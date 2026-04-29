@@ -129,7 +129,7 @@ class WebBook {
   Future<Response> _makeRequest(
     String url, 
     UrlOption? option, 
-    Map<String, dynamic>? defaultPostData,
+    String? keyword,
   ) async {
     final headers = <String, String>{};
     _dio.options.headers.forEach((key, value) {
@@ -144,16 +144,12 @@ class WebBook {
     String? body;
     if (method == 'POST') {
       body = option?.body;
-      if (body == null && defaultPostData != null) {
-        body = defaultPostData.entries
-            .map((e) => '${e.key}=${Uri.encodeComponent(e.value.toString())}')
-            .join('&');
-      }
       
-      // 替换 body 中的 {{key}} 占位符
-      if (body != null && body.contains('{{key}}')) {
-        final keyword = defaultPostData?.values.first.toString() ?? '';
-        body = body.replaceAll('{{key}}', Uri.encodeComponent(keyword));
+      // 替换 body 中的占位符
+      if (body != null) {
+        if (keyword != null) {
+          body = body.replaceAll('{{key}}', Uri.encodeComponent(keyword));
+        }
         debugPrint('📝 POST body: $body');
       }
     }
@@ -197,12 +193,9 @@ class WebBook {
     if (searchRule == null) return [];
 
     final parsed = _parseUrlWithOption(source.searchUrl!, keyword: keyword, page: page);
-    
-    // 传递 keyword 用于替换 body 中的 {{key}}
-   
 
     try {
-      final response = await _makeRequest(parsed.url, parsed.option, defaultPostData);
+      final response = await _makeRequest(parsed.url, parsed.option, keyword);
       final html = response.data.toString();
       
       debugPrint('📖 HTML preview: ${html.substring(0, html.length > 500 ? 500 : html.length)}');
