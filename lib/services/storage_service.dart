@@ -7,11 +7,13 @@ class StorageService {
   late Box _settingsBox;
   late Box _bookshelfBox;
   late Box _cacheBox;
+  late Box _bookSourceBox;
 
   Future<void> init() async {
     _settingsBox = await Hive.openBox('settings');
     _bookshelfBox = await Hive.openBox('bookshelf');
     _cacheBox = await Hive.openBox('cache');
+    _bookSourceBox = await Hive.openBox('bookSource');
   }
 
   Future<void> setSetting(String key, dynamic value) async {
@@ -52,6 +54,39 @@ class StorageService {
       book['durChapterTime'] = DateTime.now().toIso8601String();
       await _bookshelfBox.put(bookUrl, book);
     }
+  }
+
+  Future<void> saveBookSource(Map<String, dynamic> sourceData) async {
+    final sourceUrl = sourceData['bookSourceUrl'] as String? ?? '';
+    if (sourceUrl.isNotEmpty) {
+      await _bookSourceBox.put(sourceUrl, sourceData);
+    }
+  }
+
+  Future<void> saveBookSources(List<Map<String, dynamic>> sources) async {
+    for (final source in sources) {
+      await saveBookSource(source);
+    }
+  }
+
+  List<Map<String, dynamic>> getAllBookSources() {
+    return _bookSourceBox.values
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
+  Map<String, dynamic>? getBookSource(String sourceUrl) {
+    final data = _bookSourceBox.get(sourceUrl);
+    if (data == null) return null;
+    return Map<String, dynamic>.from(data);
+  }
+
+  Future<void> deleteBookSource(String sourceUrl) async {
+    await _bookSourceBox.delete(sourceUrl);
+  }
+
+  Future<void> clearBookSources() async {
+    await _bookSourceBox.clear();
   }
 
   Future<void> cacheData(String key, dynamic data) async {

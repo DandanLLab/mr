@@ -1,30 +1,71 @@
 import 'package:flutter/material.dart';
 import '../models/book_source.dart';
+import '../services/storage_service.dart';
 
 enum DiscoveryCategory { recommend, novel, comic, video, audio }
 
 class DiscoveryProvider extends ChangeNotifier {
   DiscoveryCategory _currentCategory = DiscoveryCategory.recommend;
-  List<BookSource> _enabledSources = [];
+  List<BookSource> _bookSources = [];
   Set<String> _selectedSourceIds = {};
   bool _isLoading = false;
   List<dynamic> _content = [];
+  String? _currentGroupId;
 
   DiscoveryCategory get currentCategory => _currentCategory;
-  List<BookSource> get enabledSources => _enabledSources;
+  List<BookSource> get bookSources => _bookSources;
+  List<BookSource> get enabledSources => _bookSources.where((s) => s.enabled).toList();
   Set<String> get selectedSourceIds => _selectedSourceIds;
   bool get isLoading => _isLoading;
   List<dynamic> get content => _content;
+  String? get currentGroupId => _currentGroupId;
 
   void setCategory(DiscoveryCategory category) {
     _currentCategory = category;
     notifyListeners();
   }
 
-  void setEnabledSources(List<BookSource> sources) {
-    _enabledSources = sources;
-    _selectedSourceIds = sources.map((s) => s.bookSourceUrl).toSet();
+  void setGroup(String? groupId) {
+    _currentGroupId = groupId;
     notifyListeners();
+  }
+
+  Future<void> loadBookSources() async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final sourcesData = StorageService.instance.getAllBookSources();
+      _bookSources = sourcesData.map((data) => BookSource.fromJson(data)).toList();
+      _bookSources.sort((a, b) {
+        if (a.customOrder != b.customOrder) {
+          return a.customOrder.compareTo(b.customOrder);
+        }
+        return a.bookSourceName.compareTo(b.bookSourceName);
+      });
+    } catch (e) {
+      debugPrint('加载书源失败: $e');
+      _bookSources = [];
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> deleteSource(String sourceUrl) async {
+    await StorageService.instance.deleteBookSource(sourceUrl);
+    _bookSources.removeWhere((s) => s.bookSourceUrl == sourceUrl);
+    notifyListeners();
+  }
+
+  Future<void> toggleSourceEnabled(String sourceUrl) async {
+    final index = _bookSources.indexWhere((s) => s.bookSourceUrl == sourceUrl);
+    if (index != -1) {
+      final source = _bookSources[index];
+      _bookSources[index] = source.copyWith(enabled: !source.enabled);
+      await StorageService.instance.saveBookSource(_bookSources[index].toJson());
+      notifyListeners();
+    }
   }
 
   void toggleSourceSelection(String sourceId) {
@@ -50,6 +91,6 @@ class DiscoveryProvider extends ChangeNotifier {
   }
 
   Future<void> refresh() async {
-    await loadContent();
+    await loadBookSources();
   }
 }

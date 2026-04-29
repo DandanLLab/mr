@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import '../../models/book_source.dart';
 import '../../providers/discovery_provider.dart';
 import '../../routes/app_routes.dart';
 
@@ -11,32 +11,22 @@ class DiscoveryPage extends StatefulWidget {
   State<DiscoveryPage> createState() => _DiscoveryPageState();
 }
 
-class _DiscoveryPageState extends State<DiscoveryPage> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _DiscoveryPageState extends State<DiscoveryPage> {
+  final TextEditingController _searchController = TextEditingController();
+  final Set<String> _expandedSources = {};
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(
-      length: 5,
-      vsync: this,
-    );
-    _tabController.addListener(_onTabChanged);
-  }
-
-  void _onTabChanged() {
-    if (_tabController.indexIsChanging) {
-      final provider = context.read<DiscoveryProvider>();
-      provider.setCategory(
-        DiscoveryCategory.values[_tabController.index],
-      );
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<DiscoveryProvider>().loadBookSources();
+    });
   }
 
   @override
   void dispose() {
-    _tabController.removeListener(_onTabChanged);
-    _tabController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -47,67 +37,325 @@ class _DiscoveryPageState extends State<DiscoveryPage> with SingleTickerProvider
         title: const Text('发现'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.search),
+            icon: const Icon(Icons.refresh),
             onPressed: () {
-              Navigator.pushNamed(context, AppRoutes.search);
+              context.read<DiscoveryProvider>().loadBookSources();
             },
           ),
-          IconButton(
-            icon: const Icon(Icons.filter_list),
-            onPressed: _showSourceFilter,
-          ),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          tabs: const [
-            Tab(text: '推荐'),
-            Tab(text: '小说'),
-            Tab(text: '漫画'),
-            Tab(text: '视频'),
-            Tab(text: '音频'),
-          ],
-        ),
       ),
-      body: TabBarView(
-        controller: _tabController,
+      body: Column(
         children: [
-          _buildContent(DiscoveryCategory.recommend),
-          _buildContent(DiscoveryCategory.novel),
-          _buildContent(DiscoveryCategory.comic),
-          _buildContent(DiscoveryCategory.video),
-          _buildContent(DiscoveryCategory.audio),
+          _buildSearchBar(),
+          Expanded(child: _buildSourceList()),
         ],
       ),
     );
   }
 
-  Widget _buildContent(DiscoveryCategory category) {
+  Widget _buildSearchBar() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      child: TextField(
+        controller: _searchController,
+        decoration: InputDecoration(
+          hintText: '搜索书源',
+          prefixIcon: const Icon(Icons.search),
+          suffixIcon: _searchQuery.isNotEmpty
+              ? IconButton(
+                  icon: const Icon(Icons.clear),
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() {
+                      _searchQuery = '';
+                    });
+                  },
+                )
+              : null,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+        ),
+        onChanged: (value) {
+          setState(() {
+            _searchQuery = value;
+          });
+        },
+      ),
+    );
+  }
+
+  Widget _buildSourceList() {
     return Consumer<DiscoveryProvider>(
       builder: (context, provider, child) {
         if (provider.isLoading) {
           return const Center(child: CircularProgressIndicator());
         }
 
+        final sources = _filterSources(provider.bookSources);
+
+        if (sources.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.explore_outlined,
+                  size: 64,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  _searchQuery.isEmpty ? '暂无发现内容' : '未找到匹配的书源',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                if (_searchQuery.isEmpty) ...[
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pushNamed(context, AppRoutes.profile);
+                    },
+                    child: const Text('去导入书源'),
+                  ),
+                ],
+              ],
+            ),
+          );
+        }
+
         return RefreshIndicator(
-          onRefresh: provider.refresh,
-          child: CustomScrollView(
-            slivers: [
-              SliverToBoxAdapter(
-                child: _buildBanner(),
+          onRefresh: provider.loadBookSources,
+          child: ListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            itemCount: sources.length,
+            itemBuilder: (context, index) {
+              final source = sources[index];
+              return _buildSourceItem(source, index);
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  List<BookSource> _filterSources(List<BookSource> sources) {
+    if (_searchQuery.isEmpty) return sources;
+    final query = _searchQuery.toLowerCase();
+    return sources.where((s) {
+      return s.bookSourceName.toLowerCase().contains(query) ||
+          (s.bookSourceGroup?.toLowerCase().contains(query) ?? false);
+    }).toList();
+  }
+
+  Widget _buildSourceItem(BookSource source, int index) {
+    final isExpanded = _expandedSources.contains(source.bookSourceUrl);
+    final exploreKinds = _parseExploreKinds(source.exploreUrl);
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+      child: Column(
+        children: [
+          InkWell(
+            onTap: () => _toggleExpand(source.bookSourceUrl),
+            onLongPress: () => _showSourceOptions(source),
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Center(
+                      child: Text(
+                        source.bookSourceName.isNotEmpty
+                            ? source.bookSourceName[0]
+                            : '?',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          source.bookSourceName,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                        if (source.bookSourceGroup != null &&
+                            source.bookSourceGroup!.isNotEmpty)
+                          Text(
+                            source.bookSourceGroup!,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    isExpanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ],
               ),
-              SliverToBoxAdapter(
-                child: _buildHotSearch(),
+            ),
+          ),
+          if (isExpanded && exploreKinds.isNotEmpty)
+            _buildExploreKinds(source, exploreKinds),
+        ],
+      ),
+    );
+  }
+
+  void _toggleExpand(String sourceUrl) {
+    setState(() {
+      if (_expandedSources.contains(sourceUrl)) {
+        _expandedSources.remove(sourceUrl);
+      } else {
+        _expandedSources.add(sourceUrl);
+      }
+    });
+  }
+
+  List<Map<String, String>> _parseExploreKinds(String? exploreUrl) {
+    if (exploreUrl == null || exploreUrl.isEmpty) return [];
+
+    final kinds = <Map<String, String>>[];
+
+    final lines = exploreUrl.split('\n');
+    for (final line in lines) {
+      if (line.trim().isEmpty) continue;
+
+      final parts = line.split('::');
+      if (parts.length >= 2) {
+        final title = parts[0].trim();
+        final url = parts[1].trim();
+        kinds.add({'title': title, 'url': url});
+      } else if (parts.length == 1) {
+        final item = parts[0].trim();
+        if (item.contains('&&')) {
+          final subParts = item.split('&&');
+          for (final subPart in subParts) {
+            final kv = subPart.split('@');
+            if (kv.length >= 2) {
+              kinds.add({'title': kv[0].trim(), 'url': kv[1].trim()});
+            }
+          }
+        } else {
+          final kv = item.split('@');
+          if (kv.length >= 2) {
+            kinds.add({'title': kv[0].trim(), 'url': kv[1].trim()});
+          }
+        }
+      }
+    }
+
+    return kinds;
+  }
+
+  Widget _buildExploreKinds(
+    BookSource source,
+    List<Map<String, String>> kinds,
+  ) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: kinds.map((kind) {
+          return ActionChip(
+            label: Text(kind['title'] ?? ''),
+            onPressed: () {
+              _openExplore(source, kind);
+            },
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  void _openExplore(BookSource source, Map<String, String> kind) {
+    Navigator.pushNamed(
+      context,
+      AppRoutes.exploreShow,
+      arguments: {
+        'sourceUrl': source.bookSourceUrl,
+        'sourceName': source.bookSourceName,
+        'exploreName': kind['title'],
+        'exploreUrl': kind['url'],
+      },
+    );
+  }
+
+  void _showSourceOptions(BookSource source) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.search),
+                title: const Text('搜索书籍'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.pushNamed(
+                    context,
+                    AppRoutes.search,
+                    arguments: {'sourceUrl': source.bookSourceUrl},
+                  );
+                },
               ),
-              SliverToBoxAdapter(
-                child: _buildRankingSection(),
+              ListTile(
+                leading: const Icon(Icons.edit),
+                title: const Text('编辑书源'),
+                onTap: () {
+                  Navigator.pop(context);
+                },
               ),
-              SliverToBoxAdapter(
-                child: _buildSourceCards(),
+              ListTile(
+                leading: const Icon(Icons.push_pin),
+                title: const Text('置顶'),
+                onTap: () {
+                  Navigator.pop(context);
+                },
               ),
-              SliverPadding(
-                padding: const EdgeInsets.all(12),
-                sliver: _buildWaterfallFlow(),
+              ListTile(
+                leading: Icon(
+                  Icons.delete,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                title: Text(
+                  '删除',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _confirmDelete(source);
+                },
               ),
             ],
           ),
@@ -116,304 +364,31 @@ class _DiscoveryPageState extends State<DiscoveryPage> with SingleTickerProvider
     );
   }
 
-  Widget _buildBanner() {
-    return Container(
-      height: 180,
-      margin: const EdgeInsets.all(12),
-      child: PageView.builder(
-        itemCount: 5,
-        itemBuilder: (context, index) {
-          return Container(
-            margin: const EdgeInsets.symmetric(horizontal: 4),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              gradient: LinearGradient(
-                colors: [
-                  Theme.of(context).colorScheme.primary,
-                  Theme.of(context).colorScheme.secondary,
-                ],
-              ),
-            ),
-            child: Center(
-              child: Text(
-                '精选推荐 ${index + 1}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildHotSearch() {
-    final hotWords = ['斗破苍穹', '完美世界', '遮天', '凡人修仙传', '诡秘之主'];
-
-    return Container(
-      height: 40,
-      margin: const EdgeInsets.symmetric(horizontal: 12),
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        itemCount: hotWords.length,
-        itemBuilder: (context, index) {
-          return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: ActionChip(
-              label: Text(hotWords[index]),
-              onPressed: () {
-                Navigator.pushNamed(
-                  context,
-                  AppRoutes.search,
-                  arguments: {'keyword': hotWords[index]},
-                );
-              },
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildRankingSection() {
-    return Container(
-      height: 200,
-      margin: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                '来自 笔趣阁 的 月票榜',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              TextButton(
-                onPressed: () {},
-                child: const Text('更多'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: 10,
-              itemBuilder: (context, index) {
-                return Container(
-                  width: 120,
-                  margin: const EdgeInsets.only(right: 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        height: 140,
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.surfaceVariant,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Center(
-                          child: Text('书籍 ${index + 1}'),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        '书名 ${index + 1}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSourceCards() {
-    return Container(
-      height: 100,
-      margin: const EdgeInsets.symmetric(horizontal: 12),
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        itemCount: 5,
-        itemBuilder: (context, index) {
-          return Container(
-            width: 160,
-            margin: const EdgeInsets.only(right: 12),
-            child: Card(
-              child: InkWell(
-                onTap: () {},
-                borderRadius: BorderRadius.circular(12),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      CircleAvatar(
-                        backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                        child: const Icon(Icons.book),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              '书源 ${index + 1}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            Text(
-                              '点击查看更多',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildWaterfallFlow() {
-    return SliverGrid(
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        childAspectRatio: 0.65,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-      ),
-      delegate: SliverChildBuilderDelegate(
-        (context, index) {
-          return GestureDetector(
-            onTap: () {
-              Navigator.pushNamed(
-                context,
-                AppRoutes.detail,
-                arguments: {'bookId': 'book_$index'},
-              );
-            },
-            child: Card(
-              clipBehavior: Clip.antiAlias,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: Container(
-                      color: Theme.of(context).colorScheme.surfaceVariant,
-                      child: Center(
-                        child: Text('推荐 ${index + 1}'),
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '书籍名称 ${index + 1}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '作者',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-        childCount: 20,
-      ),
-    );
-  }
-
-  void _showSourceFilter() {
-    showModalBottomSheet(
+  void _confirmDelete(BookSource source) {
+    showDialog(
       context: context,
       builder: (context) {
-        return Consumer<DiscoveryProvider>(
-          builder: (context, provider, child) {
-            return SafeArea(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          '选择书源',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.pop(context);
-                          },
-                          child: const Text('确定'),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Divider(),
-                  Expanded(
-                    child: ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: 10,
-                      itemBuilder: (context, index) {
-                        final sourceId = 'source_$index';
-                        final isSelected = provider.selectedSourceIds.contains(sourceId);
-
-                        return CheckboxListTile(
-                          value: isSelected,
-                          onChanged: (checked) {
-                            provider.toggleSourceSelection(sourceId);
-                          },
-                          title: Text('书源 ${index + 1}'),
-                          subtitle: const Text('小说、漫画'),
-                        );
-                      },
-                    ),
-                  ),
-                ],
+        return AlertDialog(
+          title: const Text('确认删除'),
+          content: Text('确定要删除书源 "${source.bookSourceName}" 吗？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                context.read<DiscoveryProvider>().deleteSource(source.bookSourceUrl);
+              },
+              child: Text(
+                '删除',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.error,
+                ),
               ),
-            );
-          },
+            ),
+          ],
         );
       },
     );
