@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../pages/splash/splash_page.dart';
 import '../pages/main/main_page.dart';
 import '../pages/bookshelf/bookshelf_page.dart';
 import '../pages/discovery/discovery_page.dart';
@@ -15,8 +14,7 @@ import '../pages/explore/explore_show_page.dart';
 import '../pages/debug/debug_page.dart';
 
 class AppRoutes {
-  static const String splash = '/';
-  static const String main = '/main';
+  static const String main = '/';
   static const String bookshelf = '/bookshelf';
   static const String discovery = '/discovery';
   static const String miniprogram = '/miniprogram';
@@ -32,8 +30,6 @@ class AppRoutes {
 
   static Route<dynamic> generateRoute(RouteSettings settings) {
     switch (settings.name) {
-      case splash:
-        return MaterialPageRoute(builder: (_) => const SplashPage());
       case main:
         return MaterialPageRoute(builder: (_) => const MainPage());
       case bookshelf:
