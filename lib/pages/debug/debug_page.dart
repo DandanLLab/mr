@@ -193,7 +193,7 @@ class _DebugPageState extends State<DebugPage> {
         index: 0,
         url: _urlController.text,
       );
-      final content = await webBook.getContent(_urlController.text, chapter);
+      final content = await webBook.getContent(_urlController.text);
 
       setState(() {
         _output = _formatOutput({

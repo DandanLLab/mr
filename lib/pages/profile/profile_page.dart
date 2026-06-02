@@ -5,6 +5,7 @@ import '../../providers/bookshelf_provider.dart';
 import '../../providers/discovery_provider.dart';
 import '../../routes/app_routes.dart';
 import '../../services/storage_service.dart';
+import 'book_source_manage_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -303,7 +304,7 @@ class _ProfilePageState extends State<ProfilePage> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => const BookSourceManagementPage(),
+        builder: (context) => const BookSourceManagePage(),
       ),
     );
   }
@@ -403,39 +404,6 @@ class _ProfilePageState extends State<ProfilePage> {
           ],
         );
       },
-    );
-  }
-}
-
-class BookSourceManagementPage extends StatelessWidget {
-  const BookSourceManagementPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('书源管理'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () {},
-          ),
-        ],
-      ),
-      body: ListView.builder(
-        itemCount: 5,
-        itemBuilder: (context, index) {
-          return ListTile(
-            leading: const CircleAvatar(child: Icon(Icons.book)),
-            title: Text('书源 ${index + 1}'),
-            subtitle: const Text('小说、漫画'),
-            trailing: Switch(
-              value: true,
-              onChanged: (value) {},
-            ),
-          );
-        },
-      ),
     );
   }
 }

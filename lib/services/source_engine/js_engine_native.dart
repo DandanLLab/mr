@@ -98,6 +98,13 @@ class JsEngine {
     return null;
   }
 
+  /// 同步执行 JS 代码（用于规则解析）
+  dynamic executeSync(String jsCode, dynamic content, {String? baseUrl}) {
+    debugPrint('⚠️ JS 同步执行需要 flutter_js 包支持');
+    debugPrint('   JS代码: ${jsCode.length > 50 ? '${jsCode.substring(0, 50)}...' : jsCode}');
+    return null;
+  }
+
   Future<String?> processJsWithBook(
     String jsCode, {
     Map<String, dynamic>? book,

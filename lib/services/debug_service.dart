@@ -199,8 +199,7 @@ class DebugService {
     try {
       final source = BookSource.fromJson(sourceData);
       final webBook = WebBook(source);
-      final chapter = Chapter.fromJson(chapterData);
-      final content = await webBook.getContent(bookUrl, chapter);
+      final content = await webBook.getContent(bookUrl);
 
       return DebugResponse(
         id: 'test_content',

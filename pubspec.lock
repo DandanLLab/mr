@@ -316,10 +316,10 @@ packages:
     dependency: transitive
     description:
       name: hooks
-      sha256: "62ae9bb76d02526c7c2110a19b6e6ad788fe28d35e553e35efb02a41a46ab43a"
+      sha256: "9a62a50b50b769a737bc0a8ff381f333529df3ab746b2f6b02e83760231455ba"
       url: "https://pub.flutter-io.cn"
     source: hosted
-    version: "2.0.1"
+    version: "2.0.2"
   html:
     dependency: "direct main"
     description:

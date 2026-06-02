@@ -4,6 +4,8 @@ import '../pages/bookshelf/bookshelf_page.dart';
 import '../pages/discovery/discovery_page.dart';
 import '../pages/miniprogram/miniprogram_page.dart';
 import '../pages/profile/profile_page.dart';
+import '../pages/profile/book_source_manage_page.dart';
+import '../pages/profile/book_source_edit_page.dart';
 import '../pages/search/search_page.dart';
 import '../pages/detail/detail_page.dart';
 import '../pages/reader/novel_reader_page.dart';
@@ -11,6 +13,7 @@ import '../pages/reader/comic_reader_page.dart';
 import '../pages/player/video_player_page.dart';
 import '../pages/player/audio_player_page.dart';
 import '../pages/explore/explore_show_page.dart';
+import '../pages/debug/book_source_debug_page.dart';
 import '../pages/debug/debug_page.dart';
 
 class AppRoutes {
@@ -19,6 +22,8 @@ class AppRoutes {
   static const String discovery = '/discovery';
   static const String miniprogram = '/miniprogram';
   static const String profile = '/profile';
+  static const String bookSourceManage = '/book-source-manage';
+  static const String bookSourceEdit = '/book-source-edit';
   static const String search = '/search';
   static const String detail = '/detail';
   static const String novelReader = '/novel-reader';
@@ -26,6 +31,7 @@ class AppRoutes {
   static const String videoPlayer = '/video-player';
   static const String audioPlayer = '/audio-player';
   static const String exploreShow = '/explore-show';
+  static const String bookSourceDebug = '/book-source-debug';
   static const String debug = '/debug';
 
   static Route<dynamic> generateRoute(RouteSettings settings) {
@@ -40,6 +46,13 @@ class AppRoutes {
         return MaterialPageRoute(builder: (_) => const MiniprogramPage());
       case profile:
         return MaterialPageRoute(builder: (_) => const ProfilePage());
+      case bookSourceManage:
+        return MaterialPageRoute(builder: (_) => const BookSourceManagePage());
+      case bookSourceEdit:
+        final args = settings.arguments as Map<String, dynamic>?;
+        return MaterialPageRoute(
+          builder: (_) => BookSourceEditPage(sourceUrl: args?['sourceUrl']),
+        );
       case search:
         return MaterialPageRoute(builder: (_) => const SearchPage());
       case detail:
@@ -88,6 +101,11 @@ class AppRoutes {
             exploreName: args?['exploreName'] ?? '',
             exploreUrl: args?['exploreUrl'] ?? '',
           ),
+        );
+      case bookSourceDebug:
+        final args = settings.arguments as Map<String, dynamic>?;
+        return MaterialPageRoute(
+          builder: (_) => BookSourceDebugPage(sourceUrl: args?['sourceUrl']),
         );
       case debug:
         return MaterialPageRoute(builder: (_) => const DebugPage());
