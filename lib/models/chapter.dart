@@ -7,6 +7,7 @@ class Chapter {
   final bool isVip;
   final bool isCached;
   final DateTime? updateTime;
+  final int? wordCount;
 
   Chapter({
     required this.id,
@@ -17,6 +18,7 @@ class Chapter {
     this.isVip = false,
     this.isCached = false,
     this.updateTime,
+    this.wordCount,
   });
 
   Chapter copyWith({
@@ -28,6 +30,7 @@ class Chapter {
     bool? isVip,
     bool? isCached,
     DateTime? updateTime,
+    int? wordCount,
   }) {
     return Chapter(
       id: id ?? this.id,
@@ -38,6 +41,7 @@ class Chapter {
       isVip: isVip ?? this.isVip,
       isCached: isCached ?? this.isCached,
       updateTime: updateTime ?? this.updateTime,
+      wordCount: wordCount ?? this.wordCount,
     );
   }
 
@@ -51,6 +55,7 @@ class Chapter {
       'isVip': isVip,
       'isCached': isCached,
       'updateTime': updateTime?.toIso8601String(),
+      'wordCount': wordCount,
     };
   }
 
@@ -66,6 +71,7 @@ class Chapter {
       updateTime: json['updateTime'] != null
           ? DateTime.parse(json['updateTime'] as String)
           : null,
+      wordCount: json['wordCount'] as int?,
     );
   }
 }

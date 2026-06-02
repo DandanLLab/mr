@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../../services/storage_service.dart';
+
 class TxtTocRule {
   final String name;
   final String rule;
@@ -15,11 +17,32 @@ class TxtTocRule {
     this.enabled = true,
     this.serialNumber = 0,
   });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'rule': rule,
+      'replacement': replacement,
+      'enabled': enabled,
+      'serialNumber': serialNumber,
+    };
+  }
+
+  factory TxtTocRule.fromJson(Map<String, dynamic> json) {
+    return TxtTocRule(
+      name: json['name'] as String? ?? '',
+      rule: json['rule'] as String? ?? '',
+      replacement: json['replacement'] as String?,
+      enabled: json['enabled'] as bool? ?? true,
+      serialNumber: json['serialNumber'] as int? ?? 0,
+    );
+  }
 }
 
 class TxtParser {
   static const int maxLengthWithNoToc = 10 * 1024;
   static const int maxLengthWithToc = 102400;
+  static const String customTocRulesKey = 'customTocRules';
 
   static const List<TxtTocRule> defaultTocRules = [
     TxtTocRule(name: '第X章', rule: r'^第[零一二三四五六七八九十百千万\d]+章'),
@@ -40,51 +63,117 @@ class TxtParser {
     TxtTocRule(name: 'Part', rule: r'^[Pp]art\s+\d+'),
   ];
 
-  static List<TxtChapter> parse(String content, {String fileName = '', bool splitLongChapter = true}) {
-    final rule = _findBestRule(content);
+  static List<TxtChapter> parse(String content, {String fileName = '', bool splitLongChapter = true, List<TxtTocRule>? customRules}) {
+    final rule = _findBestRule(content, customRules: customRules);
     if (rule != null) {
       return _parseWithRule(content, rule, fileName, splitLongChapter);
     }
     return _parseWithoutRule(content, fileName);
   }
 
-  static TxtTocRule? _findBestRule(String content) {
+  static TxtTocRule? _findBestRule(String content, {List<TxtTocRule>? customRules}) {
     final previewContent = content.length > 512000 ? content.substring(0, 512000) : content;
     final lines = previewContent.split(RegExp(r'\n'));
 
-    TxtTocRule? bestRule;
-    int maxMatchCount = -1;
     const int overRuleCount = 2;
 
-    for (final rule in defaultTocRules) {
-      if (!rule.enabled) continue;
-      final pattern = RegExp(rule.rule, caseSensitive: false, multiLine: true);
-      int matchCount = 0;
-      int errorCount = 0;
-      int lastMatchEnd = 0;
+    (TxtTocRule?, int) evaluateRules(List<TxtTocRule> rules) {
+      TxtTocRule? localBestRule;
+      int localMaxMatchCount = -1;
 
-      for (final line in lines) {
-        final trimmed = line.trim();
-        if (trimmed.isEmpty || trimmed.length > 50) continue;
-        if (pattern.hasMatch(trimmed)) {
-          final contentLength = trimmed.length - lastMatchEnd;
-          if (lastMatchEnd == 0 || contentLength > 1000) {
-            matchCount++;
-          } else if (contentLength < 100) {
-            errorCount++;
+      for (final rule in rules) {
+        if (!rule.enabled) continue;
+        final pattern = RegExp(rule.rule, caseSensitive: false, multiLine: true);
+        int matchCount = 0;
+        int errorCount = 0;
+        int lastMatchOffset = 0;
+        int currentOffset = 0;
+
+        for (final line in lines) {
+          currentOffset += line.length + 1; // +1 for newline character
+          final trimmed = line.trim();
+          if (trimmed.isEmpty || trimmed.length > 50) continue;
+          if (pattern.hasMatch(trimmed)) {
+            final distance = lastMatchOffset == 0 ? 0 : currentOffset - lastMatchOffset;
+            if (lastMatchOffset == 0 || distance > 1000) {
+              matchCount++;
+            } else if (distance < 100) {
+              errorCount++;
+            }
+            lastMatchOffset = currentOffset;
           }
-          lastMatchEnd = trimmed.length;
+        }
+
+        if (matchCount >= errorCount * 3 && matchCount > localMaxMatchCount + overRuleCount) {
+          localMaxMatchCount = matchCount;
+          localBestRule = rule;
+          if (localMaxMatchCount > 70) break;
         }
       }
 
-      if (matchCount >= errorCount * 3 && matchCount > maxMatchCount + overRuleCount) {
-        maxMatchCount = matchCount;
-        bestRule = rule;
-        if (maxMatchCount > 70) break;
+      return (localBestRule, localMaxMatchCount > 0 ? localMaxMatchCount : 0);
+    }
+
+    // First try custom rules (they have higher priority)
+    if (customRules != null && customRules.isNotEmpty) {
+      final (customBest, customCount) = evaluateRules(customRules);
+      if (customBest != null && customCount >= 2) {
+        return customBest;
       }
     }
 
-    return bestRule;
+    // Fall back to default rules
+    final (defaultBest, _) = evaluateRules(defaultTocRules);
+    return defaultBest;
+  }
+
+  static String? validateRule(String pattern) {
+    if (pattern.isEmpty) {
+      return '正则表达式不能为空';
+    }
+    try {
+      RegExp(pattern);
+      return null;
+    } catch (e) {
+      return '无效的正则表达式: $e';
+    }
+  }
+
+  static int testRule(String content, String rulePattern) {
+    final validationError = validateRule(rulePattern);
+    if (validationError != null) return 0;
+
+    final previewContent = content.length > 512000 ? content.substring(0, 512000) : content;
+    final lines = previewContent.split(RegExp(r'\n'));
+    final pattern = RegExp(rulePattern, caseSensitive: false, multiLine: true);
+
+    int count = 0;
+    for (final line in lines) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty || trimmed.length > 50) continue;
+      if (pattern.hasMatch(trimmed)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  static Future<void> saveCustomRules(List<TxtTocRule> rules) async {
+    final jsonList = rules.map((r) => r.toJson()).toList();
+    await StorageService.instance.setSetting(customTocRulesKey, jsonEncode(jsonList));
+  }
+
+  static List<TxtTocRule> loadCustomRules() {
+    final raw = StorageService.instance.getSetting(customTocRulesKey);
+    if (raw == null) return [];
+    try {
+      final List<dynamic> jsonList = jsonDecode(raw as String);
+      return jsonList
+          .map((e) => TxtTocRule.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   static List<TxtChapter> _parseWithRule(
@@ -188,7 +277,7 @@ class TxtParser {
         final chapterContent = buffer.toString().trim();
         chapters.add(TxtChapter(
           index: chapterIndex++,
-          title: '第${chapterIndex}部分',
+          title: '第$chapterIndex部分',
           content: chapterContent,
         ));
         buffer.clear();
@@ -260,17 +349,6 @@ class TxtParser {
   static bool _isChapterTitleByRule(String line, RegExp pattern) {
     if (line.isEmpty || line.length > 50) return false;
     return pattern.hasMatch(line);
-  }
-
-  static bool _isChapterTitle(String line) {
-    if (line.isEmpty || line.length > 50) return false;
-    for (final rule in defaultTocRules) {
-      if (!rule.enabled) continue;
-      if (RegExp(rule.rule, caseSensitive: false).hasMatch(line)) {
-        return true;
-      }
-    }
-    return false;
   }
 
   static String _cleanTitle(String title) {
@@ -363,16 +441,106 @@ class TxtParser {
 
     return (_formatBookName(name), null);
   }
+
+  /// Extracts introduction/description from TXT content.
+  /// Looks for preface, foreword, or text before the first chapter.
+  static String extractIntro(String content, {int maxChars = 500}) {
+    if (content.isEmpty) return '';
+
+    // Patterns for preface/intro sections
+    final prefacePattern = RegExp(
+      r'^(序[言章]?|前言|引言|楔子|引子|导言|写在前面|写在卷首)',
+      multiLine: true,
+    );
+
+    // Pattern for first chapter
+    final firstChapterPattern = RegExp(
+      r'^第[零一二三四五六七八九十百千万\d]+[章节回卷]|^[Cc]hapter\s+\d+',
+      multiLine: true,
+    );
+
+    // Check if there's a preface before the first chapter
+    final prefaceMatch = prefacePattern.firstMatch(content);
+    final firstChapterMatch = firstChapterPattern.firstMatch(content);
+
+    // If there's text before the first chapter, that's the intro
+    if (firstChapterMatch != null) {
+      final beforeFirstChapter = content.substring(0, firstChapterMatch.start).trim();
+
+      if (beforeFirstChapter.isNotEmpty) {
+        // If there's a preface marker, use the preface section
+        if (prefaceMatch != null && prefaceMatch.start < firstChapterMatch.start) {
+          // Find the end of the preface section (next blank line or first chapter)
+          final prefaceEnd = firstChapterMatch.start;
+          final prefaceText = content.substring(prefaceMatch.start, prefaceEnd).trim();
+          if (prefaceText.length <= maxChars * 2) {
+            return _cleanIntroText(prefaceText, maxChars);
+          }
+        }
+
+        // Use text before first chapter as intro
+        return _cleanIntroText(beforeFirstChapter, maxChars);
+      }
+    }
+
+    // No chapter pattern found - use the first few paragraphs
+    final paragraphs = content.split(RegExp(r'\n\s*\n'));
+    final introBuffer = StringBuffer();
+    int charCount = 0;
+
+    for (final para in paragraphs) {
+      final trimmed = para.trim();
+      if (trimmed.isEmpty) continue;
+      if (charCount + trimmed.length > maxChars) {
+        introBuffer.write(trimmed.substring(0, maxChars - charCount));
+        introBuffer.write('...');
+        break;
+      }
+      if (introBuffer.isNotEmpty) introBuffer.write('\n\n');
+      introBuffer.write(trimmed);
+      charCount += trimmed.length;
+    }
+
+    return introBuffer.toString();
+  }
+
+  static String _cleanIntroText(String text, int maxChars) {
+    // Remove the title line (e.g., "前言" or "序言") if it's short
+    final lines = text.split('\n');
+    final cleanedLines = <String>[];
+    bool skippedTitle = false;
+
+    for (final line in lines) {
+      final trimmed = line.trim();
+      if (!skippedTitle && trimmed.length <= 6 && trimmed.isNotEmpty) {
+        // Skip short title lines like "前言", "序"
+        final titlePattern = RegExp(r'^(序[言章]?|前言|引言|楔子|引子|导言)$');
+        if (titlePattern.hasMatch(trimmed)) {
+          skippedTitle = true;
+          continue;
+        }
+      }
+      cleanedLines.add(trimmed);
+    }
+
+    var result = cleanedLines.where((l) => l.isNotEmpty).join('\n');
+    if (result.length > maxChars) {
+      result = '${result.substring(0, maxChars)}...';
+    }
+    return result;
+  }
 }
 
 class TxtChapter {
   final int index;
   final String title;
   final String content;
+  final int wordCount;
 
   const TxtChapter({
     required this.index,
     required this.title,
     required this.content,
-  });
+    int? wordCount,
+  }) : wordCount = wordCount ?? content.length;
 }

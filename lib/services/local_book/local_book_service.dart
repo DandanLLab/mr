@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:archive/archive.dart';
 import '../../models/book.dart';
 import '../../models/chapter.dart';
+import '../../services/storage_service.dart';
 import 'epub_parser.dart';
 import 'txt_parser.dart';
 
@@ -11,9 +13,10 @@ class LocalBookService {
   static final LocalBookService instance = LocalBookService._internal();
   LocalBookService._internal();
 
-  final Map<String, dynamic> _epubCache = {};
+  final Map<String, EpubBook> _epubCache = {};
   final Map<String, List<TxtChapter>> _txtChapterCache = {};
   final Map<String, String> _contentCache = {};
+  final Map<String, Uint8List> _epubBytesCache = {};
 
   static LocalBookType detectBookType(String filePath) {
     final ext = filePath.split('.').last.toLowerCase();
@@ -38,9 +41,9 @@ class LocalBookService {
   Future<List<Book>> scanDirectory(String directoryPath) async {
     final books = <Book>[];
     final dir = Directory(directoryPath);
-    
+
     if (!await dir.exists()) return books;
-    
+
     await for (final entity in dir.list(recursive: true)) {
       if (entity is File) {
         final filePath = entity.path;
@@ -55,17 +58,17 @@ class LocalBookService {
         }
       }
     }
-    
+
     return books;
   }
 
   Future<Book?> importFile(String filePath) async {
     if (!isSupported(filePath)) return null;
-    
+
     try {
       final file = File(filePath);
       if (!await file.exists()) return null;
-      
+
       final bytes = await file.readAsBytes();
       return createBookFromFile(filePath, bytes: bytes);
     } catch (e) {
@@ -82,9 +85,10 @@ class LocalBookService {
     String? description;
 
     if (bookType == LocalBookType.epub && bytes != null) {
-      final epubData = _parseEpubData(bytes);
-      if (epubData != null) {
-        final epubBook = EpubParser.parse(epubData);
+      _epubBytesCache[filePath] = bytes;
+      final epubBook = _parseEpubData(bytes);
+      if (epubBook != null) {
+        _epubCache[filePath] = epubBook;
         return Book(
           bookUrl: filePath,
           name: epubBook.title.isNotEmpty ? epubBook.title : name,
@@ -97,6 +101,23 @@ class LocalBookService {
           addedTime: DateTime.now(),
         );
       }
+    }
+
+    // For TXT files, extract intro from content
+    if (bookType == LocalBookType.txt && bytes != null) {
+      final content = TxtParser.decodeBytes(bytes);
+      final extractedIntro = TxtParser.extractIntro(content);
+      return Book(
+        bookUrl: filePath,
+        name: name,
+        author: author ?? '',
+        coverUrl: coverPath ?? '',
+        intro: extractedIntro,
+        mediaType: MediaType.novel,
+        originType: BookOriginType.local,
+        canUpdate: false,
+        addedTime: DateTime.now(),
+      );
     }
 
     return Book(
@@ -157,6 +178,28 @@ class LocalBookService {
     return content;
   }
 
+  /// Convenience method that loads book data and chapter list together,
+  /// ensuring the file is read and parsed if needed.
+  Future<(Book, List<Chapter>)> getBookAndChapters(Book book) async {
+    final chapters = await getChapterList(book);
+    return (book, chapters);
+  }
+
+  /// Returns the total word count for a book by reading the file and counting characters.
+  Future<int> getWordCount(Book book) async {
+    final bookType = detectBookType(book.bookUrl);
+
+    switch (bookType) {
+      case LocalBookType.txt:
+        return _getTxtWordCount(book);
+      case LocalBookType.epub:
+        return _getEpubWordCount(book);
+      case LocalBookType.pdf:
+      case LocalBookType.unsupported:
+        return 0;
+    }
+  }
+
   Future<List<Chapter>> _getTxtChapterList(Book book) async {
     if (_txtChapterCache.containsKey(book.bookUrl)) {
       return _txtChapterCache[book.bookUrl]!.asMap().entries.map((entry) {
@@ -165,11 +208,51 @@ class LocalBookService {
           bookId: book.bookUrl,
           title: entry.value.title,
           index: entry.value.index,
+          wordCount: entry.value.wordCount,
         );
       }).toList();
     }
 
-    return [];
+    // Cache miss: read the file from disk, parse, cache, and return
+    try {
+      final file = File(book.bookUrl);
+      if (!await file.exists()) return [];
+
+      final bytes = await file.readAsBytes();
+      final content = TxtParser.decodeBytes(bytes);
+      final fileName = book.bookUrl.split('/').last.split('\\').last;
+      final customRules = TxtParser.loadCustomRules();
+      final txtChapters = TxtParser.parse(
+        content,
+        fileName: fileName,
+        customRules: customRules.isNotEmpty ? customRules : null,
+      );
+
+      if (txtChapters.isEmpty) return [];
+
+      _txtChapterCache[book.bookUrl] = txtChapters;
+
+      // Auto-extract intro if the book has no intro
+      if (book.intro.isEmpty) {
+        final extractedIntro = TxtParser.extractIntro(content);
+        if (extractedIntro.isNotEmpty) {
+          final updatedBook = book.copyWith(intro: extractedIntro);
+          await StorageService.instance.saveBook(updatedBook);
+        }
+      }
+
+      return txtChapters.asMap().entries.map((entry) {
+        return Chapter(
+          id: '${book.bookUrl}_${entry.key}',
+          bookId: book.bookUrl,
+          title: entry.value.title,
+          index: entry.value.index,
+          wordCount: entry.value.wordCount,
+        );
+      }).toList();
+    } catch (e) {
+      return [];
+    }
   }
 
   void cacheTxtChapters(String bookUrl, List<TxtChapter> chapters) {
@@ -177,16 +260,38 @@ class LocalBookService {
   }
 
   Future<String?> _getTxtContent(Book book, Chapter chapter) async {
-    final chapters = _txtChapterCache[book.bookUrl];
-    if (chapters == null || chapter.index >= chapters.length) return null;
+    var chapters = _txtChapterCache[book.bookUrl];
+    // Fallback: ensure chapters are loaded by reading and parsing the file
+    if (chapters == null) {
+      await _getTxtChapterList(book);
+      chapters = _txtChapterCache[book.bookUrl];
+    }
+    if (chapters == null || chapter.index < 0 || chapter.index >= chapters.length) return null;
     return chapters[chapter.index].content;
   }
 
   Future<List<Chapter>> _getEpubChapterList(Book book) async {
-    final epubData = _epubCache[book.bookUrl];
-    if (epubData == null) return [];
+    var epubBook = _epubCache[book.bookUrl];
 
-    final epubBook = EpubParser.parse(epubData);
+    // Fallback: read EPUB from disk if not cached
+    if (epubBook == null) {
+      try {
+        final file = File(book.bookUrl);
+        if (!await file.exists()) return [];
+
+        final bytes = await file.readAsBytes();
+        _epubBytesCache[book.bookUrl] = bytes;
+        epubBook = _parseEpubData(bytes);
+        if (epubBook != null) {
+          _epubCache[book.bookUrl] = epubBook;
+        }
+      } catch (e) {
+        return [];
+      }
+    }
+
+    if (epubBook == null) return [];
+
     return epubBook.chapters.map((epubChapter) {
       return Chapter(
         id: '${book.bookUrl}_${epubChapter.index}',
@@ -199,39 +304,238 @@ class LocalBookService {
   }
 
   Future<String?> _getEpubContent(Book book, Chapter chapter) async {
-    final epubData = _epubCache[book.bookUrl];
-    if (epubData == null) return null;
+    var epubBook = _epubCache[book.bookUrl];
 
-    final epubBook = EpubParser.parse(epubData);
-    if (chapter.index >= epubBook.chapters.length) return null;
+    // Fallback: ensure epub data is loaded by reading from disk
+    if (epubBook == null) {
+      try {
+        final file = File(book.bookUrl);
+        if (!await file.exists()) return null;
+
+        final bytes = await file.readAsBytes();
+        _epubBytesCache[book.bookUrl] = bytes;
+        epubBook = _parseEpubData(bytes);
+        if (epubBook != null) {
+          _epubCache[book.bookUrl] = epubBook;
+        }
+      } catch (e) {
+        return null;
+      }
+    }
+
+    if (epubBook == null) return null;
+    if (chapter.index < 0 || chapter.index >= epubBook.chapters.length) return null;
 
     final epubChapter = epubBook.chapters[chapter.index];
     if (epubChapter.content != null) {
       return EpubParser.extractTextFromHtml(epubChapter.content!);
     }
 
-    final contents = epubData['contents'] as List<dynamic>? ?? [];
-    if (chapter.index < contents.length) {
-      final content = contents[chapter.index];
-      if (content is String) {
-        return EpubParser.extractTextFromHtml(content);
-      }
-      if (content is Map && content.containsKey('data')) {
-        final data = content['data'];
-        if (data is String) {
-          return EpubParser.extractTextFromHtml(data);
+    return null;
+  }
+
+  /// Returns the raw HTML content of an EPUB chapter (not stripped by extractTextFromHtml).
+  /// This is needed so the reader can render EPUB content with flutter_html.
+  Future<String?> getEpubHtmlContent(Book book, Chapter chapter) async {
+    var epubBook = _epubCache[book.bookUrl];
+
+    // Fallback: ensure epub data is loaded by reading from disk
+    if (epubBook == null) {
+      try {
+        final file = File(book.bookUrl);
+        if (!await file.exists()) return null;
+
+        final bytes = await file.readAsBytes();
+        _epubBytesCache[book.bookUrl] = bytes;
+        epubBook = _parseEpubData(bytes);
+        if (epubBook != null) {
+          _epubCache[book.bookUrl] = epubBook;
         }
+      } catch (e) {
+        return null;
       }
     }
 
+    if (epubBook == null) return null;
+    if (chapter.index < 0 || chapter.index >= epubBook.chapters.length) return null;
+
+    return epubBook.chapters[chapter.index].content;
+  }
+
+  /// Returns image bytes from within the EPUB ZIP file.
+  /// The imagePath is relative to the EPUB root.
+  Future<Uint8List?> getEpubImage(Book book, String imagePath) async {
+    return _getEpubFileBytes(book, imagePath);
+  }
+
+  /// Returns CSS content from within the EPUB ZIP file.
+  Future<Map<String, String>?> getEpubCss(Book book, String cssPath) async {
+    final bytes = await _ensureEpubBytes(book);
+    if (bytes == null) return null;
+
+    try {
+      final archive = ZipDecoder().decodeBytes(bytes);
+      final normalizedPath = cssPath.replaceAll('\\', '/');
+      for (final file in archive) {
+        if (file.isFile) {
+          final name = file.name.replaceAll('\\', '/');
+          if (name == normalizedPath) {
+            final data = file.content;
+            final content = data is List<int> ? String.fromCharCodes(data) : null;
+            if (content != null) {
+              return {cssPath: content};
+            }
+          }
+        }
+      }
+    } catch (e) {
+      return null;
+    }
     return null;
   }
 
-  Map<String, dynamic>? _parseEpubData(Uint8List bytes) {
+  /// Returns a list of font file paths embedded in the EPUB.
+  Future<List<String>> getEpubFontList(Book book) async {
+    final bytes = await _ensureEpubBytes(book);
+    if (bytes == null) return [];
+
+    final fontExtensions = {'.ttf', '.otf', '.woff', '.woff2'};
+    final fontPaths = <String>[];
+
+    try {
+      final archive = ZipDecoder().decodeBytes(bytes);
+      for (final file in archive) {
+        if (file.isFile) {
+          final name = file.name.replaceAll('\\', '/');
+          final ext = name.split('.').last.toLowerCase();
+          if (fontExtensions.contains('.$ext')) {
+            fontPaths.add(name);
+          }
+        }
+      }
+    } catch (e) {
+      return [];
+    }
+    return fontPaths;
+  }
+
+  /// Returns font file bytes from within the EPUB ZIP file.
+  Future<Uint8List?> getEpubFont(Book book, String fontPath) async {
+    return _getEpubFileBytes(book, fontPath);
+  }
+
+  /// Internal helper: get raw bytes of any file inside the EPUB ZIP.
+  Future<Uint8List?> _getEpubFileBytes(Book book, String path) async {
+    final bytes = await _ensureEpubBytes(book);
+    if (bytes == null) return null;
+
+    try {
+      final archive = ZipDecoder().decodeBytes(bytes);
+      final normalizedPath = path.replaceAll('\\', '/');
+      for (final file in archive) {
+        if (file.isFile) {
+          final name = file.name.replaceAll('\\', '/');
+          if (name == normalizedPath) {
+            final data = file.content;
+            if (data is List<int>) {
+              return Uint8List.fromList(data);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      return null;
+    }
     return null;
   }
 
-  void cacheEpubData(String bookUrl, Map<String, dynamic> data) {
+  /// Ensure EPUB raw bytes are cached. Read from disk if not.
+  Future<Uint8List?> _ensureEpubBytes(Book book) async {
+    var bytes = _epubBytesCache[book.bookUrl];
+    if (bytes != null) return bytes;
+
+    try {
+      final file = File(book.bookUrl);
+      if (!await file.exists()) return null;
+
+      bytes = await file.readAsBytes();
+      _epubBytesCache[book.bookUrl] = bytes;
+
+      // Also parse and cache the EpubBook if not already cached
+      if (!_epubCache.containsKey(book.bookUrl)) {
+        final epubBook = _parseEpubData(bytes);
+        if (epubBook != null) {
+          _epubCache[book.bookUrl] = epubBook;
+        }
+      }
+
+      return bytes;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<int> _getTxtWordCount(Book book) async {
+    try {
+      final chapters = _txtChapterCache[book.bookUrl];
+      if (chapters != null) {
+        return chapters.fold<int>(0, (sum, ch) => sum + ch.content.length);
+      }
+
+      final file = File(book.bookUrl);
+      if (!await file.exists()) return 0;
+
+      final bytes = await file.readAsBytes();
+      final content = TxtParser.decodeBytes(bytes);
+      return content.length;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  Future<int> _getEpubWordCount(Book book) async {
+    try {
+      var epubBook = _epubCache[book.bookUrl];
+      if (epubBook == null) {
+        final file = File(book.bookUrl);
+        if (!await file.exists()) return 0;
+
+        final bytes = await file.readAsBytes();
+        _epubBytesCache[book.bookUrl] = bytes;
+        epubBook = _parseEpubData(bytes);
+        if (epubBook != null) {
+          _epubCache[book.bookUrl] = epubBook;
+        }
+      }
+
+      if (epubBook == null) return 0;
+
+      int count = 0;
+      for (final chapter in epubBook.chapters) {
+        if (chapter.content != null) {
+          final text = EpubParser.extractTextFromHtml(chapter.content!);
+          count += text.length;
+        }
+      }
+      return count;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  EpubBook? _parseEpubData(Uint8List bytes) {
+    try {
+      final epubBook = EpubParser.parseFromBytes(bytes);
+      if (epubBook.title != '未知书名' || epubBook.chapters.isNotEmpty) {
+        return epubBook;
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  void cacheEpubData(String bookUrl, EpubBook data) {
     _epubCache[bookUrl] = data;
   }
 
@@ -239,10 +543,12 @@ class LocalBookService {
     if (bookUrl != null) {
       _epubCache.remove(bookUrl);
       _txtChapterCache.remove(bookUrl);
+      _epubBytesCache.remove(bookUrl);
       _contentCache.removeWhere((key, _) => key.startsWith(bookUrl));
     } else {
       _epubCache.clear();
       _txtChapterCache.clear();
+      _epubBytesCache.clear();
       _contentCache.clear();
     }
   }

@@ -1,3 +1,9 @@
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:archive/archive.dart';
+import 'package:html/parser.dart' as html_parser;
+import 'package:html/dom.dart' as html_dom;
+
 class EpubChapter {
   final int index;
   final String title;
@@ -38,7 +44,551 @@ class EpubBook {
   });
 }
 
+class _ManifestItem {
+  final String id;
+  final String href;
+  final String mediaType;
+  final String? properties;
+
+  const _ManifestItem({
+    required this.id,
+    required this.href,
+    required this.mediaType,
+    this.properties,
+  });
+}
+
 class EpubParser {
+  /// 从原始字节解析EPUB文件，提取所有元数据和章节内容
+  static EpubBook parseFromBytes(Uint8List bytes) {
+    try {
+      // 1. 解码ZIP
+      final archive = ZipDecoder().decodeBytes(bytes);
+
+      // 构建文件映射：归一化路径 -> 内容字节
+      final files = <String, List<int>>{};
+      for (final file in archive) {
+        if (file.isFile) {
+          final normalizedName = file.name.replaceAll('\\', '/');
+          final data = file.content;
+          if (data is List<int>) {
+            files[normalizedName] = data;
+          }
+        }
+      }
+
+      // 2. 读取 container.xml 找到 OPF 路径
+      final containerData = files['META-INF/container.xml'];
+      if (containerData == null) {
+        return const EpubBook(title: '未知书名');
+      }
+
+      final containerDoc =
+          html_parser.parse(_decodeBytes(containerData));
+      String? opfPath;
+      final rootfileElements = containerDoc.querySelectorAll('rootfile');
+      for (final el in rootfileElements) {
+        final mediaType = el.attributes['media-type'];
+        if (mediaType == null ||
+            mediaType == 'application/oebps-package+xml') {
+          opfPath = el.attributes['full-path'];
+          break;
+        }
+      }
+
+      if (opfPath == null || opfPath.isEmpty) {
+        return const EpubBook(title: '未知书名');
+      }
+
+      // 3. 读取 OPF 文件
+      final opfData = files[opfPath];
+      if (opfData == null) {
+        return const EpubBook(title: '未知书名');
+      }
+
+      final opfDoc = html_parser.parse(_decodeBytes(opfData));
+
+      // OPF 基础目录，用于解析相对路径
+      final opfBasePath = opfPath.contains('/')
+          ? opfPath.substring(0, opfPath.lastIndexOf('/'))
+          : '';
+
+      // 4. 解析 metadata
+      final metadataElement = opfDoc.querySelector('metadata');
+
+      String title = '未知书名';
+      String? author;
+      String? description;
+      String? language;
+      String? coverId;
+
+      if (metadataElement != null) {
+        title = _getDcText(metadataElement, 'title') ?? '未知书名';
+        author = _getDcText(metadataElement, 'creator');
+        description = _getDcText(metadataElement, 'description');
+        language = _getDcText(metadataElement, 'language');
+
+        // 查找 cover meta
+        for (final child in metadataElement.children) {
+          if (_localName(child) == 'meta' && child.attributes['name'] == 'cover') {
+            coverId = child.attributes['content'];
+            break;
+          }
+        }
+      }
+
+      // 5. 解析 manifest
+      final manifestElement = opfDoc.querySelector('manifest');
+      final manifest = <String, _ManifestItem>{};
+
+      if (manifestElement != null) {
+        for (final child in manifestElement.children) {
+          if (_localName(child) == 'item') {
+            final id = child.attributes['id'] ?? '';
+            final href = child.attributes['href'] ?? '';
+            final mediaType = child.attributes['media-type'] ?? '';
+            final properties = child.attributes['properties'];
+            if (id.isNotEmpty && href.isNotEmpty) {
+              manifest[id] = _ManifestItem(
+                id: id,
+                href: href,
+                mediaType: mediaType,
+                properties: properties,
+              );
+            }
+          }
+        }
+      }
+
+      // 6. 解析 spine
+      final spineElement = opfDoc.querySelector('spine');
+      final spine = <String>[];
+      String? tocId;
+
+      if (spineElement != null) {
+        tocId = spineElement.attributes['toc'];
+        for (final child in spineElement.children) {
+          if (_localName(child) == 'itemref') {
+            final idref = child.attributes['idref'];
+            if (idref != null) {
+              spine.add(idref);
+            }
+          }
+        }
+      }
+
+      // 7. 查找封面路径
+      String? coverPath;
+      if (coverId != null && manifest.containsKey(coverId)) {
+        coverPath = _resolveEpubPath(opfBasePath, manifest[coverId]!.href);
+      }
+      // 后备：通过 properties 或 id 查找封面
+      if (coverPath == null) {
+        for (final item in manifest.values) {
+          if (item.mediaType.startsWith('image/') &&
+              (item.properties?.contains('cover-image') == true ||
+                  item.id.toLowerCase().contains('cover'))) {
+            coverPath = _resolveEpubPath(opfBasePath, item.href);
+            break;
+          }
+        }
+      }
+
+      // 8. 解析目录
+      List<EpubChapter> chapters = [];
+
+      // 查找 NCX 目录
+      String? ncxHref;
+      if (tocId != null && manifest.containsKey(tocId)) {
+        final tocItem = manifest[tocId]!;
+        if (tocItem.mediaType.contains('ncx') ||
+            tocItem.href.endsWith('.ncx')) {
+          ncxHref = tocItem.href;
+        }
+      }
+      if (ncxHref == null) {
+        for (final item in manifest.values) {
+          if (item.mediaType == 'application/x-dtbncx+xml' ||
+              item.href.endsWith('.ncx')) {
+            ncxHref = item.href;
+            break;
+          }
+        }
+      }
+
+      // 查找 NAV 目录
+      String? navHref;
+      for (final item in manifest.values) {
+        if (item.mediaType == 'application/xhtml+xml' &&
+            (item.id.toLowerCase().contains('nav') ||
+                item.href.toLowerCase().contains('nav'))) {
+          navHref = item.href;
+          break;
+        }
+      }
+
+      // 优先尝试 NCX
+      if (ncxHref != null) {
+        final ncxPath = _resolveEpubPath(opfBasePath, ncxHref);
+        final ncxData = files[ncxPath];
+        if (ncxData != null) {
+          chapters = _parseNcxToc(_decodeBytes(ncxData), opfBasePath);
+        }
+      }
+
+      // NCX 没有结果则尝试 NAV
+      if (chapters.isEmpty && navHref != null) {
+        final navPath = _resolveEpubPath(opfBasePath, navHref);
+        final navData = files[navPath];
+        if (navData != null) {
+          chapters = _parseNavToc(_decodeBytes(navData), opfBasePath);
+        }
+      }
+
+      // 后备：使用 spine 条目
+      if (chapters.isEmpty) {
+        for (final idref in spine) {
+          if (manifest.containsKey(idref)) {
+            final item = manifest[idref]!;
+            // 跳过非内容条目
+            if (item.href.toLowerCase().contains('toc') ||
+                item.href.toLowerCase().contains('nav')) {
+              continue;
+            }
+            final href = _resolveEpubPath(opfBasePath, item.href);
+            final index = chapters.length;
+            chapters.add(EpubChapter(
+              index: index,
+              title: index == 0 ? '封面' : '第$index章',
+              href: href,
+            ));
+          }
+        }
+      }
+
+      // 9. 从 ZIP 中读取章节内容
+      for (final chapter in chapters) {
+        if (chapter.href != null) {
+          final contentPath = chapter.href!.split('#').first;
+          final contentData = files[contentPath];
+          if (contentData != null) {
+            chapter.content = _decodeBytes(contentData);
+          }
+        }
+      }
+
+      // 设置 nextUrl
+      for (int i = 0; i < chapters.length - 1; i++) {
+        chapters[i].nextUrl = chapters[i + 1].href;
+      }
+
+      return EpubBook(
+        title: title,
+        author: author,
+        description: description,
+        coverPath: coverPath,
+        chapters: chapters,
+        language: language,
+      );
+    } catch (e) {
+      return const EpubBook(title: '未知书名');
+    }
+  }
+
+  /// 从EPUB文件中获取封面图片字节
+  static Uint8List? getCoverImage(Uint8List bytes) {
+    try {
+      final archive = ZipDecoder().decodeBytes(bytes);
+      final files = <String, List<int>>{};
+      for (final file in archive) {
+        if (file.isFile) {
+          final normalizedName = file.name.replaceAll('\\', '/');
+          final data = file.content;
+          if (data is List<int>) {
+            files[normalizedName] = data;
+          }
+        }
+      }
+
+      // 查找 OPF 路径
+      final containerData = files['META-INF/container.xml'];
+      if (containerData == null) return null;
+
+      final containerDoc =
+          html_parser.parse(_decodeBytes(containerData));
+      String? opfPath;
+      final rootfileElements = containerDoc.querySelectorAll('rootfile');
+      for (final el in rootfileElements) {
+        final mediaType = el.attributes['media-type'];
+        if (mediaType == null ||
+            mediaType == 'application/oebps-package+xml') {
+          opfPath = el.attributes['full-path'];
+          break;
+        }
+      }
+      if (opfPath == null) return null;
+
+      final opfData = files[opfPath];
+      if (opfData == null) return null;
+
+      final opfDoc = html_parser.parse(_decodeBytes(opfData));
+      final opfBasePath = opfPath.contains('/')
+          ? opfPath.substring(0, opfPath.lastIndexOf('/'))
+          : '';
+
+      // 从 metadata 中查找 cover ID
+      final metadataElement = opfDoc.querySelector('metadata');
+      if (metadataElement == null) return null;
+
+      String? coverId;
+      for (final child in metadataElement.children) {
+        if (_localName(child) == 'meta' &&
+            child.attributes['name'] == 'cover') {
+          coverId = child.attributes['content'];
+          break;
+        }
+      }
+
+      // 从 manifest 中查找封面路径
+      String? coverHref;
+      final manifestElement = opfDoc.querySelector('manifest');
+      if (manifestElement != null) {
+        // 优先通过 cover ID 查找
+        if (coverId != null) {
+          for (final child in manifestElement.children) {
+            if (_localName(child) == 'item' &&
+                child.attributes['id'] == coverId) {
+              coverHref = child.attributes['href'];
+              break;
+            }
+          }
+        }
+
+        // 后备：通过 properties 或 id 名称查找
+        if (coverHref == null) {
+          for (final child in manifestElement.children) {
+            if (_localName(child) == 'item') {
+              final id = child.attributes['id']?.toLowerCase() ?? '';
+              final properties = child.attributes['properties'] ?? '';
+              final mediaType = child.attributes['media-type'] ?? '';
+              if (mediaType.startsWith('image/') &&
+                  (id.contains('cover') ||
+                      properties.contains('cover-image'))) {
+                coverHref = child.attributes['href'];
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      if (coverHref == null) return null;
+
+      final coverPath = _resolveEpubPath(opfBasePath, coverHref);
+      final coverData = files[coverPath];
+      if (coverData == null) return null;
+
+      return Uint8List.fromList(coverData);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// 从 metadata 元素中获取 DC 命名空间的文本内容
+  static String? _getDcText(html_dom.Element metadata, String tagName) {
+    for (final child in metadata.children) {
+      final local = _localName(child);
+      // 兼容 <dc:title> 和 <title> 两种形式
+      if (local == tagName || local == 'dc:$tagName') {
+        final text = child.text.trim();
+        if (text.isNotEmpty) return text;
+      }
+    }
+    return null;
+  }
+
+  /// 获取元素的 localName（小写，空安全）
+  static String _localName(html_dom.Element element) {
+    return (element.localName ?? '').toLowerCase();
+  }
+
+  /// 解析 EPUB 内部相对路径
+  static String _resolveEpubPath(String basePath, String relativePath) {
+    if (relativePath.startsWith('/')) return relativePath.substring(1);
+    if (basePath.isEmpty) return relativePath;
+    final base = Uri.parse('$basePath/');
+    return base.resolve(relativePath).toString();
+  }
+
+  /// 解码字节为字符串（优先 UTF-8，后备 Latin-1）
+  static String _decodeBytes(List<int> data) {
+    try {
+      return utf8.decode(data);
+    } catch (_) {
+      return String.fromCharCodes(data);
+    }
+  }
+
+  /// 解析 NCX 格式目录
+  static List<EpubChapter> _parseNcxToc(
+      String ncxXml, String opfBasePath) {
+    final chapters = <EpubChapter>[];
+    try {
+      final doc = html_parser.parse(ncxXml);
+      final navMap = doc.querySelector('navMap');
+      if (navMap == null) return chapters;
+
+      void parseNavPoint(html_dom.Element navPoint, bool isTopLevel) {
+        // 查找 navLabel > text
+        String? title;
+        html_dom.Element? navLabel;
+        for (final e in navPoint.children) {
+          if (_localName(e) == 'navlabel') {
+            navLabel = e;
+            break;
+          }
+        }
+        if (navLabel != null) {
+          for (final e in navLabel.children) {
+            if (_localName(e) == 'text') {
+              title = e.text.trim();
+              break;
+            }
+          }
+        }
+
+        // 查找 content src
+        html_dom.Element? contentEl;
+        for (final e in navPoint.children) {
+          if (_localName(e) == 'content') {
+            contentEl = e;
+            break;
+          }
+        }
+        final src = contentEl?.attributes['src'] ?? '';
+        var href = src.split('#').first;
+        href = _resolveEpubPath(opfBasePath, href);
+        final startFragmentId = _extractFragmentId(src);
+
+        // 检查子 navPoint
+        final childNavPoints = <html_dom.Element>[];
+        for (final e in navPoint.children) {
+          if (_localName(e) == 'navpoint') {
+            childNavPoints.add(e);
+          }
+        }
+
+        if (chapters.isNotEmpty) {
+          chapters.last.endFragmentId = startFragmentId;
+        }
+
+        chapters.add(EpubChapter(
+          index: chapters.length,
+          title: (title != null && title.isNotEmpty)
+              ? title
+              : '第${chapters.length + 1}章',
+          href: href,
+          startFragmentId: startFragmentId,
+          isVolume: isTopLevel && childNavPoints.isNotEmpty,
+        ));
+
+        for (final child in childNavPoints) {
+          parseNavPoint(child, false);
+        }
+      }
+
+      for (final navPoint in navMap.children) {
+        if (_localName(navPoint) == 'navpoint') {
+          parseNavPoint(navPoint, true);
+        }
+      }
+    } catch (e) {
+      // 返回已解析的部分
+    }
+    return chapters;
+  }
+
+  /// 解析 NAV 格式目录
+  static List<EpubChapter> _parseNavToc(
+      String navXml, String opfBasePath) {
+    final chapters = <EpubChapter>[];
+    try {
+      final doc = html_parser.parse(navXml);
+
+      // 查找 TOC nav 元素
+      html_dom.Element? tocNav;
+      for (final nav in doc.querySelectorAll('nav')) {
+        final epubType =
+            nav.attributes['epub:type'] ?? nav.attributes['type'] ?? '';
+        if (epubType.contains('toc')) {
+          tocNav = nav;
+          break;
+        }
+      }
+      tocNav ??= doc.querySelector('nav');
+
+      if (tocNav == null) return chapters;
+
+      void parseOl(html_dom.Element ol, bool isTopLevel) {
+        for (final li in ol.children) {
+          if (_localName(li) != 'li') continue;
+
+          // 查找直接子元素 <a>
+          html_dom.Element? a;
+          for (final child in li.children) {
+            if (_localName(child) == 'a') {
+              a = child;
+              break;
+            }
+          }
+
+          if (a != null) {
+            final href = a.attributes['href'] ?? '';
+            final title = a.text.trim();
+            final startFragmentId = _extractFragmentId(href);
+            final resolvedHref =
+                _resolveEpubPath(opfBasePath, href.split('#').first);
+
+            // 检查嵌套 <ol>
+            html_dom.Element? nestedOl;
+            for (final child in li.children) {
+              if (_localName(child) == 'ol') {
+                nestedOl = child;
+                break;
+              }
+            }
+
+            if (chapters.isNotEmpty) {
+              chapters.last.endFragmentId = startFragmentId;
+            }
+
+            chapters.add(EpubChapter(
+              index: chapters.length,
+              title: title.isNotEmpty ? title : '第${chapters.length + 1}章',
+              href: resolvedHref,
+              startFragmentId: startFragmentId,
+              isVolume: isTopLevel && nestedOl != null,
+            ));
+
+            if (nestedOl != null) {
+              parseOl(nestedOl, false);
+            }
+          }
+        }
+      }
+
+      final ol = tocNav.querySelector('ol');
+      if (ol != null) {
+        parseOl(ol, true);
+      }
+    } catch (e) {
+      // 返回已解析的部分
+    }
+    return chapters;
+  }
+
+  // ===== 以下为原有方法，保持不变 =====
+
   static EpubBook parse(Map<String, dynamic> epubData) {
     final metadata = epubData['metadata'] as Map<String, dynamic>? ?? {};
     final spine = epubData['spine'] as List<dynamic>? ?? [];
