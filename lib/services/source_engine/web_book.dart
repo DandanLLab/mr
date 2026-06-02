@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart' as dom;
 import '../../models/book_source.dart';
 import '../../models/book.dart';
@@ -9,6 +10,7 @@ import 'analyze_rule.dart';
 import 'web_proxy.dart';
 import 'proxy_service.dart';
 
+/// URL 请求选项（类似 OkHttp 的 Request.Builder）
 class UrlOption {
   final String? method;
   final Map<String, String>? headers;
@@ -16,6 +18,8 @@ class UrlOption {
   final String? charset;
   final int retry;
   final bool useWebView;
+  final int? connectTimeout;
+  final int? readTimeout;
 
   UrlOption({
     this.method,
@@ -24,22 +28,40 @@ class UrlOption {
     this.charset,
     this.retry = 0,
     this.useWebView = false,
+    this.connectTimeout,
+    this.readTimeout,
   });
 
   factory UrlOption.fromJson(Map<String, dynamic> json) {
     return UrlOption(
       method: json['method']?.toString(),
-      headers: json['headers'] != null 
+      headers: json['headers'] != null
           ? Map<String, String>.from(json['headers'] as Map)
           : null,
       body: json['body']?.toString(),
       charset: json['charset']?.toString(),
       retry: json['retry'] as int? ?? 0,
       useWebView: json['webView'] == true || json['webView'] == 'true',
+      connectTimeout: json['connectTimeout'] as int?,
+      readTimeout: json['readTimeout'] as int?,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      if (method != null) 'method': method,
+      if (headers != null) 'headers': headers,
+      if (body != null) 'body': body,
+      if (charset != null) 'charset': charset,
+      if (retry > 0) 'retry': retry,
+      if (useWebView) 'webView': useWebView,
+      if (connectTimeout != null) 'connectTimeout': connectTimeout,
+      if (readTimeout != null) 'readTimeout': readTimeout,
+    };
   }
 }
 
+/// 解析后的 URL（类似 OkHttp 的 Request）
 class ParsedUrl {
   final String url;
   final UrlOption? option;
@@ -47,190 +69,323 @@ class ParsedUrl {
   ParsedUrl({required this.url, this.option});
 }
 
-class WebBook {
-  final BookSource source;
-  final Dio _dio;
+/// 响应包装类（类似 OkHttp 的 Response）
+class StrResponse {
+  final String url;
+  final String body;
+  final int statusCode;
+  final Map<String, String> headers;
+  final Response? raw;
 
-  WebBook(this.source) : _dio = Dio(BaseOptions(
-    headers: _parseHeaders(source.header),
+  StrResponse({
+    required this.url,
+    required this.body,
+    this.statusCode = 200,
+    this.headers = const {},
+    this.raw,
+  });
+
+  bool get isSuccessful => statusCode >= 200 && statusCode < 300;
+  String? header(String name) => headers[name];
+}
+
+/// 网络请求客户端（类似 OkHttp 的 OkHttpClient）
+class HttpClient {
+  static final HttpClient _instance = HttpClient._internal();
+  static HttpClient get instance => _instance;
+  HttpClient._internal();
+
+  final Dio _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 15),
     receiveTimeout: const Duration(seconds: 30),
+    sendTimeout: const Duration(seconds: 30),
   ));
 
-  String _getProxyUrl() {
-    if (kIsWeb) {
-      return 'http://localhost:8888/';
-    }
-    return 'http://localhost:${ProxyService.instance.port}/';
-  }
-
-  String _proxifyUrl(String url) {
-    final proxyUrl = _getProxyUrl();
-    if (!url.contains('localhost:8888') && 
-        !url.contains('localhost:${ProxyService.instance.port}') &&
-        !url.contains('allorigins.win')) {
-      return '$proxyUrl$url';
-    }
-    return url;
-  }
-
-  static Map<String, String> _parseHeaders(String? headerStr) {
-    final headers = <String, String>{};
-    if (headerStr == null || headerStr.isEmpty) return headers;
+  /// 执行请求（类似 OkHttp 的 Call.execute）
+  Future<StrResponse> execute(
+    String url, {
+    String method = 'GET',
+    Map<String, String>? headers,
+    String? body,
+    String? charset,
+    Duration? connectTimeout,
+    Duration? readTimeout,
+  }) async {
+    final options = Options(
+      method: method,
+      headers: headers,
+      responseType: ResponseType.plain,
+      receiveTimeout: readTimeout,
+      sendTimeout: connectTimeout,
+    );
 
     try {
-      final decoded = json.decode(headerStr);
-      if (decoded is Map) {
-        decoded.forEach((key, value) {
-          headers[key.toString()] = value.toString();
-        });
+      // Web 端使用代理
+      String requestUrl = url;
+      if (kIsWeb) {
+        requestUrl = 'http://localhost:8888/$url';
+        final html = await WebProxy.instance.fetch(
+          requestUrl,
+          method: method,
+          headers: headers,
+          body: body,
+        );
+        return StrResponse(
+          url: url,
+          body: html,
+          statusCode: 200,
+          headers: {},
+        );
       }
-    } catch (_) {
-      final lines = headerStr.split('\n');
-      for (final line in lines) {
-        final parts = line.split(':');
-        if (parts.length >= 2) {
-          headers[parts[0].trim()] = parts.sublist(1).join(':').trim();
-        }
+
+      // 非 Web 端使用代理服务
+      if (ProxyService.instance.isRunning) {
+        requestUrl = 'http://localhost:${ProxyService.instance.port}/$url';
       }
-    }
 
-    if (!headers.containsKey('User-Agent')) {
-      headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-    }
+      final response = await _dio.request<String>(
+        requestUrl,
+        data: body,
+        options: options,
+      );
 
-    return headers;
+      return StrResponse(
+        url: response.realUri.toString(),
+        body: response.data ?? '',
+        statusCode: response.statusCode ?? 200,
+        headers: response.headers.map.map(
+          (key, value) => MapEntry(key, value.first),
+        ),
+        raw: response,
+      );
+    } on DioException catch (e) {
+      debugPrint('❌ HTTP Error: ${e.type} - ${e.message}');
+      if (e.response != null) {
+        return StrResponse(
+          url: url,
+          body: e.response?.data?.toString() ?? '',
+          statusCode: e.response?.statusCode ?? 500,
+          headers: {},
+        );
+      }
+      rethrow;
+    }
   }
+}
 
-  ParsedUrl _parseUrlWithOption(String urlWithOption, {String? keyword, int? page}) {
+/// 书源网络请求类（参考 legados 的 WebBook）
+class WebBook {
+  final BookSource source;
+  final HttpClient _client;
+
+  // 缓存最近的响应源码
+  String? lastSearchHtml;
+  String? lastExploreHtml;
+  String? lastBookInfoHtml;
+  String? lastTocHtml;
+  String? lastContentHtml;
+
+  WebBook(this.source) : _client = HttpClient.instance;
+
+  /// 解析 URL 和选项
+  ParsedUrl _parseUrlWithOption(
+    String urlWithOption, {
+    String? keyword,
+    int? page,
+  }) {
     String url = urlWithOption;
     UrlOption? option;
 
+    // 解析 URL 末尾的 JSON 选项
     final optionMatch = RegExp(r',\s*(\{[\s\S]*\})\s*$').firstMatch(urlWithOption);
     if (optionMatch != null) {
       url = urlWithOption.substring(0, optionMatch.start).trim();
       try {
         final optionJson = json.decode(optionMatch.group(1)!) as Map<String, dynamic>;
         option = UrlOption.fromJson(optionJson);
-        debugPrint('🔧 Parsed option: method=${option.method}, body=${option.body}');
+        debugPrint('🔧 URL选项: method=${option.method}, body=${option.body}');
       } catch (e) {
-        debugPrint('❌ Failed to parse option: $e');
+        debugPrint('❌ 解析URL选项失败: $e');
       }
     }
 
+    // 替换占位符
     if (keyword != null) {
       url = url
           .replaceAll('{{key}}', Uri.encodeComponent(keyword))
           .replaceAll('{{searchKey}}', Uri.encodeComponent(keyword));
+      
+      // 同时替换选项中的占位符
+      if (option?.body != null) {
+        option = UrlOption(
+          method: option!.method,
+          headers: option!.headers,
+          body: option!.body!
+              .replaceAll('{{key}}', Uri.encodeComponent(keyword))
+              .replaceAll('{{searchKey}}', Uri.encodeComponent(keyword)),
+          charset: option!.charset,
+          retry: option!.retry,
+          useWebView: option!.useWebView,
+          connectTimeout: option!.connectTimeout,
+          readTimeout: option!.readTimeout,
+        );
+      }
     }
     if (page != null) {
       url = url.replaceAll('{{page}}', page.toString());
     }
 
+    // 处理相对 URL - 拼接书源基础 URL
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      String baseUrl = source.bookSourceUrl;
+      // 确保基础 URL 以 / 结尾
+      if (!baseUrl.endsWith('/')) {
+        baseUrl += '/';
+      }
+      // 移除相对 URL 开头的 /
+      if (url.startsWith('/')) {
+        url = url.substring(1);
+      }
+      url = baseUrl + url;
+      debugPrint('🔗 拼接相对URL: $url');
+    }
+
     return ParsedUrl(url: url, option: option);
   }
 
-  Future<Response> _makeRequest(
-    String url, 
-    UrlOption? option, 
-    String? keyword,
-  ) async {
+  /// 构建请求头
+  Map<String, String> _buildHeaders({Map<String, String>? extraHeaders}) {
     final headers = <String, String>{};
-    _dio.options.headers.forEach((key, value) {
-      headers[key] = value.toString();
-    });
-    if (option?.headers != null) {
-      headers.addAll(option!.headers!);
-    }
-
-    final method = option?.method?.toUpperCase() ?? 'GET';
     
-    String? body;
-    if (method == 'POST') {
-      body = option?.body;
-      
-      // 替换 body 中的占位符
-      if (body != null) {
-        if (keyword != null) {
-          body = body.replaceAll('{{key}}', Uri.encodeComponent(keyword));
+    // 解析书源自定义请求头
+    if (source.header != null && source.header!.isNotEmpty) {
+      try {
+        final decoded = json.decode(source.header!);
+        if (decoded is Map) {
+          decoded.forEach((key, value) {
+            headers[key.toString()] = value.toString();
+          });
         }
-        debugPrint('📝 POST body: $body');
-      }
-      
-      // 设置 Content-Type
-      if (!headers.containsKey('Content-Type')) {
-        headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      } catch (_) {
+        // 尝试按行解析
+        for (final line in source.header!.split('\n')) {
+          final parts = line.split(':');
+          if (parts.length >= 2) {
+            headers[parts[0].trim()] = parts.sublist(1).join(':').trim();
+          }
+        }
       }
     }
 
-    // 在 Web 端使用 WebProxy
-    if (kIsWeb) {
-      // 使用代理 URL
-      final proxyUrl = 'http://localhost:8888/$url';
-      debugPrint('🔍 Requesting: $proxyUrl');
-      debugPrint('📦 Method: $method, Body: $body');
-      final html = await WebProxy.instance.fetch(
-        proxyUrl,
-        method: method,
-        headers: headers,
-        body: body,
-      );
-      debugPrint('📄 Response length: ${html.length}');
-      return Response(
-        requestOptions: RequestOptions(path: url),
-        data: html,
-        statusCode: 200,
-      );
+    // 添加默认 User-Agent
+    if (!headers.containsKey('User-Agent')) {
+      headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
     }
-    
-    // 在其他平台使用 Dio
-    final proxiedUrl = _proxifyUrl(url);
-    
-    if (method == 'POST') {
-      return _dio.post(proxiedUrl, data: body, options: Options(headers: headers));
-    } else {
-      return _dio.get(proxiedUrl, options: Options(headers: headers));
+
+    // 合并额外请求头
+    if (extraHeaders != null) {
+      headers.addAll(extraHeaders);
     }
+
+    return headers;
   }
 
+  /// 执行网络请求
+  Future<StrResponse> _executeRequest(
+    ParsedUrl parsed, {
+    String? keyword,
+  }) async {
+    final headers = _buildHeaders(
+      extraHeaders: parsed.option?.headers,
+    );
+
+    final method = parsed.option?.method?.toUpperCase() ?? 'GET';
+    String? body = parsed.option?.body;
+
+    // 替换 body 中的占位符
+    if (body != null && keyword != null) {
+      body = body.replaceAll('{{key}}', Uri.encodeComponent(keyword));
+    }
+
+    // POST 请求设置默认 Content-Type
+    if (method == 'POST' && !headers.containsKey('Content-Type')) {
+      headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    }
+
+    debugPrint('🌐 请求: $method ${parsed.url}');
+    if (body != null) {
+      debugPrint('📦 Body: $body');
+    }
+
+    return _client.execute(
+      parsed.url,
+      method: method,
+      headers: headers,
+      body: body,
+      charset: parsed.option?.charset,
+    );
+  }
+
+  /// 搜索书籍
   Future<List<Map<String, dynamic>>> searchBook(String keyword, {int page = 1}) async {
     if (source.searchUrl == null || source.searchUrl!.isEmpty) {
+      debugPrint('❌ 搜索地址为空');
       return [];
     }
 
     final searchRule = source.ruleSearch;
-    if (searchRule == null) return [];
+    if (searchRule == null) {
+      debugPrint('❌ 搜索规则为空');
+      return [];
+    }
 
     final parsed = _parseUrlWithOption(source.searchUrl!, keyword: keyword, page: page);
+    debugPrint('🔍 搜索URL: ${parsed.url}');
 
     try {
-      final response = await _makeRequest(parsed.url, parsed.option, keyword);
-      final html = response.data.toString();
-      
-      debugPrint('📖 HTML preview: ${html.substring(0, html.length > 500 ? 500 : html.length)}');
+      final response = await _executeRequest(parsed, keyword: keyword);
+      final html = response.body;
 
-      final rule = AnalyzeRule()..setContent(html, baseUrl: source.bookSourceUrl);
+      // 保存原始 HTML
+      lastSearchHtml = html;
 
-      // 获取书籍元素列表
-      final bookElements = rule.getElements(searchRule.bookList ?? '');
-      debugPrint('📚 Book elements count: ${bookElements.length}');
+      debugPrint('📖 响应长度: ${html.length}');
+      if (html.isEmpty) {
+        debugPrint('❌ 响应为空');
+        return [];
+      }
+
+      // 使用 Jsoup 风格的解析器
+      final doc = Jsoup.parse(html, baseUrl: source.bookSourceUrl);
+
+      // 获取书籍列表元素
+      final bookListRule = searchRule.bookList ?? '';
+      debugPrint('📚 书籍列表规则: $bookListRule');
+
+      final bookElements = doc.select(bookListRule);
+      debugPrint('📚 书籍元素数量: ${bookElements.length}');
+
+      if (bookElements.isEmpty) {
+        debugPrint('❌ 未找到书籍元素');
+        return [];
+      }
 
       final results = <Map<String, dynamic>>[];
 
-      for (final element in bookElements) {
-        if (element is! dom.Element) continue;
-        
+      for (int i = 0; i < bookElements.length; i++) {
+        final element = bookElements[i];
+
         // 在每个元素上执行规则
-        final elementRule = AnalyzeRule()..setContent(element, baseUrl: source.bookSourceUrl);
-        
-        final name = elementRule.getString(searchRule.name ?? '');
-        final author = elementRule.getString(searchRule.author ?? '');
-        final coverUrl = elementRule.getString(searchRule.coverUrl ?? '');
-        final intro = elementRule.getString(searchRule.intro ?? '');
-        final bookUrl = elementRule.getString(searchRule.bookUrl ?? '');
-        final kind = elementRule.getString(searchRule.kind ?? '');
-        final lastChapter = elementRule.getString(searchRule.lastChapter ?? '');
-        
+        final name = element.selectFirst(searchRule.name ?? '')?.text();
+        final author = element.selectFirst(searchRule.author ?? '')?.text();
+        final coverUrl = element.selectFirst(searchRule.coverUrl ?? '')?.absUrl();
+        final intro = element.selectFirst(searchRule.intro ?? '')?.text();
+        final bookUrl = element.selectFirst(searchRule.bookUrl ?? '')?.absUrl();
+        final kind = element.selectFirst(searchRule.kind ?? '')?.text();
+        final lastChapter = element.selectFirst(searchRule.lastChapter ?? '')?.text();
+
+        debugPrint('📖 [$i] 书名: $name, 作者: $author');
+
         if (name != null && name.isNotEmpty) {
           results.add({
             'name': name,
@@ -246,94 +401,16 @@ class WebBook {
         }
       }
 
-      debugPrint('📖 Results count: ${results.length}');
-      if (results.isNotEmpty) {
-        debugPrint('📖 First result: ${results.first}');
-      }
-
+      debugPrint('📖 最终结果数量: ${results.length}');
       return results;
-    } catch (e) {
-      debugPrint('搜索失败: $e');
+    } catch (e, stackTrace) {
+      debugPrint('❌ 搜索失败: $e');
+      debugPrint('❌ 堆栈: $stackTrace');
       return [];
     }
   }
 
-  Future<Book?> getBookInfo(String bookUrl) async {
-    final bookInfoRule = source.ruleBookInfo;
-    if (bookInfoRule == null) return null;
-
-    try {
-      final response = await _dio.get(_proxifyUrl(bookUrl));
-      final html = response.data.toString();
-
-      final rule = AnalyzeRule()..setContent(html, baseUrl: bookUrl);
-
-      return Book(
-        bookUrl: bookUrl,
-        name: rule.getString(bookInfoRule.name ?? '') ?? '未知书名',
-        author: rule.getString(bookInfoRule.author ?? '') ?? '',
-        coverUrl: rule.getString(bookInfoRule.coverUrl ?? '') ?? '',
-        intro: rule.getString(bookInfoRule.intro ?? '') ?? '',
-        mediaType: MediaType.novel,
-        originType: BookOriginType.online,
-        sourceUrl: source.bookSourceUrl,
-        sourceName: source.bookSourceName,
-        canUpdate: true,
-        addedTime: DateTime.now(),
-      );
-    } catch (e) {
-      return null;
-    }
-  }
-
-  Future<List<Chapter>> getChapterList(String bookUrl) async {
-    final tocRule = source.ruleToc;
-    if (tocRule == null) return [];
-
-    try {
-      final response = await _dio.get(_proxifyUrl(bookUrl));
-      final html = response.data.toString();
-
-      final rule = AnalyzeRule()..setContent(html, baseUrl: bookUrl);
-
-      final nameList = rule.getStringList(tocRule.chapterName ?? '');
-      final urlList = rule.getStringList(tocRule.chapterUrl ?? '');
-
-      final chapters = <Chapter>[];
-
-      for (int i = 0; i < nameList.length; i++) {
-        chapters.add(Chapter(
-          id: '${bookUrl}_$i',
-          bookId: bookUrl,
-          title: nameList[i],
-          index: i,
-          url: i < urlList.length ? urlList[i] : null,
-        ));
-      }
-
-      return chapters;
-    } catch (e) {
-      return [];
-    }
-  }
-
-  Future<String?> getContent(String bookUrl, Chapter chapter) async {
-    final contentRule = source.ruleContent;
-    if (contentRule == null) return null;
-
-    final chapterUrl = chapter.url ?? bookUrl;
-
-    try {
-      final response = await _dio.get(_proxifyUrl(chapterUrl));
-      final html = response.data.toString();
-
-      final rule = AnalyzeRule()..setContent(html, baseUrl: chapterUrl);
-      return rule.getString(contentRule.content ?? '');
-    } catch (e) {
-      return null;
-    }
-  }
-
+  /// 发现书籍
   Future<List<Map<String, dynamic>>> exploreBook(String exploreUrl) async {
     final exploreRule = source.ruleExplore;
     if (exploreRule == null) return [];
@@ -341,16 +418,19 @@ class WebBook {
     final parsed = _parseUrlWithOption(exploreUrl);
 
     try {
-      final response = await _makeRequest(parsed.url, parsed.option, null);
-      final html = response.data.toString();
+      final response = await _executeRequest(parsed);
+      final html = response.body;
 
-      final rule = AnalyzeRule()..setContent(html, baseUrl: source.bookSourceUrl);
+      // 保存原始 HTML
+      lastExploreHtml = html;
 
-      final nameList = rule.getStringList(exploreRule.name ?? '');
-      final authorList = rule.getStringList(exploreRule.author ?? '');
-      final coverList = rule.getStringList(exploreRule.coverUrl ?? '');
-      final introList = rule.getStringList(exploreRule.intro ?? '');
-      final bookUrlList = rule.getStringList(exploreRule.bookUrl ?? '');
+      final doc = Jsoup.parse(html, baseUrl: source.bookSourceUrl);
+
+      final nameList = doc.select(exploreRule.name ?? '').map((e) => e.text()).toList();
+      final authorList = doc.select(exploreRule.author ?? '').map((e) => e.text()).toList();
+      final coverList = doc.select(exploreRule.coverUrl ?? '').map((e) => e.absUrl()).toList();
+      final introList = doc.select(exploreRule.intro ?? '').map((e) => e.text()).toList();
+      final bookUrlList = doc.select(exploreRule.bookUrl ?? '').map((e) => e.absUrl()).toList();
 
       final results = <Map<String, dynamic>>[];
 
@@ -368,7 +448,476 @@ class WebBook {
 
       return results;
     } catch (e) {
+      debugPrint('❌ 发现失败: $e');
       return [];
     }
+  }
+
+  /// 获取书籍详情
+  Future<Book?> getBookInfo(String bookUrl) async {
+    final bookInfoRule = source.ruleBookInfo;
+    if (bookInfoRule == null) return null;
+
+    try {
+      final headers = _buildHeaders();
+      final response = await _client.execute(bookUrl, headers: headers);
+      final html = response.body;
+
+      // 保存原始 HTML
+      lastBookInfoHtml = html;
+
+      final doc = Jsoup.parse(html, baseUrl: bookUrl);
+
+      // 执行预处理规则
+      if (bookInfoRule.init != null && bookInfoRule.init!.isNotEmpty) {
+        // TODO: 执行 JS 预处理
+      }
+
+      return Book(
+        bookUrl: bookUrl,
+        name: doc.selectFirst(bookInfoRule.name ?? '')?.text() ?? '未知书名',
+        author: doc.selectFirst(bookInfoRule.author ?? '')?.text() ?? '',
+        coverUrl: doc.selectFirst(bookInfoRule.coverUrl ?? '')?.absUrl() ?? '',
+        intro: doc.selectFirst(bookInfoRule.intro ?? '')?.text() ?? '',
+        mediaType: MediaType.novel,
+        originType: BookOriginType.online,
+        sourceUrl: source.bookSourceUrl,
+        sourceName: source.bookSourceName,
+        kind: doc.selectFirst(bookInfoRule.kind ?? '')?.text(),
+        lastChapter: doc.selectFirst(bookInfoRule.lastChapter ?? '')?.text(),
+        wordCount: doc.selectFirst(bookInfoRule.wordCount ?? '')?.text(),
+        tocUrl: doc.selectFirst(bookInfoRule.tocUrl ?? '')?.absUrl(),
+        canUpdate: true,
+        addedTime: DateTime.now(),
+      );
+    } catch (e) {
+      debugPrint('❌ 获取详情失败: $e');
+      return null;
+    }
+  }
+
+  /// 获取章节目录
+  Future<List<Chapter>> getChapterList(String tocUrl) async {
+    final tocRule = source.ruleToc;
+    if (tocRule == null) return [];
+
+    try {
+      final headers = _buildHeaders();
+      final response = await _client.execute(tocUrl, headers: headers);
+      final html = response.body;
+
+      // 保存原始 HTML
+      lastTocHtml = html;
+
+      final doc = Jsoup.parse(html, baseUrl: tocUrl);
+
+      final nameElements = doc.select(tocRule.chapterName ?? '');
+      final urlElements = doc.select(tocRule.chapterUrl ?? '');
+
+      final chapters = <Chapter>[];
+
+      for (int i = 0; i < nameElements.length; i++) {
+        final name = nameElements[i].text();
+        final url = i < urlElements.length ? urlElements[i].absUrl() : null;
+
+        chapters.add(Chapter(
+          id: '${tocUrl}_$i',
+          bookId: tocUrl,
+          title: name,
+          index: i,
+          url: url,
+        ));
+      }
+
+      return chapters;
+    } catch (e) {
+      debugPrint('❌ 获取目录失败: $e');
+      return [];
+    }
+  }
+
+  /// 获取章节正文
+  Future<String?> getContent(String chapterUrl) async {
+    final contentRule = source.ruleContent;
+    if (contentRule == null) return null;
+
+    try {
+      final headers = _buildHeaders();
+      final response = await _client.execute(chapterUrl, headers: headers);
+      final html = response.body;
+
+      // 保存原始 HTML
+      lastContentHtml = html;
+
+      final doc = Jsoup.parse(html, baseUrl: chapterUrl);
+      final content = doc.selectFirst(contentRule.content ?? '')?.html();
+
+      return content;
+    } catch (e) {
+      debugPrint('❌ 获取正文失败: $e');
+      return null;
+    }
+  }
+}
+
+/// Jsoup 风格的 HTML 解析器
+class Jsoup {
+  /// 解析 HTML 文档
+  static JsoupDocument parse(String html, {String? baseUrl}) {
+    final doc = html_parser.parse(html);
+    return JsoupDocument(doc, baseUrl: baseUrl);
+  }
+}
+
+/// Jsoup 风格的文档对象
+class JsoupDocument {
+  final dom.Document _doc;
+  final String? baseUrl;
+
+  JsoupDocument(this._doc, {this.baseUrl});
+
+  /// 选择元素（类似 Jsoup 的 select）
+  List<JsoupElement> select(String cssSelector) {
+    if (cssSelector.isEmpty) return [];
+
+    final converted = _convertLegadoRule(cssSelector);
+    final elements = _doc.querySelectorAll(converted);
+    return elements.map((e) => JsoupElement(e, baseUrl: baseUrl)).toList();
+  }
+
+  /// 选择第一个元素（类似 Jsoup 的 selectFirst）
+  JsoupElement? selectFirst(String cssSelector) {
+    if (cssSelector.isEmpty) return null;
+
+    final converted = _convertLegadoRule(cssSelector);
+    final element = _doc.querySelector(converted);
+    if (element == null) return null;
+    return JsoupElement(element, baseUrl: baseUrl);
+  }
+
+  /// 转换 legados 规则语法
+  String _convertLegadoRule(String rule) {
+    if (rule.startsWith('class.')) {
+      return '.${rule.substring(6)}';
+    }
+    if (rule.startsWith('tag.')) {
+      return rule.substring(4);
+    }
+    if (rule.startsWith('id.')) {
+      return '#${rule.substring(3)}';
+    }
+    if (rule.startsWith('@')) {
+      // 处理属性选择器
+      final attr = rule.substring(1);
+      if (attr == 'text' || attr == 'text()') {
+        return ':root';
+      }
+      if (attr == 'html' || attr == 'html()') {
+        return ':root';
+      }
+    }
+    return rule;
+  }
+}
+
+/// Jsoup 风格的元素对象
+class JsoupElement {
+  final dom.Element _element;
+  final String? baseUrl;
+
+  JsoupElement(this._element, {this.baseUrl});
+
+  /// 获取文本内容（类似 Jsoup 的 text()）
+  String text() => _element.text.trim();
+
+  /// 获取 HTML 内容（类似 Jsoup 的 html()）
+  String html() => _element.innerHtml;
+
+  /// 获取外部 HTML（类似 Jsoup 的 outerHtml()）
+  String outerHtml() => _element.outerHtml;
+
+  /// 获取属性值（类似 Jsoup 的 attr()）
+  String? attr(String name) => _element.attributes[name];
+
+  /// 获取绝对 URL（类似 Jsoup 的 absUrl()）
+  String? absUrl([String attrName = 'href']) {
+    final value = _element.attributes[attrName];
+    if (value == null) return null;
+
+    // 处理相对 URL
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+      return value;
+    }
+
+    if (baseUrl != null) {
+      final base = Uri.parse(baseUrl!);
+      return base.resolve(value).toString();
+    }
+
+    return value;
+  }
+
+  /// 选择子元素（支持多步骤规则）
+  List<JsoupElement> select(String rule) {
+    if (rule.isEmpty) return [this];
+
+    // 按 @ 分割规则步骤
+    final steps = _splitSteps(rule);
+    List<dynamic> current = [_element];
+
+    for (final step in steps) {
+      final nextResults = <dynamic>[];
+      for (final item in current) {
+        final result = _applyStep(item, step, isList: true);
+        if (result is List) {
+          nextResults.addAll(result);
+        } else if (result != null) {
+          nextResults.add(result);
+        }
+      }
+      current = nextResults;
+      if (current.isEmpty) return [];
+    }
+
+    return current.map((e) {
+      if (e is dom.Element) return JsoupElement(e, baseUrl: baseUrl);
+      if (e is String) {
+        // 返回一个包含文本的虚拟元素
+        final doc = html_parser.parse('<root>$e</root>');
+        return JsoupElement(doc.body!.firstChild as dom.Element, baseUrl: baseUrl);
+      }
+      return JsoupElement(_element, baseUrl: baseUrl);
+    }).toList();
+  }
+
+  /// 选择第一个子元素（支持多步骤规则）
+  JsoupElement? selectFirst(String rule) {
+    if (rule.isEmpty) return this;
+
+    // 按 @ 分割规则步骤
+    final steps = _splitSteps(rule);
+    dynamic current = _element;
+
+    for (final step in steps) {
+      current = _applyStep(current, step, isList: false);
+      if (current == null) return null;
+    }
+
+    if (current is dom.Element) {
+      return JsoupElement(current, baseUrl: baseUrl);
+    }
+    if (current is String) {
+      final doc = html_parser.parse('<root>$current</root>');
+      return JsoupElement(doc.body!.firstChild as dom.Element, baseUrl: baseUrl);
+    }
+    return null;
+  }
+
+  /// 分割规则步骤
+  List<String> _splitSteps(String rule) {
+    final steps = <String>[];
+    int start = 0;
+    int i = 0;
+
+    while (i < rule.length) {
+      if (rule[i] == '@') {
+        // 检查是否是属性选择器 (@text, @href 等)
+        if (i + 1 < rule.length && RegExp(r'[a-zA-Z]').hasMatch(rule[i + 1])) {
+          // 查找属性名结束位置
+          int j = i + 1;
+          while (j < rule.length && RegExp(r'[a-zA-Z0-9()]').hasMatch(rule[j])) {
+            j++;
+          }
+          // 如果后面还有 @，则分割
+          if (j < rule.length && rule[j] == '@') {
+            steps.add(rule.substring(start, j));
+            start = j;
+            i = j;
+            continue;
+          }
+          // 否则作为最后一个步骤
+          if (j == rule.length) {
+            steps.add(rule.substring(start));
+            return steps;
+          }
+          // 属性后面跟着其他字符，继续
+          i++;
+          continue;
+        }
+        // 分割
+        if (i > start) {
+          steps.add(rule.substring(start, i));
+        }
+        start = i + 1;
+      }
+      i++;
+    }
+
+    if (start < rule.length) {
+      steps.add(rule.substring(start));
+    }
+
+    return steps.where((s) => s.isNotEmpty).toList();
+  }
+
+  /// 应用单个规则步骤
+  dynamic _applyStep(dynamic content, String step, {bool isList = false}) {
+    if (step.isEmpty) return content;
+
+    // 处理属性提取
+    if (step.startsWith('@')) {
+      final attrName = step.substring(1);
+      if (content is List) {
+        return content.map((e) => _extractAttr(e, attrName)).toList();
+      }
+      return _extractAttr(content, attrName);
+    }
+
+    // 处理 text() 和 html()
+    if (step == 'text' || step == 'text()') {
+      if (content is List) {
+        return content.map((e) => _extractText(e)).toList();
+      }
+      return _extractText(content);
+    }
+    if (step == 'html' || step == 'html()') {
+      if (content is List) {
+        return content.map((e) => _extractHtml(e)).toList();
+      }
+      return _extractHtml(content);
+    }
+
+    // 转换 legados 语法
+    String cssSelector = _convertLegadoRule(step);
+
+    // 处理索引语法（在 CSS 选择后）
+    int? index;
+    final indexMatch = RegExp(r'\.(\d+)$').firstMatch(cssSelector);
+    if (indexMatch != null) {
+      index = int.parse(indexMatch.group(1)!);
+      cssSelector = cssSelector.substring(0, indexMatch.start);
+    }
+
+    // 执行选择
+    if (content is List) {
+      final results = <dom.Element>[];
+      for (final item in content) {
+        if (item is dom.Element) {
+          results.addAll(item.querySelectorAll(cssSelector));
+        }
+      }
+      if (index != null) {
+        if (index < results.length) {
+          return results[index];
+        }
+        return null;
+      }
+      return results;
+    }
+
+    dom.Element? element = _toElement(content);
+    if (element == null) return null;
+
+    final results = element.querySelectorAll(cssSelector).toList();
+
+    if (index != null) {
+      if (index < results.length) {
+        return results[index];
+      }
+      return null;
+    }
+
+    if (isList) {
+      return results;
+    }
+    return results.isNotEmpty ? results.first : null;
+  }
+
+  /// 转换 legados 规则语法
+  String _convertLegadoRule(String rule) {
+    if (rule.isEmpty) return rule;
+
+    // 处理 class. → .
+    if (rule.startsWith('class.')) {
+      rule = '.${rule.substring(6)}';
+    }
+    // 处理 tag. → 直接标签名
+    else if (rule.startsWith('tag.')) {
+      rule = rule.substring(4);
+    }
+    // 处理 id. → #
+    else if (rule.startsWith('id.')) {
+      rule = '#${rule.substring(3)}';
+    }
+
+    // 处理索引语法: .0, .1 等（但保留在返回前处理）
+    // 这里只转换选择器部分
+
+    return rule;
+  }
+
+  /// 提取属性
+  String _extractAttr(dynamic content, String attrName) {
+    dom.Element? element = _toElement(content);
+    if (element == null) return '';
+
+    switch (attrName.toLowerCase()) {
+      case 'text':
+      case 'text()':
+        return element.text.trim();
+      case 'html':
+      case 'html()':
+        return element.innerHtml;
+      case 'outerhtml':
+        return element.outerHtml;
+      case 'hrefurl':
+        return _getAbsUrl(element, 'href');
+      case 'srcurl':
+        return _getAbsUrl(element, 'src');
+      default:
+        return element.attributes[attrName] ?? '';
+    }
+  }
+
+  /// 提取文本
+  String _extractText(dynamic content) {
+    dom.Element? element = _toElement(content);
+    return element?.text.trim() ?? '';
+  }
+
+  /// 提取 HTML
+  String _extractHtml(dynamic content) {
+    dom.Element? element = _toElement(content);
+    return element?.innerHtml ?? '';
+  }
+
+  /// 获取绝对 URL
+  String _getAbsUrl(dom.Element element, String attrName) {
+    final value = element.attributes[attrName];
+    if (value == null) return '';
+
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+      return value;
+    }
+
+    if (baseUrl != null) {
+      try {
+        final base = Uri.parse(baseUrl!);
+        return base.resolve(value).toString();
+      } catch (_) {}
+    }
+
+    return value;
+  }
+
+  /// 转换为 Element
+  dom.Element? _toElement(dynamic content) {
+    if (content is dom.Element) return content;
+    if (content is dom.Document) return content.body;
+    if (content is String) {
+      final doc = html_parser.parse(content);
+      return doc.body;
+    }
+    return null;
   }
 }

@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import '../../models/book_source.dart';
 import '../../providers/discovery_provider.dart';
 import '../../services/storage_service.dart';
+import '../../routes/app_routes.dart';
+import 'book_source_edit_page.dart';
 
 /// 书源排序类型
 enum BookSourceSort {
@@ -56,6 +58,18 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  Future<void> _navigateToEditPage({String? sourceUrl}) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => BookSourceEditPage(sourceUrl: sourceUrl),
+      ),
+    );
+    if (result == true) {
+      _loadSources();
+    }
   }
 
   Future<void> _loadSources() async {
@@ -493,7 +507,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
               title: const Text('新建书源'),
               onTap: () {
                 Navigator.pop(context);
-                // TODO: 跳转到书源编辑页面
+                _navigateToEditPage();
               },
             ),
             ListTile(
@@ -685,7 +699,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
                       icon: const Icon(Icons.edit),
                       onPressed: () {
                         Navigator.pop(context);
-                        // TODO: 跳转到编辑页面
+                        _navigateToEditPage(sourceUrl: source.bookSourceUrl);
                       },
                     ),
                   ],
@@ -874,7 +888,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
           onSelected: (value) {
             switch (value) {
               case 'add':
-                // TODO: 新建书源
+                _navigateToEditPage();
                 break;
               case 'import_local':
                 _importFromLocal();
