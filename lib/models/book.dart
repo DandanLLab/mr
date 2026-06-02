@@ -31,6 +31,21 @@ class Book {
   final int? customOrder;
   final DateTime addedTime;
 
+  // 自定义元数据字段
+  final String? customName;
+  final String? customAuthor;
+  final String? customCoverUrl;
+  final String? customIntro;
+  final String? publisher;
+  final String? category;
+  final bool showWordCount;
+
+  // 显示属性：优先使用自定义值
+  String get displayName => customName ?? name;
+  String get displayAuthor => customAuthor ?? author;
+  String get displayCoverUrl => customCoverUrl ?? coverUrl;
+  String get displayIntro => customIntro ?? intro;
+
   Book({
     required this.bookUrl,
     required this.name,
@@ -59,6 +74,13 @@ class Book {
     this.canUpdate = true,
     this.customOrder,
     required this.addedTime,
+    this.customName,
+    this.customAuthor,
+    this.customCoverUrl,
+    this.customIntro,
+    this.publisher,
+    this.category,
+    this.showWordCount = true,
   });
 
   double get progress {
@@ -99,6 +121,13 @@ class Book {
     bool? canUpdate,
     int? customOrder,
     DateTime? addedTime,
+    String? customName,
+    String? customAuthor,
+    String? customCoverUrl,
+    String? customIntro,
+    String? publisher,
+    String? category,
+    bool? showWordCount,
   }) {
     return Book(
       bookUrl: bookUrl ?? this.bookUrl,
@@ -129,6 +158,13 @@ class Book {
       canUpdate: canUpdate ?? this.canUpdate,
       customOrder: customOrder ?? this.customOrder,
       addedTime: addedTime ?? this.addedTime,
+      customName: customName ?? this.customName,
+      customAuthor: customAuthor ?? this.customAuthor,
+      customCoverUrl: customCoverUrl ?? this.customCoverUrl,
+      customIntro: customIntro ?? this.customIntro,
+      publisher: publisher ?? this.publisher,
+      category: category ?? this.category,
+      showWordCount: showWordCount ?? this.showWordCount,
     );
   }
 
@@ -168,6 +204,13 @@ class Book {
       addedTime: json['addedTime'] != null
           ? DateTime.parse(json['addedTime'] as String)
           : DateTime.now(),
+      customName: json['customName'] as String?,
+      customAuthor: json['customAuthor'] as String?,
+      customCoverUrl: json['customCoverUrl'] as String?,
+      customIntro: json['customIntro'] as String?,
+      publisher: json['publisher'] as String?,
+      category: json['category'] as String?,
+      showWordCount: json['showWordCount'] as bool? ?? true,
     );
   }
 
@@ -202,6 +245,13 @@ class Book {
       'canUpdate': canUpdate,
       if (customOrder != null) 'customOrder': customOrder,
       'addedTime': addedTime.toIso8601String(),
+      if (customName != null) 'customName': customName,
+      if (customAuthor != null) 'customAuthor': customAuthor,
+      if (customCoverUrl != null) 'customCoverUrl': customCoverUrl,
+      if (customIntro != null) 'customIntro': customIntro,
+      if (publisher != null) 'publisher': publisher,
+      if (category != null) 'category': category,
+      'showWordCount': showWordCount,
     };
   }
 }
