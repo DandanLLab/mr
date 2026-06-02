@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:archive/archive.dart';
+import 'package:html/parser.dart' as html_parser;
 import '../../models/book.dart';
 import '../../models/chapter.dart';
 import '../../services/storage_service.dart';
@@ -360,6 +361,117 @@ class LocalBookService {
     if (chapter.index < 0 || chapter.index >= epubBook.chapters.length) return null;
 
     return epubBook.chapters[chapter.index].content;
+  }
+
+  /// 获取 EPUB 章节的 HTML 内容，合并所有 CSS，处理图片路径为本地文件路径，
+  /// 返回完整的 HTML 文档（包含 CSS 和资源引用）。
+  Future<String?> getEpubContentWithStyle(Book book, Chapter chapter) async {
+    final bytes = await _ensureEpubBytes(book);
+    if (bytes == null) return null;
+
+    var epubBook = _epubCache[book.bookUrl];
+
+    // Fallback: ensure epub data is loaded
+    if (epubBook == null) {
+      epubBook = _parseEpubData(bytes);
+      if (epubBook != null) {
+        _epubCache[book.bookUrl] = epubBook;
+      }
+    }
+
+    if (epubBook == null) return null;
+    if (chapter.index < 0 || chapter.index >= epubBook.chapters.length) return null;
+
+    final epubChapter = epubBook.chapters[chapter.index];
+    if (epubChapter.content == null) return null;
+
+    // 解析 EPUB ZIP 以获取 CSS 和字体信息
+    try {
+      final archive = ZipDecoder().decodeBytes(bytes);
+      final files = <String, List<int>>{};
+      for (final file in archive) {
+        if (file.isFile) {
+          final normalizedName = file.name.replaceAll('\\', '/');
+          final data = file.content;
+          if (data is List<int>) {
+            files[normalizedName] = data;
+          }
+        }
+      }
+
+      // 读取 OPF 路径
+      final containerData = files['META-INF/container.xml'];
+      if (containerData == null) return epubChapter.content;
+
+      final containerDoc = html_parser.parse(EpubParser.decodeBytes(containerData));
+      String? opfPath;
+      for (final el in containerDoc.querySelectorAll('rootfile')) {
+        final mediaType = el.attributes['media-type'];
+        if (mediaType == null || mediaType == 'application/oebps-package+xml') {
+          opfPath = el.attributes['full-path'];
+          break;
+        }
+      }
+      if (opfPath == null) return epubChapter.content;
+
+      final opfData = files[opfPath];
+      if (opfData == null) return epubChapter.content;
+
+      final opfDoc = html_parser.parse(EpubParser.decodeBytes(opfData));
+      final opfBasePath = opfPath.contains('/')
+          ? opfPath.substring(0, opfPath.lastIndexOf('/'))
+          : '';
+
+      // 解析 manifest
+      final manifestElement = opfDoc.querySelector('manifest');
+      final manifest = <String, ManifestItem>{};
+      if (manifestElement != null) {
+        for (final child in manifestElement.children) {
+          final local = (child.localName ?? '').toLowerCase();
+          if (local == 'item') {
+            final id = child.attributes['id'] ?? '';
+            final href = child.attributes['href'] ?? '';
+            final mediaType = child.attributes['media-type'] ?? '';
+            final properties = child.attributes['properties'];
+            if (id.isNotEmpty && href.isNotEmpty) {
+              manifest[id] = ManifestItem(
+                id: id,
+                href: href,
+                mediaType: mediaType,
+                properties: properties,
+              );
+            }
+          }
+        }
+      }
+
+      // 获取所有 CSS 内容
+      final allCss = EpubParser.getAllCss(files, opfBasePath, manifest);
+
+      // 获取所有字体路径
+      final fontPaths = EpubParser.getAllFonts(opfBasePath, manifest);
+
+      // 计算章节的 basePath（用于解析相对路径）
+      final chapterHref = epubChapter.href;
+      String? basePath;
+      if (chapterHref != null) {
+        final chapterPath = chapterHref.split('#').first;
+        if (chapterPath.contains('/')) {
+          basePath = chapterPath.substring(0, chapterPath.lastIndexOf('/') + 1);
+        }
+      }
+
+      // 使用 extractHtmlWithResources 处理
+      return EpubParser.extractHtmlWithResources(
+        epubChapter.content!,
+        basePath: basePath,
+        allCss: allCss,
+        fontPaths: fontPaths,
+      );
+    } catch (e) {
+      // 出错时返回原始内容
+      return epubChapter.content;
+    }
   }
 
   /// Returns image bytes from within the EPUB ZIP file.

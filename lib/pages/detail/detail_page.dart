@@ -26,7 +26,6 @@ class _DetailPageState extends State<DetailPage> {
   Book? _book;
   List<Chapter> _chapters = [];
   bool _isDescExpanded = false;
-  bool _isChapterReversed = false;
 
   @override
   void initState() {
@@ -48,12 +47,14 @@ class _DetailPageState extends State<DetailPage> {
 
     final isInShelf = bookData != null;
 
-    setState(() {
-      _book = book;
-      _chapters = chapters;
-      _isInBookshelf = isInShelf;
-      _isLoading = false;
-    });
+    if (mounted) {
+      setState(() {
+        _book = book;
+        _chapters = chapters;
+        _isInBookshelf = isInShelf;
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -73,52 +74,20 @@ class _DetailPageState extends State<DetailPage> {
     }
 
     return Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          _buildAppBar(),
-          SliverToBoxAdapter(
-            child: _buildHeader(),
-          ),
-          SliverToBoxAdapter(
-            child: _buildActionButtons(),
-          ),
-          SliverToBoxAdapter(
-            child: _buildDescription(),
-          ),
-          SliverToBoxAdapter(
-            child: _buildTags(),
-          ),
-          SliverToBoxAdapter(
-            child: _buildChapterHeader(),
-          ),
-          SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                final displayChapters = _isChapterReversed
-                    ? _chapters.reversed.toList()
-                    : _chapters;
-                final lastThree = displayChapters.length > 3
-                    ? displayChapters.sublist(displayChapters.length - 3)
-                    : displayChapters;
-                if (index == lastThree.length) {
-                  return ListTile(
-                    leading: const Icon(Icons.list),
-                    title: const Text('查看完整目录'),
-                    onTap: () => _openFullChapterList(),
-                  );
-                }
-                return _buildChapterItem(lastThree[index]);
-              },
-              childCount: (_isChapterReversed
-                      ? _chapters.reversed.toList()
-                      : _chapters).length > 3
-                  ? 4
-                  : (_isChapterReversed
-                      ? _chapters.reversed.toList()
-                      : _chapters).length + 1,
-            ),
-          ),
-        ],
+      body: RefreshIndicator(
+        onRefresh: _loadData,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            _buildAppBar(),
+            SliverToBoxAdapter(child: _buildHeader()),
+            SliverToBoxAdapter(child: _buildActionButtons()),
+            SliverToBoxAdapter(child: _buildDescription()),
+            SliverToBoxAdapter(child: _buildTags()),
+            SliverToBoxAdapter(child: _buildChapterHeader()),
+            _buildChapterList(),
+          ],
+        ),
       ),
     );
   }
@@ -144,7 +113,7 @@ class _DetailPageState extends State<DetailPage> {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                Theme.of(context).colorScheme.primary.withOpacity(0.7),
+                Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
                 Theme.of(context).colorScheme.primary,
               ],
             ),
@@ -167,12 +136,13 @@ class _DetailPageState extends State<DetailPage> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 封面
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: Container(
               width: 100,
               height: 140,
-              color: Theme.of(context).colorScheme.surfaceVariant,
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
               child: _book!.displayCoverUrl.isNotEmpty
                   ? CachedNetworkImage(
                       imageUrl: _book!.displayCoverUrl,
@@ -183,6 +153,7 @@ class _DetailPageState extends State<DetailPage> {
             ),
           ),
           const SizedBox(width: 16),
+          // 书籍信息
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -190,8 +161,10 @@ class _DetailPageState extends State<DetailPage> {
                 Text(
                   _book!.displayName,
                   style: Theme.of(context).textTheme.titleLarge,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Text(
                   _book!.displayAuthor,
                   style: TextStyle(
@@ -199,62 +172,30 @@ class _DetailPageState extends State<DetailPage> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                Row(
+                // 标签行
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        _book!.status ?? (_book!.originType == BookOriginType.local ? '本地' : '未知'),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(context).colorScheme.onPrimaryContainer,
-                        ),
-                      ),
+                    _buildInfoChip(
+                      _book!.status ?? (_book!.originType == BookOriginType.local ? '本地' : '未知'),
                     ),
-                    const SizedBox(width: 8),
                     if (_book!.sourceName != null)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.secondaryContainer,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          _book!.sourceName!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Theme.of(context).colorScheme.onSecondaryContainer,
-                          ),
-                        ),
-                      ),
+                      _buildInfoChip(_book!.sourceName!),
+                    _buildInfoChip('${_book!.totalChapterNum ?? _chapters.length} 章'),
+                    if (_book!.wordCount != null)
+                      _buildInfoChip(_book!.wordCount!),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 if (_book!.lastCheckTime != null)
                   Text(
-                    '最后更新: ${_formatDate(_book!.lastCheckTime)}',
+                    '更新: ${_formatDate(_book!.lastCheckTime)}',
                     style: TextStyle(
                       fontSize: 12,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
-                Text(
-                  '共 ${_book!.totalChapterNum ?? _chapters.length} 章',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
               ],
             ),
           ),
@@ -263,15 +204,32 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
+  Widget _buildInfoChip(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 11,
+          color: Theme.of(context).colorScheme.onPrimaryContainer,
+        ),
+      ),
+    );
+  }
+
   Widget _buildActionButtons() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
         children: [
           Expanded(
             child: FilledButton.icon(
               onPressed: _toggleBookshelf,
-              icon: Icon(_isInBookshelf ? Icons.bookmark : Icons.bookmark_border),
+              icon: Icon(_isInBookshelf ? Icons.bookmark : Icons.bookmark_border, size: 20),
               label: Text(_isInBookshelf ? '已在书架' : '加入书架'),
             ),
           ),
@@ -279,20 +237,9 @@ class _DetailPageState extends State<DetailPage> {
           Expanded(
             child: FilledButton.icon(
               onPressed: _startReading,
-              icon: const Icon(Icons.play_arrow),
+              icon: const Icon(Icons.play_arrow, size: 20),
               label: const Text('立即阅读'),
             ),
-          ),
-          const SizedBox(width: 12),
-          IconButton(
-            onPressed: _showCacheManager,
-            icon: const Icon(Icons.download),
-            tooltip: '缓存管理',
-          ),
-          IconButton(
-            onPressed: _refreshData,
-            icon: const Icon(Icons.refresh),
-            tooltip: '刷新数据',
           ),
         ],
       ),
@@ -399,17 +346,18 @@ class _DetailPageState extends State<DetailPage> {
                     ),
                   ),
           ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: () {
-                setState(() {
-                  _isDescExpanded = !_isDescExpanded;
-                });
-              },
-              child: Text(_isDescExpanded ? '收起' : '展开'),
+          if (intro.isNotEmpty)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () {
+                  setState(() {
+                    _isDescExpanded = !_isDescExpanded;
+                  });
+                },
+                child: Text(_isDescExpanded ? '收起' : '展开全部'),
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -428,7 +376,7 @@ class _DetailPageState extends State<DetailPage> {
         children: _book!.tags!.map((tag) {
           return Chip(
             label: Text(tag),
-            backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
+            backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
           );
         }).toList(),
       ),
@@ -437,39 +385,70 @@ class _DetailPageState extends State<DetailPage> {
 
   Widget _buildChapterHeader() {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(
-            '目录 (${_chapters.length})',
+            '目录',
             style: Theme.of(context).textTheme.titleMedium,
           ),
-          TextButton.icon(
-            onPressed: () {
-              setState(() {
-                _isChapterReversed = !_isChapterReversed;
-              });
-            },
-            icon: Icon(_isChapterReversed ? Icons.arrow_upward : Icons.arrow_downward),
-            label: Text(_isChapterReversed ? '正序' : '倒序'),
+          TextButton(
+            onPressed: () => _openFullChapterList(),
+            child: const Text('查看全部'),
           ),
         ],
       ),
     );
   }
 
+  Widget _buildChapterList() {
+    // 只显示最新3章
+    final displayChapters = _chapters.length > 3
+        ? _chapters.sublist(_chapters.length - 3)
+        : _chapters;
+
+    return SliverList(
+      delegate: SliverChildBuilderDelegate(
+        (context, index) {
+          if (index < displayChapters.length) {
+            return _buildChapterItem(displayChapters[index]);
+          }
+          // "查看完整目录"按钮
+          return InkWell(
+            onTap: () => _openFullChapterList(),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              alignment: Alignment.center,
+              child: Text(
+                '查看完整目录 (${_chapters.length}章)',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          );
+        },
+        childCount: displayChapters.length + 1,
+      ),
+    );
+  }
+
   Widget _buildChapterItem(Chapter chapter) {
     return ListTile(
+      dense: true,
       leading: chapter.isVip
-          ? Icon(Icons.lock, color: Theme.of(context).colorScheme.primary)
+          ? Icon(Icons.lock, size: 16, color: Theme.of(context).colorScheme.primary)
           : null,
-      title: Text(chapter.title),
+      title: Text(
+        chapter.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 14),
+      ),
       trailing: chapter.isCached
-          ? Icon(
-              Icons.download_done,
-              color: Theme.of(context).colorScheme.primary,
-            )
+          ? Icon(Icons.download_done, size: 16, color: Theme.of(context).colorScheme.primary)
           : null,
       onTap: () => _openChapter(chapter),
       onLongPress: () => _openFullChapterList(),
@@ -495,6 +474,7 @@ class _DetailPageState extends State<DetailPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(_isInBookshelf ? '已加入书架' : '已从书架移除'),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
@@ -510,89 +490,7 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
-  void _showCacheManager() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        return DraggableScrollableSheet(
-          initialChildSize: 0.6,
-          minChildSize: 0.4,
-          maxChildSize: 0.9,
-          expand: false,
-          builder: (context, scrollController) {
-            return Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        '缓存管理',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      TextButton(
-                        onPressed: () {
-                          Navigator.pop(context);
-                        },
-                        child: const Text('关闭'),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(),
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () {},
-                          icon: const Icon(Icons.download),
-                          label: const Text('缓存全部'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () {},
-                          icon: const Icon(Icons.delete),
-                          label: const Text('清除缓存'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: ListView.builder(
-                    controller: scrollController,
-                    itemCount: _chapters.length,
-                    itemBuilder: (context, index) {
-                      final chapter = _chapters[index];
-                      return CheckboxListTile(
-                        value: chapter.isCached,
-                        onChanged: (checked) {},
-                        title: Text(chapter.title),
-                        secondary: chapter.isVip
-                            ? const Icon(Icons.lock)
-                            : null,
-                      );
-                    },
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
   Future<void> _refreshData() async {
-    setState(() {
-      _isLoading = true;
-    });
     await _loadData();
   }
 

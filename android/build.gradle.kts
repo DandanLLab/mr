@@ -19,6 +19,18 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
+subprojects {
+    afterEvaluate {
+        if (project.name != "app" && project.hasProperty("android")) {
+            project.extensions.configure<com.android.build.gradle.BaseExtension>("android") {
+                buildTypes {
+                    findByName("release")?.isMinifyEnabled = true
+                }
+            }
+        }
+    }
+}
+
 tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }

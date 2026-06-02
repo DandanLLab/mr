@@ -44,13 +44,13 @@ class EpubBook {
   });
 }
 
-class _ManifestItem {
+class ManifestItem {
   final String id;
   final String href;
   final String mediaType;
   final String? properties;
 
-  const _ManifestItem({
+  const ManifestItem({
     required this.id,
     required this.href,
     required this.mediaType,
@@ -84,7 +84,7 @@ class EpubParser {
       }
 
       final containerDoc =
-          html_parser.parse(_decodeBytes(containerData));
+          html_parser.parse(decodeBytes(containerData));
       String? opfPath;
       final rootfileElements = containerDoc.querySelectorAll('rootfile');
       for (final el in rootfileElements) {
@@ -106,7 +106,7 @@ class EpubParser {
         return const EpubBook(title: '未知书名');
       }
 
-      final opfDoc = html_parser.parse(_decodeBytes(opfData));
+      final opfDoc = html_parser.parse(decodeBytes(opfData));
 
       // OPF 基础目录，用于解析相对路径
       final opfBasePath = opfPath.contains('/')
@@ -139,7 +139,7 @@ class EpubParser {
 
       // 5. 解析 manifest
       final manifestElement = opfDoc.querySelector('manifest');
-      final manifest = <String, _ManifestItem>{};
+      final manifest = <String, ManifestItem>{};
 
       if (manifestElement != null) {
         for (final child in manifestElement.children) {
@@ -149,7 +149,7 @@ class EpubParser {
             final mediaType = child.attributes['media-type'] ?? '';
             final properties = child.attributes['properties'];
             if (id.isNotEmpty && href.isNotEmpty) {
-              manifest[id] = _ManifestItem(
+              manifest[id] = ManifestItem(
                 id: id,
                 href: href,
                 mediaType: mediaType,
@@ -232,7 +232,7 @@ class EpubParser {
         final ncxPath = _resolveEpubPath(opfBasePath, ncxHref);
         final ncxData = files[ncxPath];
         if (ncxData != null) {
-          chapters = _parseNcxToc(_decodeBytes(ncxData), opfBasePath);
+          chapters = _parseNcxToc(decodeBytes(ncxData), opfBasePath);
         }
       }
 
@@ -241,7 +241,7 @@ class EpubParser {
         final navPath = _resolveEpubPath(opfBasePath, navHref);
         final navData = files[navPath];
         if (navData != null) {
-          chapters = _parseNavToc(_decodeBytes(navData), opfBasePath);
+          chapters = _parseNavToc(decodeBytes(navData), opfBasePath);
         }
       }
 
@@ -272,7 +272,7 @@ class EpubParser {
           final contentPath = chapter.href!.split('#').first;
           final contentData = files[contentPath];
           if (contentData != null) {
-            chapter.content = _decodeBytes(contentData);
+            chapter.content = decodeBytes(contentData);
           }
         }
       }
@@ -315,7 +315,7 @@ class EpubParser {
       if (containerData == null) return null;
 
       final containerDoc =
-          html_parser.parse(_decodeBytes(containerData));
+          html_parser.parse(decodeBytes(containerData));
       String? opfPath;
       final rootfileElements = containerDoc.querySelectorAll('rootfile');
       for (final el in rootfileElements) {
@@ -331,7 +331,7 @@ class EpubParser {
       final opfData = files[opfPath];
       if (opfData == null) return null;
 
-      final opfDoc = html_parser.parse(_decodeBytes(opfData));
+      final opfDoc = html_parser.parse(decodeBytes(opfData));
       final opfBasePath = opfPath.contains('/')
           ? opfPath.substring(0, opfPath.lastIndexOf('/'))
           : '';
@@ -421,7 +421,7 @@ class EpubParser {
   }
 
   /// 解码字节为字符串（优先 UTF-8，后备 Latin-1）
-  static String _decodeBytes(List<int> data) {
+  static String decodeBytes(List<int> data) {
     try {
       return utf8.decode(data);
     } catch (_) {
@@ -751,10 +751,29 @@ class EpubParser {
   static String extractHtmlWithImages(String html, {String? basePath}) {
     var text = html;
 
+    // 移除 <script> 标签
     text = _removeTags(text, 'script');
+    // 可选移除 <style> 标签（保留内联CSS，移除外部样式块）
     text = _removeTags(text, 'style');
     text = text.replaceAll(RegExp(r'<title[^>]*>[\s\S]*?</title>', caseSensitive: false), '');
 
+    // 处理 SVG 中的 <image xlink:href="..."> → <img src="...">
+    text = text.replaceAllMapped(
+      RegExp(r'<svg[^>]*>[\s\S]*?</svg>', caseSensitive: false),
+      (match) {
+        final svg = match.group(0)!;
+        return svg.replaceAllMapped(
+          RegExp(r'<image[^>]+xlink:href="([^"]*)"', caseSensitive: false),
+          (m) {
+            var src = m.group(1)!;
+            if (basePath != null) src = _resolvePath(basePath, src);
+            return '<img src="$src"';
+          },
+        );
+      },
+    );
+
+    // 处理独立的 <image xlink:href="..."> → <img src="...">
     text = text.replaceAllMapped(
       RegExp(r'<image[^>]+xlink:href="([^"]*)"', caseSensitive: false),
       (match) {
@@ -764,6 +783,7 @@ class EpubParser {
       },
     );
 
+    // 处理 <img src="..."> 路径
     text = text.replaceAllMapped(
       RegExp(r'<img[^>]+src="([^"]*)"', caseSensitive: false),
       (match) {
@@ -790,6 +810,175 @@ class EpubParser {
     text = text.replaceAll(RegExp(r'\n{3,}'), '\n\n');
 
     return text.trim();
+  }
+
+  /// 提取 HTML 内容并处理内嵌资源（CSS、图片、字体），返回完整 HTML 文档
+  /// [html] 原始 HTML 内容
+  /// [basePath] 当前章节文件的路径，用于解析相对路径
+  /// [allCss] 合并后的所有 CSS 内容
+  /// [fontPaths] 字体文件路径列表
+  static String extractHtmlWithResources(
+    String html, {
+    String? basePath,
+    String allCss = '',
+    List<String> fontPaths = const [],
+  }) {
+    var text = html;
+
+    // 移除 <script> 标签
+    text = _removeTags(text, 'script');
+    // 移除 <title> 标签
+    text = text.replaceAll(RegExp(r'<title[^>]*>[\s\S]*?</title>', caseSensitive: false), '');
+
+    // 将 CSS 链接转为内联样式（移除 <link rel="stylesheet">，CSS 将统一注入）
+    text = text.replaceAllMapped(
+      RegExp(r'<link[^>]+rel=["\x27]stylesheet["\x27][^>]*>', caseSensitive: false),
+      (match) => '',
+    );
+    text = text.replaceAllMapped(
+      RegExp(r'<link[^>]+type=["\x27]text/css["\x27][^>]*>', caseSensitive: false),
+      (match) => '',
+    );
+
+    // 处理 SVG 中的 <image xlink:href="..."> → <img src="...">
+    text = text.replaceAllMapped(
+      RegExp(r'<svg[^>]*>[\s\S]*?</svg>', caseSensitive: false),
+      (match) {
+        final svg = match.group(0)!;
+        return svg.replaceAllMapped(
+          RegExp(r'<image[^>]+xlink:href="([^"]*)"', caseSensitive: false),
+          (m) {
+            var src = m.group(1)!;
+            if (basePath != null) src = _resolvePath(basePath, src);
+            return '<img src="$src"';
+          },
+        );
+      },
+    );
+
+    // 处理独立的 <image xlink:href="..."> → <img src="...">
+    text = text.replaceAllMapped(
+      RegExp(r'<image[^>]+xlink:href="([^"]*)"', caseSensitive: false),
+      (match) {
+        var src = match.group(1)!;
+        if (basePath != null) src = _resolvePath(basePath, src);
+        return '<img src="$src">';
+      },
+    );
+
+    // 处理 <img src="..."> 路径
+    text = text.replaceAllMapped(
+      RegExp(r'<img([^>]+)src="([^"]*)"', caseSensitive: false),
+      (match) {
+        var src = match.group(2)!;
+        if (basePath != null) src = _resolvePath(basePath, src);
+        return '<img${match.group(1)}src="$src"';
+      },
+    );
+
+    // 处理字体引用：替换 CSS 中的 @font-face url() 为本地路径
+    var processedCss = allCss;
+    for (final fontPath in fontPaths) {
+      final fontName = fontPath.split('/').last;
+      // 替换相对路径的字体引用为绝对路径
+      processedCss = processedCss.replaceAllMapped(
+        RegExp(r'url\(["\x27]?([^)"\x27]+\/)?' + RegExp.escape(fontName) + r'["\x27]?\)', caseSensitive: false),
+        (match) => 'url("$fontPath")',
+      );
+    }
+
+    // 构建完整 HTML 文档
+    final cssBlock = processedCss.isNotEmpty ? '<style>$processedCss</style>' : '';
+
+    // 如果已经有 <html> 或 <body> 标签，注入 CSS
+    if (text.contains(RegExp(r'<html', caseSensitive: false))) {
+      // 在 </head> 或 <body> 前注入 CSS
+      if (text.contains(RegExp(r'</head>', caseSensitive: false))) {
+        text = text.replaceFirst(
+          RegExp(r'</head>', caseSensitive: false),
+          '$cssBlock</head>',
+        );
+      } else if (text.contains(RegExp(r'<body', caseSensitive: false))) {
+        text = text.replaceFirst(
+          RegExp(r'<body', caseSensitive: false),
+          '$cssBlock<body',
+        );
+      } else {
+        text = '$cssBlock$text';
+      }
+    } else {
+      // 没有完整 HTML 结构，包装一个
+      text = '<!DOCTYPE html><html><head><meta charset="utf-8">$cssBlock</head><body>$text</body></html>';
+    }
+
+    return text;
+  }
+
+  /// 从 EPUB ZIP 文件中获取所有 CSS 文件内容并合并
+  /// [files] ZIP 解压后的文件映射（归一化路径 -> 内容字节）
+  /// [opfBasePath] OPF 文件所在目录
+  /// [manifest] OPF manifest 条目映射
+  static String getAllCss(
+    Map<String, List<int>> files,
+    String opfBasePath,
+    Map<String, ManifestItem> manifest,
+  ) {
+    final cssBuffer = StringBuffer();
+
+    for (final item in manifest.values) {
+      if (item.mediaType == 'text/css' || item.href.toLowerCase().endsWith('.css')) {
+        final cssPath = _resolveEpubPath(opfBasePath, item.href);
+        final cssData = files[cssPath];
+        if (cssData != null) {
+          final content = decodeBytes(cssData);
+          if (content.isNotEmpty) {
+            cssBuffer.writeln('/* === ${item.href} === */');
+            cssBuffer.writeln(content);
+            cssBuffer.writeln();
+          }
+        }
+      }
+    }
+
+    return cssBuffer.toString();
+  }
+
+  /// 从 EPUB manifest 中获取所有字体文件路径
+  /// [opfBasePath] OPF 文件所在目录
+  /// [manifest] OPF manifest 条目映射
+  static List<String> getAllFonts(
+    String opfBasePath,
+    Map<String, ManifestItem> manifest,
+  ) {
+    final fontPaths = <String>[];
+    final fontMediaTypes = [
+      'font/ttf',
+      'font/otf',
+      'font/woff',
+      'font/woff2',
+      'application/x-font-ttf',
+      'application/x-font-otf',
+      'application/x-font-woff',
+      'application/font-ttf',
+      'application/font-otf',
+      'application/font-woff',
+      'application/font-woff2',
+      'application/vnd.ms-opentype',
+      'application/vnd.ms-fontobject',
+    ];
+    final fontExtensions = ['.ttf', '.otf', '.woff', '.woff2', '.eot'];
+
+    for (final item in manifest.values) {
+      final isFontMediaType = item.mediaType.contains('font') ||
+          fontMediaTypes.contains(item.mediaType.toLowerCase());
+      final isFontExtension = fontExtensions.any((ext) => item.href.toLowerCase().endsWith(ext));
+
+      if (isFontMediaType || isFontExtension) {
+        fontPaths.add(_resolveEpubPath(opfBasePath, item.href));
+      }
+    }
+
+    return fontPaths;
   }
 
   static String extractFragment(String html, String? startId, String? endId) {

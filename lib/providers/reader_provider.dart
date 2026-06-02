@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/highlight.dart';
 import '../services/storage_service.dart';
 
 enum PageMode { scroll, slide, cover, simulation }
@@ -14,6 +15,12 @@ class ReaderProvider extends ChangeNotifier {
   double _brightness = 1.0;
   bool _isNightMode = false;
   bool _initialized = false;
+
+  double _letterSpacing = 0.0;
+  double _paragraphSpacing = 8.0;
+  double _textIndent = 2.0;
+  List<HighlightRule> _highlightRules = HighlightRule.builtInRules();
+  List<Highlight> _highlights = [];
 
   String _fontFamily = '';
   bool _loadEpubFonts = true;
@@ -37,6 +44,11 @@ class ReaderProvider extends ChangeNotifier {
   Map<String, String> get fontOverrides => Map.unmodifiable(_fontOverrides);
   TapZoneAction get centerTapAction => _centerTapAction;
   List<List<TapZoneAction>> get tapZoneActions => _tapZoneActions;
+  double get letterSpacing => _letterSpacing;
+  double get paragraphSpacing => _paragraphSpacing;
+  double get textIndent => _textIndent;
+  List<HighlightRule> get highlightRules => List.unmodifiable(_highlightRules);
+  List<Highlight> get highlights => List.unmodifiable(_highlights);
 
   Future<void> loadFromStorage() async {
     if (_initialized) return;
@@ -79,6 +91,21 @@ class ReaderProvider extends ChangeNotifier {
         _backgroundColor = const Color(0xFF1A1A1A);
         _textColor = Colors.white70;
       }
+      _letterSpacing = (config['letterSpacing'] as num?)?.toDouble() ?? 0.0;
+      _paragraphSpacing = (config['paragraphSpacing'] as num?)?.toDouble() ?? 8.0;
+      _textIndent = (config['textIndent'] as num?)?.toDouble() ?? 2.0;
+      final highlightRulesJson = config['highlightRules'] as List?;
+      if (highlightRulesJson != null) {
+        _highlightRules = highlightRulesJson
+            .map((e) => HighlightRule.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
+      final highlightsJson = config['highlights'] as List?;
+      if (highlightsJson != null) {
+        _highlights = highlightsJson
+            .map((e) => Highlight.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
     }
     _initialized = true;
     notifyListeners();
@@ -97,6 +124,11 @@ class ReaderProvider extends ChangeNotifier {
       'fontOverrides': _fontOverrides,
       'centerTapAction': _centerTapAction.index,
       'tapZoneActions': _tapZoneActions.map((row) => row.map((a) => a.index).toList()).toList(),
+      'letterSpacing': _letterSpacing,
+      'paragraphSpacing': _paragraphSpacing,
+      'textIndent': _textIndent,
+      'highlightRules': _highlightRules.map((e) => e.toJson()).toList(),
+      'highlights': _highlights.map((e) => e.toJson()).toList(),
     });
   }
 
@@ -184,5 +216,81 @@ class ReaderProvider extends ChangeNotifier {
     _fontOverrides.remove(original);
     _saveToStorage();
     notifyListeners();
+  }
+
+  void setLetterSpacing(double value) {
+    _letterSpacing = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setParagraphSpacing(double value) {
+    _paragraphSpacing = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setTextIndent(double value) {
+    _textIndent = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void addHighlightRule(HighlightRule rule) {
+    _highlightRules.add(rule);
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void removeHighlightRule(String ruleId) {
+    _highlightRules.removeWhere((rule) => rule.id == ruleId);
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void toggleHighlightRule(String ruleId) {
+    final index = _highlightRules.indexWhere((rule) => rule.id == ruleId);
+    if (index != -1) {
+      final rule = _highlightRules[index];
+      _highlightRules[index] = HighlightRule(
+        id: rule.id,
+        name: rule.name,
+        pattern: rule.pattern,
+        style: rule.style,
+        color: rule.color,
+        enabled: !rule.enabled,
+        isBuiltIn: rule.isBuiltIn,
+        serialNumber: rule.serialNumber,
+      );
+      _saveToStorage();
+      notifyListeners();
+    }
+  }
+
+  void addHighlight(Highlight highlight) {
+    _highlights.add(highlight);
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void removeHighlight(String highlightId) {
+    _highlights.removeWhere((h) => h.id == highlightId);
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void updateHighlightNote(String highlightId, String note) {
+    final index = _highlights.indexWhere((h) => h.id == highlightId);
+    if (index != -1) {
+      _highlights[index] = _highlights[index].copyWith(note: note, updatedAt: DateTime.now());
+      _saveToStorage();
+      notifyListeners();
+    }
+  }
+
+  List<Highlight> getHighlightsForChapter(String bookUrl, int chapterIndex) {
+    return _highlights
+        .where((h) => h.bookUrl == bookUrl && h.chapterIndex == chapterIndex)
+        .toList();
   }
 }
