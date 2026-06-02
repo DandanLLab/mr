@@ -15,7 +15,7 @@ class NojsEngine {
 
   Future<dynamic> executeScript(String script) async {
     if (!_isInitialized) {
-      throw Exception('nojs.py 引擎未初始化');
+      throw Exception(' 引擎未初始化');
     }
     
     return null;

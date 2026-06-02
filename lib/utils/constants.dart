@@ -1,6 +1,6 @@
 class Constants {
-  static const String appName = '蛋的神器';
-  static const String appSubtitle = '蛋蛋忧赏';
+  static const String appName = 'mr';
+  static const String appSubtitle = '多媒体阅读器';
   static const String nojsVersion = '1.0.0';
   
   static const String defaultCacheDir = 'dan_shenqi_cache';

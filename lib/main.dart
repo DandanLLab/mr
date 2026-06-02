@@ -51,7 +51,7 @@ class DanShenqiApp extends StatelessWidget {
       child: Consumer<AppProvider>(
         builder: (context, appProvider, child) {
           return MaterialApp(
-            title: '蛋的神器',
+            title: 'mr',
             debugShowCheckedModeBanner: false,
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,

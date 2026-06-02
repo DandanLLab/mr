@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:html/dom.dart' as dom;
 import '../../models/book_source.dart';
 import '../../models/book.dart';
 import '../../models/chapter.dart';
@@ -111,7 +112,10 @@ class WebBook {
       try {
         final optionJson = json.decode(optionMatch.group(1)!) as Map<String, dynamic>;
         option = UrlOption.fromJson(optionJson);
-      } catch (_) {}
+        debugPrint('🔧 Parsed option: method=${option.method}, body=${option.body}');
+      } catch (e) {
+        debugPrint('❌ Failed to parse option: $e');
+      }
     }
 
     if (keyword != null) {
@@ -151,6 +155,11 @@ class WebBook {
           body = body.replaceAll('{{key}}', Uri.encodeComponent(keyword));
         }
         debugPrint('📝 POST body: $body');
+      }
+      
+      // 设置 Content-Type
+      if (!headers.containsKey('Content-Type')) {
+        headers['Content-Type'] = 'application/x-www-form-urlencoded';
       }
     }
 
@@ -202,29 +211,44 @@ class WebBook {
 
       final rule = AnalyzeRule()..setContent(html, baseUrl: source.bookSourceUrl);
 
-      final bookList = rule.getStringList(searchRule.bookList ?? '');
-      debugPrint('📚 Book list count: ${bookList.length}');
-      
-      final nameList = rule.getStringList(searchRule.name ?? '');
-      final authorList = rule.getStringList(searchRule.author ?? '');
-      final coverList = rule.getStringList(searchRule.coverUrl ?? '');
-      final introList = rule.getStringList(searchRule.intro ?? '');
-      final bookUrlList = rule.getStringList(searchRule.bookUrl ?? '');
-
-      debugPrint('📖 Names: $nameList');
+      // 获取书籍元素列表
+      final bookElements = rule.getElements(searchRule.bookList ?? '');
+      debugPrint('📚 Book elements count: ${bookElements.length}');
 
       final results = <Map<String, dynamic>>[];
 
-      for (int i = 0; i < nameList.length; i++) {
-        results.add({
-          'name': nameList[i],
-          'author': i < authorList.length ? authorList[i] : '',
-          'coverUrl': i < coverList.length ? coverList[i] : '',
-          'intro': i < introList.length ? introList[i] : '',
-          'bookUrl': i < bookUrlList.length ? bookUrlList[i] : '',
-          'sourceUrl': source.bookSourceUrl,
-          'sourceName': source.bookSourceName,
-        });
+      for (final element in bookElements) {
+        if (element is! dom.Element) continue;
+        
+        // 在每个元素上执行规则
+        final elementRule = AnalyzeRule()..setContent(element, baseUrl: source.bookSourceUrl);
+        
+        final name = elementRule.getString(searchRule.name ?? '');
+        final author = elementRule.getString(searchRule.author ?? '');
+        final coverUrl = elementRule.getString(searchRule.coverUrl ?? '');
+        final intro = elementRule.getString(searchRule.intro ?? '');
+        final bookUrl = elementRule.getString(searchRule.bookUrl ?? '');
+        final kind = elementRule.getString(searchRule.kind ?? '');
+        final lastChapter = elementRule.getString(searchRule.lastChapter ?? '');
+        
+        if (name != null && name.isNotEmpty) {
+          results.add({
+            'name': name,
+            'author': author ?? '',
+            'coverUrl': coverUrl ?? '',
+            'intro': intro ?? '',
+            'bookUrl': bookUrl ?? '',
+            'kind': kind ?? '',
+            'lastChapter': lastChapter ?? '',
+            'sourceUrl': source.bookSourceUrl,
+            'sourceName': source.bookSourceName,
+          });
+        }
+      }
+
+      debugPrint('📖 Results count: ${results.length}');
+      if (results.isNotEmpty) {
+        debugPrint('📖 First result: ${results.first}');
       }
 
       return results;

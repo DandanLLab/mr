@@ -67,7 +67,6 @@ class AnalyzeRule {
   dynamic _content;
   String? _baseUrl;
   bool _isJson = false;
-  dom.Document? _document;
 
   AnalyzeRule setContent(dynamic content, {String? baseUrl}) {
     _content = content;
@@ -75,17 +74,8 @@ class AnalyzeRule {
 
     if (content is String) {
       _isJson = _isJsonContent(content);
-      if (!_isJson) {
-        _document = html_parser.parse(content);
-      }
-    } else if (content is dom.Document) {
-      _document = content;
-      _isJson = false;
-    } else if (content is dom.Element) {
-      _document = html_parser.parse(content.outerHtml);
-      _isJson = false;
     } else {
-      _isJson = true;
+      _isJson = false;
     }
 
     return this;
@@ -128,6 +118,21 @@ class AnalyzeRule {
     }
 
     return _toStringList(result);
+  }
+
+  List<dynamic> getElements(String ruleStr) {
+    if (ruleStr.isEmpty) return [];
+
+    final rule = SourceRule.parse(ruleStr);
+    dynamic result = _content;
+
+    for (final step in rule.steps) {
+      result = _applyStep(result, step, rule.type, isList: true);
+      if (result == null) return [];
+    }
+
+    if (result is List) return result;
+    return [result];
   }
 
   List<Map<String, dynamic>> getMapList(String ruleStr) {
@@ -184,9 +189,50 @@ class AnalyzeRule {
   dynamic _applyCssSelector(dynamic content, String selector, {bool isList = false}) {
     String cssSelector = _convertLegadoRule(selector);
 
-    // 处理属性提取
+    // 处理属性提取 @href, @src 等（@text 和 @html 特殊处理）
     if (cssSelector.startsWith('@')) {
       final attrName = cssSelector.substring(1);
+      
+      // @text 特殊处理：返回文本内容
+      if (attrName == 'text' || attrName == 'text()') {
+        if (content is List) {
+          return content.map((e) {
+            if (e is dom.Element) return e.text.trim();
+            return '';
+          }).toList();
+        }
+        dom.Element? element = _toElement(content);
+        if (element == null) return isList ? [] : '';
+        return element.text.trim();
+      }
+      
+      // @html 特殊处理：返回内部HTML
+      if (attrName == 'html' || attrName == 'html()') {
+        if (content is List) {
+          return content.map((e) {
+            if (e is dom.Element) return e.innerHtml;
+            return '';
+          }).toList();
+        }
+        dom.Element? element = _toElement(content);
+        if (element == null) return isList ? [] : '';
+        return element.innerHtml;
+      }
+      
+      // @outerHtml 特殊处理
+      if (attrName == 'outerHtml') {
+        if (content is List) {
+          return content.map((e) {
+            if (e is dom.Element) return e.outerHtml;
+            return '';
+          }).toList();
+        }
+        dom.Element? element = _toElement(content);
+        if (element == null) return isList ? [] : '';
+        return element.outerHtml;
+      }
+      
+      // 普通属性提取 @href, @src 等
       if (content is List) {
         return content.map((e) {
           if (e is dom.Element) {
@@ -197,9 +243,6 @@ class AnalyzeRule {
       }
       dom.Element? element = _toElement(content);
       if (element == null) return isList ? [] : '';
-      if (isList) {
-        return element.querySelectorAll('*').map((e) => e.attributes[attrName] ?? '').toList();
-      }
       return element.attributes[attrName] ?? '';
     }
 
@@ -213,9 +256,6 @@ class AnalyzeRule {
       }
       dom.Element? element = _toElement(content);
       if (element == null) return isList ? [] : '';
-      if (isList) {
-        return element.querySelectorAll('*').map((e) => e.text.trim()).toList();
-      }
       return element.text.trim();
     }
 
@@ -229,9 +269,6 @@ class AnalyzeRule {
       }
       dom.Element? element = _toElement(content);
       if (element == null) return isList ? [] : '';
-      if (isList) {
-        return element.querySelectorAll('*').map((e) => e.innerHtml).toList();
-      }
       return element.innerHtml;
     }
 
@@ -244,15 +281,11 @@ class AnalyzeRule {
       }
       dom.Element? element = _toElement(content);
       if (element == null) return isList ? [] : '';
-      if (isList) {
-        return element.querySelectorAll('*').map((e) => e.outerHtml).toList();
-      }
       return element.outerHtml;
     }
 
     // 处理选择器
     if (content is List) {
-      // 如果内容是列表，在每个元素上执行选择器
       final results = <dynamic>[];
       for (final item in content) {
         final element = _toElement(item);
