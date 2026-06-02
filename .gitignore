@@ -16,5 +16,4 @@ doc/
 coverage/
 .fvm/
 *.lock
-!pubspec.lock
 android_sdk/
