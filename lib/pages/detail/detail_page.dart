@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_html/flutter_html.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:provider/provider.dart';
 import '../../models/book.dart';
 import '../../models/chapter.dart';
@@ -7,6 +9,7 @@ import '../../providers/bookshelf_provider.dart';
 import '../../routes/app_routes.dart';
 import '../../services/storage_service.dart';
 import '../../services/local_book/local_book_service.dart';
+import '../../widgets/book_edit_sheet.dart';
 
 class DetailPage extends StatefulWidget {
   final String bookUrl;
@@ -91,12 +94,28 @@ class _DetailPageState extends State<DetailPage> {
           SliverList(
             delegate: SliverChildBuilderDelegate(
               (context, index) {
-                final chapters = _isChapterReversed
+                final displayChapters = _isChapterReversed
                     ? _chapters.reversed.toList()
                     : _chapters;
-                return _buildChapterItem(chapters[index]);
+                final lastThree = displayChapters.length > 3
+                    ? displayChapters.sublist(displayChapters.length - 3)
+                    : displayChapters;
+                if (index == lastThree.length) {
+                  return ListTile(
+                    leading: const Icon(Icons.list),
+                    title: const Text('查看完整目录'),
+                    onTap: () => _openFullChapterList(),
+                  );
+                }
+                return _buildChapterItem(lastThree[index]);
               },
-              childCount: _chapters.length,
+              childCount: (_isChapterReversed
+                      ? _chapters.reversed.toList()
+                      : _chapters).length > 3
+                  ? 4
+                  : (_isChapterReversed
+                      ? _chapters.reversed.toList()
+                      : _chapters).length + 1,
             ),
           ),
         ],
@@ -108,6 +127,16 @@ class _DetailPageState extends State<DetailPage> {
     return SliverAppBar(
       expandedHeight: 200,
       pinned: true,
+      actions: [
+        PopupMenuButton<String>(
+          onSelected: (value) {
+            if (value == 'edit') _showBookEditSheet();
+          },
+          itemBuilder: (context) => [
+            const PopupMenuItem(value: 'edit', child: Text('编辑信息')),
+          ],
+        ),
+      ],
       flexibleSpace: FlexibleSpaceBar(
         background: Container(
           decoration: BoxDecoration(
@@ -144,9 +173,9 @@ class _DetailPageState extends State<DetailPage> {
               width: 100,
               height: 140,
               color: Theme.of(context).colorScheme.surfaceVariant,
-              child: _book!.coverUrl.isNotEmpty
+              child: _book!.displayCoverUrl.isNotEmpty
                   ? CachedNetworkImage(
-                      imageUrl: _book!.coverUrl,
+                      imageUrl: _book!.displayCoverUrl,
                       fit: BoxFit.cover,
                       errorWidget: (_, __, ___) => const Icon(Icons.book, size: 48),
                     )
@@ -159,12 +188,12 @@ class _DetailPageState extends State<DetailPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _book!.name,
+                  _book!.displayName,
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  _book!.author,
+                  _book!.displayAuthor,
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
@@ -270,7 +299,79 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
+  bool _isHtmlContent(String text) {
+    final trimmed = text.trim();
+    return trimmed.startsWith('<') && (trimmed.contains('</') || trimmed.contains('/>'));
+  }
+
+  bool _isMarkdownContent(String text) {
+    int count = 0;
+    if (RegExp(r'^#{1,6}\s', multiLine: true).hasMatch(text)) count++;
+    if (RegExp(r'\*\*[^*]+\*\*').hasMatch(text)) count++;
+    if (RegExp(r'(?<!\*)\*[^*]+\*(?!\*)').hasMatch(text)) count++;
+    if (RegExp(r'^\s*[-*+]\s', multiLine: true).hasMatch(text)) count++;
+    if (RegExp(r'\[.*?\]\(.*?\)').hasMatch(text)) count++;
+    if (RegExp(r'```').hasMatch(text)) count++;
+    if (RegExp(r'^>', multiLine: true).hasMatch(text)) count++;
+    return count >= 2;
+  }
+
+  Widget _buildCollapsedIntro(String text) {
+    if (_isHtmlContent(text)) {
+      return Html(
+        data: text,
+        style: {
+          'body': Style(
+            maxLines: 3,
+            textOverflow: TextOverflow.ellipsis,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        },
+      );
+    } else if (_isMarkdownContent(text)) {
+      return MarkdownBody(
+        data: text,
+        selectable: true,
+      );
+    } else {
+      return Text(
+        text,
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      );
+    }
+  }
+
+  Widget _buildFullIntro(String text) {
+    if (_isHtmlContent(text)) {
+      return Html(
+        data: text,
+        style: {
+          'body': Style(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        },
+      );
+    } else if (_isMarkdownContent(text)) {
+      return MarkdownBody(
+        data: text,
+        selectable: true,
+      );
+    } else {
+      return Text(
+        text,
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      );
+    }
+  }
+
   Widget _buildDescription() {
+    final intro = _book!.displayIntro;
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -287,14 +388,16 @@ class _DetailPageState extends State<DetailPage> {
                 _isDescExpanded = !_isDescExpanded;
               });
             },
-            child: Text(
-              _book!.intro.isNotEmpty ? _book!.intro : '暂无简介',
-              maxLines: _isDescExpanded ? null : 3,
-              overflow: _isDescExpanded ? null : TextOverflow.ellipsis,
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
+            child: intro.isNotEmpty
+                ? (_isDescExpanded
+                    ? _buildFullIntro(intro)
+                    : _buildCollapsedIntro(intro))
+                : Text(
+                    '暂无简介',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
           ),
           Align(
             alignment: Alignment.centerRight,
@@ -369,6 +472,7 @@ class _DetailPageState extends State<DetailPage> {
             )
           : null,
       onTap: () => _openChapter(chapter),
+      onLongPress: () => _openFullChapterList(),
     );
   }
 
@@ -490,6 +594,25 @@ class _DetailPageState extends State<DetailPage> {
       _isLoading = true;
     });
     await _loadData();
+  }
+
+  void _openFullChapterList() {
+    Navigator.pushNamed(
+      context,
+      AppRoutes.chapterList,
+      arguments: {'bookUrl': widget.bookUrl},
+    );
+  }
+
+  void _showBookEditSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => BookEditSheet(
+        book: _book!,
+        onSaved: _refreshData,
+      ),
+    );
   }
 
   void _openChapter(Chapter chapter) {

@@ -43,6 +43,7 @@ dependencies:
   
   url_launcher: ^6.2.2
   share_plus: ^7.2.1
+  flutter_markdown_plus: ^1.0.1
 
 dev_dependencies:
   flutter_test:

@@ -15,6 +15,7 @@ import '../pages/player/audio_player_page.dart';
 import '../pages/explore/explore_show_page.dart';
 import '../pages/debug/book_source_debug_page.dart';
 import '../pages/debug/debug_page.dart';
+import '../pages/detail/chapter_list_page.dart';
 
 class AppRoutes {
   static const String main = '/';
@@ -33,6 +34,7 @@ class AppRoutes {
   static const String exploreShow = '/explore-show';
   static const String bookSourceDebug = '/book-source-debug';
   static const String debug = '/debug';
+  static const String chapterList = '/chapter-list';
 
   static Route<dynamic> generateRoute(RouteSettings settings) {
     switch (settings.name) {
@@ -109,6 +111,11 @@ class AppRoutes {
         );
       case debug:
         return MaterialPageRoute(builder: (_) => const DebugPage());
+      case chapterList:
+        final args = settings.arguments as Map<String, dynamic>?;
+        return MaterialPageRoute(
+          builder: (_) => ChapterListPage(bookUrl: args?['bookUrl'] ?? ''),
+        );
       default:
         return MaterialPageRoute(
           builder: (_) => Scaffold(

@@ -147,6 +147,17 @@ class _NovelReaderPageState extends State<NovelReaderPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (_prevContent != null) ...[
+                    SelectableText(
+                      _formatContent(_prevContent!),
+                      style: TextStyle(
+                        fontSize: provider.fontSize,
+                        color: provider.textColor,
+                        height: provider.lineHeight,
+                      ),
+                    ),
+                    const Divider(),
+                  ],
                   Text(
                     _chapterTitle,
                     style: TextStyle(
@@ -165,6 +176,27 @@ class _NovelReaderPageState extends State<NovelReaderPage> {
                       height: provider.lineHeight,
                     ),
                   ),
+                  if (_nextContent != null) ...[
+                    const Divider(),
+                    Text(
+                      _chapters[_currentChapterIndex + 1].title,
+                      style: TextStyle(
+                        fontSize: provider.fontSize + 4,
+                        fontWeight: FontWeight.bold,
+                        color: provider.textColor,
+                        height: provider.lineHeight,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    SelectableText(
+                      _formatContent(_nextContent!),
+                      style: TextStyle(
+                        fontSize: provider.fontSize,
+                        color: provider.textColor,
+                        height: provider.lineHeight,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -258,7 +290,6 @@ class _NovelReaderPageState extends State<NovelReaderPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             _buildProgressSlider(),
-            _buildNavigationButtons(),
             _buildSettingsButtons(),
           ],
         ),
@@ -291,27 +322,6 @@ class _NovelReaderPageState extends State<NovelReaderPage> {
           Text(
             '$_totalChapters',
             style: const TextStyle(fontSize: 12),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNavigationButtons() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          TextButton.icon(
-            onPressed: _previousChapter,
-            icon: const Icon(Icons.chevron_left),
-            label: const Text('上一章'),
-          ),
-          TextButton.icon(
-            onPressed: _nextChapter,
-            icon: const Icon(Icons.chevron_right),
-            label: const Text('下一章'),
           ),
         ],
       ),
@@ -431,27 +441,14 @@ class _NovelReaderPageState extends State<NovelReaderPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              ListTile(
-                leading: const Icon(Icons.download),
-                title: const Text('缓存本章'),
-                onTap: () {
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.share),
-                title: const Text('分享'),
-                onTap: () {
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.report),
-                title: const Text('反馈问题'),
-                onTap: () {
-                  Navigator.pop(context);
-                },
-              ),
+              if (_book?.originType == BookOriginType.online)
+                ListTile(
+                  leading: const Icon(Icons.download),
+                  title: const Text('缓存本章'),
+                  onTap: () {
+                    Navigator.pop(context);
+                  },
+                ),
             ],
           ),
         );
