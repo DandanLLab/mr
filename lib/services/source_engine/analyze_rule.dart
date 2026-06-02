@@ -259,6 +259,17 @@ class AnalyzeRule {
     return rule;
   }
 
+  /// 通用的内容提取分发方法，根据 content 类型自动分发到 List 或单个元素处理
+  dynamic _applyExtractor(
+    dynamic content,
+    String Function(dynamic) extractor,
+  ) {
+    if (content is List) {
+      return content.map((e) => extractor(e)).toList();
+    }
+    return extractor(content);
+  }
+
   /// 应用 CSS 选择器
   dynamic _applyCssSelector(dynamic content, String selector, {bool isList = false}) {
     // 转换 legados 语法
@@ -267,33 +278,20 @@ class AnalyzeRule {
     // 处理属性提取 @href, @src, @text 等
     if (cssSelector.startsWith('@')) {
       final attrName = cssSelector.substring(1);
-
-      if (content is List) {
-        return content.map((e) => _extractAttribute(e, attrName)).toList();
-      }
-      return _extractAttribute(content, attrName);
+      return _applyExtractor(content, (e) => _extractAttribute(e, attrName));
     }
 
-    // 处理 text() 和 html()
+    // 处理 text() 和 html()（不带 @ 前缀的简化写法）
     if (cssSelector == 'text' || cssSelector == 'text()') {
-      if (content is List) {
-        return content.map((e) => _extractText(e)).toList();
-      }
-      return _extractText(content);
+      return _applyExtractor(content, (e) => _extractAttribute(e, 'text'));
     }
 
     if (cssSelector == 'html' || cssSelector == 'html()') {
-      if (content is List) {
-        return content.map((e) => _extractHtml(e)).toList();
-      }
-      return _extractHtml(content);
+      return _applyExtractor(content, (e) => _extractAttribute(e, 'html'));
     }
 
     if (cssSelector == 'outerHtml') {
-      if (content is List) {
-        return content.map((e) => _extractOuterHtml(e)).toList();
-      }
-      return _extractOuterHtml(content);
+      return _applyExtractor(content, (e) => _extractAttribute(e, 'outerHtml'));
     }
 
     // 处理选择器
@@ -382,24 +380,6 @@ class AnalyzeRule {
       default:
         return element.attributes[attrName] ?? '';
     }
-  }
-
-  /// 提取文本
-  String _extractText(dynamic content) {
-    dom.Element? element = _toElement(content);
-    return element?.text.trim() ?? '';
-  }
-
-  /// 提取 HTML
-  String _extractHtml(dynamic content) {
-    dom.Element? element = _toElement(content);
-    return element?.innerHtml ?? '';
-  }
-
-  /// 提取外部 HTML
-  String _extractOuterHtml(dynamic content) {
-    dom.Element? element = _toElement(content);
-    return element?.outerHtml ?? '';
   }
 
   /// 获取绝对 URL
