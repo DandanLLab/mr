@@ -100,6 +100,13 @@ class HttpClient {
     connectTimeout: const Duration(seconds: 15),
     receiveTimeout: const Duration(seconds: 30),
     sendTimeout: const Duration(seconds: 30),
+    // 接受所有状态码，不抛异常（书源网站可能返回 301/302/403/503 等）
+    validateStatus: (status) => status != null && status < 600,
+    // 跟随重定向
+    followRedirects: true,
+    maxRedirects: 5,
+    // 响应类型默认 plain
+    responseType: ResponseType.plain,
   ));
 
   /// 执行请求（类似 OkHttp 的 Call.execute）
@@ -168,7 +175,22 @@ class HttpClient {
           headers: {},
         );
       }
-      rethrow;
+      // 网络错误（连接超时、DNS解析失败等），返回空响应而不是抛异常
+      debugPrint('❌ 网络请求失败: ${e.type} - ${e.message}');
+      return StrResponse(
+        url: url,
+        body: '',
+        statusCode: 0,
+        headers: {},
+      );
+    } catch (e) {
+      debugPrint('❌ 请求异常: $e');
+      return StrResponse(
+        url: url,
+        body: '',
+        statusCode: 0,
+        headers: {},
+      );
     }
   }
 }
