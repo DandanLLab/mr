@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'rules/search_rule.dart';
 import 'rules/explore_rule.dart';
 import 'rules/book_info_rule.dart';
 import 'rules/toc_rule.dart';
 import 'rules/content_rule.dart';
+import 'rules/review_rule.dart';
 
 enum BookSourceType { text, audio, image, file, video }
 
@@ -30,11 +32,16 @@ class BookSource {
   final int weight;
   final String? searchUrl;
   final String? exploreUrl;
+  final String? exploreScreen;
   final SearchRule? ruleSearch;
   final ExploreRule? ruleExplore;
   final BookInfoRule? ruleBookInfo;
   final TocRule? ruleToc;
   final ContentRule? ruleContent;
+  final ReviewRule? ruleReview;
+  final bool eventListener;
+  final bool customButton;
+  final bool nextPageLazyLoad;
 
   const BookSource({
     required this.bookSourceUrl,
@@ -60,11 +67,16 @@ class BookSource {
     this.weight = 0,
     this.searchUrl,
     this.exploreUrl,
+    this.exploreScreen,
     this.ruleSearch,
     this.ruleExplore,
     this.ruleBookInfo,
     this.ruleToc,
     this.ruleContent,
+    this.ruleReview,
+    this.eventListener = false,
+    this.customButton = false,
+    this.nextPageLazyLoad = false,
   });
 
   BookSource copyWith({
@@ -91,11 +103,16 @@ class BookSource {
     int? weight,
     String? searchUrl,
     String? exploreUrl,
+    String? exploreScreen,
     SearchRule? ruleSearch,
     ExploreRule? ruleExplore,
     BookInfoRule? ruleBookInfo,
     TocRule? ruleToc,
     ContentRule? ruleContent,
+    ReviewRule? ruleReview,
+    bool? eventListener,
+    bool? customButton,
+    bool? nextPageLazyLoad,
   }) {
     return BookSource(
       bookSourceUrl: bookSourceUrl ?? this.bookSourceUrl,
@@ -121,11 +138,16 @@ class BookSource {
       weight: weight ?? this.weight,
       searchUrl: searchUrl ?? this.searchUrl,
       exploreUrl: exploreUrl ?? this.exploreUrl,
+      exploreScreen: exploreScreen ?? this.exploreScreen,
       ruleSearch: ruleSearch ?? this.ruleSearch,
       ruleExplore: ruleExplore ?? this.ruleExplore,
       ruleBookInfo: ruleBookInfo ?? this.ruleBookInfo,
       ruleToc: ruleToc ?? this.ruleToc,
       ruleContent: ruleContent ?? this.ruleContent,
+      ruleReview: ruleReview ?? this.ruleReview,
+      eventListener: eventListener ?? this.eventListener,
+      customButton: customButton ?? this.customButton,
+      nextPageLazyLoad: nextPageLazyLoad ?? this.nextPageLazyLoad,
     );
   }
 
@@ -154,6 +176,7 @@ class BookSource {
       weight: json['weight'] as int? ?? 0,
       searchUrl: json['searchUrl'] as String?,
       exploreUrl: json['exploreUrl'] as String?,
+      exploreScreen: json['exploreScreen'] as String?,
       ruleSearch: json['ruleSearch'] != null
           ? SearchRule.fromJson(json['ruleSearch'] as Map<String, dynamic>)
           : null,
@@ -169,6 +192,12 @@ class BookSource {
       ruleContent: json['ruleContent'] != null
           ? ContentRule.fromJson(json['ruleContent'] as Map<String, dynamic>)
           : null,
+      ruleReview: json['ruleReview'] != null
+          ? ReviewRule.fromJson(json['ruleReview'] as Map<String, dynamic>)
+          : null,
+      eventListener: json['eventListener'] as bool? ?? false,
+      customButton: json['customButton'] as bool? ?? false,
+      nextPageLazyLoad: json['nextPageLazyLoad'] as bool? ?? false,
     );
   }
 
@@ -197,12 +226,47 @@ class BookSource {
       'weight': weight,
       if (searchUrl != null) 'searchUrl': searchUrl,
       if (exploreUrl != null) 'exploreUrl': exploreUrl,
+      if (exploreScreen != null) 'exploreScreen': exploreScreen,
       if (ruleSearch != null) 'ruleSearch': ruleSearch!.toJson(),
       if (ruleExplore != null) 'ruleExplore': ruleExplore!.toJson(),
       if (ruleBookInfo != null) 'ruleBookInfo': ruleBookInfo!.toJson(),
       if (ruleToc != null) 'ruleToc': ruleToc!.toJson(),
       if (ruleContent != null) 'ruleContent': ruleContent!.toJson(),
+      if (ruleReview != null) 'ruleReview': ruleReview!.toJson(),
+      if (eventListener) 'eventListener': eventListener,
+      if (customButton) 'customButton': customButton,
+      if (nextPageLazyLoad) 'nextPageLazyLoad': nextPageLazyLoad,
     };
+  }
+
+  /// 获取搜索规则（确保非空）
+  SearchRule getSearchRule() {
+    return ruleSearch ?? const SearchRule();
+  }
+
+  /// 获取发现规则（确保非空）
+  ExploreRule getExploreRule() {
+    return ruleExplore ?? const ExploreRule();
+  }
+
+  /// 获取书籍信息规则（确保非空）
+  BookInfoRule getBookInfoRule() {
+    return ruleBookInfo ?? const BookInfoRule();
+  }
+
+  /// 获取目录规则（确保非空）
+  TocRule getTocRule() {
+    return ruleToc ?? const TocRule();
+  }
+
+  /// 获取正文规则（确保非空）
+  ContentRule getContentRule() {
+    return ruleContent ?? const ContentRule();
+  }
+
+  /// 获取段评规则（确保非空）
+  ReviewRule getReviewRule() {
+    return ruleReview ?? const ReviewRule();
   }
 
   String get typeName {
@@ -218,5 +282,39 @@ class BookSource {
       case BookSourceType.video:
         return '视频';
     }
+  }
+
+  /// 获取显示名称（包含分组）
+  String get displayName {
+    if (bookSourceGroup == null || bookSourceGroup!.isEmpty) {
+      return bookSourceName;
+    }
+    return '$bookSourceName ($bookSourceGroup)';
+  }
+
+  /// 解析请求头
+  Map<String, String> getHeaderMap() {
+    if (header == null || header!.isEmpty) {
+      return {};
+    }
+    
+    try {
+      final decoded = jsonDecode(header!);
+      if (decoded is Map) {
+        return decoded.map((k, v) => MapEntry(k.toString(), v.toString()));
+      }
+    } catch (_) {
+      // 尝试按行解析
+      final headers = <String, String>{};
+      for (final line in header!.split('\n')) {
+        final parts = line.split(':');
+        if (parts.length >= 2) {
+          headers[parts[0].trim()] = parts.sublist(1).join(':').trim();
+        }
+      }
+      return headers;
+    }
+    
+    return {};
   }
 }

@@ -10,6 +10,7 @@ class ContentRule {
   final String? imageDecode;
   final String? payAction;
   final String? callBackJs;
+  final String? js;
 
   const ContentRule({
     this.content,
@@ -23,6 +24,7 @@ class ContentRule {
     this.imageDecode,
     this.payAction,
     this.callBackJs,
+    this.js,
   });
 
   factory ContentRule.fromJson(Map<String, dynamic> json) {
@@ -38,6 +40,7 @@ class ContentRule {
       imageDecode: json['imageDecode'] as String?,
       payAction: json['payAction'] as String?,
       callBackJs: json['callBackJs'] as String?,
+      js: json['js'] as String?,
     );
   }
 
@@ -54,6 +57,7 @@ class ContentRule {
       if (imageDecode != null) 'imageDecode': imageDecode,
       if (payAction != null) 'payAction': payAction,
       if (callBackJs != null) 'callBackJs': callBackJs,
+      if (js != null) 'js': js,
     };
   }
 }
