@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 class ProxyService {
@@ -21,7 +20,7 @@ class ProxyService {
     }
 
     _port = port;
-    debugPrint('代理服务在非Web平台暂不支持');
+    debugPrint('代理服务在移动端不需要，直接使用Dio请求');
     _isRunning = false;
   }
 

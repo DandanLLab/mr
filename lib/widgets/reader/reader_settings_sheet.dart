@@ -232,7 +232,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
 
   Future<void> _pickBackgroundImage() async {
     try {
-      final result = await FilePicker.pickFiles(type: FileType.image);
+      final result = await FilePicker.platform.pickFiles(type: FileType.image);
       if (result == null || result.files.isEmpty) return;
       final sourcePath = result.files.single.path;
       if (sourcePath == null) return;

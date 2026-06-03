@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'web_proxy_stub.dart'
     if (dart.library.html) 'web_proxy_web.dart' as platform;

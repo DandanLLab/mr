@@ -56,8 +56,8 @@ class ReaderBookmarkService {
   Future<List<Bookmark>> list(String bookUrl) async {
     try {
       final key = '$_bookmarkKeyPrefix$bookUrl';
-      final data = StorageService.instance.getString(key);
-      if (data == null || data.isEmpty) return [];
+      final data = StorageService.instance.getCachedData(key);
+      if (data == null || data is! String || data.isEmpty) return [];
       
       final decoded = jsonDecode(data) as List;
       return decoded
@@ -93,7 +93,7 @@ class ReaderBookmarkService {
       bookmarks.add(bookmark);
       
       final key = '$_bookmarkKeyPrefix$bookUrl';
-      await StorageService.instance.setString(key, jsonEncode(
+      await StorageService.instance.cacheData(key, jsonEncode(
         bookmarks.map((b) => b.toJson()).toList(),
       ));
       
@@ -114,7 +114,7 @@ class ReaderBookmarkService {
       bookmarks.removeWhere((b) => b.id == bookmarkId);
       
       final key = '$_bookmarkKeyPrefix$bookUrl';
-      await StorageService.instance.setString(key, jsonEncode(
+      await StorageService.instance.cacheData(key, jsonEncode(
         bookmarks.map((b) => b.toJson()).toList(),
       ));
     } catch (e) {

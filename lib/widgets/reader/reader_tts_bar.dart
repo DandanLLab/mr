@@ -17,6 +17,7 @@ class ReaderTtsBar extends StatelessWidget {
   final VoidCallback onStop;
   final VoidCallback onCycleSpeed;
   final ValueChanged<double> onSpeedChanged;
+  final double speed;
 
   const ReaderTtsBar({
     super.key,
@@ -34,6 +35,7 @@ class ReaderTtsBar extends StatelessWidget {
     required this.onStop,
     required this.onCycleSpeed,
     required this.onSpeedChanged,
+    this.speed = 1.0,
   });
 
   @override
@@ -147,7 +149,7 @@ class ReaderTtsBar extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
         ),
         child: Text(
-          '1.0x',
+          '${speed.toStringAsFixed(1)}x',
           style: TextStyle(
             fontSize: 12,
             color: cs.onPrimaryContainer,

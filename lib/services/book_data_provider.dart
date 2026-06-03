@@ -1,6 +1,8 @@
 import '../models/book.dart';
+import '../models/book_source.dart';
 import '../models/chapter.dart';
 import 'local_book/local_book_service.dart';
+import 'source_engine/source_engine.dart';
 import 'storage_service.dart';
 
 /// 书籍数据提供者抽象接口
@@ -53,34 +55,51 @@ class LocalBookDataProvider implements BookDataProvider {
   }
 }
 
-/// 在线书籍数据提供者（预留接口）
+/// 在线书籍数据提供者
 class OnlineBookDataProvider implements BookDataProvider {
   final String sourceUrl;
 
   OnlineBookDataProvider({required this.sourceUrl});
 
+  BookSource? _source;
+  WebBook? _webBook;
+
+  Future<WebBook> _getWebBook() async {
+    if (_webBook != null) return _webBook!;
+    final sourceData = StorageService.instance.getBookSource(sourceUrl);
+    if (sourceData == null) throw Exception('书源不存在: $sourceUrl');
+    _source = BookSource.fromJson(sourceData);
+    _webBook = WebBook(_source!);
+    return _webBook!;
+  }
+
   @override
   Future<Book?> getBookInfo(String bookUrl) async {
-    // TODO: 通过书源获取在线书籍信息
-    throw UnimplementedError('在线书籍功能尚未实现');
+    final webBook = await _getWebBook();
+    return webBook.getBookInfo(bookUrl);
   }
 
   @override
   Future<List<Chapter>> getChapterList(Book book) async {
-    // TODO: 通过书源获取在线章节列表
-    throw UnimplementedError('在线书籍功能尚未实现');
+    final webBook = await _getWebBook();
+    final tocUrl = book.tocUrl ?? book.bookUrl;
+    return webBook.getChapterList(tocUrl);
   }
 
   @override
   Future<String?> getContent(Book book, Chapter chapter) async {
-    // TODO: 通过书源获取在线章节内容
-    throw UnimplementedError('在线书籍功能尚未实现');
+    final webBook = await _getWebBook();
+    if (chapter.url != null) {
+      return webBook.getContent(chapter.url!);
+    }
+    return null;
   }
 
   @override
   Future<List<Book>> searchBooks(String keyword) async {
-    // TODO: 通过书源搜索在线书籍
-    throw UnimplementedError('在线书籍功能尚未实现');
+    final webBook = await _getWebBook();
+    final results = await webBook.searchBook(keyword);
+    return results.map((data) => Book.fromJson(data)).toList();
   }
 
   @override

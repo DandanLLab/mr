@@ -8,7 +8,6 @@ import '../../providers/reader_provider.dart';
 import '../../providers/bookshelf_provider.dart';
 import '../../services/local_book/local_book_service.dart';
 import '../../services/storage_service.dart';
-import '../../services/reader_bookmark_service.dart';
 import '../../widgets/reader/reader_control_overlay.dart';
 import '../../widgets/reader/reader_settings_sheet.dart';
 import '../../widgets/reader/reader_tts_bar.dart';
@@ -506,6 +505,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   _ttsSpeed = speed;
                   provider.setTtsRate(speed);
                 },
+                speed: _ttsSpeed,
               ),
             // 增强版控制面板
             if (_useEnhancedControls && _showMenu)

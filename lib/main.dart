@@ -6,9 +6,10 @@ import 'providers/app_provider.dart';
 import 'providers/bookshelf_provider.dart';
 import 'providers/discovery_provider.dart';
 import 'providers/reader_provider.dart';
+import 'providers/search_provider.dart';
 import 'routes/app_routes.dart';
 import 'themes/app_theme.dart';
-import 'services/nojs_engine.dart';
+import 'services/native/js_engine.dart';
 import 'services/storage_service.dart';
 import 'services/source_engine/proxy_service.dart';
 
@@ -23,9 +24,9 @@ void main() async {
   }
 
   try {
-    await NojsEngine.instance.init();
+    await JsEngine.instance.init();
   } catch (e) {
-    debugPrint('NojsEngine init error: $e');
+    debugPrint('JsEngine init error: $e');
   }
 
   // 启动代理服务（非 Web 平台）
@@ -47,6 +48,7 @@ class DanShenqiApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => BookshelfProvider()),
         ChangeNotifierProvider(create: (_) => DiscoveryProvider()),
         ChangeNotifierProvider(create: (_) => ReaderProvider()),
+        ChangeNotifierProvider(create: (_) => SearchProvider()),
       ],
       child: Consumer<AppProvider>(
         builder: (context, appProvider, child) {

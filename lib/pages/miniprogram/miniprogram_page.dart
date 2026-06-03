@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import '../../models/miniprogram.dart';
-import '../../providers/app_provider.dart';
 
 class MiniprogramPage extends StatefulWidget {
   const MiniprogramPage({super.key});

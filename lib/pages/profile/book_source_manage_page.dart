@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import '../../models/book_source.dart';
 import '../../providers/discovery_provider.dart';
 import '../../services/storage_service.dart';
-import '../../routes/app_routes.dart';
 import 'book_source_edit_page.dart';
 
 /// 书源排序类型

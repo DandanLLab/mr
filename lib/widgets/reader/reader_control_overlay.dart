@@ -250,7 +250,8 @@ class ReaderControlOverlay extends StatelessWidget {
     final maxCh = (totalChapters - 1).toDouble();
     final maxChClamped = maxCh < 0 ? 0.0 : maxCh;
     final cur = (sliderValue >= 0 ? sliderValue : currentChapter.toDouble())
-        .clamp(0, maxChClamped);
+        .clamp(0.0, maxChClamped)
+        .toDouble();
 
     return Row(
       children: [

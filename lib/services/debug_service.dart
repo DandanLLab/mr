@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../../models/book_source.dart';
-import '../../models/chapter.dart';
 import 'source_engine/source_engine.dart';
 import 'storage_service.dart';
 

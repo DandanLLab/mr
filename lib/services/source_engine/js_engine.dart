@@ -1,1 +1,1 @@
-export 'js_engine_native.dart';
+export '../native/js_engine.dart';

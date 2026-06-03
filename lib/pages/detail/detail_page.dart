@@ -264,7 +264,9 @@ class _DetailPageState extends State<DetailPage> {
 
   Widget _buildReadProgress() {
     final chapterIndex = _book!.durChapterIndex;
-    final chapterName = _book!.durChapterTitle ?? '第${chapterIndex + 1}章';
+    final chapterName = _book!.durChapterTitle.isEmpty 
+        ? '第${chapterIndex + 1}章' 
+        : _book!.durChapterTitle;
     final progress = _chapters.isNotEmpty
         ? (chapterIndex / _chapters.length * 100).toInt()
         : 0;
@@ -602,10 +604,6 @@ class _DetailPageState extends State<DetailPage> {
         'chapterIndex': _book?.durChapterIndex ?? 0,
       },
     );
-  }
-
-  Future<void> _refreshData() async {
-    await _loadData();
   }
 
   void _openFullChapterList() {

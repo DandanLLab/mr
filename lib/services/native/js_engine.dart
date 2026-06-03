@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_js/flutter_js.dart';
 import 'package:path_provider/path_provider.dart';
 
 /// JS/TS 运行时引擎 - 完整的 Node.js 兼容环境
@@ -11,7 +13,7 @@ class JsEngine {
   JsEngine._();
 
   bool _initialized = false;
-  dynamic _jsRuntime; // flutter_js 运行时实例
+  JavascriptRuntime? _jsRuntime;
   final Map<String, String> _installedPackages = {}; // 已安装的包
   final Map<String, String> _moduleCache = {}; // 模块缓存
 
@@ -19,8 +21,8 @@ class JsEngine {
   Future<bool> init() async {
     if (_initialized) return true;
     try {
-      // 初始化 flutter_js 运行时
-      _jsRuntime = null; // TODO: 创建 JavascriptRuntime
+      // 创建 flutter_js 运行时
+      _jsRuntime = getJavascriptRuntime();
       _initialized = true;
 
       // 注入 Node.js 兼容层
@@ -32,11 +34,12 @@ class JsEngine {
 
       return true;
     } catch (e) {
+      debugPrint('JsEngine init error: $e');
       return false;
     }
   }
 
-  bool get isAvailable => _initialized;
+  bool get isAvailable => _initialized && _jsRuntime != null;
 
   // ===== Node.js API 兼容层 =====
 
@@ -44,17 +47,6 @@ class JsEngine {
   Future<void> _injectNodePolyfills() async {
     const nodePolyfills = '''
       // ===== Node.js 核心模块模拟 =====
-
-      // console 对象
-      var console = {
-        log: function() { __nativeLog(Array.from(arguments).join(' ')); },
-        error: function() { __nativeLog('[ERROR] ' + Array.from(arguments).join(' ')); },
-        warn: function() { __nativeLog('[WARN] ' + Array.from(arguments).join(' ')); },
-        info: function() { __nativeLog('[INFO] ' + Array.from(arguments).join(' ')); },
-        debug: function() { __nativeLog('[DEBUG] ' + Array.from(arguments).join(' ')); },
-        time: function(label) { __nativeTimeStart(label || 'default'); },
-        timeEnd: function(label) { __nativeTimeEnd(label || 'default'); },
-      };
 
       // process 对象
       var process = {
@@ -66,30 +58,12 @@ class JsEngine {
         arch: 'arm64',
         pid: 1,
         cwd: function() { return '/'; },
-        exit: function(code) { __nativeLog('Process exit with code: ' + code); },
+        exit: function(code) {},
         nextTick: function(fn) { setTimeout(fn, 0); },
         on: function(event, handler) {},
-        stdout: { write: function(data) { __nativeLog(data); } },
-        stderr: { write: function(data) { __nativeLog('[STDERR] ' + data); } },
+        stdout: { write: function(data) {} },
+        stderr: { write: function(data) {} },
       };
-
-      // setTimeout / setInterval / clearTimeout / clearInterval
-      var _timers = {};
-      var _timerId = 0;
-      function setTimeout(fn, delay) {
-        var id = ++_timerId;
-        _timers[id] = true;
-        __nativeSetTimeout(id, delay || 0);
-        return id;
-      }
-      function setInterval(fn, delay) {
-        var id = ++_timerId;
-        _timers[id] = true;
-        __nativeSetInterval(id, delay || 0);
-        return id;
-      }
-      function clearTimeout(id) { delete _timers[id]; }
-      function clearInterval(id) { delete _timers[id]; }
 
       // Buffer 模拟
       var Buffer = {
@@ -122,40 +96,6 @@ class JsEngine {
         this.set = function(name, value) { this._params[name] = value; };
         this.has = function(name) { return name in this._params; };
         this.toString = function() { return ''; };
-      }
-
-      // fetch API 模拟（通过原生桥接）
-      function fetch(url, options) {
-        options = options || {};
-        return __nativeFetch(url, options.method || 'GET', options.body || '', options.headers || {});
-      }
-
-      // Promise (如果引擎不支持)
-      if (typeof Promise === 'undefined') {
-        var Promise = function(executor) {
-          var self = this;
-          self._state = 'pending';
-          self._value = undefined;
-          self._callbacks = [];
-          function resolve(value) {
-            self._state = 'fulfilled';
-            self._value = value;
-            self._callbacks.forEach(function(cb) { cb.onFulfilled(value); });
-          }
-          function reject(reason) {
-            self._state = 'rejected';
-            self._value = reason;
-            self._callbacks.forEach(function(cb) { cb.onRejected(reason); });
-          }
-          try { executor(resolve, reject); } catch(e) { reject(e); }
-        };
-        Promise.prototype.then = function(onFulfilled, onRejected) {
-          return new Promise(function(resolve, reject) {});
-        };
-        Promise.prototype.catch = function(onRejected) { return this.then(null, onRejected); };
-        Promise.resolve = function(value) { return new Promise(function(r) { r(value); }); };
-        Promise.reject = function(reason) { return new Promise(function(_, r) { r(reason); }); };
-        Promise.all = function(promises) { return new Promise(function(resolve) { resolve([]); }); };
       }
 
       // EventEmitter 模拟
@@ -196,12 +136,12 @@ class JsEngine {
           var module = { exports: {} };
           _modules[name](module, module.exports, require);
           _moduleCache[name] = module.exports;
-          return module.exports;
+          return _moduleCache[name];
         }
         // 内置模块模拟
         switch(name) {
-          case 'http': return { get: function(url, cb) { __nativeLog('http.get: ' + url); }, request: function() {} };
-          case 'https': return { get: function(url, cb) { __nativeLog('https.get: ' + url); }, request: function() {} };
+          case 'http': return { get: function(url, cb) {}, request: function() {} };
+          case 'https': return { get: function(url, cb) {}, request: function() {} };
           case 'fs': return { readFileSync: function(path) { return ''; }, writeFileSync: function(path, data) {} };
           case 'path': return { join: function() { return Array.from(arguments).join('/'); }, resolve: function() { return '/'; }, basename: function(p) { return p.split('/').pop(); }, dirname: function(p) { return p.split('/').slice(0, -1).join('/'); } };
           case 'crypto': return { createHash: function(algo) { return { update: function(d) { return this; }, digest: function(enc) { return ''; } }; }, randomBytes: function(n) { return []; } };
@@ -214,19 +154,9 @@ class JsEngine {
           default: throw new Error('Module not found: ' + name);
         }
       }
-
-      // JSON 增强
-      var JSON = JSON || {
-        parse: function(s) { return eval('(' + s + ')'); },
-        stringify: function(o) { return __nativeJsonStringify(o); },
-      };
-
-      // cheerio 兼容（jQuery-like HTML 解析）
-      // var cheerio = require('cheerio');
-      // var dollarSign = cheerio;
     ''';
 
-    await evaluate(nodePolyfills);
+    evaluate(nodePolyfills);
   }
 
   // ===== Java 桥接对象 =====
@@ -236,37 +166,36 @@ class JsEngine {
     const javaBridge = '''
       // ===== Legado Java 桥接对象 =====
       var java = {
-        // HTTP 请求方法
+        // HTTP 请求方法（通过 Dart 桥接）
         get: function(url, headers) {
-          return __nativeHttpGet(url, headers || {});
+          return JSON.stringify({ url: url, method: 'GET', headers: headers || {} });
         },
         post: function(url, body, headers) {
-          return __nativeHttpPost(url, body || '', headers || {});
+          return JSON.stringify({ url: url, method: 'POST', body: body || '', headers: headers || {} });
         },
         ajax: function(url, headers) {
-          return __nativeHttpGet(url, headers || {});
+          return java.get(url, headers);
         },
         ajaxAll: function(urls) {
-          return urls.map(function(url) { return __nativeHttpGet(url, {}); });
+          return JSON.stringify(urls.map(function(url) { return java.get(url, {}); }));
         },
         put: function(key, value) {
-          __nativePut(key, value);
+          _javaCache[key] = value;
         },
         getStr: function(key, defaultValue) {
-          return __nativeGetStr(key, defaultValue || '');
+          return _javaCache[key] || (defaultValue || '');
         },
         log: function(msg) {
-          __nativeLog(String(msg));
+          // console.log 已由 flutter_js 内置
         },
 
         // 字符串操作
         getString: function(str, ruleStr) {
           if (!str || !ruleStr) return '';
-          return __nativeRuleString(str, ruleStr);
+          return str;
         },
         getStrResponse: function(url, ruleStr) {
-          var html = __nativeHttpGet(url, {});
-          return __nativeRuleString(html, ruleStr);
+          return '';
         },
 
         // JSON 操作
@@ -274,43 +203,25 @@ class JsEngine {
           try { return JSON.parse(str); } catch(e) { return {}; }
         },
         putJson: function(key, value) {
-          __nativePut(key, JSON.stringify(value));
+          _javaCache[key] = JSON.stringify(value);
         },
 
-        // 加密/解密
-        aesEncode: function(data, key, iv) {
-          return __nativeAesEncode(data, key, iv || '');
-        },
-        aesDecode: function(data, key, iv) {
-          return __nativeAesDecode(data, key, iv || '');
-        },
-        md5Encode: function(str) {
-          return __nativeMd5(str);
-        },
-        base64Encode: function(str) {
-          return __nativeBase64Encode(str);
-        },
-        base64Decode: function(str) {
-          return __nativeBase64Decode(str);
-        },
+        // 加密/解密（占位，实际由 Dart 侧桥接实现）
+        aesEncode: function(data, key, iv) { return ''; },
+        aesDecode: function(data, key, iv) { return ''; },
+        md5Encode: function(str) { return ''; },
+        base64Encode: function(str) { return ''; },
+        base64Decode: function(str) { return ''; },
 
-        // HTML 解析（Jsoup 桥接）
+        // HTML 解析（占位）
         jsoup: {
           parse: function(html) {
-            return { select: function(sel) { return __nativeJsoupSelect(html, sel); } };
+            return { select: function(sel) { return ''; } };
           },
-          select: function(html, selector) {
-            return __nativeJsoupSelectAll(html, selector);
-          },
-          selectFirst: function(html, selector) {
-            return __nativeJsoupSelect(html, selector);
-          },
-          getAttr: function(html, selector, attr) {
-            return __nativeJsoupGetAttr(html, selector, attr);
-          },
-          clean: function(html) {
-            return __nativeJsoupClean(html);
-          },
+          select: function(html, selector) { return []; },
+          selectFirst: function(html, selector) { return ''; },
+          getAttr: function(html, selector, attr) { return ''; },
+          clean: function(html) { return html; },
         },
 
         // 正则操作
@@ -331,26 +242,27 @@ class JsEngine {
 
         // 时间操作
         timeFormat: function(timestamp, format) {
-          return __nativeTimeFormat(timestamp, format || 'yyyy-MM-dd HH:mm:ss');
+          return new Date(timestamp).toLocaleString();
         },
         getTime: function() {
           return Date.now();
         },
 
-        // WebView 池
+        // WebView 池（占位）
         webview: {
-          eval: function(url, js) {
-            return __nativeWebviewEval(url, js);
-          },
+          eval: function(url, js) { return ''; },
         },
 
         // 缓存操作
         cache: {
-          get: function(key) { return __nativeGetStr(key, ''); },
-          put: function(key, value) { __nativePut(key, value); },
-          delete: function(key) { __nativeDelete(key); },
+          get: function(key) { return _javaCache[key] || ''; },
+          put: function(key, value) { _javaCache[key] = value; },
+          delete: function(key) { delete _javaCache[key]; },
         },
       };
+
+      // Java 缓存
+      var _javaCache = {};
 
       // 兼容 Legado 的 CryptoJS
       var CryptoJS = {
@@ -380,33 +292,25 @@ class JsEngine {
     String js = tsCode;
 
     // 移除类型注解
-    // 函数参数类型: (param: Type) → (param)
     js = js.replaceAllMapped(
       RegExp(r'(\w+)\s*:\s*[\w\[\]<>\|&\s]+([,\)])'),
       (m) => '${m[1]}${m[2]}',
     );
-    // 返回类型: ): Type => / ): Type {
     js = js.replaceAllMapped(
       RegExp(r'\)\s*:\s*[\w\[\]<>\|&\s]+\s*([=>{])'),
       (m) => ') ${m[1]}',
     );
-    // 变量类型: const/let/var x: Type = → const/let/var x =
     js = js.replaceAllMapped(
       RegExp(r'(const|let|var)\s+(\w+)\s*:\s*[\w\[\]<>\|&\s]+=\s*'),
       (m) => '${m[1]} ${m[2]} = ',
     );
-    // interface 声明移除
     js = js.replaceAll(RegExp(r'interface\s+\w+\s*\{[^}]*\}', multiLine: true), '');
-    // type 声明移除
     js = js.replaceAll(RegExp(r'type\s+\w+\s*=\s*[^;]+;'), '');
-    // as 类型断言移除
     js = js.replaceAllMapped(RegExp(r'\s+as\s+[\w\[\]<>\|&]+'), (m) => '');
-    // 泛型函数调用: func<Type>(args) → func(args)
     js = js.replaceAllMapped(
       RegExp(r'(\w+)<[^>]+>\('),
       (m) => '${m[1]}(',
     );
-    // 枚举转对象
     js = js.replaceAllMapped(
       RegExp(r'enum\s+(\w+)\s*\{([^}]+)\}'),
       (m) {
@@ -422,21 +326,16 @@ class JsEngine {
         return 'var $name = { $entries };';
       },
     );
-    // 可选链: obj?.prop → (obj && obj.prop)
     js = js.replaceAllMapped(
       RegExp(r'(\w+)\?\.(?:(\w+)\()?'),
       (m) => m[2] != null ? '(${m[1]} && ${m[1]}.${m[2]}(' : '(${m[1]} && ${m[1]}.',
     );
-    // 空值合并: a ?? b → (a != null ? a : b)
     js = js.replaceAllMapped(
       RegExp(r'(\w+)\s*\?\?\s*'),
       (m) => '(${m[1]} != null ? ${m[1]} : ',
     );
-    // 移除 public/private/protected 修饰符
     js = js.replaceAll(RegExp(r'\b(public|private|protected|readonly)\s+'), '');
-    // 移除 abstract
     js = js.replaceAll(RegExp(r'\babstract\s+'), '');
-    // 移除 implements 子句
     js = js.replaceAllMapped(RegExp(r'\s+implements\s+[\w,\s]+'), (m) => '');
 
     return js;
@@ -453,11 +352,9 @@ class JsEngine {
         await pkgDir.create(recursive: true);
       }
 
-      // 保存包代码
       final file = File('${pkgDir.path}/index.js');
       await file.writeAsString(code);
 
-      // 保存包信息
       final info = {
         'name': name,
         'version': version ?? '1.0.0',
@@ -466,7 +363,6 @@ class JsEngine {
       final infoFile = File('${pkgDir.path}/package.json');
       await infoFile.writeAsString(jsonEncode(info));
 
-      // 注册到运行时
       _installedPackages[name] = code;
       _registerPackage(name, code);
 
@@ -479,10 +375,6 @@ class JsEngine {
   /// 从 URL 安装 JS/TS 库
   Future<bool> installPackageFromUrl(String name, String url) async {
     try {
-      // 通过原生 OkHttp 下载
-      // final code = await NativeChannel.instance.httpGet(url);
-      // if (code == null) return false;
-      // return await installPackage(name, code);
       return false;
     } catch (e) {
       return false;
@@ -556,14 +448,34 @@ class JsEngine {
 
   // ===== 脚本执行 =====
 
-  /// 执行 JS 脚本
-  Future<dynamic> evaluate(String script) async {
-    if (!_initialized) return null;
+  /// 执行 JS 脚本（同步，直接返回字符串结果）
+  dynamic evaluate(String script) {
+    if (!_initialized || _jsRuntime == null) return null;
     try {
-      // TODO: 通过 flutter_js 执行
-      // return _jsRuntime.evaluate(script);
-      return null;
+      final result = _jsRuntime!.evaluate(script);
+      if (result.isError) {
+        debugPrint('JsEngine evaluate error: ${result.stringResult}');
+        return null;
+      }
+      return result.stringResult;
     } catch (e) {
+      debugPrint('JsEngine evaluate exception: $e');
+      return null;
+    }
+  }
+
+  /// 执行 JS 脚本（异步版本，支持 Promise）
+  Future<dynamic> evaluateAsync(String script) async {
+    if (!_initialized || _jsRuntime == null) return null;
+    try {
+      final result = await _jsRuntime!.evaluateAsync(script);
+      if (result.isError) {
+        debugPrint('JsEngine evaluateAsync error: ${result.stringResult}');
+        return null;
+      }
+      return result.stringResult;
+    } catch (e) {
+      debugPrint('JsEngine evaluateAsync exception: $e');
       return null;
     }
   }
@@ -571,39 +483,133 @@ class JsEngine {
   /// 执行 TypeScript 脚本（自动编译为 JS）
   Future<dynamic> evaluateTypeScript(String tsCode) async {
     final jsCode = await compileTypeScript(tsCode);
-    return await evaluate(jsCode);
+    return evaluate(jsCode);
+  }
+
+  /// 同步执行 JS 代码（用于规则解析）
+  /// [jsCode] - JS 代码
+  /// [content] - 上下文内容（注入为 result 变量）
+  /// [baseUrl] - 基础 URL（注入为 baseUrl 变量）
+  dynamic executeSync(String jsCode, dynamic content, {String? baseUrl}) {
+    if (!_initialized || _jsRuntime == null) {
+      // 尝试懒初始化（同步方式，仅标记需要初始化）
+      debugPrint('JsEngine not initialized, cannot executeSync');
+      return null;
+    }
+    try {
+      final contentStr = content is String
+          ? jsonEncode(content)
+          : jsonEncode(content?.toString() ?? '');
+      final wrappedScript = '''
+        (function() {
+          var result = $contentStr;
+          var baseUrl = ${jsonEncode(baseUrl ?? '')};
+          var content = result;
+          $jsCode
+        })();
+      ''';
+      final evalResult = _jsRuntime!.evaluate(wrappedScript);
+      if (evalResult.isError) {
+        debugPrint('JsEngine executeSync error: ${evalResult.stringResult}');
+        return null;
+      }
+      return _parseJsResult(evalResult.stringResult);
+    } catch (e) {
+      debugPrint('JsEngine executeSync exception: $e');
+      return null;
+    }
+  }
+
+  /// 处理 JS 书源规则（异步）
+  /// [content] - 输入内容
+  /// [jsCode] - JS 规则代码
+  /// [baseUrl] - 基础 URL
+  Future<String?> processJsRule(String content, String jsCode, {String? baseUrl}) async {
+    if (!_initialized || _jsRuntime == null) {
+      await init();
+      if (!_initialized || _jsRuntime == null) return null;
+    }
+    try {
+      final wrappedScript = '''
+        (function() {
+          var result = ${jsonEncode(content)};
+          var baseUrl = ${jsonEncode(baseUrl ?? '')};
+          var content = result;
+          $jsCode
+        })();
+      ''';
+      final evalResult = _jsRuntime!.evaluate(wrappedScript);
+      if (evalResult.isError) {
+        debugPrint('JsEngine processJsRule error: ${evalResult.stringResult}');
+        return null;
+      }
+      return evalResult.stringResult;
+    } catch (e) {
+      debugPrint('JsEngine processJsRule exception: $e');
+      return null;
+    }
+  }
+
+  /// 处理带书籍上下文的 JS 规则
+  Future<String?> processJsWithBook(
+    String jsCode, {
+    Map<String, dynamic>? book,
+    Map<String, dynamic>? chapter,
+    String? content,
+    int? index,
+  }) async {
+    if (!_initialized || _jsRuntime == null) {
+      await init();
+      if (!_initialized || _jsRuntime == null) return null;
+    }
+    try {
+      final wrappedScript = '''
+        (function() {
+          var result = ${jsonEncode(content ?? '')};
+          var baseUrl = ${jsonEncode(book?['bookUrl'] ?? '')};
+          var content = result;
+          var book = ${jsonEncode(book ?? {})};
+          var chapter = ${jsonEncode(chapter ?? {})};
+          var index = ${jsonEncode(index ?? 0)};
+          $jsCode
+        })();
+      ''';
+      final evalResult = _jsRuntime!.evaluate(wrappedScript);
+      if (evalResult.isError) {
+        debugPrint('JsEngine processJsWithBook error: ${evalResult.stringResult}');
+        return null;
+      }
+      return evalResult.stringResult;
+    } catch (e) {
+      debugPrint('JsEngine processJsWithBook exception: $e');
+      return null;
+    }
   }
 
   /// 执行书源规则（支持 JS/Java/TS 三种格式）
-  /// Legado 格式：@js: / <js></js> / @java: / <java></java>
   Future<String?> evaluateBookRule(String ruleCode, {
     String? result,
     Map<String, dynamic>? env,
   }) async {
-    if (!_initialized) return null;
+    if (!_initialized || _jsRuntime == null) return null;
     try {
-      // 检测规则类型
       String jsCode;
       if (ruleCode.startsWith('@ts:') || ruleCode.startsWith('<ts>')) {
-        // TypeScript 规则
         final tsCode = ruleCode.startsWith('@ts:')
             ? ruleCode.substring(4)
             : ruleCode.replaceAll(RegExp(r'^<ts>|</ts>$'), '');
         jsCode = await compileTypeScript(tsCode);
       } else if (ruleCode.startsWith('@java:') || ruleCode.startsWith('<java>')) {
-        // Java 规则 - 通过原生通道执行
         final javaCode = ruleCode.startsWith('@java:')
             ? ruleCode.substring(6)
             : ruleCode.replaceAll(RegExp(r'^<java>|</java>$'), '');
         return await _evaluateJavaRule(javaCode, result: result, env: env);
       } else {
-        // JS 规则
         jsCode = ruleCode.startsWith('@js:')
             ? ruleCode.substring(4)
             : ruleCode.replaceAll(RegExp(r'^<js>|</js>$'), '');
       }
 
-      // 注入环境变量
       final wrappedScript = '''
         (function() {
           var result = ${jsonEncode(result ?? '')};
@@ -616,8 +622,14 @@ class JsEngine {
         })();
       ''';
 
-      return await evaluate(wrappedScript) as String?;
+      final evalResult = _jsRuntime!.evaluate(wrappedScript);
+      if (evalResult.isError) {
+        debugPrint('JsEngine evaluateBookRule error: ${evalResult.stringResult}');
+        return null;
+      }
+      return evalResult.stringResult;
     } catch (e) {
+      debugPrint('JsEngine evaluateBookRule exception: $e');
       return null;
     }
   }
@@ -627,10 +639,8 @@ class JsEngine {
     String? result,
     Map<String, dynamic>? env,
   }) async {
-    // Java 规则通过 Android 原生层执行
-    // 预留接口，需要 Android 原生侧实现
+    // Java 规则通过 Android 原生层执行，预留接口
     try {
-      // return await NativeChannel.instance.evaluateJavaRule(javaCode, result: result, env: env);
       return null;
     } catch (e) {
       return null;
@@ -639,7 +649,7 @@ class JsEngine {
 
   /// 执行正则替换
   Future<String?> regexReplace(String text, String pattern, String replacement) async {
-    if (!_initialized) return null;
+    if (!_initialized || _jsRuntime == null) return null;
     try {
       final script = '''
         (function() {
@@ -649,7 +659,9 @@ class JsEngine {
           return text.replace(new RegExp(pattern, 'g'), replacement);
         })();
       ''';
-      return await evaluate(script) as String?;
+      final evalResult = _jsRuntime!.evaluate(script);
+      if (evalResult.isError) return null;
+      return evalResult.stringResult;
     } catch (e) {
       return null;
     }
@@ -657,14 +669,16 @@ class JsEngine {
 
   /// 执行 CSS 选择器（通过 Jsoup 桥接）
   Future<String?> cssSelect(String html, String selector) async {
-    if (!_initialized) return null;
+    if (!_initialized || _jsRuntime == null) return null;
     try {
       final script = '''
         (function() {
           return java.jsoup.selectFirst(${jsonEncode(html)}, ${jsonEncode(selector)});
         })();
       ''';
-      return await evaluate(script) as String?;
+      final evalResult = _jsRuntime!.evaluate(script);
+      if (evalResult.isError) return null;
+      return evalResult.stringResult;
     } catch (e) {
       return null;
     }
@@ -672,19 +686,17 @@ class JsEngine {
 
   /// 执行 XPath（预留）
   Future<String?> xpathSelect(String html, String xpath) async {
-    // XPath 需要原生层支持
     return null;
   }
 
   /// 执行 JSONPath
   Future<dynamic> jsonPath(String jsonStr, String path) async {
-    if (!_initialized) return null;
+    if (!_initialized || _jsRuntime == null) return null;
     try {
       final script = '''
         (function() {
           var data = JSON.parse(${jsonEncode(jsonStr)});
           var path = ${jsonEncode(path)};
-          // 简单的 JSONPath 实现
           var parts = path.replace(/^\\\$\\\./, '').split('.');
           var result = data;
           for (var i = 0; i < parts.length; i++) {
@@ -694,14 +706,34 @@ class JsEngine {
           return JSON.stringify(result);
         })();
       ''';
-      return await evaluate(script);
+      final evalResult = _jsRuntime!.evaluate(script);
+      if (evalResult.isError) return null;
+      return evalResult.stringResult;
     } catch (e) {
       return null;
     }
   }
 
+  /// 解析 JS 返回值，尝试还原为原始 Dart 类型
+  dynamic _parseJsResult(String result) {
+    if (result == 'undefined' || result == 'null') return null;
+    if (result == 'true') return true;
+    if (result == 'false') return false;
+    // 尝试解析为数字
+    final numVal = num.tryParse(result);
+    if (numVal != null) return numVal;
+    // 尝试解析为 JSON
+    try {
+      return jsonDecode(result);
+    } catch (_) {}
+    // 返回原始字符串
+    return result;
+  }
+
   /// 释放资源
   void dispose() {
+    _jsRuntime?.dispose();
+    _jsRuntime = null;
     _initialized = false;
     _installedPackages.clear();
     _moduleCache.clear();
