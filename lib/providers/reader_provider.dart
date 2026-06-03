@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../models/highlight.dart';
 import '../services/storage_service.dart';
+import '../services/reader_bookmark_service.dart';
+import '../services/reader_tts_manager.dart';
 
 enum PageMode { scroll, slide, cover, simulation }
 
@@ -31,6 +33,39 @@ class ReaderProvider extends ChangeNotifier {
     [TapZoneAction.none, TapZoneAction.showMenu, TapZoneAction.none],
     [TapZoneAction.none, TapZoneAction.showMenu, TapZoneAction.none],
   ];
+
+  // 书签服务
+  final ReaderBookmarkService _bookmarkService = ReaderBookmarkService();
+  List<Bookmark> _bookmarks = [];
+  
+  // TTS管理器
+  ReaderTtsManager? _ttsManager;
+  bool _isTtsPlaying = false;
+  bool _isTtsPaused = false;
+  int _ttsParagraphIndex = 0;
+  int _ttsParagraphTotal = 0;
+  double _ttsRate = 0.5;
+  
+  // 阅读设置
+  bool _showReadingInfo = true;
+  bool _showChapterTitle = true;
+  bool _showClock = true;
+  bool _showProgress = true;
+  int _pageAnim = 3; // 仿真翻页
+  int _pageAnimDurationMs = 300;
+  double _screenBrightness = -1.0; // -1表示跟随系统
+  bool _keepScreenOn = false;
+  bool _enableVolumeKeyPage = false;
+  bool _volumeKeyPageOnTts = false;
+  bool _enableLongPressMenu = true;
+  int _autoScrollSpeed = 50;
+  int _autoPageIntervalSeconds = 0;
+  List<int> _tapZones = [0, 4, 0, 0, 1, 0, 0, 3, 2];
+  double _horizontalPadding = 16.0;
+  double _verticalPadding = 12.0;
+  String _paragraphIndent = '\u3000\u3000';
+  int _fontWeightIndex = 1;
+  String? _backgroundImagePath;
 
   PageMode get pageMode => _pageMode;
   double get fontSize => _fontSize;
@@ -292,5 +327,255 @@ class ReaderProvider extends ChangeNotifier {
     return _highlights
         .where((h) => h.bookUrl == bookUrl && h.chapterIndex == chapterIndex)
         .toList();
+  }
+
+  // ==================== 书签相关 ====================
+  List<Bookmark> get bookmarks => List.unmodifiable(_bookmarks);
+  
+  Future<void> loadBookmarks(String bookUrl) async {
+    _bookmarks = await _bookmarkService.list(bookUrl);
+    notifyListeners();
+  }
+  
+  Future<bool> hasBookmarkForChapter(String bookUrl, int chapterIndex) async {
+    return await _bookmarkService.hasBookmarkForChapter(bookUrl, chapterIndex);
+  }
+  
+  Future<Bookmark?> addBookmark({
+    required String bookUrl,
+    required int chapterIndex,
+    required String chapterTitle,
+    required String content,
+    String? note,
+  }) async {
+    final bookmark = await _bookmarkService.add(
+      bookUrl: bookUrl,
+      chapterIndex: chapterIndex,
+      chapterTitle: chapterTitle,
+      content: content,
+      note: note,
+    );
+    if (bookmark != null) {
+      _bookmarks.add(bookmark);
+      notifyListeners();
+    }
+    return bookmark;
+  }
+  
+  Future<void> removeBookmark(String bookUrl, String bookmarkId) async {
+    await _bookmarkService.remove(bookUrl: bookUrl, bookmarkId: bookmarkId);
+    _bookmarks.removeWhere((b) => b.id == bookmarkId);
+    notifyListeners();
+  }
+
+  // ==================== TTS相关 ====================
+  bool get isTtsPlaying => _isTtsPlaying;
+  bool get isTtsPaused => _isTtsPaused;
+  int get ttsParagraphIndex => _ttsParagraphIndex;
+  int get ttsParagraphTotal => _ttsParagraphTotal;
+  double get ttsRate => _ttsRate;
+  
+  Future<void> initTts({
+    double rate = 0.5,
+    VoidCallback? onStateChanged,
+    VoidCallback? onParagraphChanged,
+  }) async {
+    _ttsManager = ReaderTtsManager();
+    _ttsRate = rate;
+    await _ttsManager!.init(
+      rate: rate,
+      onStateChanged: () {
+        _isTtsPlaying = _ttsManager!.isSpeaking;
+        _isTtsPaused = _ttsManager!.isPaused;
+        _ttsParagraphIndex = _ttsManager!.paragraphIndex;
+        onStateChanged?.call();
+        notifyListeners();
+      },
+      onParagraphChanged: () {
+        _ttsParagraphIndex = _ttsManager!.paragraphIndex;
+        onParagraphChanged?.call();
+        notifyListeners();
+      },
+    );
+  }
+  
+  void setTtsChapterContent(String content) {
+    _ttsManager?.setChapterContent(content);
+    // 计算段落总数
+    _ttsParagraphTotal = content
+        .split(RegExp(r'\n+'))
+        .where((p) => p.trim().isNotEmpty)
+        .length;
+    notifyListeners();
+  }
+  
+  Future<void> startTts() async {
+    await _ttsManager?.start();
+  }
+  
+  void pauseTts() {
+    _ttsManager?.pause();
+  }
+  
+  Future<void> resumeTts() async {
+    await _ttsManager?.resume();
+  }
+  
+  void stopTts() {
+    _ttsManager?.stop();
+  }
+  
+  Future<void> nextTtsParagraph() async {
+    await _ttsManager?.nextParagraph();
+  }
+  
+  Future<void> prevTtsParagraph() async {
+    await _ttsManager?.prevParagraph();
+  }
+  
+  Future<void> setTtsRate(double rate) async {
+    _ttsRate = rate;
+    await _ttsManager?.setRate(rate);
+    notifyListeners();
+  }
+  
+  void disposeTts() {
+    _ttsManager?.dispose();
+    _ttsManager = null;
+  }
+
+  // ==================== 阅读设置 ====================
+  bool get showReadingInfo => _showReadingInfo;
+  bool get showChapterTitle => _showChapterTitle;
+  bool get showClock => _showClock;
+  bool get showProgress => _showProgress;
+  int get pageAnim => _pageAnim;
+  int get pageAnimDurationMs => _pageAnimDurationMs;
+  double get screenBrightness => _screenBrightness;
+  bool get keepScreenOn => _keepScreenOn;
+  bool get enableVolumeKeyPage => _enableVolumeKeyPage;
+  bool get volumeKeyPageOnTts => _volumeKeyPageOnTts;
+  bool get enableLongPressMenu => _enableLongPressMenu;
+  int get autoScrollSpeed => _autoScrollSpeed;
+  int get autoPageIntervalSeconds => _autoPageIntervalSeconds;
+  List<int> get tapZones => _tapZones;
+  double get horizontalPadding => _horizontalPadding;
+  double get verticalPadding => _verticalPadding;
+  String get paragraphIndent => _paragraphIndent;
+  int get fontWeightIndex => _fontWeightIndex;
+  String? get backgroundImagePath => _backgroundImagePath;
+
+  void setShowReadingInfo(bool value) {
+    _showReadingInfo = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setShowChapterTitle(bool value) {
+    _showChapterTitle = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setShowClock(bool value) {
+    _showClock = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setShowProgress(bool value) {
+    _showProgress = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setPageAnim(int value) {
+    _pageAnim = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setPageAnimDurationMs(int value) {
+    _pageAnimDurationMs = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setScreenBrightness(double value) {
+    _screenBrightness = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setKeepScreenOn(bool value) {
+    _keepScreenOn = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setEnableVolumeKeyPage(bool value) {
+    _enableVolumeKeyPage = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setVolumeKeyPageOnTts(bool value) {
+    _volumeKeyPageOnTts = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setEnableLongPressMenu(bool value) {
+    _enableLongPressMenu = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setAutoScrollSpeed(int value) {
+    _autoScrollSpeed = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setAutoPageIntervalSeconds(int value) {
+    _autoPageIntervalSeconds = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setTapZones(List<int> value) {
+    _tapZones = List.from(value);
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setHorizontalPadding(double value) {
+    _horizontalPadding = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setVerticalPadding(double value) {
+    _verticalPadding = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setParagraphIndent(String value) {
+    _paragraphIndent = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setFontWeightIndex(int value) {
+    _fontWeightIndex = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setBackgroundImagePath(String? value) {
+    _backgroundImagePath = value;
+    _saveToStorage();
+    notifyListeners();
   }
 }
