@@ -79,6 +79,9 @@ flutter {
 
 /**
  * 下载 Node.js 预编译二进制，重命名为 libnode.so 放入 jniLibs
+ *
+ * 跨平台兼容：Windows/macOS/Linux 均可
+ * 不阻塞构建：下载/解压失败只警告，不抛异常
  */
 tasks.register("downloadNodeBinaries") {
     group = "node-runtime"
@@ -96,84 +99,121 @@ tasks.register("downloadNodeBinaries") {
             val versionFile = File(abiDir, ".node_version")
 
             // 检查是否已下载且版本匹配
-            if (libNode.exists() && versionFile.exists() && versionFile.readText().trim() == nodeVersion) {
+            if (libNode.exists() && libNode.length() > 0 && versionFile.exists() && versionFile.readText().trim() == nodeVersion) {
                 logger.lifecycle("[Node.js] ${abi} 已存在 (v${nodeVersion})，跳过下载")
                 continue
             }
 
             abiDir.mkdirs()
-            val tarFile = File(abiDir, "node.tar.xz")
 
-            logger.lifecycle("[Node.js] 下载 ${abi}: ${url}")
+            try {
+                val tarFile = File(abiDir, "node.tar.xz")
 
-            // 下载
-            ant.withGroovyBuilder {
-                "get"("src" to url, "dest" to tarFile, "verbose" to true)
-            }
+                logger.lifecycle("[Node.js] 下载 ${abi}: ${url}")
 
-            // 解压（musl 版本目录名: node-v25.9.0-linux-arm64-musl/bin/node）
-            logger.lifecycle("[Node.js] 解压 ${abi}...")
-            val muslSuffix = if (abi == "arm64-v8a") "arm64-musl" else "x64-musl"
-            val proc = ProcessBuilder(
-                "tar", "-xJf", tarFile.absolutePath,
-                "-C", abiDir.absolutePath,
-                "--strip-components=2",
-                "node-${nodeVersion}-linux-${muslSuffix}/bin/node"
-            )
-                .directory(abiDir)
-                .redirectErrorStream(true)
-                .start()
-            proc.inputStream.bufferedReader().use { it.lines().forEach { line -> logger.lifecycle(line) } }
-            val exitCode = proc.waitFor()
+                // 下载
+                ant.withGroovyBuilder {
+                    "get"("src" to url, "dest" to tarFile, "verbose" to true)
+                }
 
-            // 清理 tar
-            tarFile.delete()
+                if (!tarFile.exists() || tarFile.length() == 0L) {
+                    logger.warn("[Node.js] ${abi} 下载失败，跳过")
+                    continue
+                }
 
-            if (exitCode != 0) {
-                // 如果精确路径解压失败，尝试全量解压
-                logger.lifecycle("[Node.js] 精确解压失败，尝试全量解压...")
-                if (!File(abiDir, "node").exists()) {
-                    val tarFile2 = File(abiDir, "node.tar.xz")
-                    ant.withGroovyBuilder {
-                        "get"("src" to url, "dest" to tarFile2, "verbose" to true)
+                // 解压（跨平台：优先用系统 tar，失败则用 7z/PowerShell）
+                logger.lifecycle("[Node.js] 解压 ${abi}...")
+                val muslSuffix = if (abi == "arm64-v8a") "arm64-musl" else "x64-musl"
+                val innerPath = "node-${nodeVersion}-linux-${muslSuffix}/bin/node"
+                var extracted = false
+
+                // 方法1：系统 tar（Linux/macOS/Git Bash）
+                if (!extracted) {
+                    try {
+                        val proc = ProcessBuilder(
+                            "tar", "-xJf", tarFile.absolutePath,
+                            "-C", abiDir.absolutePath,
+                            "--strip-components=2",
+                            innerPath
+                        )
+                            .redirectErrorStream(true)
+                            .start()
+                        proc.inputStream.bufferedReader().use { it.lines().forEach { line -> logger.lifecycle(line) } }
+                        val exitCode = proc.waitFor()
+                        if (exitCode == 0) extracted = true
+                    } catch (e: Exception) {
+                        logger.lifecycle("[Node.js] tar 不可用: ${e.message}")
                     }
-                    val proc2 = ProcessBuilder("tar", "-xJf", tarFile2.absolutePath, "-C", abiDir.absolutePath)
-                        .directory(abiDir)
-                        .redirectErrorStream(true)
-                        .start()
-                    proc2.inputStream.bufferedReader().use { it.lines().forEach { line -> logger.lifecycle(line) } }
-                    proc2.waitFor()
-                    tarFile2.delete()
                 }
-            }
 
-            // 找到解压出来的 node 二进制，重命名为 libnode.so
-            val extractedNode = File(abiDir, "node")
-            if (extractedNode.exists()) {
-                extractedNode.renameTo(libNode)
-                logger.lifecycle("[Node.js] 重命名 node → libnode.so")
-            } else {
-                // 可能在子目录中
-                abiDir.walk().find { it.name == "node" && it.isFile }?.let { found ->
-                    found.copyTo(libNode, overwrite = true)
-                    found.delete()
-                    logger.lifecycle("[Node.js] 找到并重命名 node → libnode.so")
+                // 方法2：7z（Windows 常见）
+                if (!extracted) {
+                    try {
+                        // 先全量解压
+                        val proc = ProcessBuilder("7z", "x", tarFile.absolutePath, "-o${abiDir.absolutePath}", "-y")
+                            .redirectErrorStream(true)
+                            .start()
+                        proc.inputStream.bufferedReader().use { it.lines().forEach { line -> logger.lifecycle(line) } }
+                        val exitCode = proc.waitFor()
+                        if (exitCode == 0) extracted = true
+                    } catch (e: Exception) {
+                        logger.lifecycle("[Node.js] 7z 不可用: ${e.message}")
+                    }
                 }
+
+                // 方法3：PowerShell Expand-Archive（Windows，但只支持 zip）
+                // xz 格式不支持，跳过
+
+                // 清理 tar
+                tarFile.delete()
+
+                if (!extracted) {
+                    // 检查是否有部分解压的文件
+                    val foundNode = abiDir.walk().find { it.name == "node" && it.isFile && it.length() > 1000000 }
+                    if (foundNode != null) {
+                        extracted = true
+                    }
+                }
+
+                // 找到解压出来的 node 二进制，重命名为 libnode.so
+                val directNode = File(abiDir, "node")
+                if (directNode.exists() && directNode.isFile) {
+                    directNode.renameTo(libNode)
+                    logger.lifecycle("[Node.js] 重命名 node → libnode.so")
+                } else {
+                    // 在子目录中查找
+                    abiDir.walk().find { it.name == "node" && it.isFile && it.length() > 1000000 }?.let { found ->
+                        found.copyTo(libNode, overwrite = true)
+                        found.delete()
+                        logger.lifecycle("[Node.js] 找到并重命名 node → libnode.so")
+                    }
+                }
+
+                if (!libNode.exists() || libNode.length() == 0L) {
+                    logger.warn("[Node.js] ${abi} 二进制未找到，Node.js 功能将不可用")
+                    logger.warn("[Node.js] 请手动下载 ${url}")
+                    logger.warn("[Node.js] 解压后提取 bin/node 重命名为 libnode.so 放入 ${abiDir.absolutePath}")
+                    // 不抛异常，不阻塞构建
+                    continue
+                }
+
+                // 写入版本标记
+                versionFile.writeText(nodeVersion)
+
+                // 清理多余文件
+                abiDir.walk().filter { it.isFile && it.name != "libnode.so" && it.name != ".node_version" }.forEach {
+                    it.delete()
+                }
+                abiDir.walk().filter { it.isDirectory && it.name != abi && it.listFiles()?.isEmpty() != false }.forEach {
+                    it.deleteRecursively()
+                }
+
+                logger.lifecycle("[Node.js] ${abi} 完成: ${libNode.absolutePath} (${libNode.length() / 1024 / 1024}MB)")
+            } catch (e: Exception) {
+                logger.warn("[Node.js] ${abi} 处理失败: ${e.message}")
+                logger.warn("[Node.js] Node.js 功能将不可用，不影响其他功能")
+                // 不抛异常，不阻塞构建
             }
-
-            if (!libNode.exists()) {
-                throw GradleException("[Node.js] ${abi} 二进制未找到，请检查下载和解压")
-            }
-
-            // 写入版本标记
-            versionFile.writeText(nodeVersion)
-
-            // 清理多余文件
-            abiDir.listFiles()?.filter { it.name != "libnode.so" && it.name != ".node_version" }?.forEach {
-                if (it.isDirectory) it.deleteRecursively() else it.delete()
-            }
-
-            logger.lifecycle("[Node.js] ${abi} 完成: ${libNode.absolutePath} (${libNode.length() / 1024 / 1024}MB)")
         }
     }
 }
