@@ -30,6 +30,8 @@ class _ChapterListPageState extends State<ChapterListPage> {
   bool _isChapterReversed = false;
   Set<int> _expandedVolumes = {};
   int _totalWordCount = 0;
+  final ScrollController _scrollController = ScrollController();
+  bool _confirmChapterJump = false;
 
   @override
   void initState() {
@@ -101,7 +103,21 @@ class _ChapterListPageState extends State<ChapterListPage> {
   }
 
   void _scrollToCurrentChapter() {
-    // Scroll logic could be added here with a ScrollController if needed
+    if (!_scrollController.hasClients) return;
+    if (widget.currentChapterIndex <= 0) return;
+
+    // 找到当前章节在_filteredChapters中的位置
+    final targetIndex = _filteredChapters.indexWhere(
+        (ch) => ch.index == widget.currentChapterIndex);
+    if (targetIndex < 0) return;
+
+    // 估算位置 - 每个item大约56高度
+    final estimatedOffset = targetIndex * 56.0;
+    _scrollController.animateTo(
+      estimatedOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
   }
 
   void _filterChapters(String query) {
@@ -118,6 +134,16 @@ class _ChapterListPageState extends State<ChapterListPage> {
   }
 
   void _openChapter(Chapter chapter) {
+    if (!_confirmChapterJump &&
+        (chapter.index - widget.currentChapterIndex).abs() > 3) {
+      // 跨章节跳转超过3章，显示确认
+      _showChapterJumpConfirm(chapter);
+    } else {
+      _doOpenChapter(chapter);
+    }
+  }
+
+  void _doOpenChapter(Chapter chapter) {
     Navigator.pushReplacementNamed(
       context,
       AppRoutes.novelReader,
@@ -125,6 +151,30 @@ class _ChapterListPageState extends State<ChapterListPage> {
         'bookUrl': widget.bookUrl,
         'chapterIndex': chapter.index,
       },
+    );
+  }
+
+  void _showChapterJumpConfirm(Chapter chapter) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('章节跳转确认'),
+        content: Text('确定要跳转到 "${chapter.title}" 吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _confirmChapterJump = true;
+              _doOpenChapter(chapter);
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      ),
     );
   }
 
