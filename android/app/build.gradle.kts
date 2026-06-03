@@ -12,10 +12,12 @@ val assetsNodeDir = file("src/main/assets/node")
 val projectRoot = file("../..")
 
 // Node.js for Android 预编译二进制下载地址
+// 优先使用 unofficial-builds 的 musl 版本（静态链接，Android 兼容性更好）
+// 官方 linux-arm64 依赖 glibc，Android 上可能缺库；musl 版本无此问题
+// armeabi-v7a (32位ARM) 官方和非官方均不提供，旧设备不支持
 val nodeDownloadUrls = mapOf(
-    "arm64-v8a" to "https://unofficial-builds.nodejs.org/download/release/${nodeVersion}/node-${nodeVersion}-linux-arm64.tar.xz",
-    "armeabi-v7a" to "https://unofficial-builds.nodejs.org/download/release/${nodeVersion}/node-${nodeVersion}-linux-armv7l.tar.xz",
-    "x86_64" to "https://unofficial-builds.nodejs.org/download/release/${nodeVersion}/node-${nodeVersion}-linux-x64.tar.xz",
+    "arm64-v8a" to "https://unofficial-builds.nodejs.org/download/release/${nodeVersion}/node-${nodeVersion}-linux-arm64-musl.tar.xz",
+    "x86_64" to "https://unofficial-builds.nodejs.org/download/release/${nodeVersion}/node-${nodeVersion}-linux-x64-musl.tar.xz",
 )
 
 android {
@@ -109,13 +111,14 @@ tasks.register("downloadNodeBinaries") {
                 "get"("src" to url, "dest" to tarFile, "verbose" to true)
             }
 
-            // 解压
+            // 解压（musl 版本目录名: node-v25.9.0-linux-arm64-musl/bin/node）
             logger.lifecycle("[Node.js] 解压 ${abi}...")
+            val muslSuffix = if (abi == "arm64-v8a") "arm64-musl" else "x64-musl"
             val proc = ProcessBuilder(
                 "tar", "-xJf", tarFile.absolutePath,
                 "-C", abiDir.absolutePath,
                 "--strip-components=2",
-                "node-${nodeVersion}-linux-${if (abi == "armeabi-v7a") "armv7l" else if (abi == "arm64-v8a") "arm64" else "x64"}/bin/node"
+                "node-${nodeVersion}-linux-${muslSuffix}/bin/node"
             )
                 .directory(abiDir)
                 .redirectErrorStream(true)
