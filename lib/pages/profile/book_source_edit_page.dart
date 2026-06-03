@@ -318,6 +318,36 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
     }
   }
 
+  /// 内容编辑 - 全屏JSON编辑器
+  void _showContentEditor() {
+    final source = _buildSourceFromEntities();
+    final jsonStr = const JsonEncoder.withIndent('  ').convert(source.toJson());
+    
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => _ContentEditPage(
+          title: '内容编辑',
+          content: jsonStr,
+          onSave: (newContent) {
+            try {
+              final json = jsonDecode(newContent) as Map<String, dynamic>;
+              final newSource = BookSource.fromJson(json);
+              setState(() {
+                _source = newSource;
+                _initEntities();
+                _hasChanges = true;
+              });
+              return true;
+            } catch (e) {
+              return false;
+            }
+          },
+        ),
+      ),
+    );
+  }
+
   void _showJsonEditor() {
     final source = _buildSourceFromEntities();
     final jsonStr = const JsonEncoder.withIndent('  ').convert(source.toJson());
@@ -529,11 +559,11 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
         appBar: AppBar(
           title: Text(_originalSource?.bookSourceName ?? '新建书源'),
           actions: [
-            // 全屏编辑
+            // 内容编辑
             IconButton(
-              icon: const Icon(Icons.code),
-              onPressed: _showJsonEditor,
-              tooltip: '全屏编辑',
+              icon: const Icon(Icons.edit_note),
+              onPressed: _showContentEditor,
+              tooltip: '内容编辑',
             ),
             // 保存
             IconButton(
@@ -691,25 +721,26 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
               ],
             ),
           ],
-          bottom: TabBar(
-            controller: _tabController,
-            isScrollable: true,
-            tabs: const [
-              Tab(text: '基本'),
-              Tab(text: '搜索'),
-              Tab(text: '发现'),
-              Tab(text: '详情'),
-              Tab(text: '目录'),
-              Tab(text: '正文'),
-            ],
-          ),
         ),
         body: Column(
           children: [
-            // 第一行选项
+            // 第一行选项：类型、启用、发现、自动保存Cookie
             _buildOptionsRow1(),
-            // 第二行选项
+            // 第二行选项：事件监听器、自定义按钮、下一页懒加载
             _buildOptionsRow2(),
+            // Tab标签栏
+            TabBar(
+              controller: _tabController,
+              isScrollable: true,
+              tabs: const [
+                Tab(text: '基本'),
+                Tab(text: '搜索'),
+                Tab(text: '发现'),
+                Tab(text: '详情'),
+                Tab(text: '目录'),
+                Tab(text: '正文'),
+              ],
+            ),
             // Tab内容
             Expanded(
               child: TabBarView(
@@ -998,6 +1029,250 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 全屏内容编辑页面
+/// 参考legado的ContentEditDialog实现
+class _ContentEditPage extends StatefulWidget {
+  final String title;
+  final String content;
+  final bool Function(String) onSave;
+
+  const _ContentEditPage({
+    required this.title,
+    required this.content,
+    required this.onSave,
+  });
+
+  @override
+  State<_ContentEditPage> createState() => _ContentEditPageState();
+}
+
+class _ContentEditPageState extends State<_ContentEditPage> {
+  late TextEditingController _controller;
+  String _searchKeyword = '';
+  int _currentIndex = -1;
+  List<int> _matchPositions = [];
+  String _originalContent = '';
+  bool _showSearchPanel = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _originalContent = widget.content;
+    _controller = TextEditingController(text: widget.content);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _toggleSearchPanel() {
+    setState(() {
+      _showSearchPanel = !_showSearchPanel;
+      if (!_showSearchPanel) {
+        _clearSearchHighlight();
+      }
+    });
+  }
+
+  void _performSearch(String keyword) {
+    _searchKeyword = keyword;
+    if (_searchKeyword.isEmpty) {
+      _clearSearchHighlight();
+      return;
+    }
+
+    final content = _controller.text;
+    _matchPositions.clear();
+    var startIndex = 0;
+    while (true) {
+      final index = content.indexOf(_searchKeyword, startIndex);
+      if (index == -1) break;
+      _matchPositions.add(index);
+      startIndex = index + 1;
+    }
+
+    if (_matchPositions.isNotEmpty) {
+      _currentIndex = 0;
+      _scrollToMatch(0);
+    } else {
+      _currentIndex = -1;
+    }
+    setState(() {});
+  }
+
+  void _clearSearchHighlight() {
+    _matchPositions.clear();
+    _currentIndex = -1;
+    setState(() {});
+  }
+
+  void _navigateToMatch(int direction) {
+    if (_matchPositions.isEmpty) return;
+    _currentIndex = (_currentIndex + direction + _matchPositions.length) % _matchPositions.length;
+    _scrollToMatch(_currentIndex);
+    setState(() {});
+  }
+
+  void _scrollToMatch(int index) {
+    if (index < 0 || index >= _matchPositions.length) return;
+    final pos = _matchPositions[index];
+    // 简单滚动到位置
+    _controller.selection = TextSelection.collapsed(offset: pos);
+  }
+
+  void _save() {
+    final content = _controller.text;
+    final success = widget.onSave(content);
+    if (success) {
+      Navigator.pop(context);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('JSON格式错误')),
+      );
+    }
+  }
+
+  void _reset() {
+    _controller.text = _originalContent;
+    _clearSearchHighlight();
+  }
+
+  void _copyAll() {
+    Clipboard.setData(ClipboardData(text: _controller.text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已复制到剪贴板')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.title),
+        actions: [
+          // 搜索
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: _toggleSearchPanel,
+            tooltip: '搜索',
+          ),
+          // 保存
+          IconButton(
+            icon: const Icon(Icons.save),
+            onPressed: _save,
+            tooltip: '保存',
+          ),
+          // 更多菜单
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              switch (value) {
+                case 'reset':
+                  _reset();
+                  break;
+                case 'copy_all':
+                  _copyAll();
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'reset',
+                child: ListTile(
+                  leading: Icon(Icons.refresh),
+                  title: Text('重置'),
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'copy_all',
+                child: ListTile(
+                  leading: Icon(Icons.copy),
+                  title: Text('复制全部'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          // 搜索面板
+          if (_showSearchPanel)
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 4,
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _matchPositions.isEmpty
+                              ? (_searchKeyword.isEmpty ? '' : '未找到')
+                              : '${_currentIndex + 1}/${_matchPositions.length}',
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: _toggleSearchPanel,
+                        iconSize: 20,
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          decoration: const InputDecoration(
+                            hintText: '搜索',
+                            isDense: true,
+                            border: OutlineInputBorder(),
+                          ),
+                          onSubmitted: _performSearch,
+                          onChanged: _performSearch,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.arrow_upward),
+                        onPressed: () => _navigateToMatch(-1),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.arrow_downward),
+                        onPressed: () => _navigateToMatch(1),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          // 编辑区域
+          Expanded(
+            child: TextField(
+              controller: _controller,
+              maxLines: null,
+              expands: true,
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.all(12),
+              ),
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+            ),
           ),
         ],
       ),
