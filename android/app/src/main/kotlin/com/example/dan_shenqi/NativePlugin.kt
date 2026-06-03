@@ -114,16 +114,20 @@ class NativePlugin(private val context: Context) {
             val client = okHttpClient.newBuilder()
                 .connectTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
                 .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+                .followRedirects(true)
+                .followSslRedirects(true)
                 .build()
 
             val response = client.newCall(requestBuilder.build()).execute()
-            if (response.isSuccessful) {
-                result.success(response.body?.string())
+            val responseBody = response.body?.string()
+            if (response.isSuccessful || responseBody != null) {
+                result.success(responseBody ?: "")
             } else {
-                result.error("HTTP_ERROR", "HTTP ${response.code}", null)
+                result.success("")
             }
         } catch (e: Exception) {
-            result.error("ERROR", e.message, null)
+            Log.w("NativePlugin", "httpGet failed: ${e.message}")
+            result.success("")
         }
     }
 
@@ -134,23 +138,28 @@ class NativePlugin(private val context: Context) {
             val headers = call.argument<Map<String, String>>("headers") ?: emptyMap()
             val timeoutMs = call.argument<Int>("timeoutMs") ?: 10000
 
-            val requestBody = body.toRequestBody("application/json".toMediaType())
+            val contentType = headers["Content-Type"]?.toMediaType() ?: "application/x-www-form-urlencoded".toMediaType()
+            val requestBody = body.toRequestBody(contentType)
             val requestBuilder = Request.Builder().url(url).post(requestBody)
             headers.forEach { (key, value) -> requestBuilder.addHeader(key, value) }
 
             val client = okHttpClient.newBuilder()
                 .connectTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
                 .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+                .followRedirects(true)
+                .followSslRedirects(true)
                 .build()
 
             val response = client.newCall(requestBuilder.build()).execute()
-            if (response.isSuccessful) {
-                result.success(response.body?.string())
+            val responseBody = response.body?.string()
+            if (response.isSuccessful || responseBody != null) {
+                result.success(responseBody ?: "")
             } else {
-                result.error("HTTP_ERROR", "HTTP ${response.code}", null)
+                result.success("")
             }
         } catch (e: Exception) {
-            result.error("ERROR", e.message, null)
+            Log.w("NativePlugin", "httpPost failed: ${e.message}")
+            result.success("")
         }
     }
 

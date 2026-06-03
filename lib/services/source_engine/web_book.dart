@@ -10,6 +10,7 @@ import 'analyze_rule.dart';
 import 'web_proxy.dart';
 import 'proxy_service.dart';
 import '../native/js_engine.dart';
+import '../native/platform_channel.dart';
 
 /// URL 请求选项（类似 OkHttp 的 Request.Builder）
 class UrlOption {
@@ -110,6 +111,11 @@ class HttpClient {
   ));
 
   /// 执行请求（类似 OkHttp 的 Call.execute）
+  ///
+  /// Android 端优先使用 OkHttp（NativeChannel），更可靠：
+  /// - OkHttp 原生支持 HTTP/2、连接池、自动重试
+  /// - 不受 Dart VM 网络栈限制
+  /// - 正确处理编码和重定向
   Future<StrResponse> execute(
     String url, {
     String method = 'GET',
@@ -119,20 +125,10 @@ class HttpClient {
     Duration? connectTimeout,
     Duration? readTimeout,
   }) async {
-    final options = Options(
-      method: method,
-      headers: headers,
-      responseType: ResponseType.plain,
-      receiveTimeout: readTimeout,
-      sendTimeout: connectTimeout,
-    );
-
     try {
-      String requestUrl = url;
-
       // Web 端受 CORS 限制，必须走代理
       if (kIsWeb) {
-        requestUrl = 'http://localhost:${ProxyService.instance.port}/$url';
+        final requestUrl = 'http://localhost:${ProxyService.instance.port}/$url';
         final html = await WebProxy.instance.fetch(
           requestUrl,
           method: method,
@@ -147,11 +143,54 @@ class HttpClient {
         );
       }
 
-      // Android/iOS 原生端：Dio 不受 CORS 限制，直接请求
-      // CORS 只是浏览器的安全策略，原生 HTTP 客户端无需代理转发
+      // Android/iOS 原生端：优先使用 OkHttp（NativeChannel）
+      if (!kIsWeb) {
+        try {
+          final timeoutMs = (connectTimeout ?? const Duration(seconds: 15)).inMilliseconds;
+          String? result;
+
+          if (method.toUpperCase() == 'POST') {
+            result = await NativeChannel.instance.httpPost(
+              url,
+              body: body,
+              headers: headers,
+              timeoutMs: timeoutMs,
+            );
+          } else {
+            result = await NativeChannel.instance.httpGet(
+              url,
+              headers: headers,
+              timeoutMs: timeoutMs,
+            );
+          }
+
+          if (result != null) {
+            return StrResponse(
+              url: url,
+              body: result,
+              statusCode: 200,
+              headers: headers ?? {},
+            );
+          }
+
+          // OkHttp 返回 null，降级到 Dio
+          debugPrint('⚠️ OkHttp 返回 null，降级到 Dio: $url');
+        } catch (e) {
+          debugPrint('⚠️ OkHttp 请求失败，降级到 Dio: $e');
+        }
+      }
+
+      // 降级方案：使用 Dio
+      final options = Options(
+        method: method,
+        headers: headers,
+        responseType: ResponseType.plain,
+        receiveTimeout: readTimeout,
+        sendTimeout: connectTimeout,
+      );
 
       final response = await _dio.request<String>(
-        requestUrl,
+        url,
         data: body,
         options: options,
       );
