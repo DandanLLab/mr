@@ -8,6 +8,10 @@ import '../../providers/reader_provider.dart';
 import '../../providers/bookshelf_provider.dart';
 import '../../services/local_book/local_book_service.dart';
 import '../../services/storage_service.dart';
+import '../../services/reader_bookmark_service.dart';
+import '../../widgets/reader/reader_control_overlay.dart';
+import '../../widgets/reader/reader_settings_sheet.dart';
+import '../../widgets/reader/reader_tts_bar.dart';
 
 class NovelReaderPage extends StatefulWidget {
   final String bookUrl;
@@ -63,6 +67,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   double _dragCurrentX = 0;
   bool _isDragging = false;
 
+  // 增强版控制
+  bool _useEnhancedControls = true;
+  bool _showSettingsSheet = false;
+  bool _hasBookmark = false;
+  double _ttsSpeed = 1.0;
+
   @override
   void initState() {
     super.initState();
@@ -79,6 +89,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
     _scrollController.addListener(_onScroll);
     _loadBookAndChapters();
+    _initTts();
+    _checkBookmark();
   }
 
   @override
@@ -86,7 +98,98 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     _menuAnimController.dispose();
     _scrollController.dispose();
     _pageController?.dispose();
+    context.read<ReaderProvider>().disposeTts();
     super.dispose();
+  }
+
+  Future<void> _initTts() async {
+    final provider = context.read<ReaderProvider>();
+    await provider.initTts(
+      rate: 0.5,
+      onStateChanged: () {
+        if (mounted) setState(() {});
+      },
+      onParagraphChanged: () {
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
+  Future<void> _checkBookmark() async {
+    if (_book == null) return;
+    final provider = context.read<ReaderProvider>();
+    await provider.loadBookmarks(_book!.bookUrl);
+    _hasBookmark = await provider.hasBookmarkForChapter(
+      _book!.bookUrl,
+      _currentChapterIndex,
+    );
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _toggleBookmark() async {
+    if (_book == null) return;
+    final provider = context.read<ReaderProvider>();
+    if (_hasBookmark) {
+      // 移除书签
+      final bookmarks = provider.bookmarks.where((b) =>
+        b.bookUrl == _book!.bookUrl &&
+        b.chapterIndex == _currentChapterIndex
+      ).toList();
+      for (final b in bookmarks) {
+        await provider.removeBookmark(_book!.bookUrl, b.id);
+      }
+    } else {
+      // 添加书签
+      await provider.addBookmark(
+        bookUrl: _book!.bookUrl,
+        chapterIndex: _currentChapterIndex,
+        chapterTitle: _chapterTitle,
+        content: _content.length > 100 ? _content.substring(0, 100) : _content,
+      );
+    }
+    _hasBookmark = !_hasBookmark;
+    if (mounted) setState(() {});
+  }
+
+  void _showEnhancedSettings() {
+    setState(() {
+      _showSettingsSheet = true;
+    });
+  }
+
+  void _startTts() {
+    final provider = context.read<ReaderProvider>();
+    provider.setTtsChapterContent(_content);
+    provider.startTts();
+  }
+
+  void _stopTts() {
+    context.read<ReaderProvider>().stopTts();
+  }
+
+  void _pauseTts() {
+    context.read<ReaderProvider>().pauseTts();
+  }
+
+  Future<void> _resumeTts() async {
+    await context.read<ReaderProvider>().resumeTts();
+  }
+
+  void _nextTtsParagraph() {
+    context.read<ReaderProvider>().nextTtsParagraph();
+  }
+
+  void _prevTtsParagraph() {
+    context.read<ReaderProvider>().prevTtsParagraph();
+  }
+
+  void _cycleTtsSpeed() {
+    final speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+    final currentIndex = speeds.indexOf(_ttsSpeed);
+    final nextIndex = (currentIndex + 1) % speeds.length;
+    _ttsSpeed = speeds[nextIndex];
+    context.read<ReaderProvider>().setTtsRate(_ttsSpeed);
+    setState(() {});
   }
 
   void _onScroll() {
@@ -150,6 +253,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         _content = content ?? '内容加载失败';
         _isLoading = false;
       });
+
+      // 更新TTS内容
+      context.read<ReaderProvider>().setTtsChapterContent(_content);
+      
+      // 检查书签
+      _checkBookmark();
 
       _repaginate();
 
@@ -377,8 +486,156 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         child: Stack(
           children: [
             _buildContent(provider),
-            if (_showMenu) _buildMenu(provider),
+            // TTS 播放控制条
+            if (provider.isTtsPlaying)
+              ReaderTtsBar(
+                isSpeaking: provider.isTtsPlaying,
+                isPaused: provider.isTtsPaused,
+                paragraphIndex: provider.ttsParagraphIndex,
+                paragraphTotal: provider.ttsParagraphTotal,
+                fontSize: provider.fontSize,
+                textColor: provider.textColor,
+                backgroundColor: provider.backgroundColor,
+                onPrev: _prevTtsParagraph,
+                onNext: _nextTtsParagraph,
+                onPause: _pauseTts,
+                onResume: _resumeTts,
+                onStop: _stopTts,
+                onCycleSpeed: _cycleTtsSpeed,
+                onSpeedChanged: (speed) {
+                  _ttsSpeed = speed;
+                  provider.setTtsRate(speed);
+                },
+              ),
+            // 增强版控制面板
+            if (_useEnhancedControls && _showMenu)
+              ReaderControlOverlay(
+                bookName: _book?.name ?? '',
+                chapterTitle: _chapterTitle,
+                sourceName: '', // 暂时为空
+                currentChapter: _currentChapterIndex,
+                totalChapters: _totalChapters,
+                hasBookmark: _hasBookmark,
+                hasPrev: _currentChapterIndex > 0,
+                hasNext: _currentChapterIndex < _totalChapters - 1,
+                isAutoScroll: false,
+                isNightMode: provider.isNightMode,
+                sliderValue: _currentChapterIndex.toDouble(),
+                onBack: () => Navigator.pop(context),
+                onChangeSource: () {},
+                onRefresh: () {
+                  _loadChapterContent();
+                },
+                onDownload: _showCacheOptions,
+                onToggleBookmark: _toggleBookmark,
+                onClose: _hideMenu,
+                onPrevChapter: () {
+                  if (_currentChapterIndex > 0) {
+                    _previousChapter();
+                  }
+                },
+                onNextChapter: () {
+                  if (_currentChapterIndex < _totalChapters - 1) {
+                    _nextChapter();
+                  }
+                },
+                onStartSearch: () {},
+                onToggleAutoScroll: () {},
+                onToggleNightMode: () {
+                  provider.toggleNightMode();
+                },
+                onOpenReplaceRules: () {},
+                onShowDirectory: () {
+                  _hideMenu();
+                  _showChapterList();
+                },
+                onStartTts: _startTts,
+                onShowSettings: _showEnhancedSettings,
+                onSliderChanged: (value) {
+                  setState(() {
+                    _currentChapterIndex = value.round();
+                  });
+                },
+                onSliderChangeEnd: (value) {
+                  _currentChapterIndex = value;
+                  _loadChapterContent();
+                },
+              )
+            // 原版菜单
+            else if (_showMenu)
+              _buildMenu(provider),
             if (_showHighlightMenu) _buildHighlightMenu(provider),
+            // 设置面板
+            if (_showSettingsSheet)
+              DraggableScrollableSheet(
+                initialChildSize: 0.8,
+                minChildSize: 0.3,
+                maxChildSize: 0.9,
+                expand: false,
+                builder: (context, scrollController) {
+                  return ReaderSettingsSheet(
+                    fontSize: provider.fontSize,
+                    lineHeight: provider.lineHeight,
+                    letterSpacing: provider.letterSpacing,
+                    paragraphSpacing: provider.paragraphSpacing,
+                    horizontalPadding: 16.0,
+                    verticalPadding: 12.0,
+                    paragraphIndent: '\u3000\u3000',
+                    fontWeightIndex: 1,
+                    fontFamily: provider.fontFamily,
+                    backgroundColor: provider.backgroundColor,
+                    backgroundImagePath: null,
+                    showReadingInfo: true,
+                    showChapterTitle: true,
+                    showClock: true,
+                    showProgress: true,
+                    pageAnim: provider.pageMode.index,
+                    pageAnimDurationMs: 300,
+                    screenBrightness: provider.brightness,
+                    keepScreenOn: false,
+                    enableVolumeKeyPage: false,
+                    volumeKeyPageOnTts: false,
+                    enableLongPressMenu: true,
+                    autoScrollSpeed: 50,
+                    autoPageIntervalSeconds: 0,
+                    tapZones: [0, 4, 0, 0, 1, 0, 0, 3, 2],
+                    isNightMode: provider.isNightMode,
+                    onFontSizeChanged: (value) => provider.setFontSize(value),
+                    onLineHeightChanged: (value) => provider.setLineHeight(value),
+                    onLetterSpacingChanged: (value) => provider.setLetterSpacing(value),
+                    onParagraphSpacingChanged: (value) => provider.setParagraphSpacing(value),
+                    onHorizontalPaddingChanged: (value) {},
+                    onVerticalPaddingChanged: (value) {},
+                    onParagraphIndentChanged: (value) {},
+                    onFontWeightChanged: (value) {},
+                    onFontFamilyChanged: (value) => provider.setFontFamily(value),
+                    onBackgroundColorChanged: (value) => provider.setBackgroundColor(value),
+                    onBackgroundImageChanged: (value) {},
+                    onShowReadingInfoChanged: (value) {},
+                    onShowChapterTitleChanged: (value) {},
+                    onShowClockChanged: (value) {},
+                    onShowProgressChanged: (value) {},
+                    onPageAnimChanged: (value) {
+                      if (value < PageMode.values.length) {
+                        provider.setPageMode(PageMode.values[value]);
+                        _repaginate();
+                      }
+                    },
+                    onPageAnimDurationChanged: (value) {},
+                    onScreenBrightnessChanged: (value) => provider.setBrightness(value),
+                    onKeepScreenOnChanged: (value) {},
+                    onEnableVolumeKeyPageChanged: (value) {},
+                    onVolumeKeyPageOnTtsChanged: (value) {},
+                    onEnableLongPressMenuChanged: (value) {},
+                    onAutoScrollSpeedChanged: (value) {},
+                    onAutoPageIntervalChanged: (value) {},
+                    onTapZonesChanged: (value) {},
+                    onNightModeChanged: (value) {
+                      provider.toggleNightMode();
+                    },
+                  );
+                },
+              ),
           ],
         ),
       ),

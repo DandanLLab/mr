@@ -64,6 +64,8 @@ dependencies:
   flutter_js: ^0.8.2
   # JSON 处理
   json_annotation: ^4.9.0
+  # TTS 文字转语音
+  flutter_tts: ^3.8.5
 
 dev_dependencies:
   flutter_test:

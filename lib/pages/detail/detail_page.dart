@@ -23,9 +23,11 @@ class DetailPage extends StatefulWidget {
 class _DetailPageState extends State<DetailPage> {
   bool _isInBookshelf = false;
   bool _isLoading = true;
+  bool _isRefreshing = false;
   Book? _book;
   List<Chapter> _chapters = [];
   bool _isDescExpanded = false;
+  int _totalWordCount = 0;
 
   @override
   void initState() {
@@ -45,6 +47,10 @@ class _DetailPageState extends State<DetailPage> {
       chapters = await LocalBookService.instance.getChapterList(book);
     }
 
+    // 计算总字数
+    _totalWordCount = chapters.fold<int>(
+      0, (sum, ch) => sum + (ch.wordCount ?? 0));
+
     final isInShelf = bookData != null;
 
     if (mounted) {
@@ -53,6 +59,27 @@ class _DetailPageState extends State<DetailPage> {
         _chapters = chapters;
         _isInBookshelf = isInShelf;
         _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _refreshData() async {
+    if (_isRefreshing) return;
+    setState(() {
+      _isRefreshing = true;
+    });
+
+    final bookData = StorageService.instance.getBook(widget.bookUrl);
+    if (bookData != null) {
+      _book = Book.fromJson(bookData);
+      _chapters = await LocalBookService.instance.getChapterList(_book!);
+      _totalWordCount = _chapters.fold<int>(
+        0, (sum, ch) => sum + (ch.wordCount ?? 0));
+    }
+
+    if (mounted) {
+      setState(() {
+        _isRefreshing = false;
       });
     }
   }
@@ -75,7 +102,7 @@ class _DetailPageState extends State<DetailPage> {
 
     return Scaffold(
       body: RefreshIndicator(
-        onRefresh: _loadData,
+        onRefresh: _refreshData,
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
@@ -137,19 +164,26 @@ class _DetailPageState extends State<DetailPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // 封面
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Container(
-              width: 100,
-              height: 140,
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              child: _book!.displayCoverUrl.isNotEmpty
-                  ? CachedNetworkImage(
-                      imageUrl: _book!.displayCoverUrl,
-                      fit: BoxFit.cover,
-                      errorWidget: (_, __, ___) => const Icon(Icons.book, size: 48),
-                    )
-                  : const Icon(Icons.book, size: 48),
+          Hero(
+            tag: 'cover_${widget.bookUrl}',
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                width: 100,
+                height: 140,
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                child: _book!.displayCoverUrl.isNotEmpty
+                    ? CachedNetworkImage(
+                        imageUrl: _book!.displayCoverUrl,
+                        fit: BoxFit.cover,
+                        placeholder: (_, __) => const Center(
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        errorWidget: (_, __, ___) =>
+                            const Icon(Icons.book, size: 48),
+                      )
+                    : const Icon(Icons.book, size: 48),
+              ),
             ),
           ),
           const SizedBox(width: 16),
@@ -160,16 +194,32 @@ class _DetailPageState extends State<DetailPage> {
               children: [
                 Text(
                   _book!.displayName,
-                  style: Theme.of(context).textTheme.titleLarge,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  _book!.displayAuthor,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.person_outline,
+                      size: 16,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        _book!.displayAuthor,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 8),
                 // 标签行
@@ -178,17 +228,24 @@ class _DetailPageState extends State<DetailPage> {
                   runSpacing: 4,
                   children: [
                     _buildInfoChip(
-                      _book!.status ?? (_book!.originType == BookOriginType.local ? '本地' : '未知'),
+                      _book!.status ??
+                          (_book!.originType == BookOriginType.local
+                              ? '本地'
+                              : '未知'),
                     ),
                     if (_book!.sourceName != null)
                       _buildInfoChip(_book!.sourceName!),
-                    _buildInfoChip('${_book!.totalChapterNum ?? _chapters.length} 章'),
-                    if (_book!.wordCount != null)
-                      _buildInfoChip(_book!.wordCount!),
+                    _buildInfoChip(
+                        '${_chapters.length} ${_chapters.length == 1 ? "章" : "章"}'),
+                    if (_totalWordCount > 0)
+                      _buildInfoChip(_formatWordCount(_totalWordCount)),
                   ],
                 ),
-                const SizedBox(height: 6),
-                if (_book!.lastCheckTime != null)
+                const SizedBox(height: 8),
+                // 阅读进度
+                if (_book!.durChapterIndex > 0) _buildReadProgress(),
+                if (_book!.lastCheckTime != null) ...[
+                  const SizedBox(height: 4),
                   Text(
                     '更新: ${_formatDate(_book!.lastCheckTime)}',
                     style: TextStyle(
@@ -196,12 +253,69 @@ class _DetailPageState extends State<DetailPage> {
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
+                ],
               ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildReadProgress() {
+    final chapterIndex = _book!.durChapterIndex;
+    final chapterName = _book!.durChapterTitle ?? '第${chapterIndex + 1}章';
+    final progress = _chapters.isNotEmpty
+        ? (chapterIndex / _chapters.length * 100).toInt()
+        : 0;
+
+    return GestureDetector(
+      onTap: _startReading,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.play_circle_outline,
+              size: 14,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                chapterName,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '$progress%',
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context).colorScheme.onPrimaryContainer,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatWordCount(int count) {
+    if (count >= 10000) {
+      return '${(count / 10000).toStringAsFixed(1)}万字';
+    }
+    return '${count}字';
   }
 
   Widget _buildInfoChip(String text) {
