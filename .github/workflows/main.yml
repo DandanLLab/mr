@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - '**'           # 监听所有分支的推送
-      - '!main'        # 排除目标分支自身，避免循环
+      - '!master'      # 排除目标分支自身，避免循环
 
 permissions:
   contents: write
@@ -13,8 +13,7 @@ permissions:
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
-    # 如果是 main 分支的推送，不触发（由上面 branches 已排除，双重保险）
-    if: github.ref != 'refs/heads/main'
+    if: github.ref != 'refs/heads/master'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,14 +26,36 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
 
-      - name: Create or update Pull Request
+      - name: Fetch all branches
+        run: git fetch origin
+
+      - name: Try to merge and resolve conflicts
+        id: merge
+        continue-on-error: true
+        run: |
+          git checkout master
+          git pull origin master
+          git merge --no-ff ${{ github.ref_name }} --strategy-option theirs || true
+          if [ -f .git/MERGE_HEAD ]; then
+            echo "conflict=true" >> $GITHUB_OUTPUT
+          else
+            echo "conflict=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Push merged changes if no conflict
+        if: steps.merge.outputs.conflict == 'false'
+        run: |
+          git push origin master
+
+      - name: Create or update Pull Request if conflict
+        if: steps.merge.outputs.conflict == 'true'
         id: create-pr
         uses: repo-sync/pull-request@v2
         with:
           source_branch: ${{ github.ref_name }}
-          destination_branch: main           # 目标分支，改成你的主分支名
+          destination_branch: master
           pr_title: "自动合并 ${{ github.ref_name }}"
-          pr_body: "由 GitHub Actions 自动创建的合并请求"
+          pr_body: "由 GitHub Actions 自动创建的合并请求\n\n⚠️ 检测到冲突，需要人工审查解决"
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Enable auto-merge on PR
@@ -42,9 +63,5 @@ jobs:
         run: |
           pr_number=${{ steps.create-pr.outputs.pr_number }}
           gh pr merge $pr_number --auto --merge -R ${{ github.repository }}
-          # 参数说明：
-          # --auto 启用自动合并
-          # --merge 使用 merge commit 方式，也可换 --squash 或 --rebase
-          # -R 指定仓库
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
