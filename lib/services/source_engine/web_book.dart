@@ -147,36 +147,38 @@ class HttpClient {
       if (!kIsWeb) {
         try {
           final timeoutMs = (connectTimeout ?? const Duration(seconds: 15)).inMilliseconds;
-          String? result;
+          String? okResult;
 
+          debugPrint('🔵 [OkHttp] $method $url');
           if (method.toUpperCase() == 'POST') {
-            result = await NativeChannel.instance.httpPost(
+            okResult = await NativeChannel.instance.httpPost(
               url,
               body: body,
               headers: headers,
               timeoutMs: timeoutMs,
             );
           } else {
-            result = await NativeChannel.instance.httpGet(
+            okResult = await NativeChannel.instance.httpGet(
               url,
               headers: headers,
               timeoutMs: timeoutMs,
             );
           }
 
-          if (result != null) {
+          debugPrint('🔵 [OkHttp] 响应: ${okResult != null ? "${okResult.length} chars" : "null"}');
+          if (okResult != null && okResult.isNotEmpty) {
             return StrResponse(
               url: url,
-              body: result,
+              body: okResult,
               statusCode: 200,
               headers: headers ?? {},
             );
           }
 
-          // OkHttp 返回 null，降级到 Dio
-          debugPrint('⚠️ OkHttp 返回 null，降级到 Dio: $url');
+          // OkHttp 返回 null 或空字符串，降级到 Dio
+          debugPrint('⚠️ OkHttp 返回空，降级到 Dio: $url');
         } catch (e) {
-          debugPrint('⚠️ OkHttp 请求失败，降级到 Dio: $e');
+          debugPrint('⚠️ OkHttp 异常，降级到 Dio: $e');
         }
       }
 

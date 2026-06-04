@@ -5,6 +5,7 @@ import android.util.Base64
 import android.util.Log
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import kotlinx.coroutines.*
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -36,6 +37,9 @@ class NativePlugin(private val context: Context) {
                 .setMethodCallHandler(NativePlugin(context).handler)
         }
     }
+
+    // 协程作用域：网络请求在 IO 线程执行，避免阻塞主线程
+    private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     // 内置 Node.js 运行时
     private val nodeRuntime by lazy { NodeRuntime(context) }
@@ -103,83 +107,118 @@ class NativePlugin(private val context: Context) {
     // ===== OkHttp 方法 =====
 
     private fun httpGet(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
-        try {
-            val url = call.argument<String>("url") ?: return result.error("ERROR", "url is required", null)
-            val headers = call.argument<Map<String, String>>("headers") ?: emptyMap()
-            val timeoutMs = call.argument<Int>("timeoutMs") ?: 10000
+        val url = call.argument<String>("url")
+        if (url.isNullOrEmpty()) {
+            result.error("ERROR", "url is required", null)
+            return
+        }
+        val headers = call.argument<Map<String, String>>("headers") ?: emptyMap()
+        val timeoutMs = call.argument<Int>("timeoutMs") ?: 10000
 
-            val requestBuilder = Request.Builder().url(url)
-            headers.forEach { (key, value) -> requestBuilder.addHeader(key, value) }
+        coroutineScope.launch {
+            try {
+                val requestBuilder = Request.Builder().url(url)
+                headers.forEach { (key, value) -> requestBuilder.addHeader(key, value) }
 
-            val client = okHttpClient.newBuilder()
-                .connectTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
-                .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
-                .followRedirects(true)
-                .followSslRedirects(true)
-                .build()
+                val client = okHttpClient.newBuilder()
+                    .connectTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+                    .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+                    .followRedirects(true)
+                    .followSslRedirects(true)
+                    .build()
 
-            val response = client.newCall(requestBuilder.build()).execute()
-            val responseBody = response.body?.string()
-            if (response.isSuccessful || responseBody != null) {
-                result.success(responseBody ?: "")
-            } else {
-                result.success("")
+                val response = client.newCall(requestBuilder.build()).execute()
+                val responseBody = response.body?.string()
+                Log.d(TAG, "httpGet: $url → ${response.code} (${responseBody?.length ?: 0} chars)")
+                withContext(Dispatchers.Main) {
+                    if (response.isSuccessful || responseBody != null) {
+                        result.success(responseBody ?: "")
+                    } else {
+                        result.success("")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "httpGet failed: $url → ${e.message}")
+                withContext(Dispatchers.Main) {
+                    result.success("")
+                }
             }
-        } catch (e: Exception) {
-            Log.w("NativePlugin", "httpGet failed: ${e.message}")
-            result.success("")
         }
     }
 
     private fun httpPost(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
-        try {
-            val url = call.argument<String>("url") ?: return result.error("ERROR", "url is required", null)
-            val body = call.argument<String>("body") ?: ""
-            val headers = call.argument<Map<String, String>>("headers") ?: emptyMap()
-            val timeoutMs = call.argument<Int>("timeoutMs") ?: 10000
+        val url = call.argument<String>("url")
+        if (url.isNullOrEmpty()) {
+            result.error("ERROR", "url is required", null)
+            return
+        }
+        val body = call.argument<String>("body") ?: ""
+        val headers = call.argument<Map<String, String>>("headers") ?: emptyMap()
+        val timeoutMs = call.argument<Int>("timeoutMs") ?: 10000
 
-            val contentType = headers["Content-Type"]?.toMediaType() ?: "application/x-www-form-urlencoded".toMediaType()
-            val requestBody = body.toRequestBody(contentType)
-            val requestBuilder = Request.Builder().url(url).post(requestBody)
-            headers.forEach { (key, value) -> requestBuilder.addHeader(key, value) }
+        coroutineScope.launch {
+            try {
+                val contentType = headers["Content-Type"]?.toMediaType()
+                    ?: "application/x-www-form-urlencoded".toMediaType()
+                val requestBody = body.toRequestBody(contentType)
+                val requestBuilder = Request.Builder().url(url).post(requestBody)
+                headers.forEach { (key, value) -> requestBuilder.addHeader(key, value) }
 
-            val client = okHttpClient.newBuilder()
-                .connectTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
-                .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
-                .followRedirects(true)
-                .followSslRedirects(true)
-                .build()
+                val client = okHttpClient.newBuilder()
+                    .connectTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+                    .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+                    .followRedirects(true)
+                    .followSslRedirects(true)
+                    .build()
 
-            val response = client.newCall(requestBuilder.build()).execute()
-            val responseBody = response.body?.string()
-            if (response.isSuccessful || responseBody != null) {
-                result.success(responseBody ?: "")
-            } else {
-                result.success("")
+                val response = client.newCall(requestBuilder.build()).execute()
+                val responseBody = response.body?.string()
+                Log.d(TAG, "httpPost: $url → ${response.code} (${responseBody?.length ?: 0} chars)")
+                withContext(Dispatchers.Main) {
+                    if (response.isSuccessful || responseBody != null) {
+                        result.success(responseBody ?: "")
+                    } else {
+                        result.success("")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "httpPost failed: $url → ${e.message}")
+                withContext(Dispatchers.Main) {
+                    result.success("")
+                }
             }
-        } catch (e: Exception) {
-            Log.w("NativePlugin", "httpPost failed: ${e.message}")
-            result.success("")
         }
     }
 
     private fun httpGetWithCache(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
-        try {
-            val url = call.argument<String>("url") ?: return result.error("ERROR", "url is required", null)
-            val headers = call.argument<Map<String, String>>("headers") ?: emptyMap()
+        val url = call.argument<String>("url")
+        if (url.isNullOrEmpty()) {
+            result.error("ERROR", "url is required", null)
+            return
+        }
+        val headers = call.argument<Map<String, String>>("headers") ?: emptyMap()
 
-            val requestBuilder = Request.Builder().url(url)
-                .cacheControl(CacheControl.Builder().maxStale(3600, TimeUnit.SECONDS).build())
-            headers.forEach { (key, value) -> requestBuilder.addHeader(key, value) }
+        coroutineScope.launch {
+            try {
+                val requestBuilder = Request.Builder().url(url)
+                    .cacheControl(CacheControl.Builder().maxStale(3600, TimeUnit.SECONDS).build())
+                headers.forEach { (key, value) -> requestBuilder.addHeader(key, value) }
 
-            val response = cachedClient.newCall(requestBuilder.build()).execute()
-            if (response.isSuccessful) {
-                result.success(response.body?.string())
-            } else {
-                result.error("HTTP_ERROR", "HTTP ${response.code}", null)
+                val response = cachedClient.newCall(requestBuilder.build()).execute()
+                val responseBody = response.body?.string()
+                withContext(Dispatchers.Main) {
+                    if (response.isSuccessful) {
+                        result.success(responseBody ?: "")
+                    } else {
+                        result.success("")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "httpGetWithCache failed: $url → ${e.message}")
+                withContext(Dispatchers.Main) {
+                    result.success("")
+                }
             }
-        } catch (e: Exception) {
-            result.error("ERROR", e.message, null)
         }
     }
 
@@ -247,78 +286,86 @@ class NativePlugin(private val context: Context) {
      * 通过 Jsoup + OkHttp 组合执行书源规则，支持反射调用
      */
     private fun evaluateJavaRule(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
-        try {
-            val code = call.argument<String>("code") ?: return result.error("ERROR", "code is required", null)
-            val existingResult = call.argument<String>("result") ?: ""
-            val env = call.argument<Map<String, Any>>("env") ?: emptyMap()
+        val code = call.argument<String>("code")
+        if (code.isNullOrEmpty()) {
+            result.error("ERROR", "code is required", null)
+            return
+        }
+        val existingResult = call.argument<String>("result") ?: ""
+        val env = call.argument<Map<String, Any>>("env") ?: emptyMap()
 
-            // 构建规则执行环境
-            val url = env["url"] as? String
-            val html = env["html"] as? String
-            val selector = env["selector"] as? String
+        coroutineScope.launch {
+            try {
+                // 构建规则执行环境
+                val url = env["url"] as? String
+                val html = env["html"] as? String
+                val selector = env["selector"] as? String
 
-            var ruleResult = existingResult
+                var ruleResult = existingResult
 
-            // 如果提供了 URL，先获取 HTML
-            val targetHtml = if (!html.isNullOrEmpty()) {
-                html
-            } else if (!url.isNullOrEmpty()) {
-                try {
-                    val request = Request.Builder().url(url).build()
-                    val response = okHttpClient.newCall(request).execute()
-                    response.body?.string() ?: ""
-                } catch (e: Exception) {
-                    Log.e(TAG, "evaluateJavaRule: failed to fetch url", e)
+                // 如果提供了 URL，先获取 HTML
+                val targetHtml = if (!html.isNullOrEmpty()) {
+                    html
+                } else if (!url.isNullOrEmpty()) {
+                    try {
+                        val request = Request.Builder().url(url).build()
+                        val response = okHttpClient.newCall(request).execute()
+                        response.body?.string() ?: ""
+                    } catch (e: Exception) {
+                        Log.e(TAG, "evaluateJavaRule: failed to fetch url", e)
+                        ""
+                    }
+                } else {
                     ""
                 }
-            } else {
-                ""
-            }
 
-            // 解析规则代码：支持简单的选择器规则
-            val doc = if (targetHtml.isNotEmpty()) Jsoup.parse(targetHtml) else null
+                // 解析规则代码：支持简单的选择器规则
+                val doc = if (targetHtml.isNotEmpty()) Jsoup.parse(targetHtml) else null
 
-            when {
-                code.startsWith("@css:") -> {
-                    val cssSelector = code.substring(5).trim()
-                    ruleResult = doc?.selectFirst(cssSelector)?.text() ?: ""
-                }
-                code.startsWith("@text:") -> {
-                    val textSelector = code.substring(6).trim()
-                    ruleResult = doc?.select(textSelector)?.map { it.text() }?.joinToString("\n") ?: ""
-                }
-                code.startsWith("@attr:") -> {
-                    val parts = code.substring(6).trim().split("|")
-                    val sel = parts.getOrNull(0) ?: ""
-                    val attrName = parts.getOrNull(1) ?: ""
-                    ruleResult = doc?.selectFirst(sel)?.attr(attrName) ?: ""
-                }
-                code.startsWith("@js:") || code.startsWith("javascript:") -> {
-                    // JavaScript 规则：通过 Rhino 执行（如果可用），否则简单返回
-                    val jsCode = if (code.startsWith("@js:")) code.substring(4) else code.substring(11)
-                    ruleResult = executeJsRule(jsCode, targetHtml, ruleResult, env)
-                }
-                code.startsWith("java:") -> {
-                    // Java 反射调用规则
-                    val className = code.substring(5).trim()
-                    try {
-                        val clazz = Class.forName(className)
-                        val method = clazz.getMethod("evaluate", String::class.java, Map::class.java)
-                        ruleResult = method.invoke(null, targetHtml, env) as? String ?: ""
-                    } catch (e: Exception) {
-                        Log.e(TAG, "evaluateJavaRule: reflection failed", e)
-                        ruleResult = ""
+                ruleResult = when {
+                    code.startsWith("@css:") -> {
+                        val cssSelector = code.substring(5).trim()
+                        doc?.selectFirst(cssSelector)?.text() ?: ""
+                    }
+                    code.startsWith("@text:") -> {
+                        val textSelector = code.substring(6).trim()
+                        doc?.select(textSelector)?.map { it.text() }?.joinToString("\n") ?: ""
+                    }
+                    code.startsWith("@attr:") -> {
+                        val parts = code.substring(6).trim().split("|")
+                        val sel = parts.getOrNull(0) ?: ""
+                        val attrName = parts.getOrNull(1) ?: ""
+                        doc?.selectFirst(sel)?.attr(attrName) ?: ""
+                    }
+                    code.startsWith("@js:") || code.startsWith("javascript:") -> {
+                        val jsCode = if (code.startsWith("@js:")) code.substring(4) else code.substring(11)
+                        executeJsRule(jsCode, targetHtml, ruleResult, env)
+                    }
+                    code.startsWith("java:") -> {
+                        val className = code.substring(5).trim()
+                        try {
+                            val clazz = Class.forName(className)
+                            val method = clazz.getMethod("evaluate", String::class.java, Map::class.java)
+                            method.invoke(null, targetHtml, env) as? String ?: ""
+                        } catch (e: Exception) {
+                            Log.e(TAG, "evaluateJavaRule: reflection failed", e)
+                            ""
+                        }
+                    }
+                    else -> {
+                        doc?.selectFirst(code)?.text() ?: existingResult
                     }
                 }
-                else -> {
-                    // 默认当作 CSS 选择器
-                    ruleResult = doc?.selectFirst(code)?.text() ?: existingResult
+
+                withContext(Dispatchers.Main) {
+                    result.success(ruleResult)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "evaluateJavaRule failed: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    result.success("")
                 }
             }
-
-            result.success(ruleResult)
-        } catch (e: Exception) {
-            result.error("ERROR", e.message, null)
         }
     }
 
@@ -359,28 +406,41 @@ class NativePlugin(private val context: Context) {
      * 从 URL 直接解析 HTML（Jsoup.connect）
      */
     private fun jsoupParseUrl(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
-        try {
-            val url = call.argument<String>("url") ?: return result.error("ERROR", "url is required", null)
-            val headers = call.argument<Map<String, String>>("headers") ?: emptyMap()
-            val selector = call.argument<String>("selector")
+        val url = call.argument<String>("url")
+        if (url.isNullOrEmpty()) {
+            result.error("ERROR", "url is required", null)
+            return
+        }
+        val headers = call.argument<Map<String, String>>("headers") ?: emptyMap()
+        val selector = call.argument<String>("selector")
 
-            val connection = Jsoup.connect(url)
-                .userAgent("Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Mobile Safari/537.36")
-                .timeout(15000)
-                .ignoreContentType(true)
+        coroutineScope.launch {
+            try {
+                val connection = Jsoup.connect(url)
+                    .userAgent("Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Mobile Safari/537.36")
+                    .timeout(15000)
+                    .ignoreContentType(true)
 
-            headers.forEach { (key, value) -> connection.header(key, value) }
+                headers.forEach { (key, value) -> connection.header(key, value) }
 
-            val doc = connection.get()
+                val doc = connection.get()
 
-            if (!selector.isNullOrEmpty()) {
-                val elements = doc.select(selector)
-                result.success(elements.map { it.outerHtml() }.joinToString("\n"))
-            } else {
-                result.success(doc.html())
+                val parseResult = if (!selector.isNullOrEmpty()) {
+                    val elements = doc.select(selector)
+                    elements.map { it.outerHtml() }.joinToString("\n")
+                } else {
+                    doc.html()
+                }
+
+                withContext(Dispatchers.Main) {
+                    result.success(parseResult)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "jsoupParseUrl failed: $url → ${e.message}")
+                withContext(Dispatchers.Main) {
+                    result.success("")
+                }
             }
-        } catch (e: Exception) {
-            result.error("ERROR", e.message, null)
         }
     }
 
