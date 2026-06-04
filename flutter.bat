@@ -1,6 +1,7 @@
 @echo off
 set PUB_HOSTED_URL=https://pub.flutter-io.cn
 set FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn
+set PUB_CACHE=%~dp0.pub-cache
 
 if defined FLUTTER_ROOT if exist "%FLUTTER_ROOT%\bin\flutter.bat" (
   call "%FLUTTER_ROOT%\bin\flutter.bat" %*

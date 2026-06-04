@@ -1,5 +1,6 @@
 $env:PUB_HOSTED_URL="https://pub.flutter-io.cn"
 $env:FLUTTER_STORAGE_BASE_URL="https://storage.flutter-io.cn"
+$env:PUB_CACHE = (Join-Path $PSScriptRoot ".pub-cache")
 
 if ($env:FLUTTER_ROOT) {
     $flutterFromRoot = Join-Path $env:FLUTTER_ROOT "bin\flutter.bat"
