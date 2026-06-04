@@ -357,6 +357,66 @@ class WebBook {
     return url;
   }
 
+  /// 将相对链接拼接成绝对链接
+  /// [url] 待拼接的链接（可能是相对路径如 /book/123.html）
+  /// [baseUrl] 基准链接（当前页面的完整 URL）
+  /// 拼接规则：
+  ///   - 已经是绝对路径（http/https开头）→ 直接返回
+  ///   - 以 // 开头 → 补上协议
+  ///   - 以 / 开头 → 拼接 baseUrl 的 origin
+  ///   - 以 ./ 或 ../ 开头 → 相对于 baseUrl 路径解析
+  ///   - 其他 → 相对于 baseUrl 路径拼接
+  static String resolveUrl(String? url, String baseUrl) {
+    if (url == null || url.trim().isEmpty) return '';
+    url = url.trim();
+
+    // 已经是绝对路径
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+
+    // 以 // 开头，补上协议
+    if (url.startsWith('//')) {
+      final baseUri = Uri.tryParse(baseUrl);
+      return '${baseUri?.scheme ?? 'https'}:$url';
+    }
+
+    // 解析 baseUrl
+    final baseUri = Uri.tryParse(baseUrl);
+    if (baseUri == null) return url;
+
+    if (url.startsWith('/')) {
+      // 以 / 开头，拼接 origin
+      return '${baseUri.scheme}://${baseUri.host}${baseUri.hasPort ? ':${baseUri.port}' : ''}$url';
+    }
+
+    // 相对路径（./ ../ 或其他），相对于 baseUrl 的路径解析
+    final basePath = baseUri.path;
+    final lastSlash = basePath.lastIndexOf('/');
+    final dir = lastSlash >= 0 ? basePath.substring(0, lastSlash + 1) : '/';
+    final resolvedPath = _normalizePath('$dir$url');
+
+    return '${baseUri.scheme}://${baseUri.host}${baseUri.hasPort ? ':${baseUri.port}' : ''}$resolvedPath';
+  }
+
+  /// 规范化路径（处理 ./ 和 ../）
+  static String _normalizePath(String path) {
+    final segments = path.split('/');
+    final result = <String>[];
+
+    for (final seg in segments) {
+      if (seg == '..') {
+        if (result.isNotEmpty && result.last != '..') {
+          result.removeLast();
+        }
+      } else if (seg != '.' && seg.isNotEmpty) {
+        result.add(seg);
+      }
+    }
+
+    return '/${result.join('/')}';
+  }
+
   /// 解析可能包含 JS 的请求头
   Future<Map<String, String>> _resolveHeaders(String? headerStr) async {
     final headers = <String, String>{};
@@ -583,7 +643,14 @@ class WebBook {
       AppLogger.instance
           .info(LogCategory.network, '搜索响应: ${html.length} chars');
       if (html.isEmpty) {
-        AppLogger.instance.error(LogCategory.network, '搜索响应为空');
+        AppLogger.instance.error(LogCategory.network, '搜索响应为空',
+          detail: 'URL: ${parsed.url}\n状态码: ${response.statusCode}');
+        // 保存诊断信息，方便调试页面查看
+        lastSearchHtml = '<!-- 搜索响应为空 -->\n'
+            '<!-- URL: ${parsed.url} -->\n'
+            '<!-- 状态码: ${response.statusCode} -->\n'
+            '<!-- 请求方式: ${parsed.option?.method ?? "GET"} -->\n'
+            '<!-- 书源: ${source.bookSourceName} -->';
         return [];
       }
 
@@ -643,12 +710,16 @@ class WebBook {
             .debug(LogCategory.parse, '[$i] 书名: $name, 作者: $author');
 
         if (name != null && name.isNotEmpty) {
+          // 拼接相对链接：用书源URL作为基准
+          final resolvedBookUrl = resolveUrl(bookUrl, source.bookSourceUrl);
+          final resolvedCoverUrl = resolveUrl(coverUrl, source.bookSourceUrl);
+
           results.add({
             'name': name,
             'author': author ?? '',
-            'coverUrl': coverUrl ?? '',
+            'coverUrl': resolvedCoverUrl,
             'intro': intro ?? '',
-            'bookUrl': bookUrl ?? '',
+            'bookUrl': resolvedBookUrl,
             'kind': kind ?? '',
             'lastChapter': lastChapter ?? '',
             'wordCount': wordCount ?? '',
@@ -668,12 +739,51 @@ class WebBook {
   }
 
   /// 发现书籍
+  /// 当发现规则为空或 bookList 为空时，退回使用搜索规则
   Future<List<Map<String, dynamic>>> exploreBook(String exploreUrl) async {
-    final exploreRule = source.ruleExplore;
-    if (exploreRule == null) return [];
-
     // 加载书源 JS 库
     await _loadJsLib();
+
+    // 发现规则回退逻辑：ruleExplore 为空或 bookList 为空时，使用 ruleSearch
+    final exploreRule = source.ruleExplore;
+    final searchRule = source.ruleSearch;
+    final useSearchFallback = exploreRule == null ||
+        (exploreRule.bookList == null || exploreRule.bookList!.trim().isEmpty);
+
+    // 确定要使用的规则字段
+    final bookListRule = useSearchFallback
+        ? (searchRule?.bookList ?? '')
+        : (exploreRule.bookList ?? '');
+    final nameRule = useSearchFallback
+        ? (searchRule?.name ?? '')
+        : (exploreRule.name ?? '');
+    final authorRule = useSearchFallback
+        ? (searchRule?.author ?? '')
+        : (exploreRule.author ?? '');
+    final coverUrlRule = useSearchFallback
+        ? (searchRule?.coverUrl ?? '')
+        : (exploreRule.coverUrl ?? '');
+    final introRule = useSearchFallback
+        ? (searchRule?.intro ?? '')
+        : (exploreRule.intro ?? '');
+    final bookUrlRule = useSearchFallback
+        ? (searchRule?.bookUrl ?? '')
+        : (exploreRule.bookUrl ?? '');
+    final kindRule = useSearchFallback
+        ? (searchRule?.kind ?? '')
+        : (exploreRule.kind ?? '');
+    final lastChapterRule = useSearchFallback
+        ? (searchRule?.lastChapter ?? '')
+        : (exploreRule.lastChapter ?? '');
+    final wordCountRule = useSearchFallback
+        ? (searchRule?.wordCount ?? '')
+        : (exploreRule.wordCount ?? '');
+
+    if (useSearchFallback && searchRule != null) {
+      AppLogger.instance.info(LogCategory.parse, '发现规则为空，退回搜索规则');
+    }
+
+    if (bookListRule.isEmpty && nameRule.isEmpty) return [];
 
     // 支持 JS 动态生成发现 URL
     final resolvedExploreUrl = await _resolveUrl(exploreUrl);
@@ -684,6 +794,16 @@ class WebBook {
       final html = response.body;
 
       lastExploreHtml = html;
+
+      AppLogger.instance.info(LogCategory.network, '发现响应: ${html.length} chars, 状态码: ${response.statusCode}');
+      if (html.isEmpty) {
+        AppLogger.instance.error(LogCategory.network, '发现响应为空',
+          detail: 'URL: ${parsed.url}\n状态码: ${response.statusCode}');
+        lastExploreHtml = '<!-- 发现响应为空 -->\n'
+            '<!-- URL: ${parsed.url} -->\n'
+            '<!-- 状态码: ${response.statusCode} -->';
+        return [];
+      }
 
       // 使用 AnalyzeRule 引擎解析
       final analyzer = AnalyzeRule()
@@ -720,7 +840,7 @@ class WebBook {
 
       return results;
     } catch (e) {
-      debugPrint('❌ 发现失败: $e');
+      AppLogger.instance.error(LogCategory.parse, '发现失败', detail: e.toString());
       return [];
     }
   }
@@ -737,41 +857,71 @@ class WebBook {
       final response = await _executeRequest(_parseUrlWithOption(bookUrl));
       var html = response.body;
 
-      lastBookInfoHtml = html;
+      AppLogger.instance.info(LogCategory.network, '详情响应: ${html.length} chars, 状态码: ${response.statusCode}');
+      if (html.isEmpty) {
+        AppLogger.instance.error(LogCategory.network, '详情响应为空',
+          detail: 'URL: $bookUrl\n状态码: ${response.statusCode}');
+        lastBookInfoHtml = '<!-- 详情响应为空 -->\n'
+            '<!-- URL: $bookUrl -->\n'
+            '<!-- 状态码: ${response.statusCode} -->';
+        return null;
+      }
 
       // 使用 AnalyzeRule 引擎解析
       var analyzer = AnalyzeRule()
         ..setContent(html, baseUrl: response.url)
         ..setSourceEngine(source.engineType);
       if (bookInfoRule.init != null && bookInfoRule.init!.isNotEmpty) {
-        final initialized = analyzer.getElement(bookInfoRule.init!);
-        if (initialized != null) {
-          analyzer = AnalyzeRule()
-            ..setContent(initialized, baseUrl: response.url)
-            ..setSourceEngine(source.engineType);
+        final initResult = await _executeJs(bookInfoRule.init!,
+            result: html, baseUrl: bookUrl);
+        if (initResult != null && initResult.isNotEmpty) {
+          html = initResult;
+          AppLogger.instance.logJsResult('init', '${initResult.length} chars');
         }
       }
 
+      // 保存源码（init 处理后的）
+      lastBookInfoHtml = html;
+
+      // 使用 AnalyzeRule 引擎解析
+      final analyzer = AnalyzeRule()
+        ..setContent(html, baseUrl: bookUrl)
+        ..setSourceEngine(source.engineType);
+
+      final name = analyzer.getString(bookInfoRule.name ?? '');
+      final author = analyzer.getString(bookInfoRule.author ?? '');
+      final rawCoverUrl = analyzer.getString(bookInfoRule.coverUrl ?? '');
+      final intro = analyzer.getString(bookInfoRule.intro ?? '');
+      final kind = analyzer.getString(bookInfoRule.kind ?? '');
+      final lastChapter = analyzer.getString(bookInfoRule.lastChapter ?? '');
+      final wordCount = analyzer.getString(bookInfoRule.wordCount ?? '');
+      final rawTocUrl = analyzer.getString(bookInfoRule.tocUrl ?? '');
+
+      // 拼接相对链接：用详情页URL作为基准
+      final resolvedCoverUrl = resolveUrl(rawCoverUrl, bookUrl);
+      final resolvedTocUrl = resolveUrl(rawTocUrl, bookUrl);
+
+      AppLogger.instance.info(LogCategory.parse, '详情: 书名=$name, 作者=$author, 目录=$resolvedTocUrl');
+
       return Book(
         bookUrl: bookUrl,
-        name: analyzer.getString(bookInfoRule.name ?? '') ?? '未知书名',
-        author: analyzer.getString(bookInfoRule.author ?? '') ?? '',
-        coverUrl:
-            analyzer.getString(bookInfoRule.coverUrl ?? '', isUrl: true) ?? '',
-        intro: analyzer.getString(bookInfoRule.intro ?? '') ?? '',
+        name: name ?? '未知书名',
+        author: author ?? '',
+        coverUrl: resolvedCoverUrl,
+        intro: intro ?? '',
         mediaType: MediaType.novel,
         originType: BookOriginType.online,
         sourceUrl: source.bookSourceUrl,
         sourceName: source.bookSourceName,
-        kind: analyzer.getString(bookInfoRule.kind ?? ''),
-        lastChapter: analyzer.getString(bookInfoRule.lastChapter ?? ''),
-        wordCount: analyzer.getString(bookInfoRule.wordCount ?? ''),
-        tocUrl: analyzer.getString(bookInfoRule.tocUrl ?? '', isUrl: true),
+        kind: kind,
+        lastChapter: lastChapter,
+        wordCount: wordCount,
+        tocUrl: resolvedTocUrl,
         canUpdate: true,
         addedTime: DateTime.now(),
       );
     } catch (e) {
-      debugPrint('❌ 获取详情失败: $e');
+      AppLogger.instance.error(LogCategory.parse, '获取详情失败', detail: e.toString());
       return null;
     }
   }
@@ -788,7 +938,15 @@ class WebBook {
       final response = await _executeRequest(_parseUrlWithOption(tocUrl));
       var html = response.body;
 
-      lastTocHtml = html;
+      AppLogger.instance.info(LogCategory.network, '目录响应: ${html.length} chars, 状态码: ${response.statusCode}');
+      if (html.isEmpty) {
+        AppLogger.instance.error(LogCategory.network, '目录响应为空',
+          detail: 'URL: $tocUrl\n状态码: ${response.statusCode}');
+        lastTocHtml = '<!-- 目录响应为空 -->\n'
+            '<!-- URL: $tocUrl -->\n'
+            '<!-- 状态码: ${response.statusCode} -->';
+        return [];
+      }
 
       // 执行 preUpdateJs（目录更新前 JS 脚本）
       if (tocRule.preUpdateJs != null && tocRule.preUpdateJs!.isNotEmpty) {
@@ -796,8 +954,12 @@ class WebBook {
             result: html, baseUrl: tocUrl);
         if (preResult != null && preResult.isNotEmpty) {
           html = preResult;
+          AppLogger.instance.logJsResult('preUpdateJs', '${preResult.length} chars');
         }
       }
+
+      // 保存源码（preUpdateJs 处理后的）
+      lastTocHtml = html;
 
       // 使用 AnalyzeRule 引擎解析
       final analyzer = AnalyzeRule()
@@ -827,6 +989,8 @@ class WebBook {
             .add(_isRuleTrue(itemAnalyzer.getString(tocRule.isPay ?? '')));
         chapterTags.add(itemAnalyzer.getString(tocRule.updateTime ?? ''));
       }
+
+      AppLogger.instance.logParseResult('目录', chapterNames.length);
 
       // 执行 formatJs（格式化章节列表的 JS 脚本）
       if (tocRule.formatJs != null && tocRule.formatJs!.isNotEmpty) {
@@ -860,34 +1024,25 @@ class WebBook {
 
       for (int i = 0; i < chapterNames.length; i++) {
         final name = chapterNames[i];
-        if (name.isEmpty) continue;
-
-        final isVolume = i < chapterVolumes.length && chapterVolumes[i];
-        var url = i < chapterUrls.length ? chapterUrls[i].trim() : '';
-        if (url.isEmpty) {
-          url = isVolume ? '$name$i' : response.url;
-        } else {
-          url = legado_url.AnalyzeUrl.resolve(response.url, url);
-        }
+        final rawUrl = i < chapterUrls.length ? chapterUrls[i] : null;
+        // 拼接相对链接：用目录页URL作为基准
+        final resolvedUrl = resolveUrl(rawUrl, tocUrl);
 
         chapters.add(Chapter(
           id: '${tocUrl}_$i',
           bookId: tocUrl,
           title: name,
           index: i,
-          url: url,
-          isVolume: isVolume,
-          isVip: i < chapterVip.length && chapterVip[i],
-          isPay: i < chapterPay.length && chapterPay[i],
-          tag: i < chapterTags.length ? chapterTags[i] : null,
+          url: resolvedUrl.isEmpty ? null : resolvedUrl,
         ));
       }
 
       // 处理 nextTocUrl（目录下一页，支持 JS）
       if (tocRule.nextTocUrl != null && tocRule.nextTocUrl!.isNotEmpty) {
-        final nextUrl = analyzer.getString(tocRule.nextTocUrl!, isUrl: true);
-        if (nextUrl != null && nextUrl.isNotEmpty && nextUrl != tocUrl) {
-          debugPrint('📖 发现目录下一页: $nextUrl');
+        final rawNextUrl = analyzer.getString(tocRule.nextTocUrl!, isUrl: true);
+        final nextUrl = resolveUrl(rawNextUrl, tocUrl);
+        if (nextUrl.isNotEmpty && nextUrl != tocUrl) {
+          AppLogger.instance.info(LogCategory.parse, '目录下一页: $nextUrl');
           final nextChapters = await getChapterList(nextUrl);
           chapters.addAll(nextChapters);
         }
@@ -895,7 +1050,7 @@ class WebBook {
 
       return chapters;
     } catch (e) {
-      debugPrint('❌ 获取目录失败: $e');
+      AppLogger.instance.error(LogCategory.parse, '获取目录失败', detail: e.toString());
       return [];
     }
   }
@@ -920,6 +1075,17 @@ class WebBook {
       final response = await _executeRequest(_parseUrlWithOption(chapterUrl));
       var html = response.body;
 
+      AppLogger.instance.info(LogCategory.network, '正文响应: ${html.length} chars, 状态码: ${response.statusCode}');
+      if (html.isEmpty) {
+        AppLogger.instance.error(LogCategory.network, '正文响应为空',
+          detail: 'URL: $chapterUrl\n状态码: ${response.statusCode}');
+        lastContentHtml = '<!-- 正文响应为空 -->\n'
+            '<!-- URL: $chapterUrl -->\n'
+            '<!-- 状态码: ${response.statusCode} -->';
+        return null;
+      }
+
+      // 保存原始源码
       lastContentHtml = html;
 
       // 使用 AnalyzeRule 引擎解析正文
@@ -932,12 +1098,15 @@ class WebBook {
         content = '${content ?? ''}\n$subContent'.trim();
       }
 
+      AppLogger.instance.logParseResult('正文', content != null ? 1 : 0);
+
       // 执行 js 脚本（正文加载后执行的 JS）
       if (contentRule.js != null && contentRule.js!.isNotEmpty) {
         final jsResult = await _executeJs(contentRule.js!,
             result: content ?? '', baseUrl: chapterUrl);
         if (jsResult != null && jsResult.isNotEmpty) {
           content = jsResult;
+          AppLogger.instance.logJsResult('content.js', '${jsResult.length} chars');
         }
       }
 
@@ -954,6 +1123,7 @@ class WebBook {
             result: content ?? '', baseUrl: chapterUrl);
         if (callBackResult != null && callBackResult.isNotEmpty) {
           content = callBackResult;
+          AppLogger.instance.logJsResult('callBackJs', '${callBackResult.length} chars');
         }
       }
 
@@ -973,7 +1143,7 @@ class WebBook {
 
       return content;
     } catch (e) {
-      debugPrint('❌ 获取正文失败: $e');
+      AppLogger.instance.error(LogCategory.parse, '获取正文失败', detail: e.toString());
       return null;
     }
   }

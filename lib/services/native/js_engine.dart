@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_js/flutter_js.dart';
 import 'package:path_provider/path_provider.dart';
+import '../app_logger.dart';
 import 'platform_channel.dart';
 
 // ===== 分流引擎架构 =====
@@ -594,7 +595,9 @@ class JsEngine {
   /// 同步执行 JS 代码（用于 AnalyzeRule 规则解析）
   /// 默认走 QuickJS，如果代码含 java. 且无 ES6 特征，自动走 Rhino
   dynamic executeSync(String jsCode, dynamic content, {String? baseUrl, JsEngineType? sourceEngine}) {
-    final resolved = resolveEngine(jsCode, sourceEngine: sourceEngine);
+    // 先提取 JS 代码（去掉 <js></js> 标签或 @js: 前缀）
+    final extracted = _extractJsCode(jsCode) ?? jsCode;
+    final resolved = resolveEngine(extracted, sourceEngine: sourceEngine);
 
     if (resolved.engine == JsEngineType.rhino) {
       // Rhino 不支持同步调用（MethodChannel 是异步的），降级到 QuickJS
@@ -614,12 +617,16 @@ class JsEngine {
       final contentStr = content is String
           ? jsonEncode(content)
           : jsonEncode(content?.toString() ?? '');
+
+      // 自动补 return：如果 JS 代码不以 return 结尾，自动包裹使其返回最后一个表达式的值
+      final wrappedCode = _wrapJsCode(jsCode);
+
       final wrappedScript = '''
         (function() {
           var result = $contentStr;
           var baseUrl = ${jsonEncode(baseUrl ?? '')};
           var content = result;
-          $jsCode
+          $wrappedCode
         })();
       ''';
       final evalResult = _jsRuntime!.evaluate(wrappedScript);
@@ -634,6 +641,64 @@ class JsEngine {
     }
   }
 
+  /// 包裹 JS 代码，确保最后一个表达式的值被返回
+  /// 如果代码已经包含 return 语句，直接使用
+  /// 如果没有 return，在代码末尾添加 return 语句
+  String _wrapJsCode(String code) {
+    final trimmed = code.trim();
+
+    // 已经有 return 语句 → 直接使用
+    if (trimmed.contains(RegExp(r'\breturn\b'))) {
+      return trimmed;
+    }
+
+    // 单行简单表达式（如变量名、函数调用、字符串等）
+    // 将整个代码作为返回值
+    final lines = trimmed.split('\n');
+    final lastLine = lines.last.trim();
+
+    // 如果最后一行是语句（以 ; 结尾或是块语句），需要用 eval 包裹
+    // 否则直接 return
+    if (lastLine.isEmpty) {
+      return trimmed;
+    }
+
+    // 多行代码：最后一行作为返回值
+    if (lines.length > 1) {
+      final allButLast = lines.sublist(0, lines.length - 1).join('\n');
+      return '$allButLast\nreturn $lastLine';
+    }
+
+    // 单行代码：直接 return
+    return 'return $trimmed';
+  }
+
+  /// 从规则字符串中提取 JS 代码
+  /// 支持：<js>code</js>、@js:code、@rhino:code、@quickjs:code
+  String? _extractJsCode(String rule) {
+    // <js>code</js> 格式
+    final jsTagPattern = RegExp(r'<js>([\s\S]*?)</js>', caseSensitive: false);
+    final jsTagMatch = jsTagPattern.firstMatch(rule);
+    if (jsTagMatch != null) {
+      return jsTagMatch.group(1)?.trim();
+    }
+
+    // @js:code、@rhino:code、@quickjs:code、@java:code、@ts:code 格式
+    final prefixPattern = RegExp(r'^@(?:js|rhino|quickjs|java|ts):', caseSensitive: false);
+    if (prefixPattern.hasMatch(rule)) {
+      return rule.replaceFirst(prefixPattern, '').trim();
+    }
+
+    // {{expression}} 格式
+    final templatePattern = RegExp(r'\{\{([\s\S]*?)\}\}');
+    final templateMatch = templatePattern.firstMatch(rule);
+    if (templateMatch != null) {
+      return 'return ${templateMatch.group(1)?.trim()}';
+    }
+
+    return null;
+  }
+
   // ===== 书源规则执行（分流核心）=====
 
   /// 处理 JS 书源规则（异步）
@@ -643,7 +708,14 @@ class JsEngine {
       if (!_initialized || _jsRuntime == null) return null;
     }
 
-    final resolved = resolveEngine(jsCode, sourceEngine: sourceEngine);
+    // 先提取 JS 代码（去掉 <js></js> 标签或 @js: 前缀）
+    final extracted = _extractJsCode(jsCode) ?? jsCode;
+    final resolved = resolveEngine(extracted, sourceEngine: sourceEngine);
+
+    AppLogger.instance.logJsExecute(
+      resolved.engine == JsEngineType.rhino ? 'Rhino' : 'QuickJS',
+      resolved.code,
+    );
 
     if (resolved.engine == JsEngineType.rhino) {
       return _executeRhinoRule(resolved.code, result: content, env: {'baseUrl': baseUrl ?? ''});
@@ -666,7 +738,9 @@ class JsEngine {
       if (!_initialized || _jsRuntime == null) return null;
     }
 
-    final resolved = resolveEngine(jsCode, sourceEngine: sourceEngine);
+    // 先提取 JS 代码
+    final extracted = _extractJsCode(jsCode) ?? jsCode;
+    final resolved = resolveEngine(extracted, sourceEngine: sourceEngine);
 
     if (resolved.engine == JsEngineType.rhino) {
       return _executeRhinoRule(
@@ -744,6 +818,9 @@ class JsEngine {
       if (!_initialized || _jsRuntime == null) return null;
     }
     try {
+      // 自动补 return
+      final wrappedCode = _wrapJsCode(jsCode);
+
       final wrappedScript = '''
         (function() {
           var result = ${jsonEncode(result ?? '')};
@@ -752,7 +829,7 @@ class JsEngine {
           var chapter = ${jsonEncode(env?['chapter'] ?? {})};
           var source = ${jsonEncode(env?['source'] ?? {})};
 
-          $jsCode
+          $wrappedCode
         })();
       ''';
 
@@ -762,7 +839,10 @@ class JsEngine {
         // QuickJS 失败 → 降级到 Rust 引擎
         return fallbackToRustEngine(jsCode, result: result, env: env);
       }
-      return evalResult.stringResult;
+      final strResult = evalResult.stringResult;
+      // undefined → 返回空字符串而不是 null（书源规则可能不需要返回值）
+      if (strResult == 'undefined') return '';
+      return strResult;
     } catch (e) {
       debugPrint('JsEngine QuickJS exception: $e');
       // QuickJS 异常 → 降级到 Rust 引擎
@@ -941,7 +1021,9 @@ class JsEngine {
   }
 
   dynamic _parseJsResult(String result) {
-    if (result == 'undefined' || result == 'null') return null;
+    // undefined → 返回空字符串（而不是 null，避免书源规则误判）
+    if (result == 'undefined') return '';
+    if (result == 'null') return null;
     if (result == 'true') return true;
     if (result == 'false') return false;
     final numVal = num.tryParse(result);

@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import '../../providers/app_provider.dart';
 import '../../providers/bookshelf_provider.dart';
 import '../../providers/discovery_provider.dart';
-import '../../routes/app_routes.dart';
 import 'book_source_manage_page.dart';
 
 class ProfilePage extends StatefulWidget {

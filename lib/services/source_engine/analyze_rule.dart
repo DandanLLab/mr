@@ -6,6 +6,7 @@ import 'package:html/parser.dart' as html_parser;
 import 'package:html/src/query_selector.dart' as html_query;
 import 'package:xml/xml.dart' as xml;
 
+import '../app_logger.dart';
 import 'js_engine.dart';
 import 'legado_json_path.dart';
 import 'legado_xpath.dart';
@@ -798,7 +799,7 @@ class AnalyzeRule {
       return JsEngine.instance.executeSync(jsCode, content,
           baseUrl: _baseUrl, sourceEngine: _sourceEngine);
     } catch (e) {
-      debugPrint('JS execution failed: $e');
+      AppLogger.instance.logJsError('AnalyzeRule', e.toString());
       return null;
     }
   }
