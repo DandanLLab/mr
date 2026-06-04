@@ -449,6 +449,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     if (_debugCancelled) return;
     final webBook = _webBook!;
     _addLog('︾开始解析搜索页');
+    _addLog('≡搜索关键字: $keyword');
 
     final results = await webBook.searchBook(keyword);
     if (_debugCancelled) return;
@@ -462,11 +463,31 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
       return;
     }
 
-    final first = results.first;
-    _addLog('≡首本: ${first['name'] ?? ''} - ${first['author'] ?? ''}');
+    // 逐条输出搜索结果详细信息
+    for (int i = 0; i < results.length; i++) {
+      final item = results[i];
+      _addLog('─── 搜索结果 #${i + 1} ───');
+      _addLog('  书名: ${item['name'] ?? ''}');
+      _addLog('  作者: ${item['author'] ?? ''}');
+      _addLog('  分类: ${item['kind'] ?? ''}');
+      _addLog('  字数: ${item['wordCount'] ?? ''}');
+      _addLog('  最新章节: ${item['lastChapter'] ?? ''}');
+      final intro = '${item['intro'] ?? ''}'.trim();
+      if (intro.isNotEmpty) {
+        _addLog('  简介: ${intro.length > 100 ? '${intro.substring(0, 100)}...' : intro}');
+      }
+      _addLog('  封面链接: ${item['coverUrl'] ?? ''}');
+      _addLog('  详情链接: ${item['bookUrl'] ?? ''}');
+    }
 
+    final first = results.first;
     final bookUrl = '${first['bookUrl'] ?? ''}'.trim();
-    if (bookUrl.isEmpty) return;
+    if (bookUrl.isEmpty) {
+      _addLog('≡首本详情链接为空，无法继续', state: -1);
+      return;
+    }
+    _addLog('');
+    _addLog('≡自动跳转详情页: $bookUrl');
     await _debugBookInfo(bookUrl);
   }
 
@@ -475,6 +496,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     final webBook = _webBook!;
     final realUrl = _extractRealUrl(exploreUrl);
     _addLog('︾开始解析发现页');
+    _addLog('≡发现URL: $realUrl');
 
     final results = await webBook.exploreBook(realUrl);
     if (_debugCancelled) return;
@@ -488,11 +510,29 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
       return;
     }
 
-    final first = results.first;
-    _addLog('≡首本: ${first['name'] ?? ''} - ${first['author'] ?? ''}');
+    // 逐条输出发现结果详细信息
+    for (int i = 0; i < results.length; i++) {
+      final item = results[i];
+      _addLog('─── 发现结果 #${i + 1} ───');
+      _addLog('  书名: ${item['name'] ?? ''}');
+      _addLog('  作者: ${item['author'] ?? ''}');
+      _addLog('  分类: ${item['kind'] ?? ''}');
+      final intro = '${item['intro'] ?? ''}'.trim();
+      if (intro.isNotEmpty) {
+        _addLog('  简介: ${intro.length > 100 ? '${intro.substring(0, 100)}...' : intro}');
+      }
+      _addLog('  封面链接: ${item['coverUrl'] ?? ''}');
+      _addLog('  详情链接: ${item['bookUrl'] ?? ''}');
+    }
 
+    final first = results.first;
     final bookUrl = '${first['bookUrl'] ?? ''}'.trim();
-    if (bookUrl.isEmpty) return;
+    if (bookUrl.isEmpty) {
+      _addLog('≡首本详情链接为空，无法继续', state: -1);
+      return;
+    }
+    _addLog('');
+    _addLog('≡自动跳转详情页: $bookUrl');
     await _debugBookInfo(bookUrl);
   }
 
@@ -500,6 +540,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     if (_debugCancelled) return;
     final webBook = _webBook!;
     _addLog('︾开始解析详情页');
+    _addLog('≡详情页URL: $bookUrl');
 
     final Book? book = await webBook.getBookInfo(bookUrl);
     if (_debugCancelled) return;
@@ -513,14 +554,33 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
       return;
     }
 
-    _addLog('≡${book.name} / ${book.author} / ${book.tocUrl ?? bookUrl}');
+    // 逐字段输出详情信息
+    _addLog('─── 书籍详情 ───');
+    _addLog('  书名: ${book.name}');
+    _addLog('  作者: ${book.author}');
+    _addLog('  分类: ${book.kind ?? ''}');
+    _addLog('  字数: ${book.wordCount ?? ''}');
+    _addLog('  最新章节: ${book.lastChapter ?? ''}');
+    _addLog('  总章数: ${book.totalChapterNum?.toString() ?? ''}');
+    _addLog('  状态: ${book.status ?? ''}');
+    _addLog('  封面链接: ${book.coverUrl}');
+    _addLog('  详情链接: ${book.bookUrl}');
+    _addLog('  目录链接: ${book.tocUrl ?? ''}');
+    final intro = book.intro.trim();
+    if (intro.isNotEmpty) {
+      _addLog('  简介: ${intro.length > 200 ? '${intro.substring(0, 200)}...' : intro}');
+    }
+    if (book.tags != null && book.tags!.isNotEmpty) {
+      _addLog('  标签: ${book.tags!.join(', ')}');
+    }
+    _addLog('');
 
     final tocUrl = book.tocUrl?.trim();
     final effectiveTocUrl =
         (tocUrl != null && tocUrl.isNotEmpty) ? tocUrl : bookUrl;
 
     if (tocUrl != null && tocUrl.isNotEmpty) {
-      _addLog('≡开始解析目录');
+      _addLog('≡开始解析目录（目录链接: $tocUrl）');
     } else {
       _addLog('≡目录链接为空，使用详情页作为目录页');
     }
@@ -533,6 +593,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     final webBook = _webBook!;
     final realUrl = _extractRealUrl(tocUrl);
     _addLog('︾开始解析目录页');
+    _addLog('≡目录页URL: $realUrl');
 
     final List<Chapter> chapters = await webBook.getChapterList(realUrl);
     if (_debugCancelled) return;
@@ -542,25 +603,58 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     _addLog('');
 
     if (chapters.isEmpty) {
-      _addLog('≡没有正文章节');
+      _addLog('≡没有正文章节', state: -1);
       return;
     }
 
-    final first = chapters.first;
-    _addLog('≡首章: ${first.title} → ${first.url ?? ""}');
+    // 统计信息
+    final volumeCount = chapters.where((c) => c.isVolume).length;
+    final contentCount = chapters.where((c) => !c.isVolume).length;
+    final vipCount = chapters.where((c) => c.isVip).length;
+    final payCount = chapters.where((c) => c.isPay).length;
 
+    _addLog('─── 目录统计 ───');
+    _addLog('  总数: ${chapters.length}');
+    _addLog('  卷名数: $volumeCount');
+    _addLog('  正文章节数: $contentCount');
+    _addLog('  VIP章节数: $vipCount');
+    _addLog('  付费章节数: $payCount');
+    _addLog('');
+
+    // 逐条输出章节详细信息
+    _addLog('─── 章节列表 ───');
+    for (int i = 0; i < chapters.length; i++) {
+      final ch = chapters[i];
+      final flags = <String>[];
+      if (ch.isVolume) flags.add('卷名');
+      if (ch.isVip) flags.add('VIP');
+      if (ch.isPay) flags.add('付费');
+      final flagStr = flags.isNotEmpty ? ' [${flags.join(',')}]' : '';
+      final urlStr = ch.url ?? '';
+      _addLog('  #${i + 1} ${ch.title}$flagStr');
+      if (urlStr.isNotEmpty) {
+        _addLog('       → $urlStr');
+      }
+    }
+    _addLog('');
+
+    // 找到第一个正文章节
     final contentChapters = chapters
         .where((chapter) => !chapter.isVolume)
         .toList();
     // 如果全部是卷名，则不过滤
     final effectiveChapters = contentChapters.isNotEmpty ? contentChapters : chapters;
     if (effectiveChapters.isEmpty) {
-      _addLog('≡没有正文章节');
+      _addLog('≡没有正文章节', state: -1);
       return;
     }
 
-    final chapterUrl = effectiveChapters.first.url?.trim();
+    final firstContent = effectiveChapters.first;
+    _addLog('≡首章: ${firstContent.title} → ${firstContent.url ?? ""}');
+
+    final chapterUrl = firstContent.url?.trim();
     if (chapterUrl != null && chapterUrl.isNotEmpty) {
+      _addLog('≡自动跳转正文页: $chapterUrl');
       await _debugContent(chapterUrl);
     } else {
       _addLog('≡首章链接为空，无法跳转正文', state: -1);
