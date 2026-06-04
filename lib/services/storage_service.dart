@@ -90,8 +90,13 @@ class StorageService {
       }
     }
 
-    await _bookSourceBox?.put(sourceUrl, sourceData);
-    await _bookSourceBox?.flush();
+    if (_bookSourceBox == null) {
+      final error = Exception('StorageService: _bookSourceBox 初始化失败');
+      debugPrint('❌ $error');
+      throw error;
+    }
+    await _bookSourceBox!.put(sourceUrl, sourceData);
+    await _bookSourceBox!.flush();
   }
 
   Future<void> saveBookSources(List<Map<String, dynamic>> sources) async {

@@ -452,23 +452,12 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
       return;
     }
 
-    try {
-      await StorageService.instance.saveBookSource(source.toJson());
-      debugPrint('✅ 书源保存成功: ${source.bookSourceUrl}');
-    } catch (e) {
-      debugPrint('❌ 保存书源失败: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('保存书源失败: $e')),
-        );
-      }
-      // 保存失败也继续跳转，让调试页面自行处理
-    }
-
+    // 直接传 BookSource 对象给调试页面，无需保存即可调试
     if (mounted) {
-      debugPrint('🔄 跳转调试页面: sourceUrl=${source.bookSourceUrl}');
+      debugPrint('🔄 跳转调试页面: ${source.bookSourceName}');
       Navigator.pushNamed(context, AppRoutes.bookSourceDebug, arguments: {
         'sourceUrl': source.bookSourceUrl,
+        'source': source,
       });
     }
   }

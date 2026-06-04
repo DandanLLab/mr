@@ -44,8 +44,9 @@ class _ExploreKindItem {
 /// 书源调试页
 class BookSourceDebugPage extends StatefulWidget {
   final String? sourceUrl;
+  final BookSource? source;  // 直接传入书源对象，无需保存即可调试
 
-  const BookSourceDebugPage({super.key, this.sourceUrl});
+  const BookSourceDebugPage({super.key, this.sourceUrl, this.source});
 
   @override
   State<BookSourceDebugPage> createState() => _BookSourceDebugPageState();
@@ -128,10 +129,22 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
   }
 
   Future<void> _loadSource() async {
-    final sourceUrl = widget.sourceUrl;
     debugPrint('=== 调试页面加载书源 ===');
+    AppLogger.instance.info(LogCategory.parse, '调试页面加载书源');
+
+    // 优先使用直接传入的 BookSource 对象（无需保存即可调试）
+    if (widget.source != null) {
+      _source = widget.source;
+      _webBook = WebBook(_source!);
+      debugPrint('✅ 使用传入的书源对象: ${_source!.bookSourceName}');
+      AppLogger.instance.info(LogCategory.parse, '使用传入的书源对象', detail: _source!.bookSourceName);
+      _afterSourceLoaded();
+      return;
+    }
+
+    // 降级：从 StorageService 加载
+    final sourceUrl = widget.sourceUrl;
     debugPrint('sourceUrl: $sourceUrl');
-    AppLogger.instance.info(LogCategory.parse, '调试页面加载书源', detail: 'sourceUrl: $sourceUrl');
 
     if (sourceUrl == null || sourceUrl.isEmpty) {
       debugPrint('sourceUrl 为空，无法加载书源');
@@ -161,7 +174,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     if (data == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('未找到书源: $sourceUrl\n请先保存书源后再调试')),
+          SnackBar(content: Text('未找到书源: $sourceUrl')),
         );
       }
       return;
@@ -180,6 +193,12 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
       }
       return;
     }
+
+    _afterSourceLoaded();
+  }
+
+  /// 书源加载后的初始化（解析发现分类等）
+  void _afterSourceLoaded() {
 
     final searchKey = _source?.ruleSearch?.checkKeyWord;
     if (searchKey != null && searchKey.isNotEmpty) {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/book_source.dart';
 import '../pages/main/main_page.dart';
 import '../pages/bookshelf/bookshelf_page.dart';
 import '../pages/discovery/discovery_page.dart';
@@ -110,9 +111,13 @@ class AppRoutes {
           ),
         );
       case bookSourceDebug:
-        final args = settings.arguments as Map<String, dynamic>?;
+        final debugArgs = settings.arguments as Map<String, dynamic>?;
+        final sourceObj = debugArgs?['source'];
         return MaterialPageRoute(
-          builder: (_) => BookSourceDebugPage(sourceUrl: args?['sourceUrl']),
+          builder: (_) => BookSourceDebugPage(
+            sourceUrl: debugArgs?['sourceUrl'],
+            source: sourceObj is BookSource ? sourceObj : null,
+          ),
         );
       case chapterList:
         final args = settings.arguments as Map<String, dynamic>?;
