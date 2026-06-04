@@ -611,9 +611,13 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
   /// 显示源码对话框
   void _showSourceDialog(String title, String source) {
     if (source.isEmpty) {
-      _addLog('≡源码为空');
+      _addLog('≡源码为空，请检查：1)网络权限 2)URL是否正确 3)书源规则');
       return;
     }
+
+    // 检查是否是诊断信息（响应为空时保存的）
+    final isDiagnostic = source.startsWith('<!--') && source.contains('响应为空');
+
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
@@ -638,13 +642,17 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
               ],
             ),
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(12),
-                child: SelectableText(
-                  source,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontFamily: 'monospace',
+              child: Container(
+                color: isDiagnostic ? const Color(0xFFFFF8E1) : null,
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(12),
+                  child: SelectableText(
+                    source,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                      color: isDiagnostic ? const Color(0xFFE65100) : null,
+                    ),
                   ),
                 ),
               ),
