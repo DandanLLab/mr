@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 
+import '../app_logger.dart';
 import 'js_engine.dart';
 
 /// 规则模式枚举
@@ -784,7 +785,7 @@ class AnalyzeRule {
       return JsEngine.instance.executeSync(jsCode, content,
           baseUrl: _baseUrl, sourceEngine: _sourceEngine);
     } catch (e) {
-      debugPrint('JS execution failed: $e');
+      AppLogger.instance.logJsError('AnalyzeRule', e.toString());
       return null;
     }
   }
