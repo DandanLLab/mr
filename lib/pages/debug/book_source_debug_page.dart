@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -8,6 +9,7 @@ import 'package:flutter/services.dart';
 import '../../models/book.dart';
 import '../../models/book_source.dart';
 import '../../models/chapter.dart';
+import '../../services/app_logger.dart';
 import '../../services/source_engine/source_engine.dart';
 import '../../services/storage_service.dart';
 
@@ -62,6 +64,13 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
   bool _isLoading = false;
   bool _showHelp = true;
   bool _debugCancelled = false;
+  int _currentTab = 0; // 0: 调试, 1: 日志
+
+  // AppLogger 订阅
+  StreamSubscription<LogEntry>? _logSubscription;
+  final List<LogEntry> _appLogs = [];
+  LogLevel _logFilterLevel = LogLevel.verbose;
+  LogCategory? _logFilterCategory;
 
   // 源码存储
   String _searchSrc = '';
@@ -92,6 +101,18 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
       });
     });
     _loadSource();
+
+    // 订阅 AppLogger 日志流
+    _logSubscription = AppLogger.instance.stream.listen((entry) {
+      if (!mounted) return;
+      setState(() {
+        _appLogs.add(entry);
+        if (_appLogs.length > 500) {
+          _appLogs.removeRange(0, _appLogs.length - 500);
+        }
+      });
+    });
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _searchFocusNode.requestFocus();
@@ -101,6 +122,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
 
   @override
   void dispose() {
+    _logSubscription?.cancel();
     _searchController.dispose();
     _searchFocusNode.dispose();
     _scrollController.dispose();
@@ -1048,49 +1070,262 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: _buildDebugAppBar(context),
-      body: Stack(
-        children: [
-          if (!_showHelp)
-            Scrollbar(
+      body: _currentTab == 0 ? _buildDebugBody() : _buildLogViewerBody(),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentTab,
+        onTap: (index) => setState(() => _currentTab = index),
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.bug_report_outlined),
+            activeIcon: Icon(Icons.bug_report),
+            label: '调试',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.article_outlined),
+            activeIcon: Icon(Icons.article),
+            label: '日志',
+          ),
+        ],
+        selectedItemColor: const Color(0xFF1976D2),
+        unselectedItemColor: Colors.grey,
+        type: BottomNavigationBarType.fixed,
+      ),
+    );
+  }
+
+  /// 调试 Tab 内容
+  Widget _buildDebugBody() {
+    return Stack(
+      children: [
+        if (!_showHelp)
+          Scrollbar(
+            controller: _scrollController,
+            thumbVisibility: true,
+            child: ListView(
               controller: _scrollController,
-              thumbVisibility: true,
-              child: ListView(
-                controller: _scrollController,
-                padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
-                children: _debugLogs.isEmpty
-                    ? [
-                        const SizedBox(height: 120),
-                        const Text(
-                          '等待调试结果...',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: Color(0xFF9A9A9A),
-                          ),
+              padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
+              children: _debugLogs.isEmpty
+                  ? [
+                      const SizedBox(height: 120),
+                      const Text(
+                        '等待调试结果...',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Color(0xFF9A9A9A),
                         ),
-                      ]
-                    : _debugLogs.map(_buildLogLine).toList(),
-              ),
-            )
-          else
-            SingleChildScrollView(
-              padding: const EdgeInsets.only(bottom: 28),
-              child: _buildHelpPanel(),
+                      ),
+                    ]
+                  : _debugLogs.map(_buildLogLine).toList(),
             ),
-          if (_isLoading)
-            Positioned(
-              left: 0,
-              right: 0,
-              top: 0,
-              child: Center(
-                child: Container(
-                  margin: const EdgeInsets.only(top: 8),
-                  width: 36,
-                  height: 36,
-                  child: const CircularProgressIndicator(
-                    strokeWidth: 2.5,
-                    color: Color(0xFF1976D2),
-                  ),
+          )
+        else
+          SingleChildScrollView(
+            padding: const EdgeInsets.only(bottom: 28),
+            child: _buildHelpPanel(),
+          ),
+        if (_isLoading)
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 8),
+                width: 36,
+                height: 36,
+                child: const CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: Color(0xFF1976D2),
                 ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// 日志查看器 Tab 内容
+  final ScrollController _logScrollController = ScrollController();
+
+  Widget _buildLogViewerBody() {
+    final filteredLogs = _appLogs.where((e) {
+      if (e.level.index < _logFilterLevel.index) return false;
+      if (_logFilterCategory != null && e.category != _logFilterCategory) return false;
+      return true;
+    }).toList();
+
+    return Column(
+      children: [
+        // 过滤器栏
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          color: const Color(0xFFF5F5F5),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                // 级别过滤
+                _buildFilterChip('全部', _logFilterLevel == LogLevel.verbose, () {
+                  setState(() => _logFilterLevel = LogLevel.verbose);
+                }),
+                _buildFilterChip('Debug', _logFilterLevel == LogLevel.debug, () {
+                  setState(() => _logFilterLevel = LogLevel.debug);
+                }),
+                _buildFilterChip('Info', _logFilterLevel == LogLevel.info, () {
+                  setState(() => _logFilterLevel = LogLevel.info);
+                }),
+                _buildFilterChip('Warn', _logFilterLevel == LogLevel.warning, () {
+                  setState(() => _logFilterLevel = LogLevel.warning);
+                }),
+                _buildFilterChip('Error', _logFilterLevel == LogLevel.error, () {
+                  setState(() => _logFilterLevel = LogLevel.error);
+                }),
+                const SizedBox(width: 8),
+                // 分类过滤
+                _buildFilterChip('全部类别', _logFilterCategory == null, () {
+                  setState(() => _logFilterCategory = null);
+                }),
+                for (final cat in LogCategory.values)
+                  _buildFilterChip(cat.label, _logFilterCategory == cat, () {
+                    setState(() => _logFilterCategory = cat);
+                  }),
+              ],
+            ),
+          ),
+        ),
+        // 日志统计
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          color: const Color(0xFFFAFAFA),
+          child: Row(
+            children: [
+              Text('共 ${filteredLogs.length} 条日志',
+                style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.delete_outline, size: 18),
+                tooltip: '清空日志',
+                onPressed: () {
+                  AppLogger.instance.clear();
+                  setState(() => _appLogs.clear());
+                },
+              ),
+            ],
+          ),
+        ),
+        // 日志列表
+        Expanded(
+          child: filteredLogs.isEmpty
+              ? const Center(
+                  child: Text('暂无日志', style: TextStyle(color: Colors.grey)),
+                )
+              : ListView.builder(
+                  controller: _logScrollController,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  itemCount: filteredLogs.length,
+                  itemBuilder: (context, index) {
+                    final entry = filteredLogs[index];
+                    return _buildAppLogEntry(entry);
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFilterChip(String label, bool selected, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(right: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFF1976D2) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? const Color(0xFF1976D2) : Colors.grey.shade300,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            color: selected ? Colors.white : Colors.black54,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAppLogEntry(LogEntry entry) {
+    Color bgColor;
+    switch (entry.level) {
+      case LogLevel.error:
+        bgColor = const Color(0xFFFFEBEE);
+        break;
+      case LogLevel.warning:
+        bgColor = const Color(0xFFFFF8E1);
+        break;
+      case LogLevel.info:
+        bgColor = const Color(0xFFE8F5E9);
+        break;
+      default:
+        bgColor = Colors.transparent;
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(entry.levelIcon, style: const TextStyle(fontSize: 12)),
+              const SizedBox(width: 4),
+              Text(
+                '${entry.time.hour.toString().padLeft(2, '0')}:${entry.time.minute.toString().padLeft(2, '0')}:${entry.time.second.toString().padLeft(2, '0')}',
+                style: const TextStyle(fontSize: 10, color: Colors.grey, fontFamily: 'monospace'),
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE0E0E0),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: Text(
+                  entry.category.label,
+                  style: const TextStyle(fontSize: 9, color: Colors.black54),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  entry.message,
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF333333)),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          if (entry.detail != null && entry.detail!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 24, top: 2),
+              child: Text(
+                entry.detail!,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Color(0xFF666666),
+                  fontFamily: 'monospace',
+                ),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
         ],

@@ -6,6 +6,7 @@ import 'package:html/dom.dart' as dom;
 import '../../models/book_source.dart';
 import '../../models/book.dart';
 import '../../models/chapter.dart';
+import '../app_logger.dart';
 import 'analyze_rule.dart';
 import 'web_proxy.dart';
 import 'proxy_service.dart';
@@ -150,6 +151,7 @@ class HttpClient {
           String? okResult;
 
           debugPrint('🔵 [OkHttp] $method $url');
+          AppLogger.instance.logRequest(method, url, headers: headers);
           if (method.toUpperCase() == 'POST') {
             okResult = await NativeChannel.instance.httpPost(
               url,
@@ -166,6 +168,7 @@ class HttpClient {
           }
 
           debugPrint('🔵 [OkHttp] 响应: ${okResult != null ? "${okResult.length} chars" : "null"}');
+          AppLogger.instance.logResponse(url, 200, okResult?.length ?? 0);
           if (okResult != null && okResult.isNotEmpty) {
             return StrResponse(
               url: url,
@@ -268,13 +271,16 @@ class WebBook {
   /// 执行 JS 规则并返回字符串结果
   Future<String?> _executeJs(String jsCode, {String? result, String? baseUrl}) async {
     try {
-      return await JsEngine.instance.processJsRule(
+      AppLogger.instance.logJsExecute('分流', jsCode);
+      final jsResult = await JsEngine.instance.processJsRule(
         result ?? '', jsCode,
         baseUrl: baseUrl ?? source.bookSourceUrl,
         sourceEngine: source.engineType,
       );
+      AppLogger.instance.logJsResult('分流', jsResult);
+      return jsResult;
     } catch (e) {
-      debugPrint('❌ JS执行失败: $e');
+      AppLogger.instance.logJsError('分流', e.toString());
       return null;
     }
   }
@@ -501,13 +507,13 @@ class WebBook {
   /// 搜索书籍
   Future<List<Map<String, dynamic>>> searchBook(String keyword, {int page = 1}) async {
     if (source.searchUrl == null || source.searchUrl!.isEmpty) {
-      debugPrint('❌ 搜索地址为空');
+      AppLogger.instance.warn(LogCategory.parse, '搜索地址为空');
       return [];
     }
 
     final searchRule = source.ruleSearch;
     if (searchRule == null) {
-      debugPrint('❌ 搜索规则为空');
+      AppLogger.instance.warn(LogCategory.parse, '搜索规则为空');
       return [];
     }
 
@@ -517,7 +523,7 @@ class WebBook {
     // 支持 JS 动态生成搜索 URL
     final resolvedSearchUrl = await _resolveUrl(source.searchUrl!, keyword: keyword, page: page);
     final parsed = _parseUrlWithOption(resolvedSearchUrl, keyword: keyword, page: page);
-    debugPrint('🔍 搜索URL: ${parsed.url}');
+    AppLogger.instance.info(LogCategory.network, '搜索URL: ${parsed.url}');
 
     try {
       final response = await _executeRequest(parsed, keyword: keyword);
@@ -525,9 +531,9 @@ class WebBook {
 
       lastSearchHtml = html;
 
-      debugPrint('📖 响应长度: ${html.length}');
+      AppLogger.instance.info(LogCategory.network, '搜索响应: ${html.length} chars');
       if (html.isEmpty) {
-        debugPrint('❌ 响应为空');
+        AppLogger.instance.error(LogCategory.network, '搜索响应为空');
         return [];
       }
 
@@ -546,13 +552,13 @@ class WebBook {
       final analyzer = AnalyzeRule()..setContent(html, baseUrl: source.bookSourceUrl)..setSourceEngine(source.engineType);
 
       final bookListRule = searchRule.bookList ?? '';
-      debugPrint('📚 书籍列表规则: $bookListRule');
+      AppLogger.instance.logParse('搜索列表', bookListRule);
 
       final bookElements = analyzer.getElements(bookListRule);
-      debugPrint('📚 书籍元素数量: ${bookElements.length}');
+      AppLogger.instance.logParseResult('搜索列表', bookElements.length);
 
       if (bookElements.isEmpty) {
-        debugPrint('❌ 未找到书籍元素');
+        AppLogger.instance.warn(LogCategory.parse, '未找到书籍元素');
         return [];
       }
 
@@ -572,6 +578,7 @@ class WebBook {
         final wordCount = itemAnalyzer.getString(searchRule.wordCount ?? '');
 
         debugPrint('📖 [$i] 书名: $name, 作者: $author');
+        AppLogger.instance.debug(LogCategory.parse, '[$i] 书名: $name, 作者: $author');
 
         if (name != null && name.isNotEmpty) {
           results.add({

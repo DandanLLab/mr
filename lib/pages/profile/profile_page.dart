@@ -210,13 +210,6 @@ class _ProfilePageState extends State<ProfilePage> {
             );
           },
         ),
-        ListTile(
-          leading: const Icon(Icons.bug_report),
-          title: const Text('书源调试'),
-          subtitle: const Text('调试搜索、发现、详情、目录、正文'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => Navigator.pushNamed(context, AppRoutes.bookSourceDebug),
-        ),
       ],
     );
   }
