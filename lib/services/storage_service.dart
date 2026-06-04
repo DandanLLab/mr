@@ -25,7 +25,8 @@ class StorageService {
   }
 
   Future<void> addToBookshelf(Map<String, dynamic> bookData) async {
-    final bookUrl = bookData['bookUrl'] as String? ?? bookData['id'] as String? ?? '';
+    final bookUrl =
+        bookData['bookUrl'] as String? ?? bookData['id'] as String? ?? '';
     await _bookshelfBox.put(bookUrl, bookData);
   }
 
@@ -45,7 +46,8 @@ class StorageService {
     return Map<String, dynamic>.from(data);
   }
 
-  Future<void> updateBookProgress(String bookUrl, int durChapterIndex, String durChapterTitle, int durChapterPos) async {
+  Future<void> updateBookProgress(String bookUrl, int durChapterIndex,
+      String durChapterTitle, int durChapterPos) async {
     final book = _bookshelfBox.get(bookUrl);
     if (book != null) {
       book['durChapterIndex'] = durChapterIndex;
@@ -71,6 +73,7 @@ class StorageService {
     final sourceUrl = sourceData['bookSourceUrl'] as String? ?? '';
     if (sourceUrl.isNotEmpty) {
       await _bookSourceBox.put(sourceUrl, sourceData);
+      await _bookSourceBox.flush();
     }
   }
 
@@ -140,12 +143,14 @@ class StorageService {
     await _cacheBox.delete('highlight_$id');
   }
 
-  List<Map<String, dynamic>> getChapterHighlights(String bookUrl, int chapterIndex) {
+  List<Map<String, dynamic>> getChapterHighlights(
+      String bookUrl, int chapterIndex) {
     return _cacheBox.values
         .where((e) {
           final map = e as Map?;
           if (map == null) return false;
-          return map['bookUrl'] == bookUrl && map['chapterIndex'] == chapterIndex;
+          return map['bookUrl'] == bookUrl &&
+              map['chapterIndex'] == chapterIndex;
         })
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();

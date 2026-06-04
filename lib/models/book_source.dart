@@ -160,6 +160,12 @@ class BookSource {
     final typeValue = json['bookSourceType'];
     final typeIndex =
         typeValue is int ? typeValue : int.tryParse('$typeValue') ?? 0;
+    final ruleSearch = _asMap(json['ruleSearch']);
+    final ruleExplore = _asMap(json['ruleExplore']);
+    final ruleBookInfo = _asMap(json['ruleBookInfo']);
+    final ruleToc = _asMap(json['ruleToc']);
+    final ruleContent = _asMap(json['ruleContent']);
+    final ruleReview = _asMap(json['ruleReview']);
     return BookSource(
       bookSourceUrl: json['bookSourceUrl'] as String? ?? '',
       bookSourceName: json['bookSourceName'] as String? ?? '',
@@ -188,24 +194,15 @@ class BookSource {
       searchUrl: json['searchUrl'] as String?,
       exploreUrl: json['exploreUrl'] as String?,
       exploreScreen: json['exploreScreen'] as String?,
-      ruleSearch: json['ruleSearch'] != null
-          ? SearchRule.fromJson(json['ruleSearch'] as Map<String, dynamic>)
-          : null,
-      ruleExplore: json['ruleExplore'] != null
-          ? ExploreRule.fromJson(json['ruleExplore'] as Map<String, dynamic>)
-          : null,
-      ruleBookInfo: json['ruleBookInfo'] != null
-          ? BookInfoRule.fromJson(json['ruleBookInfo'] as Map<String, dynamic>)
-          : null,
-      ruleToc: json['ruleToc'] != null
-          ? TocRule.fromJson(json['ruleToc'] as Map<String, dynamic>)
-          : null,
-      ruleContent: json['ruleContent'] != null
-          ? ContentRule.fromJson(json['ruleContent'] as Map<String, dynamic>)
-          : null,
-      ruleReview: json['ruleReview'] != null
-          ? ReviewRule.fromJson(json['ruleReview'] as Map<String, dynamic>)
-          : null,
+      ruleSearch: ruleSearch == null ? null : SearchRule.fromJson(ruleSearch),
+      ruleExplore:
+          ruleExplore == null ? null : ExploreRule.fromJson(ruleExplore),
+      ruleBookInfo:
+          ruleBookInfo == null ? null : BookInfoRule.fromJson(ruleBookInfo),
+      ruleToc: ruleToc == null ? null : TocRule.fromJson(ruleToc),
+      ruleContent:
+          ruleContent == null ? null : ContentRule.fromJson(ruleContent),
+      ruleReview: ruleReview == null ? null : ReviewRule.fromJson(ruleReview),
       eventListener: _asBool(json['eventListener']),
       customButton: _asBool(json['customButton']),
       nextPageLazyLoad: _asBool(json['nextPageLazyLoad']),
@@ -220,6 +217,11 @@ class BookSource {
     if (value == null) return defaultValue;
     if (value is bool) return value;
     return '$value'.toLowerCase() == 'true' || '$value' == '1';
+  }
+
+  static Map<String, dynamic>? _asMap(dynamic value) {
+    if (value is! Map) return null;
+    return value.map((key, item) => MapEntry('$key', item));
   }
 
   Map<String, dynamic> toJson() {

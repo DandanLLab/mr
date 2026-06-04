@@ -26,16 +26,25 @@ class SearchProvider extends ChangeNotifier {
 
   Future<void> loadBookSources() async {
     final sourcesData = StorageService.instance.getAllBookSources();
-    _bookSources = sourcesData.map((data) => BookSource.fromJson(data)).toList();
-    
-    _bookSources = _bookSources.where((s) => 
-      s.enabled && s.searchUrl != null && s.searchUrl!.isNotEmpty
-    ).toList();
-    
-    if (_selectedSourceUrls.isEmpty && _bookSources.isNotEmpty) {
-      _selectedSourceUrls = _bookSources.take(5).map((s) => s.bookSourceUrl).toSet();
+    _bookSources = [];
+    for (final data in sourcesData) {
+      try {
+        _bookSources.add(BookSource.fromJson(data));
+      } catch (e) {
+        debugPrint('跳过无效书源 ${data['bookSourceUrl'] ?? ''}: $e');
+      }
     }
-    
+
+    _bookSources = _bookSources
+        .where(
+            (s) => s.enabled && s.searchUrl != null && s.searchUrl!.isNotEmpty)
+        .toList();
+
+    if (_selectedSourceUrls.isEmpty && _bookSources.isNotEmpty) {
+      _selectedSourceUrls =
+          _bookSources.take(5).map((s) => s.bookSourceUrl).toSet();
+    }
+
     notifyListeners();
   }
 
@@ -76,7 +85,7 @@ class SearchProvider extends ChangeNotifier {
 
   Future<void> search(String keyword) async {
     if (keyword.isEmpty) return;
-    
+
     _currentKeyword = keyword;
     _isLoading = true;
     _error = null;
@@ -100,12 +109,12 @@ class SearchProvider extends ChangeNotifier {
     }
 
     final allResults = <Map<String, dynamic>>[];
-    
+
     for (final source in sources) {
       try {
         final webBook = WebBook(source);
         final results = await webBook.searchBook(keyword);
-        
+
         for (final result in results) {
           result['sourceUrl'] = source.bookSourceUrl;
           result['sourceName'] = source.bookSourceName;

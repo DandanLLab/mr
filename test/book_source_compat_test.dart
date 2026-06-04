@@ -22,6 +22,20 @@ void main() {
   });
 
   group('BookSource import compatibility', () {
+    test('restores nested rules from Hive-style dynamic maps', () {
+      final source = BookSource.fromJson(<String, dynamic>{
+        'bookSourceUrl': 'https://a.example',
+        'bookSourceName': 'A',
+        'ruleSearch': <dynamic, dynamic>{
+          'bookList': '.book',
+          'name': '.name@text',
+        },
+      });
+
+      expect(source.ruleSearch?.bookList, '.book');
+      expect(source.ruleSearch?.name, '.name@text');
+    });
+
     test('parses sourceUrls recursively and deduplicates by source URL',
         () async {
       final responses = <String, String>{
