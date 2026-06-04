@@ -24,6 +24,11 @@ class UrlOption {
   final bool useWebView;
   final int? connectTimeout;
   final int? readTimeout;
+  final String? type;
+  final String? webJs;
+  final String? bodyJs;
+  final String? js;
+  final String? dnsIp;
 
   UrlOption({
     this.method,
@@ -34,6 +39,11 @@ class UrlOption {
     this.useWebView = false,
     this.connectTimeout,
     this.readTimeout,
+    this.type,
+    this.webJs,
+    this.bodyJs,
+    this.js,
+    this.dnsIp,
   });
 
   factory UrlOption.fromJson(Map<String, dynamic> json) {
@@ -48,6 +58,11 @@ class UrlOption {
       useWebView: json['webView'] == true || json['webView'] == 'true',
       connectTimeout: json['connectTimeout'] as int?,
       readTimeout: json['readTimeout'] as int?,
+      type: json['type']?.toString(),
+      webJs: json['webJs']?.toString(),
+      bodyJs: json['bodyJs']?.toString(),
+      js: json['js']?.toString(),
+      dnsIp: json['dnsIp']?.toString(),
     );
   }
 
@@ -61,6 +76,11 @@ class UrlOption {
       if (useWebView) 'webView': useWebView,
       if (connectTimeout != null) 'connectTimeout': connectTimeout,
       if (readTimeout != null) 'readTimeout': readTimeout,
+      if (type != null) 'type': type,
+      if (webJs != null) 'webJs': webJs,
+      if (bodyJs != null) 'bodyJs': bodyJs,
+      if (js != null) 'js': js,
+      if (dnsIp != null) 'dnsIp': dnsIp,
     };
   }
 }
@@ -98,6 +118,7 @@ class HttpClient {
   static final HttpClient _instance = HttpClient._internal();
   static HttpClient get instance => _instance;
   HttpClient._internal();
+  HttpClient();
 
   final Dio _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 15),
@@ -255,7 +276,8 @@ class WebBook {
   String? lastTocHtml;
   String? lastContentHtml;
 
-  WebBook(this.source) : _client = HttpClient.instance;
+  WebBook(this.source, {HttpClient? client})
+      : _client = client ?? HttpClient.instance;
 
   // ===== JS 辅助方法 =====
 
@@ -420,6 +442,11 @@ class WebBook {
                 useWebView: option.useWebView,
                 connectTimeout: option.connectTimeout,
                 readTimeout: option.readTimeout,
+                type: option.type,
+                webJs: option.webJs,
+                bodyJs: option.bodyJs,
+                js: option.js,
+                dnsIp: option.dnsIp,
               ),
       );
     } catch (e) {
@@ -476,12 +503,50 @@ class WebBook {
       debugPrint('📦 Body: $body');
     }
 
-    return _client.execute(
-      parsed.url,
+    var requestUrl = parsed.url;
+    final urlJs = parsed.option?.js;
+    if (urlJs != null && urlJs.isNotEmpty) {
+      requestUrl =
+          await _executeJs(urlJs, result: requestUrl, baseUrl: requestUrl) ??
+              requestUrl;
+    }
+    StrResponse response = await _client.execute(
+      requestUrl,
       method: method,
       headers: headers,
       body: body,
       charset: parsed.option?.charset,
+      connectTimeout: parsed.option?.connectTimeout == null
+          ? null
+          : Duration(milliseconds: parsed.option!.connectTimeout!),
+      readTimeout: parsed.option?.readTimeout == null
+          ? null
+          : Duration(milliseconds: parsed.option!.readTimeout!),
+    );
+    for (var attempt = 0;
+        attempt < (parsed.option?.retry ?? 0) && !response.isSuccessful;
+        attempt++) {
+      response = await _client.execute(
+        requestUrl,
+        method: method,
+        headers: headers,
+        body: body,
+        charset: parsed.option?.charset,
+      );
+    }
+    final bodyJs = parsed.option?.bodyJs;
+    if (bodyJs == null || bodyJs.isEmpty) return response;
+    final transformed = await _executeJs(
+      bodyJs,
+      result: response.body,
+      baseUrl: response.url,
+    );
+    return StrResponse(
+      url: response.url,
+      body: transformed ?? response.body,
+      statusCode: response.statusCode,
+      headers: response.headers,
+      raw: response.raw,
     );
   }
 
@@ -539,7 +604,7 @@ class WebBook {
 
       // 使用 AnalyzeRule 引擎解析
       final analyzer = AnalyzeRule()
-        ..setContent(html, baseUrl: source.bookSourceUrl)
+        ..setContent(html, baseUrl: response.url)
         ..setSourceEngine(source.engineType);
 
       final bookListRule = searchRule.bookList ?? '';
@@ -558,14 +623,16 @@ class WebBook {
       for (int i = 0; i < bookElements.length; i++) {
         final element = bookElements[i];
         final itemAnalyzer = AnalyzeRule()
-          ..setContent(element, baseUrl: source.bookSourceUrl)
+          ..setContent(element, baseUrl: response.url)
           ..setSourceEngine(source.engineType);
 
         final name = itemAnalyzer.getString(searchRule.name ?? '');
         final author = itemAnalyzer.getString(searchRule.author ?? '');
-        final coverUrl = itemAnalyzer.getString(searchRule.coverUrl ?? '');
+        final coverUrl =
+            itemAnalyzer.getString(searchRule.coverUrl ?? '', isUrl: true);
         final intro = itemAnalyzer.getString(searchRule.intro ?? '');
-        final bookUrl = itemAnalyzer.getString(searchRule.bookUrl ?? '');
+        final bookUrl =
+            itemAnalyzer.getString(searchRule.bookUrl ?? '', isUrl: true);
         final kind = itemAnalyzer.getString(searchRule.kind ?? '');
         final lastChapter =
             itemAnalyzer.getString(searchRule.lastChapter ?? '');
@@ -620,31 +687,32 @@ class WebBook {
 
       // 使用 AnalyzeRule 引擎解析
       final analyzer = AnalyzeRule()
-        ..setContent(html, baseUrl: source.bookSourceUrl)
+        ..setContent(html, baseUrl: response.url)
         ..setSourceEngine(source.engineType);
 
-      final nameList = analyzer.getStringList(exploreRule.name ?? '');
-      final authorList = analyzer.getStringList(exploreRule.author ?? '');
-      final coverList = analyzer.getStringList(exploreRule.coverUrl ?? '');
-      final introList = analyzer.getStringList(exploreRule.intro ?? '');
-      final bookUrlList = analyzer.getStringList(exploreRule.bookUrl ?? '');
-      final kindList = analyzer.getStringList(exploreRule.kind ?? '');
-      final lastChapterList =
-          analyzer.getStringList(exploreRule.lastChapter ?? '');
-      final wordCountList = analyzer.getStringList(exploreRule.wordCount ?? '');
-
       final results = <Map<String, dynamic>>[];
-
-      for (int i = 0; i < nameList.length; i++) {
+      final bookElements = analyzer.getElements(exploreRule.bookList ?? '');
+      for (final element in bookElements) {
+        final itemAnalyzer = AnalyzeRule()
+          ..setContent(element, baseUrl: response.url)
+          ..setSourceEngine(source.engineType);
+        final name = itemAnalyzer.getString(exploreRule.name ?? '');
+        if (name == null || name.isEmpty) continue;
         results.add({
-          'name': nameList[i],
-          'author': i < authorList.length ? authorList[i] : '',
-          'coverUrl': i < coverList.length ? coverList[i] : '',
-          'intro': i < introList.length ? introList[i] : '',
-          'bookUrl': i < bookUrlList.length ? bookUrlList[i] : '',
-          'kind': i < kindList.length ? kindList[i] : '',
-          'lastChapter': i < lastChapterList.length ? lastChapterList[i] : '',
-          'wordCount': i < wordCountList.length ? wordCountList[i] : '',
+          'name': name,
+          'author': itemAnalyzer.getString(exploreRule.author ?? '') ?? '',
+          'coverUrl':
+              itemAnalyzer.getString(exploreRule.coverUrl ?? '', isUrl: true) ??
+                  '',
+          'intro': itemAnalyzer.getString(exploreRule.intro ?? '') ?? '',
+          'bookUrl':
+              itemAnalyzer.getString(exploreRule.bookUrl ?? '', isUrl: true) ??
+                  '',
+          'kind': itemAnalyzer.getString(exploreRule.kind ?? '') ?? '',
+          'lastChapter':
+              itemAnalyzer.getString(exploreRule.lastChapter ?? '') ?? '',
+          'wordCount':
+              itemAnalyzer.getString(exploreRule.wordCount ?? '') ?? '',
           'sourceUrl': source.bookSourceUrl,
           'sourceName': source.bookSourceName,
         });
@@ -666,31 +734,30 @@ class WebBook {
     await _loadJsLib();
 
     try {
-      final headers = await _buildHeaders();
-      final response = await _client.execute(bookUrl, headers: headers);
+      final response = await _executeRequest(_parseUrlWithOption(bookUrl));
       var html = response.body;
 
       lastBookInfoHtml = html;
 
-      // 执行 init JS 预处理脚本
+      // 使用 AnalyzeRule 引擎解析
+      var analyzer = AnalyzeRule()
+        ..setContent(html, baseUrl: response.url)
+        ..setSourceEngine(source.engineType);
       if (bookInfoRule.init != null && bookInfoRule.init!.isNotEmpty) {
-        final initResult = await _executeJs(bookInfoRule.init!,
-            result: html, baseUrl: bookUrl);
-        if (initResult != null && initResult.isNotEmpty) {
-          html = initResult;
+        final initialized = analyzer.getElement(bookInfoRule.init!);
+        if (initialized != null) {
+          analyzer = AnalyzeRule()
+            ..setContent(initialized, baseUrl: response.url)
+            ..setSourceEngine(source.engineType);
         }
       }
-
-      // 使用 AnalyzeRule 引擎解析
-      final analyzer = AnalyzeRule()
-        ..setContent(html, baseUrl: bookUrl)
-        ..setSourceEngine(source.engineType);
 
       return Book(
         bookUrl: bookUrl,
         name: analyzer.getString(bookInfoRule.name ?? '') ?? '未知书名',
         author: analyzer.getString(bookInfoRule.author ?? '') ?? '',
-        coverUrl: analyzer.getString(bookInfoRule.coverUrl ?? '') ?? '',
+        coverUrl:
+            analyzer.getString(bookInfoRule.coverUrl ?? '', isUrl: true) ?? '',
         intro: analyzer.getString(bookInfoRule.intro ?? '') ?? '',
         mediaType: MediaType.novel,
         originType: BookOriginType.online,
@@ -699,7 +766,7 @@ class WebBook {
         kind: analyzer.getString(bookInfoRule.kind ?? ''),
         lastChapter: analyzer.getString(bookInfoRule.lastChapter ?? ''),
         wordCount: analyzer.getString(bookInfoRule.wordCount ?? ''),
-        tocUrl: analyzer.getString(bookInfoRule.tocUrl ?? ''),
+        tocUrl: analyzer.getString(bookInfoRule.tocUrl ?? '', isUrl: true),
         canUpdate: true,
         addedTime: DateTime.now(),
       );
@@ -718,8 +785,7 @@ class WebBook {
     await _loadJsLib();
 
     try {
-      final headers = await _buildHeaders();
-      final response = await _client.execute(tocUrl, headers: headers);
+      final response = await _executeRequest(_parseUrlWithOption(tocUrl));
       var html = response.body;
 
       lastTocHtml = html;
@@ -735,11 +801,32 @@ class WebBook {
 
       // 使用 AnalyzeRule 引擎解析
       final analyzer = AnalyzeRule()
-        ..setContent(html, baseUrl: tocUrl)
+        ..setContent(html, baseUrl: response.url)
         ..setSourceEngine(source.engineType);
 
-      var chapterNames = analyzer.getStringList(tocRule.chapterName ?? '');
-      var chapterUrls = analyzer.getStringList(tocRule.chapterUrl ?? '');
+      final chapterElements = analyzer.getElements(tocRule.chapterList ?? '');
+      var chapterNames = <String>[];
+      var chapterUrls = <String>[];
+      final chapterVolumes = <bool>[];
+      final chapterVip = <bool>[];
+      final chapterPay = <bool>[];
+      final chapterTags = <String?>[];
+      for (final element in chapterElements) {
+        final itemAnalyzer = AnalyzeRule()
+          ..setContent(element, baseUrl: response.url)
+          ..setSourceEngine(source.engineType);
+        chapterNames
+            .add(itemAnalyzer.getString(tocRule.chapterName ?? '') ?? '');
+        chapterUrls.add(itemAnalyzer.getString(tocRule.chapterUrl ?? '') ?? '');
+        chapterVolumes.add(
+          _isRuleTrue(itemAnalyzer.getString(tocRule.isVolume ?? '')),
+        );
+        chapterVip
+            .add(_isRuleTrue(itemAnalyzer.getString(tocRule.isVip ?? '')));
+        chapterPay
+            .add(_isRuleTrue(itemAnalyzer.getString(tocRule.isPay ?? '')));
+        chapterTags.add(itemAnalyzer.getString(tocRule.updateTime ?? ''));
+      }
 
       // 执行 formatJs（格式化章节列表的 JS 脚本）
       if (tocRule.formatJs != null && tocRule.formatJs!.isNotEmpty) {
@@ -773,7 +860,15 @@ class WebBook {
 
       for (int i = 0; i < chapterNames.length; i++) {
         final name = chapterNames[i];
-        final url = i < chapterUrls.length ? chapterUrls[i] : null;
+        if (name.isEmpty) continue;
+
+        final isVolume = i < chapterVolumes.length && chapterVolumes[i];
+        var url = i < chapterUrls.length ? chapterUrls[i].trim() : '';
+        if (url.isEmpty) {
+          url = isVolume ? '$name$i' : response.url;
+        } else {
+          url = legado_url.AnalyzeUrl.resolve(response.url, url);
+        }
 
         chapters.add(Chapter(
           id: '${tocUrl}_$i',
@@ -781,6 +876,10 @@ class WebBook {
           title: name,
           index: i,
           url: url,
+          isVolume: isVolume,
+          isVip: i < chapterVip.length && chapterVip[i],
+          isPay: i < chapterPay.length && chapterPay[i],
+          tag: i < chapterTags.length ? chapterTags[i] : null,
         ));
       }
 
@@ -802,6 +901,14 @@ class WebBook {
   }
 
   /// 获取章节正文
+  static bool _isRuleTrue(String? value) {
+    final normalized = value?.trim().toLowerCase();
+    if (normalized == null || normalized.isEmpty || normalized == 'null') {
+      return false;
+    }
+    return !const {'false', 'no', 'not', '0', '0.0'}.contains(normalized);
+  }
+
   Future<String?> getContent(String chapterUrl) async {
     final contentRule = source.ruleContent;
     if (contentRule == null) return null;
@@ -810,17 +917,20 @@ class WebBook {
     await _loadJsLib();
 
     try {
-      final headers = await _buildHeaders();
-      final response = await _client.execute(chapterUrl, headers: headers);
+      final response = await _executeRequest(_parseUrlWithOption(chapterUrl));
       var html = response.body;
 
       lastContentHtml = html;
 
       // 使用 AnalyzeRule 引擎解析正文
       final analyzer = AnalyzeRule()
-        ..setContent(html, baseUrl: chapterUrl)
+        ..setContent(html, baseUrl: response.url)
         ..setSourceEngine(source.engineType);
       var content = analyzer.getString(contentRule.content ?? '');
+      final subContent = analyzer.getString(contentRule.subContent ?? '');
+      if (subContent != null && subContent.isNotEmpty) {
+        content = '${content ?? ''}\n$subContent'.trim();
+      }
 
       // 执行 js 脚本（正文加载后执行的 JS）
       if (contentRule.js != null && contentRule.js!.isNotEmpty) {

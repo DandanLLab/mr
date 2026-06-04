@@ -50,8 +50,8 @@ class _DetailPageState extends State<DetailPage> {
     }
 
     // 计算总字数
-    _totalWordCount = chapters.fold<int>(
-      0, (sum, ch) => sum + (ch.wordCount ?? 0));
+    _totalWordCount =
+        chapters.fold<int>(0, (sum, ch) => sum + (ch.wordCount ?? 0));
 
     final isInShelf = bookData != null;
 
@@ -75,8 +75,8 @@ class _DetailPageState extends State<DetailPage> {
     if (bookData != null) {
       _book = Book.fromJson(bookData);
       _chapters = await LocalBookService.instance.getChapterList(_book!);
-      _totalWordCount = _chapters.fold<int>(
-        0, (sum, ch) => sum + (ch.wordCount ?? 0));
+      _totalWordCount =
+          _chapters.fold<int>(0, (sum, ch) => sum + (ch.wordCount ?? 0));
     }
 
     if (mounted) {
@@ -211,13 +211,15 @@ class _DetailPageState extends State<DetailPage> {
                     child: Container(
                       width: 110,
                       height: 160,
-                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      color:
+                          Theme.of(context).colorScheme.surfaceContainerHighest,
                       child: _book!.displayCoverUrl.isNotEmpty
                           ? CachedNetworkImage(
                               imageUrl: _book!.displayCoverUrl,
                               fit: BoxFit.cover,
                               placeholder: (_, __) => const Center(
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
                               ),
                               errorWidget: (_, __, ___) =>
                                   const Icon(Icons.book, size: 48),
@@ -310,8 +312,7 @@ class _DetailPageState extends State<DetailPage> {
               label: '最新',
               value: _book!.latestChapterTitle,
             ),
-          if (_book!.latestChapterTitle.isNotEmpty)
-            const SizedBox(height: 8),
+          if (_book!.latestChapterTitle.isNotEmpty) const SizedBox(height: 8),
           // 分组
           if (_book!.groupId != null && _book!.groupId!.isNotEmpty)
             _buildInfoRow(
@@ -417,7 +418,9 @@ class _DetailPageState extends State<DetailPage> {
                   leading: const Icon(Icons.source),
                   title: Text('书源 ${index + 1}'),
                   subtitle: Text('响应时间: ${(index + 1) * 100}ms'),
-                  trailing: index == 0 ? const Icon(Icons.check, color: Colors.green) : null,
+                  trailing: index == 0
+                      ? const Icon(Icons.check, color: Colors.green)
+                      : null,
                   onTap: () {
                     Navigator.pop(context);
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -441,15 +444,17 @@ class _DetailPageState extends State<DetailPage> {
         title: const Text('修改分组'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
-          children: groups.map((group) => RadioListTile<String>(
-            title: Text(group),
-            value: group,
-            groupValue: _book!.groupId ?? '全部',
-            onChanged: (value) {
-              Navigator.pop(context);
-              // TODO: 更新分组
-            },
-          )).toList(),
+          children: groups
+              .map((group) => RadioListTile<String>(
+                    title: Text(group),
+                    value: group,
+                    groupValue: _book!.groupId ?? '全部',
+                    onChanged: (value) {
+                      Navigator.pop(context);
+                      // TODO: 更新分组
+                    },
+                  ))
+              .toList(),
         ),
       ),
     );
@@ -481,7 +486,8 @@ class _DetailPageState extends State<DetailPage> {
             ListTile(
               leading: const Icon(Icons.menu_book),
               title: const Text('阅读章节'),
-              subtitle: Text('${_book!.durChapterIndex + 1}/${_chapters.length}'),
+              subtitle:
+                  Text('${_book!.durChapterIndex + 1}/${_chapters.length}'),
               contentPadding: EdgeInsets.zero,
             ),
           ],
@@ -526,8 +532,8 @@ class _DetailPageState extends State<DetailPage> {
 
   Widget _buildReadProgress() {
     final chapterIndex = _book!.durChapterIndex;
-    final chapterName = _book!.durChapterTitle.isEmpty 
-        ? '第${chapterIndex + 1}章' 
+    final chapterName = _book!.durChapterTitle.isEmpty
+        ? '第${chapterIndex + 1}章'
         : _book!.durChapterTitle;
     final progress = _chapters.isNotEmpty
         ? (chapterIndex / _chapters.length * 100).toInt()
@@ -538,7 +544,8 @@ class _DetailPageState extends State<DetailPage> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
+          color:
+              Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Row(
@@ -607,7 +614,9 @@ class _DetailPageState extends State<DetailPage> {
           Expanded(
             child: FilledButton.icon(
               onPressed: _toggleBookshelf,
-              icon: Icon(_isInBookshelf ? Icons.bookmark : Icons.bookmark_border, size: 20),
+              icon: Icon(
+                  _isInBookshelf ? Icons.bookmark : Icons.bookmark_border,
+                  size: 20),
               label: Text(_isInBookshelf ? '已在书架' : '加入书架'),
             ),
           ),
@@ -626,7 +635,8 @@ class _DetailPageState extends State<DetailPage> {
 
   bool _isHtmlContent(String text) {
     final trimmed = text.trim();
-    return trimmed.startsWith('<') && (trimmed.contains('</') || trimmed.contains('/>'));
+    return trimmed.startsWith('<') &&
+        (trimmed.contains('</') || trimmed.contains('/>'));
   }
 
   bool _isMarkdownContent(String text) {
@@ -754,7 +764,8 @@ class _DetailPageState extends State<DetailPage> {
         children: _book!.tags!.map((tag) {
           return Chip(
             label: Text(tag),
-            backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+            backgroundColor:
+                Theme.of(context).colorScheme.surfaceContainerHighest,
           );
         }).toList(),
       ),
@@ -817,7 +828,8 @@ class _DetailPageState extends State<DetailPage> {
     return ListTile(
       dense: true,
       leading: chapter.isVip
-          ? Icon(Icons.lock, size: 16, color: Theme.of(context).colorScheme.primary)
+          ? Icon(Icons.lock,
+              size: 16, color: Theme.of(context).colorScheme.primary)
           : null,
       title: Text(
         chapter.title,
@@ -826,7 +838,8 @@ class _DetailPageState extends State<DetailPage> {
         style: const TextStyle(fontSize: 14),
       ),
       trailing: chapter.isCached
-          ? Icon(Icons.download_done, size: 16, color: Theme.of(context).colorScheme.primary)
+          ? Icon(Icons.download_done,
+              size: 16, color: Theme.of(context).colorScheme.primary)
           : null,
       onTap: () => _openChapter(chapter),
       onLongPress: () => _openFullChapterList(),
@@ -888,6 +901,7 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _openChapter(Chapter chapter) {
+    if (chapter.isVolume) return;
     Navigator.pushNamed(
       context,
       AppRoutes.novelReader,

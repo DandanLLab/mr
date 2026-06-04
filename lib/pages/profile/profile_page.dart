@@ -62,46 +62,50 @@ class _ProfilePageState extends State<ProfilePage> {
     return Container(
       margin: const EdgeInsets.all(16),
       child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 32,
-                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                child: Icon(
-                  Icons.person,
-                  size: 32,
-                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+        child: InkWell(
+          onTap: () => Navigator.pushNamed(context, AppRoutes.readRecord),
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 32,
+                  backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                  child: Icon(
+                    Icons.person,
+                    size: 32,
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _nickname,
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        _buildStatItem('阅读', '${_readingTime}分钟'),
-                        const SizedBox(width: 16),
-                        _buildStatItem('书籍', '$_bookCount本'),
-                        const SizedBox(width: 16),
-                        _buildStatItem('应用', '${_miniprogramCount + _pluginCount}个'),
-                      ],
-                    ),
-                  ],
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _nickname,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          _buildStatItem('阅读', '${_readingTime}分钟'),
+                          const SizedBox(width: 16),
+                          _buildStatItem('书籍', '$_bookCount本'),
+                          const SizedBox(width: 16),
+                          _buildStatItem('应用', '${_miniprogramCount + _pluginCount}个'),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.edit),
-                onPressed: _editNickname,
-              ),
-            ],
+                IconButton(
+                  icon: const Icon(Icons.edit),
+                  onPressed: _editNickname,
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -139,13 +143,6 @@ class _ProfilePageState extends State<ProfilePage> {
             '管理',
             style: Theme.of(context).textTheme.titleMedium,
           ),
-        ),
-        ListTile(
-          leading: const Icon(Icons.history),
-          title: const Text('阅读记录'),
-          subtitle: Text('已读 $_bookCount 本'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => Navigator.pushNamed(context, AppRoutes.readRecord),
         ),
         ListTile(
           leading: const Icon(Icons.book),

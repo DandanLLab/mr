@@ -15,13 +15,13 @@ import '../../services/storage_service.dart';
 
 /// 调试状态码
 enum DebugState {
-  searchSrc,    // 10: 搜索源码
-  exploreSrc,   // 探索源码
-  bookSrc,      // 20: 详情源码
-  tocSrc,       // 30: 目录源码
-  contentSrc,   // 40: 正文源码
-  error,        // -1: 错误
-  success,      // 1000: 成功完成
+  searchSrc, // 10: 搜索源码
+  exploreSrc, // 探索源码
+  bookSrc, // 20: 详情源码
+  tocSrc, // 30: 目录源码
+  contentSrc, // 40: 正文源码
+  error, // -1: 错误
+  success, // 1000: 成功完成
 }
 
 /// 调试菜单操作
@@ -133,7 +133,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     final sourceUrl = widget.sourceUrl;
     debugPrint('=== 调试页面加载书源 ===');
     debugPrint('sourceUrl: $sourceUrl');
-    
+
     if (sourceUrl == null || sourceUrl.isEmpty) {
       debugPrint('sourceUrl 为空，无法加载书源');
       if (mounted) {
@@ -146,7 +146,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
 
     final data = StorageService.instance.getBookSource(sourceUrl);
     debugPrint('书源数据: ${data != null ? "找到" : "未找到"}');
-    
+
     if (data == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -330,7 +330,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
   Future<void> _submitDebug([String? value]) async {
     final text = (value ?? _searchController.text).trim();
     if (text.isEmpty) return;
-    
+
     // 先检查书源是否存在
     final webBook = _webBook;
     final source = _source;
@@ -343,7 +343,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
       );
       return;
     }
-    
+
     _searchFocusNode.unfocus();
     if (mounted) {
       setState(() {
@@ -365,8 +365,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
 
     final next = query.startsWith(prefix) ? query : '$prefix$query';
     _searchController.text = next;
-    _searchController.selection =
-        TextSelection.collapsed(offset: next.length);
+    _searchController.selection = TextSelection.collapsed(offset: next.length);
     await _submitDebug(next);
   }
 
@@ -535,8 +534,9 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     _addLog(book.tocUrl ?? '');
 
     final tocUrl = book.tocUrl?.trim();
-    final effectiveTocUrl = (tocUrl != null && tocUrl.isNotEmpty) ? tocUrl : bookUrl;
-    
+    final effectiveTocUrl =
+        (tocUrl != null && tocUrl.isNotEmpty) ? tocUrl : bookUrl;
+
     if (tocUrl != null && tocUrl.isNotEmpty) {
       _addLog('≡已获取目录链接，开始解析目录');
     } else {
@@ -571,13 +571,22 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     final Chapter first = chapters.first;
     _addLog('◇章节名称:${first.title}');
     _addLog('◇章节链接:${first.url ?? ''}');
-    _addLog('◇章节信息:');
-    _addLog('◇├是否VIP:false');
-    _addLog('◇├是否购买:false');
+    _addLog('◇章节信息:${first.tag ?? ''}');
+    _addLog('◇├是否VIP:${first.isVip}');
+    _addLog('◇├是否购买:${first.isPay}');
     _addLog('◇└目录总数:${chapters.length}');
     _addLog('');
 
-    final chapterUrl = first.url?.trim();
+    final contentChapters = chapters
+        .where((chapter) => !(chapter.isVolume &&
+            (chapter.url ?? '').startsWith(chapter.title)))
+        .toList();
+    if (contentChapters.isEmpty) {
+      _addLog('≡没有正文章节');
+      return;
+    }
+
+    final chapterUrl = contentChapters.first.url?.trim();
     if (chapterUrl != null && chapterUrl.isNotEmpty) {
       await _debugContent(chapterUrl);
     }
@@ -605,7 +614,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
       _addLog('≡正文解析失败: 返回null', state: -1);
       return;
     }
-    
+
     final trimmedContent = content.trim();
     if (trimmedContent.isEmpty) {
       _addLog('≡正文解析失败: 内容为空', state: -1);
@@ -1150,7 +1159,8 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
   Widget _buildLogViewerBody() {
     final filteredLogs = _appLogs.where((e) {
       if (e.level.index < _logFilterLevel.index) return false;
-      if (_logFilterCategory != null && e.category != _logFilterCategory) return false;
+      if (_logFilterCategory != null && e.category != _logFilterCategory)
+        return false;
       return true;
     }).toList();
 
@@ -1168,16 +1178,19 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
                 _buildFilterChip('全部', _logFilterLevel == LogLevel.verbose, () {
                   setState(() => _logFilterLevel = LogLevel.verbose);
                 }),
-                _buildFilterChip('Debug', _logFilterLevel == LogLevel.debug, () {
+                _buildFilterChip('Debug', _logFilterLevel == LogLevel.debug,
+                    () {
                   setState(() => _logFilterLevel = LogLevel.debug);
                 }),
                 _buildFilterChip('Info', _logFilterLevel == LogLevel.info, () {
                   setState(() => _logFilterLevel = LogLevel.info);
                 }),
-                _buildFilterChip('Warn', _logFilterLevel == LogLevel.warning, () {
+                _buildFilterChip('Warn', _logFilterLevel == LogLevel.warning,
+                    () {
                   setState(() => _logFilterLevel = LogLevel.warning);
                 }),
-                _buildFilterChip('Error', _logFilterLevel == LogLevel.error, () {
+                _buildFilterChip('Error', _logFilterLevel == LogLevel.error,
+                    () {
                   setState(() => _logFilterLevel = LogLevel.error);
                 }),
                 const SizedBox(width: 8),
@@ -1200,7 +1213,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
           child: Row(
             children: [
               Text('共 ${filteredLogs.length} 条日志',
-                style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
               const Spacer(),
               IconButton(
                 icon: const Icon(Icons.delete_outline, size: 18),
@@ -1221,7 +1234,8 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
                 )
               : ListView.builder(
                   controller: _logScrollController,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   itemCount: filteredLogs.length,
                   itemBuilder: (context, index) {
                     final entry = filteredLogs[index];
@@ -1289,7 +1303,8 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
               const SizedBox(width: 4),
               Text(
                 '${entry.time.hour.toString().padLeft(2, '0')}:${entry.time.minute.toString().padLeft(2, '0')}:${entry.time.second.toString().padLeft(2, '0')}',
-                style: const TextStyle(fontSize: 10, color: Colors.grey, fontFamily: 'monospace'),
+                style: const TextStyle(
+                    fontSize: 10, color: Colors.grey, fontFamily: 'monospace'),
               ),
               const SizedBox(width: 6),
               Container(
@@ -1307,7 +1322,8 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
               Expanded(
                 child: Text(
                   entry.message,
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF333333)),
+                  style:
+                      const TextStyle(fontSize: 12, color: Color(0xFF333333)),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),

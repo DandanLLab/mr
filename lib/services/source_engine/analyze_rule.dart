@@ -3,8 +3,12 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
+import 'package:html/src/query_selector.dart' as html_query;
+import 'package:xml/xml.dart' as xml;
 
 import 'js_engine.dart';
+import 'legado_json_path.dart';
+import 'legado_xpath.dart';
 
 /// 规则模式枚举
 enum RuleMode { xpath, json, default_, js, regex, webJs }
@@ -159,7 +163,7 @@ class AnalyzeRule {
 
     // 解析 @js: / @rhino: / @quickjs: / @java: / @ts: 和 <js></js> 规则
     final jsPattern = RegExp(
-        r'@(?:js|rhino|quickjs|java|ts):([\s\S]*?)(?=@(?:js|rhino|quickjs|java|ts):|$)',
+        r'@(?:webjs|js|rhino|quickjs|java|ts):([\s\S]*?)(?=@(?:webjs|js|rhino|quickjs|java|ts):|$)',
         caseSensitive: false);
     final jsTagPattern = RegExp(r'<js>([\s\S]*?)</js>', caseSensitive: false);
 
@@ -191,7 +195,12 @@ class AnalyzeRule {
         // 添加 JS 规则（保留完整前缀，让 JsEngine._resolveEngine 处理分流）
         final matchedText = match.group(0)?.trim() ?? '';
         if (matchedText.isNotEmpty) {
-          ruleList.add(_SourceRule(matchedText, RuleMode.js));
+          ruleList.add(_SourceRule(
+            matchedText,
+            matchedText.toLowerCase().startsWith('@webjs:')
+                ? RuleMode.webJs
+                : RuleMode.js,
+          ));
         }
         lastEnd = match.end;
       }
@@ -227,7 +236,7 @@ class AnalyzeRule {
       _executePutRule(rule.putMap);
 
       // 应用变量替换
-      final appliedRule = _applyVariables(rule);
+      final appliedRule = _applyVariables(rule, result);
 
       // 执行规则
       result = _applyRule(result, appliedRule, listMode: false);
@@ -266,8 +275,10 @@ class AnalyzeRule {
       if (result == null) continue;
 
       _executePutRule(rule.putMap);
-      final appliedRule = _applyVariables(rule);
-      result = _applyRule(result, appliedRule, listMode: true);
+      final appliedRule = _applyVariables(rule, result);
+      result = appliedRule.mode == RuleMode.default_
+          ? _jsoupGetStringList(result, appliedRule.rule)
+          : _applyRule(result, appliedRule, listMode: true);
 
       if (result != null && rule.replaceRegex.isNotEmpty) {
         if (result is List) {
@@ -312,7 +323,7 @@ class AnalyzeRule {
       if (result == null) continue;
 
       _executePutRule(rule.putMap);
-      final appliedRule = _applyVariables(rule);
+      final appliedRule = _applyVariables(rule, result);
       result = _applyRule(result, appliedRule, listMode: true);
 
       if (result != null && rule.replaceRegex.isNotEmpty) {
@@ -342,6 +353,7 @@ class AnalyzeRule {
       {required bool listMode}) {
     final ruleStr = rule.rule;
     if (ruleStr.isEmpty) return content;
+    if (rule.literal) return ruleStr;
 
     switch (rule.mode) {
       case RuleMode.json:
@@ -353,8 +365,7 @@ class AnalyzeRule {
       case RuleMode.regex:
         return _applyRegex(content, ruleStr, listMode: listMode);
       case RuleMode.webJs:
-        debugPrint('WebJs rule is not supported yet: $ruleStr');
-        return null;
+        return _applyJs(content, ruleStr.substring(7));
       case RuleMode.default_:
         return listMode
             ? _jsoupGetElements(content, ruleStr)
@@ -395,10 +406,16 @@ class AnalyzeRule {
   }
 
   String? _jsoupGetString(dynamic content, String rule) {
+    final text = _jsoupGetStringList(content, rule);
+    if (text.isEmpty) return null;
+    return text.length == 1 ? text.first : text.join('\n');
+  }
+
+  List<String> _jsoupGetStringList(dynamic content, String rule) {
     final element = _toElement(content);
     if (element == null || rule.isEmpty) {
       debugPrint('📝 _jsoupGetString: element=${element != null}, rule为空');
-      return null;
+      return [];
     }
 
     debugPrint('📝 _jsoupGetString: rule="$rule"');
@@ -437,8 +454,7 @@ class AnalyzeRule {
     }
 
     debugPrint('📝 最终结果: ${text.length}个文本段');
-    if (text.isEmpty) return null;
-    return text.length == 1 ? text.first : text.join('\n');
+    return text;
   }
 
   /// 链式选择元素
@@ -481,30 +497,50 @@ class AnalyzeRule {
       final rules = beforeRule.split('.');
       switch (rules.first) {
         case 'class':
-          elements =
-              rules.length > 1 ? root.getElementsByClassName(rules[1]) : [];
+          elements = rules.length > 1
+              ? _withSelf(
+                  root,
+                  root.getElementsByClassName(rules[1]).toList(),
+                  root.classes.contains(rules[1]),
+                )
+              : [];
           break;
         case 'tag':
-          elements =
-              rules.length > 1 ? root.getElementsByTagName(rules[1]) : [];
+          elements = rules.length > 1
+              ? _withSelf(
+                  root,
+                  root.getElementsByTagName(rules[1]).toList(),
+                  root.localName?.toLowerCase() == rules[1].toLowerCase(),
+                )
+              : [];
           break;
         case 'id':
           elements = rules.length > 1
-              ? root.querySelectorAll('#${_cssEscape(rules[1])}')
+              ? _withSelf(
+                  root,
+                  root.querySelectorAll('#${_cssEscape(rules[1])}').toList(),
+                  root.id == rules[1],
+                )
               : [];
           break;
         case 'text':
           elements = rules.length > 1
-              ? root.querySelectorAll('*').where((e) {
-                  final text = e.text.trim();
-                  final searchText = rules.sublist(1).join('.');
-                  return text.contains(searchText);
-                }).toList()
+              ? _withSelf(
+                  root,
+                  root.querySelectorAll('*').where((e) {
+                    return _ownText(e).contains(rules.sublist(1).join('.'));
+                  }).toList(),
+                  _ownText(root).contains(rules.sublist(1).join('.')),
+                )
               : [];
           break;
         default:
           try {
-            elements = root.querySelectorAll(beforeRule).toList();
+            elements = _withSelf(
+              root,
+              root.querySelectorAll(beforeRule).toList(),
+              html_query.matches(root, beforeRule),
+            );
           } catch (e) {
             debugPrint('CSS选择器失败: $beforeRule $e');
             elements = [];
@@ -513,6 +549,23 @@ class AnalyzeRule {
     }
 
     return parsed.apply(elements);
+  }
+
+  List<dom.Element> _withSelf(
+    dom.Element root,
+    List<dom.Element> descendants,
+    bool includeSelf,
+  ) {
+    if (!includeSelf) return descendants;
+    return <dom.Element>[root, ...descendants];
+  }
+
+  String _ownText(dom.Element element) {
+    return element.nodes
+        .whereType<dom.Text>()
+        .map((node) => node.text)
+        .join()
+        .trim();
   }
 
   /// 链式获取最后结果
@@ -695,86 +748,47 @@ class AnalyzeRule {
 
   dynamic _applyJsonPath(dynamic content, String jsonPath,
       {required bool listMode}) {
-    dynamic data = content;
-    if (data is String) {
+    final analyzer = _RuleAnalyzer(jsonPath);
+    final rules = analyzer.splitRule('&&', '||', '%%');
+    final results = <List<dynamic>>[];
+    for (final rule in rules) {
       try {
-        data = jsonDecode(data);
-      } catch (_) {
-        return null;
-      }
+        var processed = rule;
+        processed = processed.replaceAllMapped(
+          RegExp(r'\{(\$\.[^{}]+)\}'),
+          (match) => '${LegadoJsonPath.read(content, match.group(1)!)}',
+        );
+        final values = LegadoJsonPath.readList(content, processed);
+        if (values.isNotEmpty) {
+          results.add(values);
+          if (analyzer.elementsType == '||') break;
+        }
+      } catch (_) {}
     }
-
-    // 处理内嵌规则 {$.rule}
-    final innerPattern = RegExp(r'\{\$\.([^}]+)\}');
-    var processedPath = jsonPath.replaceAllMapped(innerPattern, (match) {
-      final innerRule = '\$.${match.group(1)}';
-      final innerResult = _applyJsonPath(data, innerRule, listMode: false);
-      return innerResult?.toString() ?? '';
-    });
-
-    final tokens = _parseJsonPath(processedPath);
-    dynamic current = data;
-
-    for (final token in tokens) {
-      current = _jsonStep(current, token);
-      if (current == null) return null;
-    }
-
-    return current;
-  }
-
-  List<String> _parseJsonPath(String path) {
-    var p = path.trim();
-    if (p.startsWith(r'$.')) p = p.substring(2);
-    if (p.startsWith(r'$')) p = p.substring(1);
-
-    final tokens = <String>[];
-    final re = RegExp(r'([^\.\[\]]+)|\[([^\]]+)\]');
-
-    for (final match in re.allMatches(p)) {
-      final value = match.group(1) ?? match.group(2);
-      if (value == null || value.isEmpty) continue;
-      tokens.add(
-          value == '*' ? '*' : value.replaceAll("'", '').replaceAll('"', ''));
-    }
-
-    return tokens;
-  }
-
-  dynamic _jsonStep(dynamic value, String token) {
-    if (token == '*') {
-      if (value is Map) return value.values.toList();
-      if (value is List) return value;
-      return null;
-    }
-
-    final index = int.tryParse(token);
-    if (index != null) {
-      if (value is List) {
-        final fixed = index < 0 ? value.length + index : index;
-        return fixed >= 0 && fixed < value.length ? value[fixed] : null;
-      }
-      return null;
-    }
-
-    if (value is Map) return value[token];
-    if (value is List) {
-      return value
-          .map((item) => item is Map ? item[token] : null)
-          .where((item) => item != null)
-          .expand((item) => item is List ? item : [item])
-          .toList();
-    }
-
-    return null;
+    final merged = _mergeRuleResults(results, analyzer.elementsType);
+    if (listMode) return merged;
+    if (merged.isEmpty) return null;
+    return merged.length == 1 ? merged.first : merged.join('\n');
   }
 
   // ================== XPath 解析 ==================
 
   dynamic _applyXPath(dynamic content, String xpath, {required bool listMode}) {
-    // XPath 需要额外的库支持，这里提供基础框架
-    debugPrint('XPath is only partially supported: $xpath');
-    return listMode ? <dynamic>[] : null;
+    final analyzer = _RuleAnalyzer(xpath);
+    final rules = analyzer.splitRule('&&', '||', '%%');
+    final results = <List<dynamic>>[];
+    for (final rule in rules) {
+      final value = LegadoXPath.read(content, rule, listMode: true);
+      final values = value is List ? value : <dynamic>[];
+      if (values.isNotEmpty) {
+        results.add(values);
+        if (analyzer.elementsType == '||') break;
+      }
+    }
+    final merged = _mergeRuleResults(results, analyzer.elementsType);
+    if (listMode) return merged;
+    if (merged.isEmpty) return null;
+    return merged.map((item) => LegadoXPath.stringValue(item)).join('\n');
   }
 
   // ================== JS 执行 ==================
@@ -793,6 +807,19 @@ class AnalyzeRule {
 
   dynamic _applyRegex(dynamic content, String pattern,
       {required bool listMode}) {
+    final chained = _RuleAnalyzer(pattern).splitRule('&&');
+    if (chained.length > 1) {
+      var current = content.toString();
+      for (var index = 0; index < chained.length - 1; index++) {
+        final regex = _compileRegex(chained[index]);
+        if (regex == null) return listMode ? <dynamic>[] : null;
+        current = regex
+            .allMatches(current)
+            .map((match) => match.group(0) ?? '')
+            .join();
+      }
+      return _applyRegex(current, chained.last, listMode: listMode);
+    }
     final regex = _compileRegex(pattern);
     if (regex == null) return null;
 
@@ -800,10 +827,10 @@ class AnalyzeRule {
 
     if (listMode) {
       return regex.allMatches(text).map((m) {
-        if (m.groupCount > 0) {
-          return m.group(1) ?? m.group(0) ?? '';
-        }
-        return m.group(0) ?? '';
+        return [
+          for (var index = 0; index <= m.groupCount; index++)
+            m.group(index) ?? ''
+        ];
       }).toList();
     }
 
@@ -823,6 +850,21 @@ class AnalyzeRule {
     });
   }
 
+  List<dynamic> _mergeRuleResults(List<List<dynamic>> results, String type) {
+    if (type != '%%') return results.expand((items) => items).toList();
+    final merged = <dynamic>[];
+    final maxLength = results.fold<int>(
+      0,
+      (max, items) => items.length > max ? items.length : max,
+    );
+    for (var index = 0; index < maxLength; index++) {
+      for (final items in results) {
+        if (index < items.length) merged.add(items[index]);
+      }
+    }
+    return merged;
+  }
+
   // ================== 变量处理 ==================
 
   /// 执行 @put 规则
@@ -834,8 +876,24 @@ class AnalyzeRule {
   }
 
   /// 应用变量替换
-  _SourceRule _applyVariables(_SourceRule rule) {
+  _SourceRule _applyVariables(_SourceRule rule, dynamic result) {
     var next = rule.rule;
+    var literal = rule.literal;
+    final original = rule.rule.trim();
+    final expressionOnly = RegExp(
+      r'^(?:\{\{[\s\S]*\}\}|@get:\{[^}]+\}|\$\d{1,2})$',
+      caseSensitive: false,
+    ).hasMatch(original);
+
+    next = next.replaceAllMapped(RegExp(r'\$(\d{1,2})'), (match) {
+      final index = int.parse(match.group(1)!);
+      if (result is List && index >= 0 && index < result.length) {
+        literal = true;
+        return '${result[index] ?? ''}';
+      }
+      return match.group(0)!;
+    });
+    literal = literal || expressionOnly;
 
     // 替换 @get:{key}
     next = next.replaceAllMapped(
@@ -854,6 +912,12 @@ class AnalyzeRule {
         // 检查是否为变量名
         final value = getVariable(expr);
         if (value != null) return value.toString();
+        if (expr.startsWith('@') ||
+            expr.startsWith(r'$.') ||
+            expr.startsWith(r'$[') ||
+            expr.startsWith('//')) {
+          return getString(expr)?.toString() ?? '';
+        }
         // 否则尝试作为JS执行
         try {
           return JsEngine.instance
@@ -877,6 +941,7 @@ class AnalyzeRule {
       replacement: rule.replacement,
       replaceFirst: rule.replaceFirst,
       putMap: rule.putMap,
+      literal: literal,
     );
   }
 
@@ -905,6 +970,12 @@ class AnalyzeRule {
   dom.Element? _toElement(dynamic content) {
     if (content is dom.Element) return content;
     if (content is dom.Document) return content.body;
+    if (content is xml.XmlNode) {
+      return html_parser
+          .parseFragment(content.toXmlString())
+          .children
+          .firstOrNull;
+    }
     if (content is String) {
       try {
         return html_parser.parse(content).body;
@@ -920,6 +991,7 @@ class AnalyzeRule {
     if (value == null) return null;
     if (value is String) return value;
     if (value is dom.Element) return value.text.trim();
+    if (value is xml.XmlNode) return LegadoXPath.stringValue(value);
     if (value is List) return value.isEmpty ? null : _toString(value.first);
     return value.toString();
   }
@@ -964,6 +1036,7 @@ class _SourceRule {
   final String replacement;
   final bool replaceFirst;
   final Map<String, String> putMap;
+  final bool literal;
 
   const _SourceRule(
     this.rule,
@@ -972,6 +1045,7 @@ class _SourceRule {
     this.replacement = '',
     this.replaceFirst = false,
     this.putMap = const {},
+    this.literal = false,
   });
 
   factory _SourceRule.parse(
@@ -998,6 +1072,9 @@ class _SourceRule {
         rule = rule.substring(6);
       } else if (isJson || rule.startsWith(r'$.') || rule.startsWith(r'$[')) {
         currentMode = RuleMode.json;
+      } else if (rule.toLowerCase().startsWith('@webjs:')) {
+        currentMode = RuleMode.webJs;
+        rule = rule.substring(7);
       } else if (rule.startsWith('/')) {
         currentMode = RuleMode.xpath;
       }
@@ -1121,8 +1198,14 @@ class _ElementSelector {
   final String beforeRule;
   final List<int> indexes;
   final bool exclude;
+  final String? rangeExpression;
 
-  const _ElementSelector(this.beforeRule, this.indexes, this.exclude);
+  const _ElementSelector(
+    this.beforeRule,
+    this.indexes,
+    this.exclude, {
+    this.rangeExpression,
+  });
 
   factory _ElementSelector.parse(String rawRule) {
     var rule = rawRule.trim();
@@ -1130,19 +1213,16 @@ class _ElementSelector {
     final indexes = <int>[];
 
     // 支持 [!0,1,2] 或 [0,1,2] 格式
-    final bracketMatch = RegExp(r'^(.*)\[(!?)([-\d,\s]+)\]$').firstMatch(rule);
+    final bracketMatch = RegExp(r'^(.*)\[(!?)([-\d,:\s]+)\]$').firstMatch(rule);
     if (bracketMatch != null) {
       rule = bracketMatch.group(1)!.trim();
       exclude = bracketMatch.group(2) == '!';
-      indexes.addAll(
-        bracketMatch
-            .group(3)!
-            .split(',')
-            .map((e) => int.tryParse(e.trim()))
-            .whereType<int>()
-            .toList(),
+      return _ElementSelector(
+        rule,
+        indexes,
+        exclude,
+        rangeExpression: bracketMatch.group(3),
       );
-      return _ElementSelector(rule, indexes, exclude);
     }
 
     // 支持 .0 或 .!0 或 :0:1:2 格式
@@ -1183,13 +1263,51 @@ class _ElementSelector {
   }
 
   List<dynamic> apply(List<dom.Element> elements) {
-    if (indexes.isEmpty) return elements.toList();
+    if (elements.isEmpty) return [];
+    if (indexes.isEmpty && rangeExpression == null) return elements.toList();
 
-    final selected = <int>{};
+    final selected = <int>[];
     for (final index in indexes) {
       final fixed = index < 0 ? elements.length + index : index;
       if (fixed >= 0 && fixed < elements.length) {
-        selected.add(fixed);
+        if (!selected.contains(fixed)) selected.add(fixed);
+      }
+    }
+    if (rangeExpression != null) {
+      for (final item in rangeExpression!.split(',')) {
+        final parts = item.trim().split(':');
+        if (parts.length == 1) {
+          final raw = int.tryParse(parts.first);
+          if (raw == null) continue;
+          final fixed = raw < 0 ? elements.length + raw : raw;
+          if (fixed >= 0 &&
+              fixed < elements.length &&
+              !selected.contains(fixed)) {
+            selected.add(fixed);
+          }
+          continue;
+        }
+        var start = parts.first.isEmpty ? 0 : int.tryParse(parts.first) ?? 0;
+        var end = parts[1].isEmpty
+            ? elements.length - 1
+            : int.tryParse(parts[1]) ?? elements.length - 1;
+        var step = parts.length > 2 ? int.tryParse(parts[2]) ?? 1 : 1;
+        if (start < 0) start += elements.length;
+        if (end < 0) end += elements.length;
+        start = start.clamp(0, elements.length - 1);
+        end = end.clamp(0, elements.length - 1);
+        if (step == 0) step = 1;
+        if (end < start && step > 0) {
+          for (var index = start; index >= end; index -= step) {
+            if (!selected.contains(index)) selected.add(index);
+          }
+        } else {
+          for (var index = start;
+              step > 0 ? index <= end : index >= end;
+              index += step) {
+            if (!selected.contains(index)) selected.add(index);
+          }
+        }
       }
     }
 

@@ -9,6 +9,11 @@ class UrlOption {
   final bool useWebView;
   final int? connectTimeout;
   final int? readTimeout;
+  final String? type;
+  final String? webJs;
+  final String? bodyJs;
+  final String? js;
+  final String? dnsIp;
 
   const UrlOption({
     this.method,
@@ -19,6 +24,11 @@ class UrlOption {
     this.useWebView = false,
     this.connectTimeout,
     this.readTimeout,
+    this.type,
+    this.webJs,
+    this.bodyJs,
+    this.js,
+    this.dnsIp,
   });
 
   factory UrlOption.fromJson(Map<String, dynamic> json) {
@@ -34,6 +44,11 @@ class UrlOption {
       useWebView: _toBool(json['webView']),
       connectTimeout: _toNullableInt(json['connectTimeout']),
       readTimeout: _toNullableInt(json['readTimeout']),
+      type: json['type']?.toString(),
+      webJs: json['webJs']?.toString(),
+      bodyJs: json['bodyJs']?.toString(),
+      js: json['js']?.toString(),
+      dnsIp: json['dnsIp']?.toString(),
     );
   }
 
@@ -52,6 +67,11 @@ class UrlOption {
       useWebView: useWebView,
       connectTimeout: connectTimeout,
       readTimeout: readTimeout,
+      type: type,
+      webJs: webJs,
+      bodyJs: bodyJs,
+      js: js,
+      dnsIp: dnsIp,
     );
   }
 
@@ -111,10 +131,21 @@ class AnalyzeUrl {
       final encoded = Uri.encodeComponent(keyword);
       result = result
           .replaceAll('{{key}}', encoded)
-          .replaceAll('{{searchKey}}', encoded);
+          .replaceAll('{{searchKey}}', encoded)
+          .replaceAll('searchKey', encoded);
     }
     if (page != null) {
-      result = result.replaceAll('{{page}}', '$page');
+      result = result
+          .replaceAll('{{page}}', '$page')
+          .replaceAll('{{searchPage}}', '$page')
+          .replaceAll('searchPage', '$page');
+      result = result.replaceAllMapped(
+        RegExp(r'\{\{page\s*([+-])\s*(\d+)\}\}', caseSensitive: false),
+        (match) {
+          final amount = int.parse(match.group(2)!);
+          return '${match.group(1) == '+' ? page + amount : page - amount}';
+        },
+      );
       result = result.replaceAllMapped(_pageRule, (match) {
         final pages =
             match.group(1)!.split(',').map((item) => item.trim()).toList();

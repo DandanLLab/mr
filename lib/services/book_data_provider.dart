@@ -88,6 +88,9 @@ class OnlineBookDataProvider implements BookDataProvider {
 
   @override
   Future<String?> getContent(Book book, Chapter chapter) async {
+    if (chapter.isVolume && (chapter.url ?? '').startsWith(chapter.title)) {
+      return '';
+    }
     final webBook = await _getWebBook();
     if (chapter.url != null) {
       return webBook.getContent(chapter.url!);

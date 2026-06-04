@@ -45,8 +45,8 @@ class _ChapterListPageState extends State<ChapterListPage> {
       _book = Book.fromJson(bookData);
       _chapters = await LocalBookService.instance.getChapterList(_book!);
       _filteredChapters = _chapters;
-      _totalWordCount = _chapters.fold<int>(
-        0, (sum, ch) => sum + (ch.wordCount ?? 0));
+      _totalWordCount =
+          _chapters.fold<int>(0, (sum, ch) => sum + (ch.wordCount ?? 0));
       _groupChaptersByVolume();
     }
     setState(() {
@@ -68,7 +68,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
 
     _VolumeGroup? currentGroup;
     for (final chapter in _chapters) {
-      if (volumePattern.hasMatch(chapter.title)) {
+      if (chapter.isVolume || volumePattern.hasMatch(chapter.title)) {
         currentGroup = _VolumeGroup(
           title: chapter.title,
           chapterIndex: chapter.index,
@@ -107,8 +107,8 @@ class _ChapterListPageState extends State<ChapterListPage> {
     if (widget.currentChapterIndex <= 0) return;
 
     // 找到当前章节在_filteredChapters中的位置
-    final targetIndex = _filteredChapters.indexWhere(
-        (ch) => ch.index == widget.currentChapterIndex);
+    final targetIndex = _filteredChapters
+        .indexWhere((ch) => ch.index == widget.currentChapterIndex);
     if (targetIndex < 0) return;
 
     // 估算位置 - 每个item大约56高度
@@ -134,6 +134,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
   }
 
   void _openChapter(Chapter chapter) {
+    if (chapter.isVolume) return;
     if (!_confirmChapterJump &&
         (chapter.index - widget.currentChapterIndex).abs() > 3) {
       // 跨章节跳转超过3章，显示确认
@@ -217,7 +218,8 @@ class _ChapterListPageState extends State<ChapterListPage> {
     final showWordCount = _book?.showWordCount ?? true;
     return Scaffold(
       appBar: AppBar(
-        title: Text('目录 (${_chapters.length})${showWordCount && _totalWordCount > 0 ? ' · ${LocalBookService.formatWordCount(_totalWordCount)}字' : ''}'),
+        title: Text(
+            '目录 (${_chapters.length})${showWordCount && _totalWordCount > 0 ? ' · ${LocalBookService.formatWordCount(_totalWordCount)}字' : ''}'),
         actions: [
           IconButton(
             icon: Icon(showWordCount ? Icons.numbers : Icons.numbers_outlined),
@@ -269,9 +271,8 @@ class _ChapterListPageState extends State<ChapterListPage> {
       children: [
         _buildSearchBar(),
         Expanded(
-          child: _volumeGroups.length <= 1
-              ? _buildFlatList()
-              : _buildVolumeList(),
+          child:
+              _volumeGroups.length <= 1 ? _buildFlatList() : _buildVolumeList(),
         ),
       ],
     );
@@ -309,9 +310,8 @@ class _ChapterListPageState extends State<ChapterListPage> {
   }
 
   Widget _buildVolumeList() {
-    final groups = _isChapterReversed
-        ? _volumeGroups.reversed.toList()
-        : _volumeGroups;
+    final groups =
+        _isChapterReversed ? _volumeGroups.reversed.toList() : _volumeGroups;
     return ListView.builder(
       itemCount: groups.length,
       itemBuilder: (context, index) {
@@ -374,9 +374,10 @@ class _ChapterListPageState extends State<ChapterListPage> {
   Widget _buildChapterItem(Chapter chapter) {
     final isCurrent = chapter.index == widget.currentChapterIndex;
     final showWordCount = _book?.showWordCount ?? true;
-    final wordCountText = showWordCount && chapter.wordCount != null && chapter.wordCount! > 0
-        ? LocalBookService.formatWordCount(chapter.wordCount!)
-        : null;
+    final wordCountText =
+        showWordCount && chapter.wordCount != null && chapter.wordCount! > 0
+            ? LocalBookService.formatWordCount(chapter.wordCount!)
+            : null;
     return ListTile(
       dense: true,
       title: Row(
@@ -398,7 +399,10 @@ class _ChapterListPageState extends State<ChapterListPage> {
               wordCountText,
               style: TextStyle(
                 fontSize: 11,
-                color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.6),
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurfaceVariant
+                    .withOpacity(0.6),
               ),
             ),
           ],
@@ -479,8 +483,7 @@ class _RegexConfigSheetState extends State<_RegexConfigSheet> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
                 children: [
-                  Text('目录正则配置',
-                      style: Theme.of(context).textTheme.titleLarge),
+                  Text('目录正则配置', style: Theme.of(context).textTheme.titleLarge),
                   const Spacer(),
                   TextButton(
                       onPressed: () => Navigator.pop(context),
@@ -528,9 +531,7 @@ class _RegexConfigSheetState extends State<_RegexConfigSheet> {
       title: Text(rule.name),
       subtitle: Text(rule.rule,
           style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey[600],
-              fontFamily: 'monospace')),
+              fontSize: 12, color: Colors.grey[600], fontFamily: 'monospace')),
       trailing: isPreset
           ? null
           : IconButton(

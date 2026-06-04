@@ -220,6 +220,13 @@ class BookSource {
   }
 
   static Map<String, dynamic>? _asMap(dynamic value) {
+    if (value is String) {
+      try {
+        value = jsonDecode(value);
+      } catch (_) {
+        return null;
+      }
+    }
     if (value is! Map) return null;
     return value.map((key, item) => MapEntry('$key', item));
   }
