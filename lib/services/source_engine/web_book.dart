@@ -811,28 +811,28 @@ class WebBook {
         ..setSourceEngine(source.engineType);
 
       final results = <Map<String, dynamic>>[];
-      final bookElements = analyzer.getElements(exploreRule.bookList ?? '');
+      final bookElements = analyzer.getElements(exploreRule?.bookList ?? '');
       for (final element in bookElements) {
         final itemAnalyzer = AnalyzeRule()
           ..setContent(element, baseUrl: response.url)
           ..setSourceEngine(source.engineType);
-        final name = itemAnalyzer.getString(exploreRule.name ?? '');
+        final name = itemAnalyzer.getString(exploreRule?.name ?? '');
         if (name == null || name.isEmpty) continue;
         results.add({
           'name': name,
-          'author': itemAnalyzer.getString(exploreRule.author ?? '') ?? '',
+          'author': itemAnalyzer.getString(exploreRule?.author ?? '') ?? '',
           'coverUrl':
-              itemAnalyzer.getString(exploreRule.coverUrl ?? '', isUrl: true) ??
+              itemAnalyzer.getString(exploreRule?.coverUrl ?? '', isUrl: true) ??
                   '',
-          'intro': itemAnalyzer.getString(exploreRule.intro ?? '') ?? '',
+          'intro': itemAnalyzer.getString(exploreRule?.intro ?? '') ?? '',
           'bookUrl':
-              itemAnalyzer.getString(exploreRule.bookUrl ?? '', isUrl: true) ??
+              itemAnalyzer.getString(exploreRule?.bookUrl ?? '', isUrl: true) ??
                   '',
-          'kind': itemAnalyzer.getString(exploreRule.kind ?? '') ?? '',
+          'kind': itemAnalyzer.getString(exploreRule?.kind ?? '') ?? '',
           'lastChapter':
-              itemAnalyzer.getString(exploreRule.lastChapter ?? '') ?? '',
+              itemAnalyzer.getString(exploreRule?.lastChapter ?? '') ?? '',
           'wordCount':
-              itemAnalyzer.getString(exploreRule.wordCount ?? '') ?? '',
+              itemAnalyzer.getString(exploreRule?.wordCount ?? '') ?? '',
           'sourceUrl': source.bookSourceUrl,
           'sourceName': source.bookSourceName,
         });
@@ -883,8 +883,8 @@ class WebBook {
       // 保存源码（init 处理后的）
       lastBookInfoHtml = html;
 
-      // 使用 AnalyzeRule 引擎解析
-      final analyzer = AnalyzeRule()
+      // 重新解析 init 处理后的内容
+      analyzer = AnalyzeRule()
         ..setContent(html, baseUrl: bookUrl)
         ..setSourceEngine(source.engineType);
 
