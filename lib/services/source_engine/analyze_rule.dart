@@ -102,9 +102,72 @@ class AnalyzeRule {
     return this;
   }
 
-  /// 获取变量
+  /// 获取变量（借鉴 legado 的多级变量查找链）
+  /// 查找顺序：_variables → _variableMap → _sourceInfo → _bookInfo → _chapterInfo
   dynamic getVariable(String key) {
-    return _variables[key] ?? _variableMap[key];
+    // 1. 本地变量
+    if (_variables.containsKey(key)) return _variables[key];
+    if (_variableMap.containsKey(key)) return _variableMap[key];
+
+    // 2. 书源变量（借鉴 legado 的 source.put/get）
+    if (_sourceInfo != null) {
+      final sourceVars = _sourceInfo!['variable'];
+      if (sourceVars is Map && sourceVars.containsKey(key)) {
+        return sourceVars[key];
+      }
+      // 常用书源属性快捷访问
+      switch (key) {
+        case 'bookSourceUrl':
+          return _sourceInfo!['bookSourceUrl'];
+        case 'bookSourceName':
+          return _sourceInfo!['bookSourceName'];
+        case 'bookSourceGroup':
+          return _sourceInfo!['bookSourceGroup'];
+      }
+    }
+
+    // 3. 书籍变量（借鉴 legado 的 book.put/get）
+    if (_bookInfo != null) {
+      switch (key) {
+        case 'bookName':
+        case 'name':
+          return _bookInfo!['name'];
+        case 'bookAuthor':
+        case 'author':
+          return _bookInfo!['author'];
+        case 'bookUrl':
+        case 'bookUrlPattern':
+          return _bookInfo!['bookUrl'];
+        case 'coverUrl':
+          return _bookInfo!['coverUrl'];
+        case 'intro':
+          return _bookInfo!['intro'];
+        case 'kind':
+          return _bookInfo!['kind'];
+        case 'lastChapter':
+          return _bookInfo!['lastChapter'];
+        case 'tocUrl':
+          return _bookInfo!['tocUrl'];
+        case 'wordCount':
+          return _bookInfo!['wordCount'];
+      }
+    }
+
+    // 4. 章节变量（借鉴 legado 的 chapter.put/get）
+    if (_chapterInfo != null) {
+      switch (key) {
+        case 'title':
+          return _chapterInfo!['title'];
+        case 'chapterUrl':
+          return _chapterInfo!['url'];
+        case 'chapterIndex':
+          return _chapterInfo!['index'];
+        case 'isVolume':
+          return _chapterInfo!['isVolume'];
+      }
+    }
+
+    return null;
   }
 
   /// 获取字符串结果
@@ -284,10 +347,14 @@ class AnalyzeRule {
       resultStr = _unescapeHtml(resultStr);
     }
 
-    // URL处理
+    // URL处理（借鉴 legado：isUrl 时只取第一个结果，避免多行文本）
     if (isUrl) {
       if (resultStr.isEmpty) {
         return null; // 空字符串不返回baseUrl
+      }
+      // 借鉴 legado 的 getString0：URL 模式只取第一行
+      if (resultStr.contains('\n')) {
+        resultStr = resultStr.split('\n').first.trim();
       }
       return _getAbsoluteUrl(resultStr);
     }
@@ -1249,6 +1316,7 @@ class _JsoupSourceRule {
 }
 
 // ================== RuleAnalyzer 类 ==================
+// 借鉴 legado 的 RuleAnalyzer，实现平衡组解析和引号内保护
 
 class _RuleAnalyzer {
   String rule;
@@ -1267,7 +1335,7 @@ class _RuleAnalyzer {
     final types = [first, second, third].whereType<String>().toList();
 
     for (final type in types) {
-      final parts = _splitOutside(rule, type);
+      final parts = _splitOutsideBalanced(rule, type);
       if (parts.length > 1) {
         elementsType = type;
         return parts
@@ -1280,19 +1348,56 @@ class _RuleAnalyzer {
     return [rule.trim()].where((e) => e.isNotEmpty).toList();
   }
 
-  List<String> _splitOutside(String value, String delimiter) {
+  /// 平衡组分割（借鉴 legado 的 chompRuleBalanced）
+  /// 正确处理引号内的分隔符、括号嵌套、转义字符
+  List<String> _splitOutsideBalanced(String value, String delimiter) {
     final result = <String>[];
     var depth = 0;
+    var bracketDepth = 0;
+    var inSingleQuote = false;
+    var inDoubleQuote = false;
     var start = 0;
 
     for (var i = 0; i <= value.length - delimiter.length; i++) {
       final ch = value[i];
-      if (ch == '[' || ch == '(' || ch == '{') depth++;
-      if (ch == ']' || ch == ')' || ch == '}') {
+
+      // 转义字符跳过
+      if (ch == '\\' && i + 1 < value.length) {
+        i++;
+        continue;
+      }
+
+      // 引号状态管理
+      if (ch == "'" && !inDoubleQuote) {
+        inSingleQuote = !inSingleQuote;
+        continue;
+      }
+      if (ch == '"' && !inSingleQuote) {
+        inDoubleQuote = !inDoubleQuote;
+        continue;
+      }
+
+      // 引号内不处理分隔符和括号
+      if (inSingleQuote || inDoubleQuote) continue;
+
+      // 括号深度管理
+      if (ch == '[') {
+        bracketDepth++;
+      } else if (ch == ']') {
+        bracketDepth = bracketDepth > 0 ? bracketDepth - 1 : 0;
+      } else if (ch == '(') {
+        depth++;
+      } else if (ch == ')') {
+        depth = depth > 0 ? depth - 1 : 0;
+      } else if (ch == '{') {
+        depth++;
+      } else if (ch == '}') {
         depth = depth > 0 ? depth - 1 : 0;
       }
 
-      if (depth == 0 && value.startsWith(delimiter, i)) {
+      // 在括号外且匹配分隔符时分割
+      if (depth == 0 && bracketDepth == 0 &&
+          value.startsWith(delimiter, i)) {
         result.add(value.substring(start, i));
         start = i + delimiter.length;
         i = start - 1;
@@ -1302,6 +1407,101 @@ class _RuleAnalyzer {
     if (start == 0) return [value];
     result.add(value.substring(start));
     return result;
+  }
+
+  /// 保留旧方法兼容
+  List<String> _splitOutside(String value, String delimiter) {
+    return _splitOutsideBalanced(value, delimiter);
+  }
+
+  /// 内嵌规则替换（借鉴 legado 的 innerRule）
+  /// 提取 startStr 和 endStr 之间的内容，用 fr 函数替换
+  /// 例如 innerRule('{{', '}}', (expr) => evalJS(expr))
+  static String innerRule(
+    String value,
+    String startStr,
+    String endStr,
+    String Function(String expr) replaceFn,
+  ) {
+    final result = StringBuffer();
+    var searchStart = 0;
+
+    while (searchStart < value.length) {
+      final startIdx = value.indexOf(startStr, searchStart);
+      if (startIdx < 0) {
+        result.write(value.substring(searchStart));
+        break;
+      }
+
+      result.write(value.substring(searchStart, startIdx));
+
+      // 使用平衡组找到匹配的 endStr
+      final contentStart = startIdx + startStr.length;
+      final endIdx = _findBalancedEnd(value, contentStart, startStr, endStr);
+
+      if (endIdx < 0) {
+        // 没有匹配的结束符，保留原文
+        result.write(value.substring(startIdx));
+        break;
+      }
+
+      final innerContent = value.substring(contentStart, endIdx);
+      try {
+        result.write(replaceFn(innerContent.trim()));
+      } catch (_) {
+        result.write(innerContent);
+      }
+
+      searchStart = endIdx + endStr.length;
+    }
+
+    return result.toString();
+  }
+
+  /// 找到平衡的结束位置
+  /// 处理嵌套的 startStr/endStr 对
+  static int _findBalancedEnd(
+    String value,
+    int start,
+    String startStr,
+    String endStr,
+  ) {
+    var depth = 1;
+    var inSingleQuote = false;
+    var inDoubleQuote = false;
+    var i = start;
+
+    while (i < value.length && depth > 0) {
+      final ch = value[i];
+
+      // 转义字符
+      if (ch == '\\' && i + 1 < value.length) {
+        i += 2;
+        continue;
+      }
+
+      // 引号
+      if (ch == "'" && !inDoubleQuote) inSingleQuote = !inSingleQuote;
+      if (ch == '"' && !inSingleQuote) inDoubleQuote = !inDoubleQuote;
+
+      if (!inSingleQuote && !inDoubleQuote) {
+        if (value.startsWith(startStr, i)) {
+          depth++;
+          i += startStr.length;
+          continue;
+        }
+        if (value.startsWith(endStr, i)) {
+          depth--;
+          if (depth == 0) return i;
+          i += endStr.length;
+          continue;
+        }
+      }
+
+      i++;
+    }
+
+    return -1; // 没有找到匹配的结束符
   }
 }
 

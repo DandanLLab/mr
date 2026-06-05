@@ -7,6 +7,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../models/book.dart';
 import '../../models/book_source.dart';
@@ -1155,22 +1156,60 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
   /// 导出日志到文件
   Future<void> _exportLogs() async {
     try {
+      // 请求存储权限（Android端）
+      if (!kIsWeb && Platform.isAndroid) {
+        final status = await Permission.storage.request();
+        if (!status.isGranted) {
+          // Android 11+ 尝试请求管理所有文件权限
+          if (await Permission.manageExternalStorage.request().isDenied) {
+            _addLog('≡导出日志需要存储权限', state: -1);
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('导出日志需要存储权限，请在设置中授予权限')),
+              );
+            }
+            return;
+          }
+        }
+      }
+
       final text = AppLogger.instance.exportLogs(
         category: _logFilterCategory,
         minLevel: _logFilterLevel,
       );
 
-      // 获取外部存储目录
-      final dir = await getApplicationDocumentsDirectory();
-      final now = DateTime.now();
-      final fileName = 'APP_${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}.txt';
-      final file = File('${dir.path}/$fileName');
-      await file.writeAsString(text);
+      // 优先导出到公共 Downloads 目录，失败则回退到应用内部目录
+      String filePath;
+      if (!kIsWeb && Platform.isAndroid) {
+        final downloadsDir = Directory('/storage/emulated/0/Download');
+        if (downloadsDir.existsSync()) {
+          final now = DateTime.now();
+          final fileName = 'APP_${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}.txt';
+          final file = File('${downloadsDir.path}/$fileName');
+          await file.writeAsString(text);
+          filePath = file.path;
+        } else {
+          // 回退到应用内部目录
+          final dir = await getApplicationDocumentsDirectory();
+          final now = DateTime.now();
+          final fileName = 'APP_${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}.txt';
+          final file = File('${dir.path}/$fileName');
+          await file.writeAsString(text);
+          filePath = file.path;
+        }
+      } else {
+        final dir = await getApplicationDocumentsDirectory();
+        final now = DateTime.now();
+        final fileName = 'APP_${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}.txt';
+        final file = File('${dir.path}/$fileName');
+        await file.writeAsString(text);
+        filePath = file.path;
+      }
 
-      _addLog('≡已导出日志到: ${file.path}');
+      _addLog('≡已导出日志到: $filePath');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('日志已导出: ${file.path}')),
+          SnackBar(content: Text('日志已导出: $filePath')),
         );
       }
     } catch (e) {

@@ -650,13 +650,30 @@ class WebBook {
       // 使用 AnalyzeRule 引擎解析
       final analyzer = AnalyzeRule()
         ..setContent(html, baseUrl: response.url)
-        ..setSourceEngine(source.engineType);
+        ..setSourceEngine(source.engineType)
+        ..setSourceInfo(_sourceToMap(source)); // 借鉴 legado：注入 source 上下文
 
       final bookListRule = searchRule.bookList ?? '';
-      AppLogger.instance.logParse('搜索列表', bookListRule);
 
-      final bookElements = analyzer.getElements(bookListRule);
+      // 借鉴 legado：bookList 规则的 -/+ 前缀处理
+      var actualBookListRule = bookListRule;
+      var reverseList = false;
+      if (actualBookListRule.startsWith('-')) {
+        reverseList = true;
+        actualBookListRule = actualBookListRule.substring(1);
+      } else if (actualBookListRule.startsWith('+')) {
+        actualBookListRule = actualBookListRule.substring(1);
+      }
+
+      AppLogger.instance.logParse('搜索列表', actualBookListRule);
+
+      final bookElements = analyzer.getElements(actualBookListRule);
       AppLogger.instance.logParseResult('搜索列表', bookElements.length);
+
+      // 借鉴 legado：列表反转
+      if (reverseList && bookElements.isNotEmpty) {
+        bookElements.toList().reversed.toList();
+      }
 
       if (bookElements.isEmpty) {
         AppLogger.instance.warn(LogCategory.parse, '未找到书籍元素');
@@ -669,13 +686,14 @@ class WebBook {
         final element = bookElements[i];
         final itemAnalyzer = AnalyzeRule()
           ..setContent(element, baseUrl: response.url)
-          ..setSourceEngine(source.engineType);
+          ..setSourceEngine(source.engineType)
+          ..setSourceInfo(_sourceToMap(source));
 
-        final name = itemAnalyzer.getString(searchRule.name ?? '');
-        final author = itemAnalyzer.getString(searchRule.author ?? '');
+        var name = itemAnalyzer.getString(searchRule.name ?? '');
+        var author = itemAnalyzer.getString(searchRule.author ?? '');
         final coverUrl =
             itemAnalyzer.getString(searchRule.coverUrl ?? '', isUrl: true);
-        final intro = itemAnalyzer.getString(searchRule.intro ?? '');
+        var intro = itemAnalyzer.getString(searchRule.intro ?? '');
         final bookUrl =
             itemAnalyzer.getString(searchRule.bookUrl ?? '', isUrl: true);
         final kind = itemAnalyzer.getString(searchRule.kind ?? '');
@@ -684,13 +702,22 @@ class WebBook {
         final wordCount = itemAnalyzer.getString(searchRule.wordCount ?? '');
 
         if (name != null && name.isNotEmpty) {
+          // 借鉴 legado：书名/作者格式化
+          name = _formatBookName(name);
+          author = _formatBookAuthor(author ?? '');
+
+          // 借鉴 legado：简介 HTML 格式化
+          if (intro != null && intro.isNotEmpty) {
+            intro = _formatIntro(intro);
+          }
+
           // 拼接相对链接：用书源URL作为基准
           final resolvedBookUrl = resolveUrl(bookUrl, source.bookSourceUrl);
           final resolvedCoverUrl = resolveUrl(coverUrl, source.bookSourceUrl);
 
           results.add({
             'name': name,
-            'author': author ?? '',
+            'author': author,
             'coverUrl': resolvedCoverUrl,
             'intro': intro ?? '',
             'bookUrl': resolvedBookUrl,
@@ -703,8 +730,19 @@ class WebBook {
         }
       }
 
-      debugPrint('📖 最终结果数量: ${results.length}');
-      return results;
+      // 借鉴 legado：搜索结果去重
+      final seen = <String>{};
+      final dedupedResults = <Map<String, dynamic>>[];
+      for (final book in results) {
+        final key = '${book['name']}_${book['author']}';
+        if (!seen.contains(key)) {
+          seen.add(key);
+          dedupedResults.add(book);
+        }
+      }
+
+      debugPrint('📖 最终结果数量: ${dedupedResults.length}');
+      return dedupedResults;
     } catch (e, stackTrace) {
       debugPrint('❌ 搜索失败: $e');
       debugPrint('❌ 堆栈: $stackTrace');
@@ -1123,6 +1161,156 @@ class WebBook {
       } catch (e) {
         debugPrint('❌ 替换规则执行失败: $pattern → $e');
       }
+    }
+
+    return result;
+  }
+
+  // ================== 借鉴 legado 的辅助方法 ==================
+
+  /// 将 BookSource 转为 Map（用于注入 JS 上下文）
+  Map<String, dynamic> _sourceToMap(BookSource source) {
+    return {
+      'bookSourceUrl': source.bookSourceUrl,
+      'bookSourceName': source.bookSourceName,
+      'bookSourceGroup': source.bookSourceGroup ?? '',
+      'bookSourceType': source.bookSourceType.index,
+      'header': source.header ?? '',
+      'loginUrl': source.loginUrl ?? '',
+      'loginCheckJs': source.loginCheckJs ?? '',
+      'enabledCookieJar': source.enabledCookieJar ?? false,
+      'concurrentRate': source.concurrentRate ?? '',
+      'jsLib': source.jsLib ?? '',
+      'variable': source.variable ?? '',
+    };
+  }
+
+  /// 执行 loginCheckJs 检测（借鉴 legado 的登录检测流程）
+  /// 返回 true 表示需要登录，false 表示不需要
+  Future<bool> _checkLoginNeeded(String html) async {
+    final checkJs = source.loginCheckJs;
+    if (checkJs == null || checkJs.isEmpty) return false;
+
+    try {
+      final result = await _executeJs(checkJs, result: html, baseUrl: source.bookSourceUrl);
+      if (result == null || result.isEmpty || result == 'false' || result == 'null') {
+        return false;
+      }
+      return result == 'true' || result.toLowerCase() == 'needlogin';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 书名格式化（借鉴 legado 的 BookHelp.formatBookName）
+  static String _formatBookName(String name) {
+    var result = name.trim();
+    // 去除常见前缀
+    for (final prefix in ['《', '「', '【', '『']) {
+      if (result.startsWith(prefix)) {
+        result = result.substring(1);
+      }
+    }
+    // 去除常见后缀
+    for (final suffix in ['》', '」', '】', '』']) {
+      if (result.endsWith(suffix)) {
+        result = result.substring(0, result.length - 1);
+      }
+    }
+    // 去除多余空白
+    result = result.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return result;
+  }
+
+  /// 作者格式化（借鉴 legado 的 BookHelp.formatBookAuthor）
+  static String _formatBookAuthor(String author) {
+    var result = author.trim();
+    // 去除常见前缀
+    for (final prefix in ['作者：', '作者:', '著：', '著:', '文：', '文:']) {
+      if (result.startsWith(prefix)) {
+        result = result.substring(prefix.length);
+      }
+    }
+    // 去除常见后缀
+    for (final suffix in [' 著', '著', ' 编', '编', ' 撰', '撰']) {
+      if (result.endsWith(suffix)) {
+        result = result.substring(0, result.length - suffix.length);
+      }
+    }
+    result = result.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return result;
+  }
+
+  /// 简介 HTML 格式化（借鉴 legado 的 HtmlFormatter.format）
+  static String _formatIntro(String intro) {
+    var result = intro.trim();
+    // 检测特殊标签（借鉴 legado：<usehtml>/<md>/<useweb> 保留原始内容）
+    if (result.startsWith('<usehtml>') ||
+        result.startsWith('<md>') ||
+        result.startsWith('<useweb>')) {
+      return result;
+    }
+    // 清理 HTML 标签
+    result = result.replaceAll(RegExp(r'<[^>]+>'), '');
+    // HTML 实体解码
+    result = result
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&nbsp;', ' ');
+    // 数字实体解码
+    result = result.replaceAllMapped(
+      RegExp(r'&#(\d+);'),
+      (match) => String.fromCharCode(int.parse(match.group(1)!)),
+    );
+    result = result.replaceAllMapped(
+      RegExp(r'&#x([0-9a-fA-F]+);'),
+      (match) => String.fromCharCode(int.parse(match.group(1)!, radix: 16)),
+    );
+    // 压缩空白
+    result = result.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return result;
+  }
+
+  /// 正文 HTML 格式化（借鉴 legado 的 HtmlFormatter.formatKeepImg）
+  static String _formatContent(String content, String? baseUrl) {
+    var result = content;
+
+    // HTML 实体解码
+    if (result.contains('&')) {
+      result = result
+          .replaceAll('&amp;', '&')
+          .replaceAll('&lt;', '<')
+          .replaceAll('&gt;', '>')
+          .replaceAll('&quot;', '"')
+          .replaceAll('&#39;', "'")
+          .replaceAll('&nbsp;', ' ');
+      // 数字实体解码
+      result = result.replaceAllMapped(
+        RegExp(r'&#(\d+);'),
+        (match) => String.fromCharCode(int.parse(match.group(1)!)),
+      );
+      result = result.replaceAllMapped(
+        RegExp(r'&#x([0-9a-fA-F]+);'),
+        (match) => String.fromCharCode(int.parse(match.group(1)!, radix: 16)),
+      );
+    }
+
+    // 将相对图片URL转为绝对URL
+    if (baseUrl != null && baseUrl.isNotEmpty) {
+      result = result.replaceAllMapped(
+        RegExp(r'''(src=["'])([^"']+)(["'])''', caseSensitive: false),
+        (match) {
+          final src = match.group(2)!;
+          if (src.startsWith('http') || src.startsWith('data:')) {
+            return match.group(0)!;
+          }
+          final absoluteUrl = resolveUrl(src, baseUrl);
+          return '${match.group(1)}$absoluteUrl${match.group(3)}';
+        },
+      );
     }
 
     return result;

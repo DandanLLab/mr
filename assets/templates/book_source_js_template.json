@@ -1,31 +1,75 @@
 {
-  "bookSourceUrl": "https://js.example.com",
-  "bookSourceName": "JavaScript 书源模板",
-  "bookSourceGroup": "JS示例",
+  "bookSourceUrl": "",
+  "bookSourceName": "",
+  "bookSourceGroup": "JS书源",
   "bookSourceType": 0,
   "enabled": true,
-  "jsLib": "function parseList(html) {\n  const results = [];\n  const items = html.match(/<li[^>]*>[\\s\\S]*?<\\/li>/g) || [];\n  for (const item of items) {\n    const name = item.match(/<h3[^>]*>([^<]*)<\\/h3>/)?.[1] || '';\n    const author = item.match(/作者[：:]([^<]*)/)?.[1]?.trim() || '';\n    const url = item.match(/href=\"([^\"]*)\"/)?.[1] || '';\n    results.push({ name, author, url });\n  }\n  return JSON.stringify(results);\n}",
-  "searchUrl": "https://js.example.com/search?key={{key}}",
+  "enabledExplore": true,
+  "enabledCookieJar": true,
+  "engine": "quickjs",
+  "jsLib": "// ===== JS工具库 =====\n// HTTP请求封装\nfunction httpGet(url, headers) {\n  const resp = fetch(url, { headers: headers || {} });\n  return resp;\n}\n\nfunction httpPost(url, body, headers) {\n  const resp = fetch(url, { method: 'POST', body: body, headers: headers || {} });\n  return resp;\n}\n\n// JSON解析\nfunction parseJson(text) {\n  return JSON.parse(text);\n}\n\n// HTML解析辅助\nfunction matchAll(regex, text) {\n  const results = [];\n  let match;\n  while ((match = regex.exec(text)) !== null) {\n    results.push(match[1] || match[0]);\n  }\n  return results;\n}\n\n// 搜索结果解析\nfunction parseSearchList(html) {\n  const results = [];\n  const items = html.match(/<li[^>]*class=\"book-item\"[^>]*>[\\s\\S]*?<\\/li>/g) || [];\n  for (const item of items) {\n    results.push({\n      name: item.match(/<h3[^>]*>([^<]*)<\\/h3>/)?.[1]?.trim() || '',\n      author: item.match(/作者[：:]\\s*([^<]*)/)?.[1]?.trim() || '',\n      bookUrl: item.match(/href=\"([^\"]+)\"/)?.[1] || '',\n      coverUrl: item.match(/src=\"([^\"]+\\.(?:jpg|png|webp))\"/)?.[1] || '',\n      intro: item.match(/<p[^>]*class=\"intro\"[^>]*>([\\s\\S]*?)<\\/p>/)?.[1]?.replace(/<[^>]*>/g, '')?.trim() || '',\n      kind: item.match(/<span[^>]*class=\"category\"[^>]*>([^<]*)<\\/span>/)?.[1]?.trim() || '',\n      lastChapter: item.match(/<a[^>]*class=\"chapter\"[^>]*>([^<]*)<\\/a>/)?.[1]?.trim() || ''\n    });\n  }\n  return JSON.stringify(results);\n}\n\n// 详情页解析\nfunction parseBookInfo(html) {\n  const info = {};\n  info.name = html.match(/<h1[^>]*>([^<]*)<\\/h1>/)?.[1]?.trim() || '';\n  info.author = html.match(/作者[：:]\\s*([^<]*)/)?.[1]?.trim() || '';\n  info.intro = html.match(/<div[^>]*class=\"intro\"[^>]*>([\\s\\S]*?)<\\/div>/)?.[1]?.replace(/<[^>]*>/g, '')?.trim() || '';\n  info.coverUrl = html.match(/<img[^>]*class=\"cover\"[^>]*src=\"([^\"]*)\"/)?.[1] || html.match(/<img[^>]*src=\"([^\"]*\\.(?:jpg|png|webp))\"[^>]*class=\"cover\"/)?.[1] || '';\n  info.tocUrl = html.match(/<a[^>]*class=\"read\"[^>]*href=\"([^\"]*)\"/)?.[1] || '';\n  info.kind = html.match(/<span[^>]*class=\"category\"[^>]*>([^<]*)<\\/span>/)?.[1]?.trim() || '';\n  info.lastChapter = html.match(/<span[^>]*class=\"last-chapter\"[^>]*>([^<]*)<\\/span>/)?.[1]?.trim() || '';\n  info.wordCount = html.match(/<span[^>]*class=\"word-count\"[^>]*>([^<]*)<\\/span>/)?.[1]?.trim() || '';\n  return JSON.stringify(info);\n}\n\n// 目录解析\nfunction parseChapterList(html) {\n  const chapters = [];\n  const items = html.match(/<li[^>]*>[\\s\\S]*?<\\/li>/g) || [];\n  for (const item of items) {\n    chapters.push({\n      name: item.match(/<a[^>]*>([^<]*)<\\/a>/)?.[1]?.trim() || '',\n      url: item.match(/href=\"([^\"]+)\"/)?.[1] || '',\n      isVolume: item.match(/<span[^>]*class=\"volume\"/)?.[0] ? 'true' : ''\n    });\n  }\n  return JSON.stringify(chapters);\n}\n\n// 正文解析\nfunction parseContent(html) {\n  let content = html.match(/<div[^>]*class=\"content\"[^>]*>([\\s\\S]*?)<\\/div>/)?.[1] || '';\n  // 清理script和style标签\n  content = content.replace(/<script[^>]*>[\\s\\S]*?<\\/script>/g, '');\n  content = content.replace(/<style[^>]*>[\\s\\S]*?<\\/style>/g, '');\n  content = content.trim();\n  return content;\n}",
+  "header": "{\"User-Agent\": \"Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36\"}",
+  "searchUrl": "https://js.example.com/search?key={{key}}&page={{page}}",
+  "exploreUrl": "推荐::https://js.example.com/recommend\n热门::https://js.example.com/hot\n更新::https://js.example.com/update",
   "ruleSearch": {
-    "bookList": ":parseList(result)",
+    "checkKeyWord": "",
+    "bookList": "<js>parseSearchList(result)</js>",
     "name": "$.name",
     "author": "$.author",
-    "bookUrl": "$.url"
+    "intro": "$.intro",
+    "kind": "$.kind",
+    "lastChapter": "$.lastChapter",
+    "bookUrl": "$.bookUrl",
+    "coverUrl": "$.coverUrl",
+    "wordCount": ""
+  },
+  "ruleExplore": {
+    "bookList": "<js>parseSearchList(result)</js>",
+    "name": "$.name",
+    "author": "$.author",
+    "intro": "$.intro",
+    "kind": "$.kind",
+    "lastChapter": "$.lastChapter",
+    "bookUrl": "$.bookUrl",
+    "coverUrl": "$.coverUrl",
+    "wordCount": ""
   },
   "ruleBookInfo": {
-    "init": ":const doc = result; const info = {}; info.name = doc.match(/<h1[^>]*>([^<]*)<\\/h1>/)?.[1] || ''; JSON.stringify(info);",
+    "init": "<js>parseBookInfo(result)</js>",
     "name": "$.name",
-    "author": ":result.match(/作者[：:]([^<]*)/)?.[1]?.trim() || ''",
-    "intro": ":result.match(/<div class=\"intro\"[^>]*>([\\s\\S]*?)<\\/div>/)?.[1]?.replace(/<[^>]*>/g, '')?.trim() || ''",
-    "coverUrl": ":result.match(/<img[^>]*src=\"([^\"]*)\"[^>]*class=\"cover\"/)?.[1] || ''",
-    "tocUrl": ":result.match(/<a[^>]*href=\"([^\"]*)\"[^>]*class=\"read\"/)?.[1] || ''"
+    "author": "$.author",
+    "intro": "$.intro",
+    "kind": "$.kind",
+    "lastChapter": "$.lastChapter",
+    "coverUrl": "$.coverUrl",
+    "tocUrl": "$.tocUrl",
+    "wordCount": "$.wordCount",
+    "canReName": "",
+    "downloadUrls": ""
   },
   "ruleToc": {
-    "chapterList": ":const chapters = []; const items = result.match(/<li[^>]*>[\\s\\S]*?<\\/li>/g) || []; for (const item of items) { chapters.push({ name: item.match(/<a[^>]*>([^<]*)<\\/a>/)?.[1] || '', url: item.match(/href=\"([^\"]*)\"/)?.[1] || '' }); } JSON.stringify(chapters);",
+    "preUpdateJs": "",
+    "chapterList": "<js>parseChapterList(result)</js>",
     "chapterName": "$.name",
-    "chapterUrl": "$.url"
+    "chapterUrl": "$.url",
+    "formatJs": "",
+    "isVolume": "$.isVolume",
+    "isVip": "",
+    "isPay": "",
+    "updateTime": "",
+    "nextTocUrl": ""
   },
   "ruleContent": {
-    "content": ":result.match(/<div class=\"content\"[^>]*>([\\s\\S]*?)<\\/div>/)?.[1]?.replace(/<script[^>]*>[\\s\\S]*?<\\/script>/g, '')?.trim() || ''"
+    "content": "<js>parseContent(result)</js>",
+    "nextContentUrl": "",
+    "subContent": "",
+    "replaceRegex": "",
+    "title": "",
+    "sourceRegex": "",
+    "imageStyle": "",
+    "imageDecode": "",
+    "webJs": "",
+    "payAction": "",
+    "callBackJs": ""
   }
 }

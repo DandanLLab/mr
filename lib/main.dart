@@ -20,8 +20,12 @@ void main() async {
   try {
     await Hive.initFlutter();
     await StorageService.instance.init();
+    if (!StorageService.instance.isInitialized) {
+      debugPrint('❌ StorageService 初始化失败: ${StorageService.instance.initError}');
+    }
   } catch (e) {
-    debugPrint('Storage init error: $e');
+    debugPrint('❌ Storage init error: $e');
+    // 继续运行，但存储功能可能不可用
   }
 
   try {

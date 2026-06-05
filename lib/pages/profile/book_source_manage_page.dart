@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
 import '../../models/book_source.dart';
@@ -6,6 +8,69 @@ import '../../providers/discovery_provider.dart';
 import '../../services/book_source_import_service.dart';
 import '../../services/storage_service.dart';
 import 'book_source_edit_page.dart';
+
+/// 书源模板定义
+class SourceTemplate {
+  final String id;
+  final String name;
+  final String description;
+  final IconData icon;
+  final Color color;
+  final String assetPath;
+
+  const SourceTemplate({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.icon,
+    required this.color,
+    required this.assetPath,
+  });
+}
+
+/// 可用模板列表
+const List<SourceTemplate> kSourceTemplates = [
+  SourceTemplate(
+    id: 'json',
+    name: 'JSON 模板',
+    description: '阅读3.0原版格式，兼容Legado书源',
+    icon: Icons.data_object,
+    color: Colors.blue,
+    assetPath: 'assets/templates/book_source_template.json',
+  ),
+  SourceTemplate(
+    id: 'json_api',
+    name: 'JSON API 模板',
+    description: '适用于JSON接口API，使用\$.xxx语法',
+    icon: Icons.api,
+    color: Colors.green,
+    assetPath: 'assets/templates/book_source_json_template.json',
+  ),
+  SourceTemplate(
+    id: 'js',
+    name: 'JS 模板',
+    description: 'JavaScript书源，支持自定义解析逻辑',
+    icon: Icons.code,
+    color: Colors.orange,
+    assetPath: 'assets/templates/book_source_js_template.json',
+  ),
+  SourceTemplate(
+    id: 'xpath',
+    name: 'XPath 模板',
+    description: '使用XPath选择器解析HTML/XML',
+    icon: Icons.account_tree,
+    color: Colors.purple,
+    assetPath: 'assets/templates/book_source_xpath_template.json',
+  ),
+  SourceTemplate(
+    id: 'regex',
+    name: '正则模板',
+    description: '使用正则表达式匹配网页内容',
+    icon: Icons.pattern,
+    color: Colors.red,
+    assetPath: 'assets/templates/book_source_regex_template.json',
+  ),
+];
 
 /// 书源排序类型
 enum BookSourceSort {
@@ -61,15 +126,84 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
     super.dispose();
   }
 
-  Future<void> _navigateToEditPage({String? sourceUrl}) async {
+  Future<void> _navigateToEditPage({String? sourceUrl, BookSource? templateSource}) async {
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => BookSourceEditPage(sourceUrl: sourceUrl),
+        builder: (context) => BookSourceEditPage(
+          sourceUrl: sourceUrl,
+          templateSource: templateSource,
+        ),
       ),
     );
     // 无论返回值如何，都刷新列表（保存可能成功但未返回 true）
     _loadSources();
+  }
+
+  /// 显示模板选择对话框
+  Future<void> _showTemplatePicker() async {
+    final selected = await showDialog<SourceTemplate>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('选择书源模板'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: kSourceTemplates.length,
+            itemBuilder: (context, index) {
+              final template = kSourceTemplates[index];
+              return ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: template.color.withOpacity(0.2),
+                  child: Icon(template.icon, color: template.color, size: 20),
+                ),
+                title: Text(template.name),
+                subtitle: Text(
+                  template.description,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                onTap: () => Navigator.pop(context, template),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+        ],
+      ),
+    );
+
+    if (selected != null) {
+      _createFromTemplate(selected);
+    }
+  }
+
+  /// 从模板创建书源
+  Future<void> _createFromTemplate(SourceTemplate template) async {
+    try {
+      final jsonStr = await rootBundle.loadString(template.assetPath);
+      final json = jsonDecode(jsonStr) as Map<String, dynamic>;
+      // 清空URL和名称，让用户填写
+      json['bookSourceUrl'] = '';
+      json['bookSourceName'] = '';
+      final templateSource = BookSource.fromJson(json);
+      _navigateToEditPage(templateSource: templateSource);
+    } catch (e) {
+      // 模板加载失败，直接创建空白书源
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('模板加载失败: $e，将创建空白书源')),
+        );
+      }
+      _navigateToEditPage();
+    }
   }
 
   Future<void> _loadSources() async {
@@ -519,7 +653,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
               title: const Text('新建书源'),
               onTap: () {
                 Navigator.pop(context);
-                _navigateToEditPage();
+                _showTemplatePicker();
               },
             ),
             ListTile(
@@ -933,7 +1067,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
           onSelected: (value) {
             switch (value) {
               case 'add':
-                _navigateToEditPage();
+                _showTemplatePicker();
                 break;
               case 'import_local':
                 _importFromLocal();

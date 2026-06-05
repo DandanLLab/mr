@@ -4,7 +4,88 @@ class LegadoJsonPath {
   static dynamic read(dynamic input, String path) {
     dynamic data = input;
     if (data is String) data = jsonDecode(data);
-    final tokens = _tokenize(path.trim());
+
+    // 借鉴 legado：替换 {$.rule} 内嵌规则
+    // 使用平衡组方法处理嵌套花括号
+    var processedPath = path.trim();
+    processedPath = _replaceInnerRules(processedPath, data);
+
+    final tokens = _tokenize(processedPath);
+    var current = <dynamic>[data];
+    for (final token in tokens) {
+      current = _apply(current, token);
+      if (current.isEmpty) return null;
+    }
+    return current.length == 1 ? current.first : current;
+  }
+
+  /// 替换 {$.rule} 内嵌规则（借鉴 legado 的 RuleAnalyzer.innerRule）
+  /// 例如: {$.data.nested} → 实际值
+  static String _replaceInnerRules(String path, dynamic data) {
+    // 检查是否包含 {$. 模式
+    if (!path.contains('{\$.') && !path.contains('{\$.')) return path;
+
+    final result = StringBuffer();
+    var i = 0;
+
+    while (i < path.length) {
+      // 查找 {$.
+      if (i + 2 < path.length && path[i] == '{' && path[i + 1] == '\$' && path[i + 2] == '.') {
+        final start = i;
+        i += 1; // 跳过 {
+
+        // 找到匹配的 }
+        var depth = 1;
+        var inSingleQuote = false;
+        var inDoubleQuote = false;
+        final contentStart = i;
+
+        while (i < path.length && depth > 0) {
+          final ch = path[i];
+          if (ch == '\\' && i + 1 < path.length) { i += 2; continue; }
+          if (ch == "'" && !inDoubleQuote) inSingleQuote = !inSingleQuote;
+          if (ch == '"' && !inSingleQuote) inDoubleQuote = !inDoubleQuote;
+          if (!inSingleQuote && !inDoubleQuote) {
+            if (ch == '{') depth++;
+            else if (ch == '}') {
+              depth--;
+              if (depth == 0) {
+                final innerPath = path.substring(contentStart, i).trim();
+                try {
+                  final value = _readRaw(data, innerPath);
+                  if (value != null) {
+                    result.write(value is String ? value : jsonEncode(value));
+                  }
+                } catch (_) {
+                  result.write(path.substring(start, i + 1));
+                }
+                i++;
+                break;
+              }
+            }
+          }
+          i++;
+        }
+
+        if (depth > 0) {
+          // 没有匹配的 }，保留原文
+          result.write(path.substring(start));
+          break;
+        }
+      } else {
+        result.write(path[i]);
+        i++;
+      }
+    }
+
+    return result.toString();
+  }
+
+  /// 原始读取（不递归替换内嵌规则）
+  static dynamic _readRaw(dynamic input, String path) {
+    dynamic data = input;
+    if (data is String) data = jsonDecode(data);
+    final tokens = _tokenize(path.startsWith(r'$') ? path.substring(1) : path);
     var current = <dynamic>[data];
     for (final token in tokens) {
       current = _apply(current, token);

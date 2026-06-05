@@ -26,8 +26,9 @@ class EditEntity {
 /// 书源编辑页面
 class BookSourceEditPage extends StatefulWidget {
   final String? sourceUrl;
+  final BookSource? templateSource;
 
-  const BookSourceEditPage({super.key, this.sourceUrl});
+  const BookSourceEditPage({super.key, this.sourceUrl, this.templateSource});
 
   @override
   State<BookSourceEditPage> createState() => _BookSourceEditPageState();
@@ -85,7 +86,8 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
       }
     }
 
-    _source = _originalSource ?? BookSource(
+    // 优先级：已有书源 > 模板书源 > 空白书源
+    _source = _originalSource ?? widget.templateSource ?? BookSource(
       bookSourceUrl: '',
       bookSourceName: '',
     );
