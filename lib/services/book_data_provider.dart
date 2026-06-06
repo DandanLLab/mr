@@ -24,6 +24,61 @@ abstract class BookDataProvider {
   Future<void> saveBook(Book book);
 }
 
+BookDataProvider createBookDataProvider(Book book) {
+  if (book.originType == BookOriginType.online) {
+    final sourceUrl = book.sourceUrl;
+    if (sourceUrl == null || sourceUrl.isEmpty) {
+      throw StateError('在线书籍缺少 sourceUrl: ${book.bookUrl}');
+    }
+    return OnlineBookDataProvider(sourceUrl: sourceUrl);
+  }
+  return LocalBookDataProvider();
+}
+
+Book mergeBookMetadata(Book primary, Book fallback) {
+  String prefer(String value, String fallbackValue) =>
+      value.trim().isNotEmpty ? value : fallbackValue;
+  String? preferNullable(String? value, String? fallbackValue) =>
+      value != null && value.trim().isNotEmpty ? value : fallbackValue;
+
+  final primaryTags = primary.tags ?? const <String>[];
+  final fallbackTags = fallback.tags ?? const <String>[];
+  final kind = preferNullable(primary.kind, fallback.kind);
+
+  return primary.copyWith(
+    name: prefer(primary.name, fallback.name),
+    author: prefer(primary.author, fallback.author),
+    coverUrl: prefer(primary.coverUrl, fallback.coverUrl),
+    intro: prefer(primary.intro, fallback.intro),
+    mediaType: fallback.mediaType,
+    originType: fallback.originType,
+    sourceUrl: preferNullable(primary.sourceUrl, fallback.sourceUrl),
+    sourceName: preferNullable(primary.sourceName, fallback.sourceName),
+    kind: kind,
+    lastChapter: preferNullable(primary.lastChapter, fallback.lastChapter),
+    totalChapterNum: primary.totalChapterNum ?? fallback.totalChapterNum,
+    status: preferNullable(primary.status, fallback.status),
+    tags: primaryTags.isNotEmpty
+        ? primaryTags
+        : fallbackTags.isNotEmpty
+            ? fallbackTags
+            : _tagsFromKind(kind),
+    tocUrl: preferNullable(primary.tocUrl, fallback.tocUrl),
+    wordCount: preferNullable(primary.wordCount, fallback.wordCount),
+  );
+}
+
+List<String>? _tagsFromKind(String? kind) {
+  if (kind == null || kind.trim().isEmpty) return null;
+  final tags = kind
+      .split(RegExp(r'[,，/|·\s]+'))
+      .map((tag) => tag.trim())
+      .where((tag) => tag.isNotEmpty)
+      .toSet()
+      .toList();
+  return tags.isEmpty ? null : tags;
+}
+
 /// 本地书籍数据提供者
 class LocalBookDataProvider implements BookDataProvider {
   @override

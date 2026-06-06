@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/book.dart';
 import '../../models/chapter.dart';
+import '../../services/book_data_provider.dart';
 import '../../services/local_book/local_book_service.dart';
 import '../../services/local_book/txt_parser.dart';
 import '../../services/storage_service.dart';
@@ -9,11 +10,13 @@ import '../../routes/app_routes.dart';
 class ChapterListPage extends StatefulWidget {
   final String bookUrl;
   final int currentChapterIndex;
+  final Book? initialBook;
 
   const ChapterListPage({
     super.key,
     required this.bookUrl,
     this.currentChapterIndex = 0,
+    this.initialBook,
   });
 
   @override
@@ -32,6 +35,8 @@ class _ChapterListPageState extends State<ChapterListPage> {
   int _totalWordCount = 0;
   final ScrollController _scrollController = ScrollController();
   bool _confirmChapterJump = false;
+  BookDataProvider? _dataProvider;
+  String? _loadError;
 
   @override
   void initState() {
@@ -40,15 +45,23 @@ class _ChapterListPageState extends State<ChapterListPage> {
   }
 
   Future<void> _loadData() async {
-    final bookData = StorageService.instance.getBook(widget.bookUrl);
-    if (bookData != null) {
-      _book = Book.fromJson(bookData);
-      _chapters = await LocalBookService.instance.getChapterList(_book!);
+    try {
+      final bookData = StorageService.instance.getBook(widget.bookUrl);
+      _book = bookData != null ? Book.fromJson(bookData) : widget.initialBook;
+      if (_book == null) {
+        throw StateError('书籍信息不存在');
+      }
+      _dataProvider = createBookDataProvider(_book!);
+      _chapters = await _dataProvider!.getChapterList(_book!);
       _filteredChapters = _chapters;
       _totalWordCount =
           _chapters.fold<int>(0, (sum, ch) => sum + (ch.wordCount ?? 0));
       _groupChaptersByVolume();
+      _loadError = null;
+    } catch (e) {
+      _loadError = e.toString();
     }
+    if (!mounted) return;
     setState(() {
       _isLoading = false;
     });
@@ -151,6 +164,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
       arguments: {
         'bookUrl': widget.bookUrl,
         'chapterIndex': chapter.index,
+        'bookData': _book,
       },
     );
   }
@@ -216,6 +230,12 @@ class _ChapterListPageState extends State<ChapterListPage> {
   @override
   Widget build(BuildContext context) {
     final showWordCount = _book?.showWordCount ?? true;
+    if (!_isLoading && _loadError != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('目录')),
+        body: Center(child: Text('目录加载失败\n$_loadError')),
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         title: Text(

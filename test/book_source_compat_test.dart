@@ -1,4 +1,6 @@
 import 'package:dan_shenqi/models/book_source.dart';
+import 'package:dan_shenqi/models/book.dart';
+import 'package:dan_shenqi/services/book_data_provider.dart';
 import 'package:dan_shenqi/services/book_source_import_service.dart';
 import 'package:dan_shenqi/services/book_source_locator.dart';
 import 'package:dan_shenqi/services/source_engine/analyze_url.dart';
@@ -89,5 +91,45 @@ void main() {
     );
 
     expect(matches.map((source) => source.bookSourceName), ['high', 'low']);
+  });
+
+  test('merges detail metadata without discarding search result fields', () {
+    final searchBook = Book(
+      bookUrl: 'https://books.example/1',
+      name: '搜索书名',
+      author: '搜索作者',
+      coverUrl: 'https://img.example/cover.jpg',
+      intro: '搜索简介',
+      mediaType: MediaType.novel,
+      originType: BookOriginType.online,
+      sourceUrl: 'https://source.example',
+      sourceName: '测试书源',
+      kind: '玄幻 都市',
+      lastChapter: '第一百章',
+      wordCount: '120万',
+      addedTime: DateTime(2026),
+    );
+    final detailBook = Book(
+      bookUrl: searchBook.bookUrl,
+      name: '详情书名',
+      author: '',
+      mediaType: MediaType.novel,
+      originType: BookOriginType.online,
+      sourceUrl: searchBook.sourceUrl,
+      tocUrl: 'https://books.example/1/chapters',
+      addedTime: DateTime(2026),
+    );
+
+    final merged = mergeBookMetadata(detailBook, searchBook);
+
+    expect(merged.name, '详情书名');
+    expect(merged.author, '搜索作者');
+    expect(merged.coverUrl, searchBook.coverUrl);
+    expect(merged.intro, searchBook.intro);
+    expect(merged.lastChapter, searchBook.lastChapter);
+    expect(merged.wordCount, searchBook.wordCount);
+    expect(merged.tags, ['玄幻', '都市']);
+    expect(merged.tocUrl, detailBook.tocUrl);
+    expect(createBookDataProvider(merged), isA<OnlineBookDataProvider>());
   });
 }

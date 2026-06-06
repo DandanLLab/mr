@@ -9,13 +9,18 @@ import '../../models/chapter.dart';
 import '../../providers/bookshelf_provider.dart';
 import '../../routes/app_routes.dart';
 import '../../services/storage_service.dart';
-import '../../services/local_book/local_book_service.dart';
+import '../../services/book_data_provider.dart';
 import '../../widgets/book_edit_sheet.dart';
 
 class DetailPage extends StatefulWidget {
   final String bookUrl;
+  final Book? initialBook;
 
-  const DetailPage({super.key, required this.bookUrl});
+  const DetailPage({
+    super.key,
+    required this.bookUrl,
+    this.initialBook,
+  });
 
   @override
   State<DetailPage> createState() => _DetailPageState();
@@ -29,6 +34,7 @@ class _DetailPageState extends State<DetailPage> {
   List<Chapter> _chapters = [];
   bool _isDescExpanded = false;
   int _totalWordCount = 0;
+  BookDataProvider? _dataProvider;
 
   @override
   void initState() {
@@ -37,30 +43,45 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   Future<void> _loadData() async {
-    final bookData = StorageService.instance.getBook(widget.bookUrl);
-    Book? book;
-    if (bookData != null) {
-      book = Book.fromJson(bookData);
-    }
-
+    final storedData = StorageService.instance.getBook(widget.bookUrl);
+    final storedBook = storedData == null ? null : Book.fromJson(storedData);
+    Book? book = storedBook ?? widget.initialBook;
     List<Chapter> chapters = [];
+    String? error;
+
     if (book != null) {
-      chapters = await LocalBookService.instance.getChapterList(book);
+      try {
+        _dataProvider = createBookDataProvider(book);
+        if (book.originType == BookOriginType.online) {
+          final detailedBook = await _dataProvider!.getBookInfo(book.bookUrl);
+          if (detailedBook != null) {
+            book = mergeBookMetadata(detailedBook, book);
+          }
+        }
+        chapters = await _dataProvider!.getChapterList(book);
+        if (book.totalChapterNum == null && chapters.isNotEmpty) {
+          book = book.copyWith(totalChapterNum: chapters.length);
+        }
+      } catch (e) {
+        error = e.toString();
+      }
     }
 
-    // 计算总字数
     _totalWordCount =
         chapters.fold<int>(0, (sum, ch) => sum + (ch.wordCount ?? 0));
-
-    final isInShelf = bookData != null;
 
     if (mounted) {
       setState(() {
         _book = book;
         _chapters = chapters;
-        _isInBookshelf = isInShelf;
+        _isInBookshelf = storedData != null;
         _isLoading = false;
       });
+      if (error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('部分信息加载失败：$error')),
+        );
+      }
     }
   }
 
@@ -70,10 +91,19 @@ class _DetailPageState extends State<DetailPage> {
       _isRefreshing = true;
     });
 
-    final bookData = StorageService.instance.getBook(widget.bookUrl);
-    if (bookData != null) {
-      _book = Book.fromJson(bookData);
-      _chapters = await LocalBookService.instance.getChapterList(_book!);
+    if (_book != null) {
+      try {
+        _dataProvider = createBookDataProvider(_book!);
+        if (_book!.originType == BookOriginType.online) {
+          final detailedBook = await _dataProvider!.getBookInfo(_book!.bookUrl);
+          if (detailedBook != null) {
+            _book = mergeBookMetadata(detailedBook, _book!);
+          }
+        }
+        _chapters = await _dataProvider!.getChapterList(_book!);
+      } catch (_) {
+        // Keep the currently displayed metadata if refreshing fails.
+      }
       _totalWordCount =
           _chapters.fold<int>(0, (sum, ch) => sum + (ch.wordCount ?? 0));
     }
@@ -256,10 +286,13 @@ class _DetailPageState extends State<DetailPage> {
                         ),
                         if (_book!.sourceName != null)
                           _buildInfoChip(_book!.sourceName!),
-                        _buildInfoChip(
-                            '${_chapters.length} ${_chapters.length == 1 ? "章" : "章"}'),
-                        if (_totalWordCount > 0)
-                          _buildInfoChip(_formatWordCount(_totalWordCount)),
+                        if (_chapters.isNotEmpty ||
+                            (_book!.totalChapterNum ?? 0) > 0)
+                          _buildInfoChip(
+                            '${_chapters.isNotEmpty ? _chapters.length : _book!.totalChapterNum}章',
+                          ),
+                        if (_displayWordCount.isNotEmpty)
+                          _buildInfoChip(_displayWordCount),
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -751,7 +784,12 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   Widget _buildTags() {
-    if (_book!.tags == null || _book!.tags!.isEmpty) {
+    final tags = _book!.tags ??
+        (_book!.kind ?? '')
+            .split(RegExp(r'[,，/|·\s]+'))
+            .where((tag) => tag.trim().isNotEmpty)
+            .toList();
+    if (tags.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -760,7 +798,7 @@ class _DetailPageState extends State<DetailPage> {
       child: Wrap(
         spacing: 8,
         runSpacing: 8,
-        children: _book!.tags!.map((tag) {
+        children: tags.map((tag) {
           return Chip(
             label: Text(tag),
             backgroundColor:
@@ -865,12 +903,19 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _startReading() {
+    if (_chapters.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('目录为空，无法开始阅读')),
+      );
+      return;
+    }
     Navigator.pushNamed(
       context,
       AppRoutes.novelReader,
       arguments: {
         'bookUrl': widget.bookUrl,
         'chapterIndex': _book?.durChapterIndex ?? 0,
+        'bookData': _book,
       },
     );
   }
@@ -879,7 +924,11 @@ class _DetailPageState extends State<DetailPage> {
     Navigator.pushNamed(
       context,
       AppRoutes.chapterList,
-      arguments: {'bookUrl': widget.bookUrl},
+      arguments: {
+        'bookUrl': widget.bookUrl,
+        'bookData': _book,
+        'currentChapterIndex': _book?.durChapterIndex ?? 0,
+      },
     );
   }
 
@@ -902,7 +951,16 @@ class _DetailPageState extends State<DetailPage> {
       arguments: {
         'bookUrl': widget.bookUrl,
         'chapterIndex': chapter.index,
+        'bookData': _book,
       },
     );
+  }
+
+  String get _displayWordCount {
+    if (_book?.wordCount?.trim().isNotEmpty == true) {
+      final value = _book!.wordCount!.trim();
+      return value.endsWith('字') ? value : '$value字';
+    }
+    return _totalWordCount > 0 ? _formatWordCount(_totalWordCount) : '';
   }
 }
