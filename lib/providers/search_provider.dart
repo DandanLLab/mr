@@ -1,22 +1,45 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/book_source.dart';
-import '../services/storage_service.dart';
 import '../services/source_engine/source_engine.dart';
+import '../services/storage_service.dart';
+
+typedef BookSourceSearcher = Future<List<Map<String, dynamic>>> Function(
+  BookSource source,
+  String keyword,
+);
 
 class SearchProvider extends ChangeNotifier {
-  List<BookSource> _bookSources = [];
-  Set<String> _selectedSourceUrls = {};
-  List<Map<String, dynamic>> _searchResults = [];
+  SearchProvider({
+    int maxConcurrentSearches = 5,
+    BookSourceSearcher? searcher,
+    List<BookSource> initialSources = const [],
+  })  : _maxConcurrentSearches =
+            maxConcurrentSearches > 0 ? maxConcurrentSearches : 1,
+        _searcher = searcher ?? _searchSource,
+        _bookSources = List.of(initialSources),
+        _selectedSourceUrls =
+            initialSources.map((source) => source.bookSourceUrl).toSet();
+
+  final int _maxConcurrentSearches;
+  final BookSourceSearcher _searcher;
+
+  List<BookSource> _bookSources;
+  Set<String> _selectedSourceUrls;
+  final List<Map<String, dynamic>> _searchResults = [];
   bool _isLoading = false;
   String? _error;
   List<String> _searchHistory = [];
   String _currentKeyword = '';
+  int _searchGeneration = 0;
 
   List<BookSource> get bookSources => _bookSources;
   Set<String> get selectedSourceUrls => _selectedSourceUrls;
   List<BookSource> get selectedSources => _bookSources
-      .where((s) => _selectedSourceUrls.contains(s.bookSourceUrl))
+      .where((source) => _selectedSourceUrls.contains(source.bookSourceUrl))
       .toList();
   List<Map<String, dynamic>> get searchResults => _searchResults;
   bool get isLoading => _isLoading;
@@ -37,12 +60,16 @@ class SearchProvider extends ChangeNotifier {
 
     _bookSources = _bookSources
         .where(
-            (s) => s.enabled && s.searchUrl != null && s.searchUrl!.isNotEmpty)
+          (source) =>
+              source.enabled &&
+              source.searchUrl != null &&
+              source.searchUrl!.isNotEmpty,
+        )
         .toList();
 
     if (_selectedSourceUrls.isEmpty && _bookSources.isNotEmpty) {
       _selectedSourceUrls =
-          _bookSources.take(5).map((s) => s.bookSourceUrl).toSet();
+          _bookSources.take(5).map((source) => source.bookSourceUrl).toSet();
     }
 
     notifyListeners();
@@ -51,8 +78,7 @@ class SearchProvider extends ChangeNotifier {
   Future<void> loadSearchHistory() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final history = prefs.getStringList('searchHistory') ?? [];
-      _searchHistory = history;
+      _searchHistory = prefs.getStringList('searchHistory') ?? [];
       notifyListeners();
     } catch (_) {}
   }
@@ -74,7 +100,8 @@ class SearchProvider extends ChangeNotifier {
   }
 
   void selectAllSources() {
-    _selectedSourceUrls = _bookSources.map((s) => s.bookSourceUrl).toSet();
+    _selectedSourceUrls =
+        _bookSources.map((source) => source.bookSourceUrl).toSet();
     notifyListeners();
   }
 
@@ -86,6 +113,7 @@ class SearchProvider extends ChangeNotifier {
   Future<void> search(String keyword) async {
     if (keyword.isEmpty) return;
 
+    final generation = ++_searchGeneration;
     _currentKeyword = keyword;
     _isLoading = true;
     _error = null;
@@ -97,7 +125,7 @@ class SearchProvider extends ChangeNotifier {
       if (_searchHistory.length > 20) {
         _searchHistory.removeLast();
       }
-      await _saveSearchHistory();
+      unawaited(_saveSearchHistory());
     }
 
     final sources = selectedSources;
@@ -108,44 +136,66 @@ class SearchProvider extends ChangeNotifier {
       return;
     }
 
-    final allResults = <Map<String, dynamic>>[];
+    var nextSourceIndex = 0;
 
-    for (final source in sources) {
-      try {
-        final webBook = WebBook(source);
-        final results = await webBook.searchBook(keyword);
+    Future<void> worker() async {
+      while (generation == _searchGeneration) {
+        final sourceIndex = nextSourceIndex++;
+        if (sourceIndex >= sources.length) return;
+        final source = sources[sourceIndex];
 
-        for (final result in results) {
-          result['sourceUrl'] = source.bookSourceUrl;
-          result['sourceName'] = source.bookSourceName;
-          allResults.add(result);
+        try {
+          final results = await _searcher(source, keyword)
+              .timeout(const Duration(seconds: 20));
+          if (generation != _searchGeneration) return;
+
+          for (final result in results) {
+            result['sourceUrl'] = source.bookSourceUrl;
+            result['sourceName'] = source.bookSourceName;
+          }
+          _searchResults.addAll(results);
+          notifyListeners();
+        } catch (e) {
+          debugPrint('搜索书源 ${source.bookSourceName} 失败: $e');
         }
-      } catch (e) {
-        debugPrint('搜索书源 ${source.bookSourceName} 失败: $e');
       }
     }
 
-    _searchResults = allResults;
+    final workerCount = sources.length < _maxConcurrentSearches
+        ? sources.length
+        : _maxConcurrentSearches;
+    await Future.wait(List.generate(workerCount, (_) => worker()));
+    if (generation != _searchGeneration) return;
+
     _isLoading = false;
     notifyListeners();
   }
 
+  static Future<List<Map<String, dynamic>>> _searchSource(
+    BookSource source,
+    String keyword,
+  ) {
+    return WebBook(source).searchBook(keyword);
+  }
+
   void clearResults() {
+    _searchGeneration++;
     _searchResults.clear();
     _currentKeyword = '';
+    _isLoading = false;
     _error = null;
     notifyListeners();
   }
 
   void clearHistory() {
     _searchHistory.clear();
-    _saveSearchHistory();
+    unawaited(_saveSearchHistory());
     notifyListeners();
   }
 
   void removeFromHistory(String keyword) {
     _searchHistory.remove(keyword);
-    _saveSearchHistory();
+    unawaited(_saveSearchHistory());
     notifyListeners();
   }
 }

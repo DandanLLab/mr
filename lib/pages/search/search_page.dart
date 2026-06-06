@@ -77,16 +77,20 @@ class _SearchPageState extends State<SearchPage> {
           return Column(
             children: [
               _buildFilters(provider),
+              if (provider.isLoading)
+                const LinearProgressIndicator(minHeight: 2),
               Expanded(
-                child: provider.isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : provider.error != null
-                        ? _buildErrorState(provider)
-                        : provider.searchResults.isEmpty
-                            ? _buildEmptyState(provider)
-                            : _isGridView
-                                ? _buildGridView(provider)
-                                : _buildListView(provider),
+                child: provider.error != null
+                    ? _buildErrorState(provider)
+                    : provider.searchResults.isNotEmpty
+                        ? _isGridView
+                            ? _buildGridView(provider)
+                            : _buildListView(provider)
+                        : provider.isLoading
+                            ? const Center(
+                                child: CircularProgressIndicator(),
+                              )
+                            : _buildEmptyState(provider),
               ),
             ],
           );
