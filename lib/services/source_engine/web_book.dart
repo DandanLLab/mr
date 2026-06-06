@@ -779,7 +779,16 @@ class WebBook {
       final results = <Map<String, dynamic>>[];
 
       for (int i = 0; i < bookElements.length; i++) {
-        final element = bookElements[i];
+        var element = bookElements[i];
+
+        // 关键修复：如果 bookList 返回的是 String 而非 Element，说明规则可能直接指向了文本内容
+        // 这种情况下，我们需要将其包装回 Element，或者在后续解析中做特殊处理
+        if (element is String && element.isNotEmpty && !element.trim().startsWith('<')) {
+          // 如果字符串不包含 HTML 标签，说明它可能就是我们想要的字段之一
+          // 为了兼容 AnalyzeRule 的逻辑，我们将其包装为简单的 HTML
+          element = '<div>$element</div>';
+        }
+
         final itemAnalyzer = AnalyzeRule()
           ..setContent(element, baseUrl: response.url)
           ..setSourceEngine(source.engineType)
@@ -921,7 +930,12 @@ class WebBook {
 
       final results = <Map<String, dynamic>>[];
       final bookElements = analyzer.getElements(bookListRule);
-      for (final element in bookElements) {
+      for (var element in bookElements) {
+        // 关键修复：处理非 HTML 字符串元素
+        if (element is String && element.isNotEmpty && !element.trim().startsWith('<')) {
+          element = '<div>$element</div>';
+        }
+
         final itemAnalyzer = AnalyzeRule()
           ..setContent(element, baseUrl: response.url)
           ..setSourceEngine(source.engineType)

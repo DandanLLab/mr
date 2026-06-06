@@ -38,7 +38,14 @@ class AnalyzeRule {
   // 规则缓存
   static final Map<String, List<_SourceRule>> _stringRuleCache = {};
   static final Map<String, RegExp?> _regexCache = {};
-  static const int _maxCacheSize = 16;
+  static const int _maxCacheSize = 64; // 稍微加大缓存上限
+
+  /// 清除所有规则缓存，确保调试时使用最新解析逻辑
+  static void clearCache() {
+    _stringRuleCache.clear();
+    _regexCache.clear();
+    debugPrint('♻️ AnalyzeRule 缓存已清空');
+  }
 
   AnalyzeRule setContent(dynamic content, {String? baseUrl}) {
     _content = content;
@@ -1243,19 +1250,10 @@ class AnalyzeRule {
       },
     );
 
-    // 借鉴 legado：如果变量替换后规则中不再包含 {{}} 和选择器语法，
-    // 说明整个规则已变成纯文本模板，应设为 literal 模式直接返回
-    // 检测条件：不含 {{}}、不含 @（选择器）、不含 <js> 标签
-    if (!literal && !next.contains('{{') && !next.contains('}}')) {
-      final hasSelector = next.contains('@') ||
-          next.contains('<js>') ||
-          next.contains(r'$.') ||
-          next.contains(r'$[') ||
-          next.startsWith('/');
-      if (!hasSelector) {
-        literal = true;
-      }
-    }
+    // 借鉴 legado：仅当原始规则只包含 {{}} 模板表达式时（expressionOnly），
+    // 才将变量替换后的结果当作 literal 处理。
+    // CSS 选择器（如 .xxx, #xxx, tag, class.xxx）不含 @ 也是合法选择器，
+    // 绝对不能因为「不含 @」就误判为 literal！
 
     // 替换 $1, $2 等正则捕获组引用
     // 这部分在 makeUpRule 中处理
