@@ -399,6 +399,9 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
   }
 
   Future<void> _startDebug(String key) async {
+    // 强制清除规则解析缓存，确保最新的解析逻辑（如 NativePlugin 的更改）能即时生效
+    AnalyzeRule.clearCache();
+
     // 重置状态
     _debugCancelled = false;
     _debugWatch
@@ -413,26 +416,37 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     }
 
     try {
-      if (kIsWeb) {
-        _addLog('≡检测到 Web 平台运行');
-        _addLog('≡提示: Web 端需要可用的 CORS 代理');
-      }
-
+      _addLog('≡当前书源: ${_source?.bookSourceName} (v${_source?.lastUpdateTime ?? '0'})');
       if (key.startsWith('++')) {
         _addLog('⇒开始访问目录页:${_extractRealUrl(key)}');
+        if (_source?.ruleToc?.chapterList != null) {
+          _addLog('≡目录规则: ${_source?.ruleToc?.chapterList}');
+        }
         await _debugToc(_extractRealUrl(key));
       } else if (key.startsWith('--')) {
         _addLog('⇒开始访问正文页:${_extractRealUrl(key)}');
+        if (_source?.ruleContent?.content != null) {
+          _addLog('≡正文规则: ${_source?.ruleContent?.content}');
+        }
         await _debugContent(_extractRealUrl(key));
       } else if (key.contains('::') && !_looksLikeUrl(key)) {
         final url = _extractRealUrl(key);
         _addLog('⇒开始访问发现页:$url');
+        if (_source?.ruleExplore?.bookList != null) {
+          _addLog('≡发现规则: ${_source?.ruleExplore?.bookList}');
+        }
         await _debugExplore(key);
       } else if (_looksLikeUrl(key)) {
         _addLog('⇒开始访问详情页:$key');
+        if (_source?.ruleBookInfo?.name != null) {
+          _addLog('≡详情规则(书名): ${_source?.ruleBookInfo?.name}');
+        }
         await _debugBookInfo(key);
       } else {
-        _addLog('⇒开始搜索关键字:$key');
+        _addLog('⇒开始搜索关键字:$keyword');
+        if (_source?.ruleSearch?.bookList != null) {
+          _addLog('≡搜索规则: ${_source?.ruleSearch?.bookList}');
+        }
         await _debugSearch(key);
       }
     } catch (e) {
@@ -1321,6 +1335,8 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
 
   /// 日志查看器 Tab 内容
   final ScrollController _logScrollController = ScrollController();
+
+  get keyword => null;
 
   Widget _buildLogViewerBody() {
     final filteredLogs = _appLogs.where((e) {

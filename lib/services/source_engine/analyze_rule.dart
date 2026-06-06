@@ -38,7 +38,14 @@ class AnalyzeRule {
   // 规则缓存
   static final Map<String, List<_SourceRule>> _stringRuleCache = {};
   static final Map<String, RegExp?> _regexCache = {};
-  static const int _maxCacheSize = 16;
+  static const int _maxCacheSize = 64; // 稍微加大缓存上限
+
+  /// 清除所有规则缓存，确保调试时使用最新解析逻辑
+  static void clearCache() {
+    _stringRuleCache.clear();
+    _regexCache.clear();
+    debugPrint('♻️ AnalyzeRule 缓存已清空');
+  }
 
   AnalyzeRule setContent(dynamic content, {String? baseUrl}) {
     _content = content;

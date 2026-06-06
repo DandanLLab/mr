@@ -243,7 +243,8 @@ class NativePlugin(private val context: Context) {
 
             val doc = Jsoup.parse(html)
             val elements = doc.select(selector)
-            result.success(elements.joinToString("\n") { it.text() })
+            // 修正：返回 outerHtml 列表，而不是合并后的纯文本，否则后续无法进行二次提取
+            result.success(elements.map { it.outerHtml() })
         } catch (e: Exception) {
             result.error("ERROR", e.message, null)
         }
