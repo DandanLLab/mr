@@ -26,6 +26,7 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
     }
@@ -61,11 +62,18 @@ android {
 }
 
 dependencies {
+    // Kotlin 标准库（显式声明版本，确保 Android Studio 能解析）
+    implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.2.20")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // OkHttp（HTTP 客户端）
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    // Jsoup（HTML 解析）
     implementation("org.jsoup:jsoup:1.18.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // Rhino（JS 引擎）
     implementation("org.mozilla:rhino:1.9.1")
+    // Java 8+ API 脱糖
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 
 flutter {

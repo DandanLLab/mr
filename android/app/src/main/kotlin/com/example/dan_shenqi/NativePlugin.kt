@@ -5,28 +5,31 @@ import android.os.Build
 import android.util.Base64
 import android.util.Log
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.*
-import okhttp3.*
+import okhttp3.Cache
+import okhttp3.CacheControl
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.logging.HttpLoggingInterceptor
 import org.jsoup.Jsoup
-import org.jsoup.select.Elements
-import org.json.JSONObject
-import java.io.IOException
 import java.io.File
+import java.io.InputStream
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
-import kotlin.coroutines.resume
 
 /**
  * Android 原生桥接插件
  * 集成 OkHttp（HTTP客户端）+ Jsoup（HTML解析）+ 加解密 + 数据持久化
  */
+@Suppress("SpellCheckingInspection", "ECBEncryption", "SetJavaScriptEnabled")
 class NativePlugin(private val context: Context) {
 
     companion object {
@@ -35,13 +38,13 @@ class NativePlugin(private val context: Context) {
         private const val PREFS_NAME = "native_plugin_data"
 
         fun register(flutterEngine: FlutterEngine, context: Context) {
-            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+            MethodChannel(flutterEngine.dartExecutor as BinaryMessenger, CHANNEL)
                 .setMethodCallHandler(NativePlugin(context).handler)
         }
     }
 
     // 协程作用域：网络请求在 IO 线程执行，避免阻塞主线程
-    private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // 内置 Node.js 运行时
     private val nodeRuntime by lazy { NodeRuntime(context) }
@@ -75,7 +78,7 @@ class NativePlugin(private val context: Context) {
             .build()
     }
 
-    val handler = { call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result ->
+    val handler = { call: MethodCall, result: MethodChannel.Result ->
         when (call.method) {
             "httpGet" -> httpGet(call, result)
             "httpPost" -> httpPost(call, result)
@@ -110,7 +113,7 @@ class NativePlugin(private val context: Context) {
 
     // ===== OkHttp 方法 =====
 
-    private fun httpGet(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun httpGet(call: MethodCall, result: MethodChannel.Result) {
         val url = call.argument<String>("url")
         if (url.isNullOrEmpty()) {
             result.error("ERROR", "url is required", null)
@@ -135,11 +138,7 @@ class NativePlugin(private val context: Context) {
                 val responseBody = response.body?.string()
                 Log.d(TAG, "httpGet: $url → ${response.code} (${responseBody?.length ?: 0} chars)")
                 withContext(Dispatchers.Main) {
-                    if (response.isSuccessful || responseBody != null) {
-                        result.success(responseBody ?: "")
-                    } else {
-                        result.success("")
-                    }
+                    result.success(responseBody ?: "")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "httpGet failed: $url → ${e.message}")
@@ -150,7 +149,7 @@ class NativePlugin(private val context: Context) {
         }
     }
 
-    private fun httpPost(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun httpPost(call: MethodCall, result: MethodChannel.Result) {
         val url = call.argument<String>("url")
         if (url.isNullOrEmpty()) {
             result.error("ERROR", "url is required", null)
@@ -179,11 +178,7 @@ class NativePlugin(private val context: Context) {
                 val responseBody = response.body?.string()
                 Log.d(TAG, "httpPost: $url → ${response.code} (${responseBody?.length ?: 0} chars)")
                 withContext(Dispatchers.Main) {
-                    if (response.isSuccessful || responseBody != null) {
-                        result.success(responseBody ?: "")
-                    } else {
-                        result.success("")
-                    }
+                    result.success(responseBody ?: "")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "httpPost failed: $url → ${e.message}")
@@ -194,7 +189,7 @@ class NativePlugin(private val context: Context) {
         }
     }
 
-    private fun httpGetWithCache(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun httpGetWithCache(call: MethodCall, result: MethodChannel.Result) {
         val url = call.argument<String>("url")
         if (url.isNullOrEmpty()) {
             result.error("ERROR", "url is required", null)
@@ -228,7 +223,7 @@ class NativePlugin(private val context: Context) {
 
     // ===== Jsoup 方法 =====
 
-    private fun jsoupSelect(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun jsoupSelect(call: MethodCall, result: MethodChannel.Result) {
         try {
             val html = call.argument<String>("html") ?: return result.error("ERROR", "html is required", null)
             val selector = call.argument<String>("selector") ?: return result.error("ERROR", "selector is required", null)
@@ -241,20 +236,20 @@ class NativePlugin(private val context: Context) {
         }
     }
 
-    private fun jsoupSelectAll(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun jsoupSelectAll(call: MethodCall, result: MethodChannel.Result) {
         try {
             val html = call.argument<String>("html") ?: return result.error("ERROR", "html is required", null)
             val selector = call.argument<String>("selector") ?: return result.error("ERROR", "selector is required", null)
 
             val doc = Jsoup.parse(html)
             val elements = doc.select(selector)
-            result.success(elements.map { it.text() })
+            result.success(elements.joinToString("\n") { it.text() })
         } catch (e: Exception) {
             result.error("ERROR", e.message, null)
         }
     }
 
-    private fun jsoupGetAttr(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun jsoupGetAttr(call: MethodCall, result: MethodChannel.Result) {
         try {
             val html = call.argument<String>("html") ?: return result.error("ERROR", "html is required", null)
             val selector = call.argument<String>("selector") ?: return result.error("ERROR", "selector is required", null)
@@ -268,7 +263,7 @@ class NativePlugin(private val context: Context) {
         }
     }
 
-    private fun jsoupClean(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun jsoupClean(call: MethodCall, result: MethodChannel.Result) {
         try {
             val html = call.argument<String>("html") ?: return result.error("ERROR", "html is required", null)
 
@@ -289,7 +284,7 @@ class NativePlugin(private val context: Context) {
      * 执行 Java 规则代码
      * 通过 Jsoup + OkHttp 组合执行书源规则，支持反射调用
      */
-    private fun evaluateJavaRule(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun evaluateJavaRule(call: MethodCall, result: MethodChannel.Result) {
         val code = call.argument<String>("code")
         if (code.isNullOrEmpty()) {
             result.error("ERROR", "code is required", null)
@@ -303,9 +298,6 @@ class NativePlugin(private val context: Context) {
                 // 构建规则执行环境
                 val url = env["url"] as? String
                 val html = env["html"] as? String
-                val selector = env["selector"] as? String
-
-                var ruleResult = existingResult
 
                 // 如果提供了 URL，先获取 HTML
                 val targetHtml = if (!html.isNullOrEmpty()) {
@@ -323,27 +315,34 @@ class NativePlugin(private val context: Context) {
                     ""
                 }
 
-                // 解析规则代码：支持简单的选择器规则
-                val doc = if (targetHtml.isNotEmpty()) Jsoup.parse(targetHtml) else null
+                // 提前返回空内容的情况，确保 doc 非空
+                if (targetHtml.isEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        result.success(existingResult)
+                    }
+                    return@launch
+                }
 
-                ruleResult = when {
+                val doc = Jsoup.parse(targetHtml)
+
+                val ruleResult = when {
                     code.startsWith("@css:") -> {
                         val cssSelector = code.substring(5).trim()
-                        doc?.selectFirst(cssSelector)?.text() ?: ""
+                        doc.selectFirst(cssSelector)?.text() ?: ""
                     }
                     code.startsWith("@text:") -> {
                         val textSelector = code.substring(6).trim()
-                        doc?.select(textSelector)?.map { it.text() }?.joinToString("\n") ?: ""
+                        doc.select(textSelector).joinToString("\n") { it.text() }
                     }
                     code.startsWith("@attr:") -> {
                         val parts = code.substring(6).trim().split("|")
                         val sel = parts.getOrNull(0) ?: ""
                         val attrName = parts.getOrNull(1) ?: ""
-                        doc?.selectFirst(sel)?.attr(attrName) ?: ""
+                        doc.selectFirst(sel)?.attr(attrName) ?: ""
                     }
                     code.startsWith("@js:") || code.startsWith("javascript:") -> {
                         val jsCode = if (code.startsWith("@js:")) code.substring(4) else code.substring(11)
-                        executeJsRule(jsCode, targetHtml, ruleResult, env)
+                        executeJsRule(jsCode, targetHtml, existingResult, env)
                     }
                     code.startsWith("java:") -> {
                         val className = code.substring(5).trim()
@@ -357,7 +356,7 @@ class NativePlugin(private val context: Context) {
                         }
                     }
                     else -> {
-                        doc?.selectFirst(code)?.text() ?: existingResult
+                        doc.selectFirst(code)?.text() ?: existingResult
                     }
                 }
 
@@ -409,14 +408,13 @@ class NativePlugin(private val context: Context) {
     /**
      * 从 URL 直接解析 HTML（Jsoup.connect）
      */
-    private fun jsoupParseUrl(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun jsoupParseUrl(call: MethodCall, result: MethodChannel.Result) {
         val url = call.argument<String>("url")
         if (url.isNullOrEmpty()) {
             result.error("ERROR", "url is required", null)
             return
         }
         val headers = call.argument<Map<String, String>>("headers") ?: emptyMap()
-        val selector = call.argument<String>("selector")
 
         coroutineScope.launch {
             try {
@@ -429,9 +427,9 @@ class NativePlugin(private val context: Context) {
 
                 val doc = connection.get()
 
+                val selector = call.argument<String>("selector")
                 val parseResult = if (!selector.isNullOrEmpty()) {
-                    val elements = doc.select(selector)
-                    elements.map { it.outerHtml() }.joinToString("\n")
+                    doc.select(selector).joinToString("\n") { it.outerHtml() }
                 } else {
                     doc.html()
                 }
@@ -451,7 +449,7 @@ class NativePlugin(private val context: Context) {
     /**
      * 获取所有链接
      */
-    private fun jsoupGetLinks(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun jsoupGetLinks(call: MethodCall, result: MethodChannel.Result) {
         try {
             val html = call.argument<String>("html") ?: return result.error("ERROR", "html is required", null)
             val baseUrl = call.argument<String>("baseUrl") ?: ""
@@ -461,9 +459,9 @@ class NativePlugin(private val context: Context) {
                 doc.setBaseUri(baseUrl)
             }
 
-            val links = doc.select("a[href]").map { el ->
-                el.attr("abs:href")
-            }.filter { it.isNotEmpty() }
+            val links = doc.select("a[href]")
+                .map { it.attr("abs:href") }
+                .filter { it.isNotEmpty() }
 
             result.success(links)
         } catch (e: Exception) {
@@ -474,7 +472,7 @@ class NativePlugin(private val context: Context) {
     /**
      * 下载文件到本地
      */
-    private fun httpDownload(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun httpDownload(call: MethodCall, result: MethodChannel.Result) {
         try {
             val url = call.argument<String>("url") ?: return result.error("ERROR", "url is required", null)
             val savePath = call.argument<String>("savePath") ?: return result.error("ERROR", "savePath is required", null)
@@ -491,12 +489,13 @@ class NativePlugin(private val context: Context) {
             val body = response.body ?: return result.error("ERROR", "Empty response body", null)
             val file = File(savePath)
             file.parentFile?.mkdirs()
-            file.outputStream().use { output ->
-                body.byteStream().use { input ->
+            body.byteStream().use { input ->
+                file.outputStream().use { output ->
                     val buffer = ByteArray(8192)
-                    var bytesRead: Int
-                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                    var bytesRead = input.read(buffer)
+                    while (bytesRead != -1) {
                         output.write(buffer, 0, bytesRead)
+                        bytesRead = input.read(buffer)
                     }
                 }
             }
@@ -511,7 +510,7 @@ class NativePlugin(private val context: Context) {
      * AES 加密
      * 支持 AES-CBC（带 IV）和 AES-ECB（无 IV）
      */
-    private fun aesEncrypt(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun aesEncrypt(call: MethodCall, result: MethodChannel.Result) {
         try {
             val data = call.argument<String>("data") ?: return result.error("ERROR", "data is required", null)
             val key = call.argument<String>("key") ?: return result.error("ERROR", "key is required", null)
@@ -542,7 +541,7 @@ class NativePlugin(private val context: Context) {
      * AES 解密
      * 支持 AES-CBC（带 IV）和 AES-ECB（无 IV）
      */
-    private fun aesDecrypt(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun aesDecrypt(call: MethodCall, result: MethodChannel.Result) {
         try {
             val data = call.argument<String>("data") ?: return result.error("ERROR", "data is required", null)
             val key = call.argument<String>("key") ?: return result.error("ERROR", "key is required", null)
@@ -583,7 +582,7 @@ class NativePlugin(private val context: Context) {
     /**
      * MD5 哈希
      */
-    private fun md5(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun md5(call: MethodCall, result: MethodChannel.Result) {
         try {
             val data = call.argument<String>("data") ?: return result.error("ERROR", "data is required", null)
 
@@ -599,7 +598,7 @@ class NativePlugin(private val context: Context) {
     /**
      * Base64 编码
      */
-    private fun base64Encode(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun base64Encode(call: MethodCall, result: MethodChannel.Result) {
         try {
             val data = call.argument<String>("data") ?: return result.error("ERROR", "data is required", null)
 
@@ -613,7 +612,7 @@ class NativePlugin(private val context: Context) {
     /**
      * Base64 解码
      */
-    private fun base64Decode(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun base64Decode(call: MethodCall, result: MethodChannel.Result) {
         try {
             val data = call.argument<String>("data") ?: return result.error("ERROR", "data is required", null)
 
@@ -627,7 +626,7 @@ class NativePlugin(private val context: Context) {
     /**
      * 执行 JavaScript 脚本（通过 Rhino 引擎）
      */
-    private fun executeScript(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun executeScript(call: MethodCall, result: MethodChannel.Result) {
         try {
             val script = call.argument<String>("script") ?: return result.error("ERROR", "script is required", null)
             val bindings = call.argument<Map<String, Any>>("bindings") ?: emptyMap()
@@ -653,7 +652,7 @@ class NativePlugin(private val context: Context) {
     /**
      * 存储键值对
      */
-    private fun putData(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun putData(call: MethodCall, result: MethodChannel.Result) {
         try {
             val key = call.argument<String>("key") ?: return result.error("ERROR", "key is required", null)
             val value = call.argument<String>("value") ?: return result.error("ERROR", "value is required", null)
@@ -668,7 +667,7 @@ class NativePlugin(private val context: Context) {
     /**
      * 读取键值对
      */
-    private fun getData(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun getData(call: MethodCall, result: MethodChannel.Result) {
         try {
             val key = call.argument<String>("key") ?: return result.error("ERROR", "key is required", null)
             val defaultValue = call.argument<String>("defaultValue") ?: ""
@@ -683,7 +682,7 @@ class NativePlugin(private val context: Context) {
     /**
      * 删除键值对
      */
-    private fun deleteData(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun deleteData(call: MethodCall, result: MethodChannel.Result) {
         try {
             val key = call.argument<String>("key") ?: return result.error("ERROR", "key is required", null)
 
@@ -699,7 +698,8 @@ class NativePlugin(private val context: Context) {
     /**
      * 获取设备信息（SDK版本、品牌、型号等）
      */
-    private fun getDeviceInfo(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    @Suppress("UNUSED_PARAMETER")
+    private fun getDeviceInfo(call: MethodCall, result: MethodChannel.Result) {
         try {
             result.success(mapOf(
                 "sdkInt" to Build.VERSION.SDK_INT,
@@ -726,7 +726,7 @@ class NativePlugin(private val context: Context) {
      * 4. 返回 JS 执行结果
      * 5. 如果有 sourceRegex，嗅探匹配的资源 URL
      */
-    private fun executeWebViewJs(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun executeWebViewJs(call: MethodCall, result: MethodChannel.Result) {
         val url = call.argument<String>("url") ?: ""
         val jsCode = call.argument<String>("jsCode") ?: "document.documentElement.outerHTML"
         val sourceRegex = call.argument<String>("sourceRegex")
@@ -738,125 +738,103 @@ class NativePlugin(private val context: Context) {
             return
         }
 
-        try {
-            // 使用协程异步执行 WebView 操作
-            CoroutineScope(Dispatchers.Main).launch {
-                try {
-                    val jsResult = withTimeoutOrNull(30000L) {
-                        suspendCancellableCoroutine<String?> { cont ->
-                            // 创建后台 WebView（借鉴 legado 的 WebViewPool）
-                            val webView = android.webkit.WebView(context).apply {
-                                settings.javaScriptEnabled = true
-                                settings.domStorageEnabled = true
-                                settings.databaseEnabled = true
-                                settings.loadWithOverviewMode = true
-                                settings.useWideViewPort = true
-                                settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                            }
+        // 使用主线程协程（WebView 必须在主线程操作）
+        CoroutineScope(Dispatchers.Main).launch {
+            try {
+                val jsResult = withTimeoutOrNull(30000L) {
+                    suspendCancellableCoroutine<String?> { cont ->
+                        val webView = android.webkit.WebView(context).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            @Suppress("DEPRECATION")
+                            settings.databaseEnabled = true
+                            settings.loadWithOverviewMode = true
+                            settings.useWideViewPort = true
+                            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        }
 
-                            var isCompleted = false
+                        var isCompleted = false
 
-                            webView.webViewClient = object : android.webkit.WebViewClient() {
-                                override fun onPageFinished(view: android.webkit.WebView?, pageUrl: String?) {
-                                    super.onPageFinished(view, pageUrl)
-                                    // 借鉴 legado 的 EvalJsRunnable：延迟执行 JS
-                                    CoroutineScope(Dispatchers.Main).launch {
-                                        delay(delayTime.toLong())
-                                        if (!isCompleted) {
-                                            webView.evaluateJavascript(jsCode) { jsResult ->
-                                                isCompleted = true
-                                                webView.destroy()
-                                                if (jsResult != null && jsResult != "null") {
-                                                    // 去掉 JSON 引号
-                                                    val cleanResult = jsResult
-                                                        .trimStart('"')
-                                                        .trimEnd('"')
-                                                        .replace("\\u003C", "<")
-                                                        .replace("\\u003E", ">")
-                                                        .replace("\\/", "/")
-                                                        .replace("\\n", "\n")
-                                                        .replace("\\t", "\t")
-                                                        .replace("\\\"", "\"")
-                                                    cont.resume(cleanResult)
-                                                } else {
-                                                    cont.resume(null)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                override fun onReceivedError(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?, error: android.webkit.WebResourceError?) {
-                                    super.onReceivedError(view, request, error)
-                                    if (!isCompleted) {
-                                        isCompleted = true
-                                        webView.destroy()
-                                        cont.resume(null)
-                                    }
-                                }
-                            }
-
+                        // 合并 sourceRegex 嗅探和页面完成逻辑到一个 WebViewClient
+                        webView.webViewClient = object : android.webkit.WebViewClient() {
                             // sourceRegex 嗅探（借鉴 legado 的 SnifferWebClient）
-                            if (sourceRegex != null && sourceRegex.isNotEmpty()) {
-                                webView.webViewClient = object : android.webkit.WebViewClient() {
-                                    override fun shouldInterceptRequest(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?): android.webkit.WebResourceResponse? {
-                                        val resUrl = request?.url?.toString() ?: ""
-                                        try {
-                                            if (resUrl.matches(Regex(sourceRegex))) {
-                                                if (!isCompleted) {
-                                                    isCompleted = true
-                                                    CoroutineScope(Dispatchers.Main).launch {
-                                                        webView.destroy()
-                                                        cont.resume(resUrl)
-                                                    }
+                            override fun shouldInterceptRequest(
+                                view: android.webkit.WebView?,
+                                request: android.webkit.WebResourceRequest?
+                            ): android.webkit.WebResourceResponse? {
+                                if (!sourceRegex.isNullOrEmpty()) {
+                                    val resUrl = request?.url?.toString() ?: ""
+                                    try {
+                                        if (resUrl.matches(Regex(sourceRegex))) {
+                                            if (!isCompleted) {
+                                                isCompleted = true
+                                                CoroutineScope(Dispatchers.Main).launch {
+                                                    webView.destroy()
+                                                    cont.resumeWith(Result.success(resUrl))
                                                 }
                                             }
-                                        } catch (e: Exception) {
-                                            Log.w(TAG, "sourceRegex匹配失败: $e")
                                         }
-                                        return super.shouldInterceptRequest(view, request)
+                                    } catch (e: Exception) {
+                                        Log.w(TAG, "sourceRegex匹配失败: $e")
                                     }
+                                }
+                                return super.shouldInterceptRequest(view, request)
+                            }
 
-                                    override fun onPageFinished(view: android.webkit.WebView?, pageUrl: String?) {
-                                        super.onPageFinished(view, pageUrl)
-                                        // 即使有 sourceRegex，也在页面完成后执行 JS
-                                        CoroutineScope(Dispatchers.Main).launch {
-                                            delay(delayTime.toLong())
-                                            if (!isCompleted) {
-                                                webView.evaluateJavascript(jsCode) { jsResult ->
-                                                    isCompleted = true
-                                                    webView.destroy()
-                                                    if (jsResult != null && jsResult != "null") {
-                                                        val cleanResult = jsResult
-                                                            .trimStart('"').trimEnd('"')
-                                                            .replace("\\u003C", "<").replace("\\u003E", ">")
-                                                            .replace("\\/", "/").replace("\\n", "\n")
-                                                        cont.resume(cleanResult)
-                                                    } else {
-                                                        cont.resume(null)
-                                                    }
-                                                }
+                            override fun onPageFinished(view: android.webkit.WebView?, pageUrl: String?) {
+                                super.onPageFinished(view, pageUrl)
+                                // 借鉴 legado 的 EvalJsRunnable：延迟执行 JS
+                                CoroutineScope(Dispatchers.Main).launch {
+                                    delay(delayTime.toLong())
+                                    if (!isCompleted) {
+                                        webView.evaluateJavascript(jsCode) { evalResult ->
+                                            isCompleted = true
+                                            webView.destroy()
+                                            if (evalResult != null && evalResult != "null") {
+                                                val cleanResult = evalResult
+                                                    .trimStart('"')
+                                                    .trimEnd('"')
+                                                    .replace("\\u003C", "<")
+                                                    .replace("\\u003E", ">")
+                                                    .replace("\\/", "/")
+                                                    .replace("\\n", "\n")
+                                                    .replace("\\t", "\t")
+                                                    .replace("\\\"", "\"")
+                                                cont.resumeWith(Result.success(cleanResult))
+                                            } else {
+                                                cont.resumeWith(Result.success(null))
                                             }
                                         }
                                     }
                                 }
                             }
 
-                            // 加载页面
-                            if (html != null && html.isNotEmpty()) {
-                                webView.loadDataWithBaseURL(url, html, "text/html", "UTF-8", url)
-                            } else {
-                                webView.loadUrl(url)
+                            override fun onReceivedError(
+                                view: android.webkit.WebView?,
+                                request: android.webkit.WebResourceRequest?,
+                                error: android.webkit.WebResourceError?
+                            ) {
+                                super.onReceivedError(view, request, error)
+                                if (!isCompleted) {
+                                    isCompleted = true
+                                    webView.destroy()
+                                    cont.resumeWith(Result.success(null))
+                                }
                             }
                         }
+
+                        // 加载页面
+                        if (!html.isNullOrEmpty()) {
+                            webView.loadDataWithBaseURL(url, html, "text/html", "UTF-8", url)
+                        } else {
+                            webView.loadUrl(url)
+                        }
                     }
-                    result.success(jsResult)
-                } catch (e: Exception) {
-                    result.error("WEBVIEW_ERROR", e.message, null)
                 }
+                result.success(jsResult)
+            } catch (e: Exception) {
+                result.error("WEBVIEW_ERROR", e.message, null)
             }
-        } catch (e: Exception) {
-            result.error("ERROR", e.message, null)
         }
     }
 
@@ -865,7 +843,8 @@ class NativePlugin(private val context: Context) {
     /**
      * 初始化 Node.js 运行环境（解压二进制 + 脚本）
      */
-    private fun nodeSetup(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    @Suppress("UNUSED_PARAMETER")
+    private fun nodeSetup(call: MethodCall, result: MethodChannel.Result) {
         try {
             val nodePath = nodeRuntime.setup()
             if (nodePath != null) {
@@ -881,7 +860,7 @@ class NativePlugin(private val context: Context) {
     /**
      * 启动内置 Node.js 代理服务（直接启动，无需解压二进制）
      */
-    private fun nodeStartProxy(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    private fun nodeStartProxy(call: MethodCall, result: MethodChannel.Result) {
         try {
             val success = nodeRuntime.startProxy()
             if (success) {
@@ -901,7 +880,8 @@ class NativePlugin(private val context: Context) {
     /**
      * 停止内置 Node.js 进程
      */
-    private fun nodeStop(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    @Suppress("UNUSED_PARAMETER")
+    private fun nodeStop(call: MethodCall, result: MethodChannel.Result) {
         try {
             nodeRuntime.stop()
             result.success(true)
@@ -913,7 +893,8 @@ class NativePlugin(private val context: Context) {
     /**
      * 获取内置 Node.js 运行状态
      */
-    private fun nodeStatus(call: io.flutter.plugin.common.MethodCall, result: io.flutter.plugin.common.MethodChannel.Result) {
+    @Suppress("UNUSED_PARAMETER")
+    private fun nodeStatus(call: MethodCall, result: MethodChannel.Result) {
         try {
             result.success(mapOf(
                 "running" to nodeRuntime.isRunning,
