@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/book.dart';
 import '../models/book_source.dart';
 import '../pages/main/main_page.dart';
 import '../pages/bookshelf/bookshelf_page.dart';
@@ -65,15 +66,29 @@ class AppRoutes {
         return MaterialPageRoute(builder: (_) => const SearchPage());
       case detail:
         final args = settings.arguments as Map<String, dynamic>?;
+        final bookData = args?['bookData'];
         return MaterialPageRoute(
-          builder: (_) => DetailPage(bookUrl: args?['bookUrl'] ?? args?['bookId'] ?? ''),
+          builder: (_) => DetailPage(
+            bookUrl: args?['bookUrl'] ?? args?['bookId'] ?? '',
+            initialBook: bookData is Book
+                ? bookData
+                : bookData is Map
+                    ? Book.fromJson(Map<String, dynamic>.from(bookData))
+                    : null,
+          ),
         );
       case novelReader:
         final args = settings.arguments as Map<String, dynamic>?;
+        final bookData = args?['bookData'];
         return MaterialPageRoute(
           builder: (_) => NovelReaderPage(
             bookUrl: args?['bookUrl'] ?? args?['bookId'] ?? '',
             chapterIndex: args?['chapterIndex'] ?? 0,
+            initialBook: bookData is Book
+                ? bookData
+                : bookData is Map
+                    ? Book.fromJson(Map<String, dynamic>.from(bookData))
+                    : null,
           ),
         );
       case comicReader:
@@ -121,8 +136,17 @@ class AppRoutes {
         );
       case chapterList:
         final args = settings.arguments as Map<String, dynamic>?;
+        final bookData = args?['bookData'];
         return MaterialPageRoute(
-          builder: (_) => ChapterListPage(bookUrl: args?['bookUrl'] ?? ''),
+          builder: (_) => ChapterListPage(
+            bookUrl: args?['bookUrl'] ?? '',
+            currentChapterIndex: args?['currentChapterIndex'] ?? 0,
+            initialBook: bookData is Book
+                ? bookData
+                : bookData is Map
+                    ? Book.fromJson(Map<String, dynamic>.from(bookData))
+                    : null,
+          ),
         );
       default:
         return MaterialPageRoute(

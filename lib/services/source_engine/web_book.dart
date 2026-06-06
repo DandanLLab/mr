@@ -445,7 +445,8 @@ class WebBook {
     if (_isJsRule(headerStr)) {
       try {
         final jsResult = JsEngine.instance.executeSync(
-          headerStr, null,
+          headerStr,
+          null,
           baseUrl: source.bookSourceUrl,
           sourceEngine: source.engineType,
           variables: {
@@ -708,7 +709,7 @@ class WebBook {
           .info(LogCategory.network, '搜索响应: ${html.length} chars');
       if (html.isEmpty) {
         AppLogger.instance.error(LogCategory.network, '搜索响应为空',
-          detail: 'URL: ${parsed.url}\n状态码: ${response.statusCode}');
+            detail: 'URL: ${parsed.url}\n状态码: ${response.statusCode}');
         // 保存诊断信息，方便调试页面查看
         lastSearchHtml = '<!-- 搜索响应为空 -->\n'
             '<!-- URL: ${parsed.url} -->\n'
@@ -739,8 +740,8 @@ class WebBook {
         ..setContent(html, baseUrl: response.url)
         ..setSourceEngine(source.engineType)
         ..setSourceInfo(_sourceToMap(source)) // 借鉴 legado：注入 source 上下文
-        ..putVariable('key', keyword)   // 注入搜索关键词
-        ..putVariable('page', page);    // 注入页码
+        ..putVariable('key', keyword) // 注入搜索关键词
+        ..putVariable('page', page); // 注入页码
 
       final bookListRule = searchRule.bookList ?? '';
 
@@ -888,9 +889,8 @@ class WebBook {
     final bookListRule = useSearchFallback
         ? (searchRule?.bookList ?? '')
         : (exploreRule.bookList ?? '');
-    final nameRule = useSearchFallback
-        ? (searchRule?.name ?? '')
-        : (exploreRule.name ?? '');
+    final nameRule =
+        useSearchFallback ? (searchRule?.name ?? '') : (exploreRule.name ?? '');
 
     if (useSearchFallback && searchRule != null) {
       AppLogger.instance.info(LogCategory.parse, '发现规则为空，退回搜索规则');
@@ -908,10 +908,11 @@ class WebBook {
 
       lastExploreHtml = html;
 
-      AppLogger.instance.info(LogCategory.network, '发现响应: ${html.length} chars, 状态码: ${response.statusCode}');
+      AppLogger.instance.info(LogCategory.network,
+          '发现响应: ${html.length} chars, 状态码: ${response.statusCode}');
       if (html.isEmpty) {
         AppLogger.instance.error(LogCategory.network, '发现响应为空',
-          detail: 'URL: ${parsed.url}\n状态码: ${response.statusCode}');
+            detail: 'URL: ${parsed.url}\n状态码: ${response.statusCode}');
         lastExploreHtml = '<!-- 发现响应为空 -->\n'
             '<!-- URL: ${parsed.url} -->\n'
             '<!-- 状态码: ${response.statusCode} -->';
@@ -939,23 +940,43 @@ class WebBook {
           ..setContent(element, baseUrl: response.url)
           ..setSourceEngine(source.engineType)
           ..setSourceInfo(_sourceToMap(source));
-        final name = itemAnalyzer.getString(useSearchFallback ? (searchRule?.name ?? '') : exploreRule.name);
+        final name = itemAnalyzer.getString(
+            useSearchFallback ? (searchRule?.name ?? '') : exploreRule.name);
         if (name == null || name.isEmpty) continue;
         results.add({
           'name': name,
-          'author': itemAnalyzer.getString(useSearchFallback ? (searchRule?.author ?? '') : exploreRule.author) ?? '',
-          'coverUrl':
-              itemAnalyzer.getString(useSearchFallback ? (searchRule?.coverUrl ?? '') : exploreRule.coverUrl, isUrl: true) ??
-                  '',
-          'intro': itemAnalyzer.getString(useSearchFallback ? (searchRule?.intro ?? '') : exploreRule.intro) ?? '',
-          'bookUrl':
-              itemAnalyzer.getString(useSearchFallback ? (searchRule?.bookUrl ?? '') : exploreRule.bookUrl, isUrl: true) ??
-                  '',
-          'kind': itemAnalyzer.getString(useSearchFallback ? (searchRule?.kind ?? '') : exploreRule.kind) ?? '',
-          'lastChapter':
-              itemAnalyzer.getString(useSearchFallback ? (searchRule?.lastChapter ?? '') : exploreRule.lastChapter) ?? '',
-          'wordCount':
-              itemAnalyzer.getString(useSearchFallback ? (searchRule?.wordCount ?? '') : exploreRule.wordCount) ?? '',
+          'author': itemAnalyzer.getString(useSearchFallback
+                  ? (searchRule?.author ?? '')
+                  : exploreRule.author) ??
+              '',
+          'coverUrl': itemAnalyzer.getString(
+                  useSearchFallback
+                      ? (searchRule?.coverUrl ?? '')
+                      : exploreRule.coverUrl,
+                  isUrl: true) ??
+              '',
+          'intro': itemAnalyzer.getString(useSearchFallback
+                  ? (searchRule?.intro ?? '')
+                  : exploreRule.intro) ??
+              '',
+          'bookUrl': itemAnalyzer.getString(
+                  useSearchFallback
+                      ? (searchRule?.bookUrl ?? '')
+                      : exploreRule.bookUrl,
+                  isUrl: true) ??
+              '',
+          'kind': itemAnalyzer.getString(useSearchFallback
+                  ? (searchRule?.kind ?? '')
+                  : exploreRule.kind) ??
+              '',
+          'lastChapter': itemAnalyzer.getString(useSearchFallback
+                  ? (searchRule?.lastChapter ?? '')
+                  : exploreRule.lastChapter) ??
+              '',
+          'wordCount': itemAnalyzer.getString(useSearchFallback
+                  ? (searchRule?.wordCount ?? '')
+                  : exploreRule.wordCount) ??
+              '',
           'sourceUrl': source.bookSourceUrl,
           'sourceName': source.bookSourceName,
         });
@@ -980,10 +1001,11 @@ class WebBook {
       final response = await _executeRequest(_parseUrlWithOption(bookUrl));
       var html = response.body;
 
-      AppLogger.instance.info(LogCategory.network, '详情响应: ${html.length} chars, 状态码: ${response.statusCode}');
+      AppLogger.instance.info(LogCategory.network,
+          '详情响应: ${html.length} chars, 状态码: ${response.statusCode}');
       if (html.isEmpty) {
         AppLogger.instance.error(LogCategory.network, '详情响应为空',
-          detail: 'URL: $bookUrl\n状态码: ${response.statusCode}');
+            detail: 'URL: $bookUrl\n状态码: ${response.statusCode}');
         lastBookInfoHtml = '<!-- 详情响应为空 -->\n'
             '<!-- URL: $bookUrl -->\n'
             '<!-- 状态码: ${response.statusCode} -->';
@@ -1022,7 +1044,8 @@ class WebBook {
       final resolvedCoverUrl = resolveUrl(rawCoverUrl, bookUrl);
       final resolvedTocUrl = resolveUrl(rawTocUrl, bookUrl);
 
-      AppLogger.instance.info(LogCategory.parse, '详情: 书名=$name, 作者=$author, 目录=$resolvedTocUrl');
+      AppLogger.instance.info(
+          LogCategory.parse, '详情: 书名=$name, 作者=$author, 目录=$resolvedTocUrl');
 
       return Book(
         bookUrl: bookUrl,
@@ -1042,7 +1065,8 @@ class WebBook {
         addedTime: DateTime.now(),
       );
     } catch (e) {
-      AppLogger.instance.error(LogCategory.parse, '获取详情失败', detail: e.toString());
+      AppLogger.instance
+          .error(LogCategory.parse, '获取详情失败', detail: e.toString());
       return null;
     }
   }
@@ -1059,10 +1083,11 @@ class WebBook {
       final response = await _executeRequest(_parseUrlWithOption(tocUrl));
       var html = response.body;
 
-      AppLogger.instance.info(LogCategory.network, '目录响应: ${html.length} chars, 状态码: ${response.statusCode}');
+      AppLogger.instance.info(LogCategory.network,
+          '目录响应: ${html.length} chars, 状态码: ${response.statusCode}');
       if (html.isEmpty) {
         AppLogger.instance.error(LogCategory.network, '目录响应为空',
-          detail: 'URL: $tocUrl\n状态码: ${response.statusCode}');
+            detail: 'URL: $tocUrl\n状态码: ${response.statusCode}');
         lastTocHtml = '<!-- 目录响应为空 -->\n'
             '<!-- URL: $tocUrl -->\n'
             '<!-- 状态码: ${response.statusCode} -->';
@@ -1075,7 +1100,8 @@ class WebBook {
             result: html, baseUrl: tocUrl);
         if (preResult != null && preResult.isNotEmpty) {
           html = preResult;
-          AppLogger.instance.logJsResult('preUpdateJs', '${preResult.length} chars');
+          AppLogger.instance
+              .logJsResult('preUpdateJs', '${preResult.length} chars');
         }
       }
 
@@ -1166,10 +1192,14 @@ class WebBook {
 
         chapters.add(Chapter(
           id: '${tocUrl}_$i',
-          bookId: tocUrl,
+          bookId: book?.bookUrl ?? tocUrl,
           title: name,
           index: i,
           url: resolvedUrl.isEmpty ? null : resolvedUrl,
+          isVolume: i < chapterVolumes.length ? chapterVolumes[i] : false,
+          isVip: i < chapterVip.length ? chapterVip[i] : false,
+          isPay: i < chapterPay.length ? chapterPay[i] : false,
+          tag: i < chapterTags.length ? chapterTags[i] : null,
         ));
       }
 
@@ -1197,7 +1227,8 @@ class WebBook {
 
       return chapters;
     } catch (e) {
-      AppLogger.instance.error(LogCategory.parse, '获取目录失败', detail: e.toString());
+      AppLogger.instance
+          .error(LogCategory.parse, '获取目录失败', detail: e.toString());
       return [];
     }
   }
@@ -1211,7 +1242,8 @@ class WebBook {
     return !const {'false', 'no', 'not', '0', '0.0'}.contains(normalized);
   }
 
-  Future<String?> getContent(String chapterUrl, {Book? book, Chapter? chapter}) async {
+  Future<String?> getContent(String chapterUrl,
+      {Book? book, Chapter? chapter}) async {
     final contentRule = source.ruleContent;
     if (contentRule == null) return null;
 
@@ -1222,10 +1254,11 @@ class WebBook {
       final response = await _executeRequest(_parseUrlWithOption(chapterUrl));
       var html = response.body;
 
-      AppLogger.instance.info(LogCategory.network, '正文响应: ${html.length} chars, 状态码: ${response.statusCode}');
+      AppLogger.instance.info(LogCategory.network,
+          '正文响应: ${html.length} chars, 状态码: ${response.statusCode}');
       if (html.isEmpty) {
         AppLogger.instance.error(LogCategory.network, '正文响应为空',
-          detail: 'URL: $chapterUrl\n状态码: ${response.statusCode}');
+            detail: 'URL: $chapterUrl\n状态码: ${response.statusCode}');
         lastContentHtml = '<!-- 正文响应为空 -->\n'
             '<!-- URL: $chapterUrl -->\n'
             '<!-- 状态码: ${response.statusCode} -->';
@@ -1282,7 +1315,8 @@ class WebBook {
             analyzer.getString(contentRule.nextContentUrl!, isUrl: true);
         if (nextUrl != null && nextUrl.isNotEmpty && nextUrl != chapterUrl) {
           debugPrint('📖 发现正文下一页: $nextUrl');
-          final nextContent = await getContent(nextUrl, book: book, chapter: chapter);
+          final nextContent =
+              await getContent(nextUrl, book: book, chapter: chapter);
           if (nextContent != null && nextContent.isNotEmpty) {
             content = (content ?? '') + '\n' + nextContent;
           }
@@ -1295,7 +1329,8 @@ class WebBook {
             result: content ?? '', baseUrl: chapterUrl);
         if (jsResult != null && jsResult.isNotEmpty) {
           content = jsResult;
-          AppLogger.instance.logJsResult('content.js', '${jsResult.length} chars');
+          AppLogger.instance
+              .logJsResult('content.js', '${jsResult.length} chars');
         }
       }
 
@@ -1306,15 +1341,20 @@ class WebBook {
             result: content ?? '', baseUrl: chapterUrl);
         if (callBackResult != null && callBackResult.isNotEmpty) {
           content = callBackResult;
-          AppLogger.instance.logJsResult('callBackJs', '${callBackResult.length} chars');
+          AppLogger.instance
+              .logJsResult('callBackJs', '${callBackResult.length} chars');
         }
       }
 
       // Apply imageDecode if set
-      if (contentRule.imageDecode != null && contentRule.imageDecode!.isNotEmpty && content != null) {
+      if (contentRule.imageDecode != null &&
+          contentRule.imageDecode!.isNotEmpty &&
+          content != null) {
         try {
           // Find all image URLs in content and decode them
-          final imgPattern = RegExp(r'(https?://[^\s"<>]+\.(?:jpg|jpeg|png|gif|webp))', caseSensitive: false);
+          final imgPattern = RegExp(
+              r'(https?://[^\s"<>]+\.(?:jpg|jpeg|png|gif|webp))',
+              caseSensitive: false);
           content = content.replaceAllMapped(imgPattern, (match) {
             final url = match.group(1)!;
             // imageDecode will be called per-image by the reader
@@ -1328,7 +1368,8 @@ class WebBook {
 
       return content;
     } catch (e) {
-      AppLogger.instance.error(LogCategory.parse, '获取正文失败', detail: e.toString());
+      AppLogger.instance
+          .error(LogCategory.parse, '获取正文失败', detail: e.toString());
       return null;
     }
   }
@@ -1397,8 +1438,12 @@ class WebBook {
     if (checkJs == null || checkJs.isEmpty) return false;
 
     try {
-      final result = await _executeJs(checkJs, result: html, baseUrl: source.bookSourceUrl);
-      if (result == null || result.isEmpty || result == 'false' || result == 'null') {
+      final result = await _executeJs(checkJs,
+          result: html, baseUrl: source.bookSourceUrl);
+      if (result == null ||
+          result.isEmpty ||
+          result == 'false' ||
+          result == 'null') {
         return false;
       }
       return result == 'true' || result.toLowerCase() == 'needlogin';
