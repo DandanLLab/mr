@@ -88,10 +88,12 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
     }
 
     // 优先级：已有书源 > 模板书源 > 空白书源
-    _source = _originalSource ?? widget.templateSource ?? BookSource(
-      bookSourceUrl: '',
-      bookSourceName: '',
-    );
+    _source = _originalSource ??
+        widget.templateSource ??
+        BookSource(
+          bookSourceUrl: '',
+          bookSourceName: '',
+        );
 
     _initEntities();
     setState(() {});
@@ -100,97 +102,209 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
   void _initEntities() {
     // 基本信息
     _baseEntities = [
-      EditEntity(key: 'bookSourceUrl', value: _source.bookSourceUrl, hint: '源 URL（bookSourceUrl）'),
-      EditEntity(key: 'bookSourceName', value: _source.bookSourceName, hint: '源名称（bookSourceName）'),
-      EditEntity(key: 'bookSourceGroup', value: _source.bookSourceGroup ?? '', hint: '源分组（bookSourceGroup）'),
-      EditEntity(key: 'bookSourceComment', value: _source.bookSourceComment ?? '', hint: '源注释（bookSourceComment）'),
-      EditEntity(key: 'loginUrl', value: _source.loginUrl ?? '', hint: '登录 URL（loginUrl）'),
-      EditEntity(key: 'loginUi', value: _source.loginUi ?? '', hint: '登录 UI（loginUi）'),
-      EditEntity(key: 'loginCheckJs', value: _source.loginCheckJs ?? '', hint: '登录检查 JS（loginCheckJs）'),
-      EditEntity(key: 'coverDecodeJs', value: _source.coverDecodeJs ?? '', hint: '封面解密（coverDecodeJs）'),
-      EditEntity(key: 'bookUrlPattern', value: _source.bookUrlPattern ?? '', hint: '书籍 URL 正则（bookUrlPattern）'),
-      EditEntity(key: 'header', value: _source.header ?? '', hint: '请求头（header）'),
-      EditEntity(key: 'variableComment', value: _source.variableComment ?? '', hint: '变量说明（variableComment）'),
-      EditEntity(key: 'concurrentRate', value: _source.concurrentRate ?? '', hint: '并发率（concurrentRate）'),
+      EditEntity(
+          key: 'bookSourceUrl',
+          value: _source.bookSourceUrl,
+          hint: '源 URL（bookSourceUrl）'),
+      EditEntity(
+          key: 'bookSourceName',
+          value: _source.bookSourceName,
+          hint: '源名称（bookSourceName）'),
+      EditEntity(
+          key: 'bookSourceGroup',
+          value: _source.bookSourceGroup ?? '',
+          hint: '源分组（bookSourceGroup）'),
+      EditEntity(
+          key: 'bookSourceComment',
+          value: _source.bookSourceComment ?? '',
+          hint: '源注释（bookSourceComment）'),
+      EditEntity(
+          key: 'loginUrl',
+          value: _source.loginUrl ?? '',
+          hint: '登录 URL（loginUrl）'),
+      EditEntity(
+          key: 'loginUi', value: _source.loginUi ?? '', hint: '登录 UI（loginUi）'),
+      EditEntity(
+          key: 'loginCheckJs',
+          value: _source.loginCheckJs ?? '',
+          hint: '登录检查 JS（loginCheckJs）'),
+      EditEntity(
+          key: 'coverDecodeJs',
+          value: _source.coverDecodeJs ?? '',
+          hint: '封面解密（coverDecodeJs）'),
+      EditEntity(
+          key: 'bookUrlPattern',
+          value: _source.bookUrlPattern ?? '',
+          hint: '书籍 URL 正则（bookUrlPattern）'),
+      EditEntity(
+          key: 'header', value: _source.header ?? '', hint: '请求头（header）'),
+      EditEntity(
+          key: 'variableComment',
+          value: _source.variableComment ?? '',
+          hint: '变量说明（variableComment）'),
+      EditEntity(
+          key: 'concurrentRate',
+          value: _source.concurrentRate ?? '',
+          hint: '并发率（concurrentRate）'),
       EditEntity(key: 'jsLib', value: _source.jsLib ?? '', hint: 'JS库（jsLib）'),
     ];
 
     // 搜索规则
     final sr = _source.ruleSearch ?? const SearchRule();
     _searchEntities = [
-      EditEntity(key: 'searchUrl', value: _source.searchUrl ?? '', hint: '搜索地址（url）'),
-      EditEntity(key: 'checkKeyWord', value: sr.checkKeyWord ?? '', hint: '校验关键字（checkKeyWord）'),
-      EditEntity(key: 'bookList', value: sr.bookList ?? '', hint: '书籍列表规则（bookList）'),
+      EditEntity(
+          key: 'searchUrl', value: _source.searchUrl ?? '', hint: '搜索地址（url）'),
+      EditEntity(
+          key: 'checkKeyWord',
+          value: sr.checkKeyWord ?? '',
+          hint: '校验关键字（checkKeyWord）'),
+      EditEntity(
+          key: 'bookList', value: sr.bookList ?? '', hint: '书籍列表规则（bookList）'),
       EditEntity(key: 'name', value: sr.name ?? '', hint: '书名规则（name）'),
       EditEntity(key: 'author', value: sr.author ?? '', hint: '作者规则（author）'),
       EditEntity(key: 'kind', value: sr.kind ?? '', hint: '分类规则（kind）'),
-      EditEntity(key: 'wordCount', value: sr.wordCount ?? '', hint: '字数规则（wordCount）'),
-      EditEntity(key: 'lastChapter', value: sr.lastChapter ?? '', hint: '最新章节规则（lastChapter）'),
+      EditEntity(
+          key: 'wordCount', value: sr.wordCount ?? '', hint: '字数规则（wordCount）'),
+      EditEntity(
+          key: 'lastChapter',
+          value: sr.lastChapter ?? '',
+          hint: '最新章节规则（lastChapter）'),
       EditEntity(key: 'intro', value: sr.intro ?? '', hint: '简介规则（intro）'),
-      EditEntity(key: 'coverUrl', value: sr.coverUrl ?? '', hint: '封面规则（coverUrl）'),
-      EditEntity(key: 'bookUrl', value: sr.bookUrl ?? '', hint: '详情页 URL 规则（bookUrl）'),
+      EditEntity(
+          key: 'coverUrl', value: sr.coverUrl ?? '', hint: '封面规则（coverUrl）'),
+      EditEntity(
+          key: 'bookUrl', value: sr.bookUrl ?? '', hint: '详情页 URL 规则（bookUrl）'),
     ];
 
     // 发现规则
     final er = _source.ruleExplore ?? const ExploreRule();
     _exploreEntities = [
-      EditEntity(key: 'exploreUrl', value: _source.exploreUrl ?? '', hint: '发现地址规则（url）'),
-      EditEntity(key: 'bookList', value: er.bookList ?? '', hint: '书籍列表规则（bookList）'),
+      EditEntity(
+          key: 'exploreUrl',
+          value: _source.exploreUrl ?? '',
+          hint: '发现地址规则（url）'),
+      EditEntity(
+          key: 'bookList', value: er.bookList ?? '', hint: '书籍列表规则（bookList）'),
       EditEntity(key: 'name', value: er.name ?? '', hint: '书名规则（name）'),
       EditEntity(key: 'author', value: er.author ?? '', hint: '作者规则（author）'),
       EditEntity(key: 'kind', value: er.kind ?? '', hint: '分类规则（kind）'),
-      EditEntity(key: 'wordCount', value: er.wordCount ?? '', hint: '字数规则（wordCount）'),
-      EditEntity(key: 'lastChapter', value: er.lastChapter ?? '', hint: '最新章节规则（lastChapter）'),
+      EditEntity(
+          key: 'wordCount', value: er.wordCount ?? '', hint: '字数规则（wordCount）'),
+      EditEntity(
+          key: 'lastChapter',
+          value: er.lastChapter ?? '',
+          hint: '最新章节规则（lastChapter）'),
       EditEntity(key: 'intro', value: er.intro ?? '', hint: '简介规则（intro）'),
-      EditEntity(key: 'coverUrl', value: er.coverUrl ?? '', hint: '封面规则（coverUrl）'),
-      EditEntity(key: 'bookUrl', value: er.bookUrl ?? '', hint: '详情页 URL 规则（bookUrl）'),
+      EditEntity(
+          key: 'coverUrl', value: er.coverUrl ?? '', hint: '封面规则（coverUrl）'),
+      EditEntity(
+          key: 'bookUrl', value: er.bookUrl ?? '', hint: '详情页 URL 规则（bookUrl）'),
     ];
 
     // 详情规则
     final ir = _source.ruleBookInfo ?? const BookInfoRule();
     _infoEntities = [
-      EditEntity(key: 'init', value: ir.init ?? '', hint: '预处理规则（bookInfoInit）'),
+      EditEntity(
+          key: 'init', value: ir.init ?? '', hint: '预处理规则（bookInfoInit）'),
       EditEntity(key: 'name', value: ir.name ?? '', hint: '书名规则（name）'),
       EditEntity(key: 'author', value: ir.author ?? '', hint: '作者规则（author）'),
       EditEntity(key: 'kind', value: ir.kind ?? '', hint: '分类规则（kind）'),
-      EditEntity(key: 'wordCount', value: ir.wordCount ?? '', hint: '字数规则（wordCount）'),
-      EditEntity(key: 'lastChapter', value: ir.lastChapter ?? '', hint: '最新章节规则（lastChapter）'),
+      EditEntity(
+          key: 'wordCount', value: ir.wordCount ?? '', hint: '字数规则（wordCount）'),
+      EditEntity(
+          key: 'lastChapter',
+          value: ir.lastChapter ?? '',
+          hint: '最新章节规则（lastChapter）'),
       EditEntity(key: 'intro', value: ir.intro ?? '', hint: '简介规则（intro）'),
-      EditEntity(key: 'coverUrl', value: ir.coverUrl ?? '', hint: '封面规则（coverUrl）'),
-      EditEntity(key: 'tocUrl', value: ir.tocUrl ?? '', hint: '目录 URL 规则（tocUrl）'),
-      EditEntity(key: 'canReName', value: ir.canReName ?? '', hint: '允许修改书名作者（canReName）'),
-      EditEntity(key: 'downloadUrls', value: ir.downloadUrls ?? '', hint: '下载URL规则（downloadUrls）'),
+      EditEntity(
+          key: 'coverUrl', value: ir.coverUrl ?? '', hint: '封面规则（coverUrl）'),
+      EditEntity(
+          key: 'tocUrl', value: ir.tocUrl ?? '', hint: '目录 URL 规则（tocUrl）'),
+      EditEntity(
+          key: 'canReName',
+          value: ir.canReName ?? '',
+          hint: '允许修改书名作者（canReName）'),
+      EditEntity(
+          key: 'downloadUrls',
+          value: ir.downloadUrls ?? '',
+          hint: '下载URL规则（downloadUrls）'),
     ];
 
     // 目录规则
     final tr = _source.ruleToc ?? const TocRule();
     _tocEntities = [
-      EditEntity(key: 'preUpdateJs', value: tr.preUpdateJs ?? '', hint: '更新之前 JS（preUpdateJs）'),
-      EditEntity(key: 'chapterList', value: tr.chapterList ?? '', hint: '目录列表规则（chapterList）'),
-      EditEntity(key: 'chapterName', value: tr.chapterName ?? '', hint: '章节名称规则（chapterName）'),
-      EditEntity(key: 'chapterUrl', value: tr.chapterUrl ?? '', hint: '章节 URL 规则（chapterUrl）'),
-      EditEntity(key: 'formatJs', value: tr.formatJs ?? '', hint: '格式化规则（formatJs）'),
-      EditEntity(key: 'isVolume', value: tr.isVolume ?? '', hint: 'Volume 标识（isVolume）'),
-      EditEntity(key: 'updateTime', value: tr.updateTime ?? '', hint: '章节信息（updateTime）'),
+      EditEntity(
+          key: 'preUpdateJs',
+          value: tr.preUpdateJs ?? '',
+          hint: '更新之前 JS（preUpdateJs）'),
+      EditEntity(
+          key: 'chapterList',
+          value: tr.chapterList ?? '',
+          hint: '目录列表规则（chapterList）'),
+      EditEntity(
+          key: 'chapterName',
+          value: tr.chapterName ?? '',
+          hint: '章节名称规则（chapterName）'),
+      EditEntity(
+          key: 'chapterUrl',
+          value: tr.chapterUrl ?? '',
+          hint: '章节 URL 规则（chapterUrl）'),
+      EditEntity(
+          key: 'formatJs', value: tr.formatJs ?? '', hint: '格式化规则（formatJs）'),
+      EditEntity(
+          key: 'isVolume',
+          value: tr.isVolume ?? '',
+          hint: 'Volume 标识（isVolume）'),
+      EditEntity(
+          key: 'updateTime',
+          value: tr.updateTime ?? '',
+          hint: '章节信息（updateTime）'),
       EditEntity(key: 'isVip', value: tr.isVip ?? '', hint: 'VIP 标识（isVip）'),
       EditEntity(key: 'isPay', value: tr.isPay ?? '', hint: '购买标识（isPay）'),
-      EditEntity(key: 'nextTocUrl', value: tr.nextTocUrl ?? '', hint: '目录下一页规则（nextTocUrl）'),
+      EditEntity(
+          key: 'nextTocUrl',
+          value: tr.nextTocUrl ?? '',
+          hint: '目录下一页规则（nextTocUrl）'),
     ];
 
     // 正文规则
     final cr = _source.ruleContent ?? const ContentRule();
     _contentEntities = [
-      EditEntity(key: 'content', value: cr.content ?? '', hint: '正文规则（content）'),
-      EditEntity(key: 'nextContentUrl', value: cr.nextContentUrl ?? '', hint: '正文下一页 URL 规则（nextContentUrl）'),
-      EditEntity(key: 'subContent', value: cr.subContent ?? '', hint: '副文规则（subContent）'),
-      EditEntity(key: 'replaceRegex', value: cr.replaceRegex ?? '', hint: '替换规则（replaceRegex）'),
+      EditEntity(
+          key: 'content', value: cr.content ?? '', hint: '正文规则（content）'),
+      EditEntity(
+          key: 'nextContentUrl',
+          value: cr.nextContentUrl ?? '',
+          hint: '正文下一页 URL 规则（nextContentUrl）'),
+      EditEntity(
+          key: 'subContent',
+          value: cr.subContent ?? '',
+          hint: '副文规则（subContent）'),
+      EditEntity(
+          key: 'replaceRegex',
+          value: cr.replaceRegex ?? '',
+          hint: '替换规则（replaceRegex）'),
       EditEntity(key: 'title', value: cr.title ?? '', hint: '章节名称规则（title）'),
-      EditEntity(key: 'sourceRegex', value: cr.sourceRegex ?? '', hint: '资源正则（sourceRegex）'),
-      EditEntity(key: 'imageStyle', value: cr.imageStyle ?? '', hint: '图片样式（imageStyle）'),
-      EditEntity(key: 'imageDecode', value: cr.imageDecode ?? '', hint: '图片解密（imageDecode）'),
-      EditEntity(key: 'webJs', value: cr.webJs ?? '', hint: 'WebView JS（webJs）'),
-      EditEntity(key: 'payAction', value: cr.payAction ?? '', hint: '购买操作（payAction）'),
-      EditEntity(key: 'callBackJs', value: cr.callBackJs ?? '', hint: '回调操作（callBackJs）'),
+      EditEntity(
+          key: 'sourceRegex',
+          value: cr.sourceRegex ?? '',
+          hint: '资源正则（sourceRegex）'),
+      EditEntity(
+          key: 'imageStyle',
+          value: cr.imageStyle ?? '',
+          hint: '图片样式（imageStyle）'),
+      EditEntity(
+          key: 'imageDecode',
+          value: cr.imageDecode ?? '',
+          hint: '图片解密（imageDecode）'),
+      EditEntity(
+          key: 'webJs', value: cr.webJs ?? '', hint: 'WebView JS（webJs）'),
+      EditEntity(
+          key: 'payAction', value: cr.payAction ?? '', hint: '购买操作（payAction）'),
+      EditEntity(
+          key: 'callBackJs',
+          value: cr.callBackJs ?? '',
+          hint: '回调操作（callBackJs）'),
     ];
 
     // 选项状态
@@ -212,83 +326,182 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
     return BookSource(
       bookSourceUrl: baseMap['bookSourceUrl'] ?? '',
       bookSourceName: baseMap['bookSourceName'] ?? '',
-      bookSourceGroup: baseMap['bookSourceGroup']?.isNotEmpty == true ? baseMap['bookSourceGroup'] : null,
-      bookSourceComment: baseMap['bookSourceComment']?.isNotEmpty == true ? baseMap['bookSourceComment'] : null,
+      bookSourceGroup: baseMap['bookSourceGroup']?.isNotEmpty == true
+          ? baseMap['bookSourceGroup']
+          : null,
+      bookSourceComment: baseMap['bookSourceComment']?.isNotEmpty == true
+          ? baseMap['bookSourceComment']
+          : null,
       bookSourceType: BookSourceType.values[_sourceType],
       enabled: _enabled,
       enabledExplore: _enabledExplore,
       enabledCookieJar: _enabledCookieJar,
-      loginUrl: baseMap['loginUrl']?.isNotEmpty == true ? baseMap['loginUrl'] : null,
-      loginUi: baseMap['loginUi']?.isNotEmpty == true ? baseMap['loginUi'] : null,
-      loginCheckJs: baseMap['loginCheckJs']?.isNotEmpty == true ? baseMap['loginCheckJs'] : null,
-      coverDecodeJs: baseMap['coverDecodeJs']?.isNotEmpty == true ? baseMap['coverDecodeJs'] : null,
-      bookUrlPattern: baseMap['bookUrlPattern']?.isNotEmpty == true ? baseMap['bookUrlPattern'] : null,
+      loginUrl:
+          baseMap['loginUrl']?.isNotEmpty == true ? baseMap['loginUrl'] : null,
+      loginUi:
+          baseMap['loginUi']?.isNotEmpty == true ? baseMap['loginUi'] : null,
+      loginCheckJs: baseMap['loginCheckJs']?.isNotEmpty == true
+          ? baseMap['loginCheckJs']
+          : null,
+      coverDecodeJs: baseMap['coverDecodeJs']?.isNotEmpty == true
+          ? baseMap['coverDecodeJs']
+          : null,
+      bookUrlPattern: baseMap['bookUrlPattern']?.isNotEmpty == true
+          ? baseMap['bookUrlPattern']
+          : null,
       header: baseMap['header']?.isNotEmpty == true ? baseMap['header'] : null,
-      variableComment: baseMap['variableComment']?.isNotEmpty == true ? baseMap['variableComment'] : null,
-      concurrentRate: baseMap['concurrentRate']?.isNotEmpty == true ? baseMap['concurrentRate'] : null,
+      variableComment: baseMap['variableComment']?.isNotEmpty == true
+          ? baseMap['variableComment']
+          : null,
+      concurrentRate: baseMap['concurrentRate']?.isNotEmpty == true
+          ? baseMap['concurrentRate']
+          : null,
       jsLib: baseMap['jsLib']?.isNotEmpty == true ? baseMap['jsLib'] : null,
-      searchUrl: searchMap['searchUrl']?.isNotEmpty == true ? searchMap['searchUrl'] : null,
-      exploreUrl: exploreMap['exploreUrl']?.isNotEmpty == true ? exploreMap['exploreUrl'] : null,
+      searchUrl: searchMap['searchUrl']?.isNotEmpty == true
+          ? searchMap['searchUrl']
+          : null,
+      exploreUrl: exploreMap['exploreUrl']?.isNotEmpty == true
+          ? exploreMap['exploreUrl']
+          : null,
       ruleSearch: SearchRule(
-        checkKeyWord: searchMap['checkKeyWord']?.isNotEmpty == true ? searchMap['checkKeyWord'] : null,
-        bookList: searchMap['bookList']?.isNotEmpty == true ? searchMap['bookList'] : null,
+        checkKeyWord: searchMap['checkKeyWord']?.isNotEmpty == true
+            ? searchMap['checkKeyWord']
+            : null,
+        bookList: searchMap['bookList']?.isNotEmpty == true
+            ? searchMap['bookList']
+            : null,
         name: searchMap['name']?.isNotEmpty == true ? searchMap['name'] : null,
-        author: searchMap['author']?.isNotEmpty == true ? searchMap['author'] : null,
-        intro: searchMap['intro']?.isNotEmpty == true ? searchMap['intro'] : null,
+        author: searchMap['author']?.isNotEmpty == true
+            ? searchMap['author']
+            : null,
+        intro:
+            searchMap['intro']?.isNotEmpty == true ? searchMap['intro'] : null,
         kind: searchMap['kind']?.isNotEmpty == true ? searchMap['kind'] : null,
-        lastChapter: searchMap['lastChapter']?.isNotEmpty == true ? searchMap['lastChapter'] : null,
-        coverUrl: searchMap['coverUrl']?.isNotEmpty == true ? searchMap['coverUrl'] : null,
-        bookUrl: searchMap['bookUrl']?.isNotEmpty == true ? searchMap['bookUrl'] : null,
-        wordCount: searchMap['wordCount']?.isNotEmpty == true ? searchMap['wordCount'] : null,
+        lastChapter: searchMap['lastChapter']?.isNotEmpty == true
+            ? searchMap['lastChapter']
+            : null,
+        coverUrl: searchMap['coverUrl']?.isNotEmpty == true
+            ? searchMap['coverUrl']
+            : null,
+        bookUrl: searchMap['bookUrl']?.isNotEmpty == true
+            ? searchMap['bookUrl']
+            : null,
+        wordCount: searchMap['wordCount']?.isNotEmpty == true
+            ? searchMap['wordCount']
+            : null,
       ),
       ruleExplore: ExploreRule(
-        bookList: exploreMap['bookList']?.isNotEmpty == true ? exploreMap['bookList'] : null,
-        name: exploreMap['name']?.isNotEmpty == true ? exploreMap['name'] : null,
-        author: exploreMap['author']?.isNotEmpty == true ? exploreMap['author'] : null,
-        intro: exploreMap['intro']?.isNotEmpty == true ? exploreMap['intro'] : null,
-        kind: exploreMap['kind']?.isNotEmpty == true ? exploreMap['kind'] : null,
-        lastChapter: exploreMap['lastChapter']?.isNotEmpty == true ? exploreMap['lastChapter'] : null,
-        coverUrl: exploreMap['coverUrl']?.isNotEmpty == true ? exploreMap['coverUrl'] : null,
-        bookUrl: exploreMap['bookUrl']?.isNotEmpty == true ? exploreMap['bookUrl'] : null,
-        wordCount: exploreMap['wordCount']?.isNotEmpty == true ? exploreMap['wordCount'] : null,
+        bookList: exploreMap['bookList']?.isNotEmpty == true
+            ? exploreMap['bookList']
+            : null,
+        name:
+            exploreMap['name']?.isNotEmpty == true ? exploreMap['name'] : null,
+        author: exploreMap['author']?.isNotEmpty == true
+            ? exploreMap['author']
+            : null,
+        intro: exploreMap['intro']?.isNotEmpty == true
+            ? exploreMap['intro']
+            : null,
+        kind:
+            exploreMap['kind']?.isNotEmpty == true ? exploreMap['kind'] : null,
+        lastChapter: exploreMap['lastChapter']?.isNotEmpty == true
+            ? exploreMap['lastChapter']
+            : null,
+        coverUrl: exploreMap['coverUrl']?.isNotEmpty == true
+            ? exploreMap['coverUrl']
+            : null,
+        bookUrl: exploreMap['bookUrl']?.isNotEmpty == true
+            ? exploreMap['bookUrl']
+            : null,
+        wordCount: exploreMap['wordCount']?.isNotEmpty == true
+            ? exploreMap['wordCount']
+            : null,
       ),
       ruleBookInfo: BookInfoRule(
         init: infoMap['init']?.isNotEmpty == true ? infoMap['init'] : null,
         name: infoMap['name']?.isNotEmpty == true ? infoMap['name'] : null,
-        author: infoMap['author']?.isNotEmpty == true ? infoMap['author'] : null,
+        author:
+            infoMap['author']?.isNotEmpty == true ? infoMap['author'] : null,
         intro: infoMap['intro']?.isNotEmpty == true ? infoMap['intro'] : null,
         kind: infoMap['kind']?.isNotEmpty == true ? infoMap['kind'] : null,
-        lastChapter: infoMap['lastChapter']?.isNotEmpty == true ? infoMap['lastChapter'] : null,
-        coverUrl: infoMap['coverUrl']?.isNotEmpty == true ? infoMap['coverUrl'] : null,
-        tocUrl: infoMap['tocUrl']?.isNotEmpty == true ? infoMap['tocUrl'] : null,
-        canReName: infoMap['canReName']?.isNotEmpty == true ? infoMap['canReName'] : null,
-        downloadUrls: infoMap['downloadUrls']?.isNotEmpty == true ? infoMap['downloadUrls'] : null,
-        wordCount: infoMap['wordCount']?.isNotEmpty == true ? infoMap['wordCount'] : null,
+        lastChapter: infoMap['lastChapter']?.isNotEmpty == true
+            ? infoMap['lastChapter']
+            : null,
+        coverUrl: infoMap['coverUrl']?.isNotEmpty == true
+            ? infoMap['coverUrl']
+            : null,
+        tocUrl:
+            infoMap['tocUrl']?.isNotEmpty == true ? infoMap['tocUrl'] : null,
+        canReName: infoMap['canReName']?.isNotEmpty == true
+            ? infoMap['canReName']
+            : null,
+        downloadUrls: infoMap['downloadUrls']?.isNotEmpty == true
+            ? infoMap['downloadUrls']
+            : null,
+        wordCount: infoMap['wordCount']?.isNotEmpty == true
+            ? infoMap['wordCount']
+            : null,
       ),
       ruleToc: TocRule(
-        preUpdateJs: tocMap['preUpdateJs']?.isNotEmpty == true ? tocMap['preUpdateJs'] : null,
-        chapterList: tocMap['chapterList']?.isNotEmpty == true ? tocMap['chapterList'] : null,
-        chapterName: tocMap['chapterName']?.isNotEmpty == true ? tocMap['chapterName'] : null,
-        chapterUrl: tocMap['chapterUrl']?.isNotEmpty == true ? tocMap['chapterUrl'] : null,
-        formatJs: tocMap['formatJs']?.isNotEmpty == true ? tocMap['formatJs'] : null,
-        isVolume: tocMap['isVolume']?.isNotEmpty == true ? tocMap['isVolume'] : null,
-        updateTime: tocMap['updateTime']?.isNotEmpty == true ? tocMap['updateTime'] : null,
+        preUpdateJs: tocMap['preUpdateJs']?.isNotEmpty == true
+            ? tocMap['preUpdateJs']
+            : null,
+        chapterList: tocMap['chapterList']?.isNotEmpty == true
+            ? tocMap['chapterList']
+            : null,
+        chapterName: tocMap['chapterName']?.isNotEmpty == true
+            ? tocMap['chapterName']
+            : null,
+        chapterUrl: tocMap['chapterUrl']?.isNotEmpty == true
+            ? tocMap['chapterUrl']
+            : null,
+        formatJs:
+            tocMap['formatJs']?.isNotEmpty == true ? tocMap['formatJs'] : null,
+        isVolume:
+            tocMap['isVolume']?.isNotEmpty == true ? tocMap['isVolume'] : null,
+        updateTime: tocMap['updateTime']?.isNotEmpty == true
+            ? tocMap['updateTime']
+            : null,
         isVip: tocMap['isVip']?.isNotEmpty == true ? tocMap['isVip'] : null,
         isPay: tocMap['isPay']?.isNotEmpty == true ? tocMap['isPay'] : null,
-        nextTocUrl: tocMap['nextTocUrl']?.isNotEmpty == true ? tocMap['nextTocUrl'] : null,
+        nextTocUrl: tocMap['nextTocUrl']?.isNotEmpty == true
+            ? tocMap['nextTocUrl']
+            : null,
       ),
       ruleContent: ContentRule(
-        content: contentMap['content']?.isNotEmpty == true ? contentMap['content'] : null,
-        nextContentUrl: contentMap['nextContentUrl']?.isNotEmpty == true ? contentMap['nextContentUrl'] : null,
-        subContent: contentMap['subContent']?.isNotEmpty == true ? contentMap['subContent'] : null,
-        replaceRegex: contentMap['replaceRegex']?.isNotEmpty == true ? contentMap['replaceRegex'] : null,
-        title: contentMap['title']?.isNotEmpty == true ? contentMap['title'] : null,
-        sourceRegex: contentMap['sourceRegex']?.isNotEmpty == true ? contentMap['sourceRegex'] : null,
-        imageStyle: contentMap['imageStyle']?.isNotEmpty == true ? contentMap['imageStyle'] : null,
-        imageDecode: contentMap['imageDecode']?.isNotEmpty == true ? contentMap['imageDecode'] : null,
-        webJs: contentMap['webJs']?.isNotEmpty == true ? contentMap['webJs'] : null,
-        payAction: contentMap['payAction']?.isNotEmpty == true ? contentMap['payAction'] : null,
-        callBackJs: contentMap['callBackJs']?.isNotEmpty == true ? contentMap['callBackJs'] : null,
+        content: contentMap['content']?.isNotEmpty == true
+            ? contentMap['content']
+            : null,
+        nextContentUrl: contentMap['nextContentUrl']?.isNotEmpty == true
+            ? contentMap['nextContentUrl']
+            : null,
+        subContent: contentMap['subContent']?.isNotEmpty == true
+            ? contentMap['subContent']
+            : null,
+        replaceRegex: contentMap['replaceRegex']?.isNotEmpty == true
+            ? contentMap['replaceRegex']
+            : null,
+        title: contentMap['title']?.isNotEmpty == true
+            ? contentMap['title']
+            : null,
+        sourceRegex: contentMap['sourceRegex']?.isNotEmpty == true
+            ? contentMap['sourceRegex']
+            : null,
+        imageStyle: contentMap['imageStyle']?.isNotEmpty == true
+            ? contentMap['imageStyle']
+            : null,
+        imageDecode: contentMap['imageDecode']?.isNotEmpty == true
+            ? contentMap['imageDecode']
+            : null,
+        webJs: contentMap['webJs']?.isNotEmpty == true
+            ? contentMap['webJs']
+            : null,
+        payAction: contentMap['payAction']?.isNotEmpty == true
+            ? contentMap['payAction']
+            : null,
+        callBackJs: contentMap['callBackJs']?.isNotEmpty == true
+            ? contentMap['callBackJs']
+            : null,
       ),
     );
   }
@@ -319,7 +532,7 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('保存成功')),
         );
-        Navigator.pop(context, true);  // 返回 true 触发列表刷新
+        Navigator.pop(context, true); // 返回 true 触发列表刷新
       }
     } catch (e) {
       debugPrint('❌ 保存书源失败: $e');
@@ -335,7 +548,7 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
   void _showContentEditor() {
     final source = _buildSourceFromEntities();
     final jsonStr = const JsonEncoder.withIndent('  ').convert(source.toJson());
-    
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -391,7 +604,8 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
           TextButton(
             onPressed: () {
               try {
-                final json = jsonDecode(controller.text) as Map<String, dynamic>;
+                final json =
+                    jsonDecode(controller.text) as Map<String, dynamic>;
                 final newSource = BookSource.fromJson(json);
                 setState(() {
                   _source = newSource;
@@ -483,7 +697,9 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
         content: TextField(
           controller: controller,
           decoration: const InputDecoration(
-            hintText: '源变量可在JS中通过source.getVariable()获取',
+            labelText: '源变量',
+            hintText: '可在 JS 中通过 source.getVariable() 获取',
+            floatingLabelBehavior: FloatingLabelBehavior.auto,
             border: OutlineInputBorder(),
           ),
           maxLines: 3,
@@ -574,10 +790,12 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
 
   @override
   Widget build(BuildContext context) {
-    final loginUrl = _baseEntities.firstWhere(
-      (e) => e.key == 'loginUrl',
-      orElse: () => EditEntity(key: 'loginUrl', value: '', hint: ''),
-    ).value;
+    final loginUrl = _baseEntities
+        .firstWhere(
+          (e) => e.key == 'loginUrl',
+          orElse: () => EditEntity(key: 'loginUrl', value: '', hint: ''),
+        )
+        .value;
 
     return WillPopScope(
       onWillPop: _onWillPop,
@@ -681,7 +899,9 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                 PopupMenuItem(
                   value: 'auto_complete',
                   child: ListTile(
-                    leading: Icon(_autoComplete ? Icons.check_box : Icons.check_box_outline_blank),
+                    leading: Icon(_autoComplete
+                        ? Icons.check_box
+                        : Icons.check_box_outline_blank),
                     title: const Text('自动补全'),
                   ),
                 ),
@@ -997,10 +1217,12 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
           child: TextField(
             controller: TextEditingController(text: entity.value),
             decoration: InputDecoration(
-              hintText: entity.hint,
+              labelText: entity.hint,
+              floatingLabelBehavior: FloatingLabelBehavior.auto,
               border: const OutlineInputBorder(),
               isDense: true,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             ),
             maxLines: null,
             minLines: 1,
@@ -1106,7 +1328,8 @@ class _ContentEditPageState extends State<_ContentEditPage> {
 
   void _navigateToMatch(int direction) {
     if (_matchPositions.isEmpty) return;
-    _currentIndex = (_currentIndex + direction + _matchPositions.length) % _matchPositions.length;
+    _currentIndex = (_currentIndex + direction + _matchPositions.length) %
+        _matchPositions.length;
     _scrollToMatch(_currentIndex);
     setState(() {});
   }
@@ -1277,7 +1500,8 @@ class _SourceHelpPage extends StatefulWidget {
   State<_SourceHelpPage> createState() => _SourceHelpPageState();
 }
 
-class _SourceHelpPageState extends State<_SourceHelpPage> with SingleTickerProviderStateMixin {
+class _SourceHelpPageState extends State<_SourceHelpPage>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
   String _generalHelp = '';
   String _jsHelp = '';

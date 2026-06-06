@@ -6,7 +6,14 @@ import '../services/reader_tts_manager.dart';
 
 enum PageMode { scroll, slide, cover, simulation }
 
-enum TapZoneAction { none, showMenu, previousPage, nextPage, previousChapter, nextChapter }
+enum TapZoneAction {
+  none,
+  showMenu,
+  previousPage,
+  nextPage,
+  previousChapter,
+  nextChapter
+}
 
 class ReaderProvider extends ChangeNotifier {
   PageMode _pageMode = PageMode.simulation;
@@ -37,7 +44,7 @@ class ReaderProvider extends ChangeNotifier {
   // 书签服务
   final ReaderBookmarkService _bookmarkService = ReaderBookmarkService();
   List<Bookmark> _bookmarks = [];
-  
+
   // TTS管理器
   ReaderTtsManager? _ttsManager;
   bool _isTtsPlaying = false;
@@ -45,7 +52,7 @@ class ReaderProvider extends ChangeNotifier {
   int _ttsParagraphIndex = 0;
   int _ttsParagraphTotal = 0;
   double _ttsRate = 0.5;
-  
+
   // 阅读设置
   bool _showReadingInfo = true;
   bool _showChapterTitle = true;
@@ -106,7 +113,8 @@ class ReaderProvider extends ChangeNotifier {
         _fontOverrides = Map<String, String>.from(overrides);
       }
       final centerActionIndex = config['centerTapAction'] as int?;
-      if (centerActionIndex != null && centerActionIndex < TapZoneAction.values.length) {
+      if (centerActionIndex != null &&
+          centerActionIndex < TapZoneAction.values.length) {
         _centerTapAction = TapZoneAction.values[centerActionIndex];
       }
       final tapActions = config['tapZoneActions'] as List?;
@@ -127,8 +135,26 @@ class ReaderProvider extends ChangeNotifier {
         _textColor = Colors.white70;
       }
       _letterSpacing = (config['letterSpacing'] as num?)?.toDouble() ?? 0.0;
-      _paragraphSpacing = (config['paragraphSpacing'] as num?)?.toDouble() ?? 8.0;
+      _paragraphSpacing =
+          (config['paragraphSpacing'] as num?)?.toDouble() ?? 8.0;
       _textIndent = (config['textIndent'] as num?)?.toDouble() ?? 2.0;
+      _showReadingInfo = config['showReadingInfo'] as bool? ?? true;
+      _showChapterTitle = config['showChapterTitle'] as bool? ?? true;
+      _showClock = config['showClock'] as bool? ?? true;
+      _showProgress = config['showProgress'] as bool? ?? true;
+      _pageAnimDurationMs = config['pageAnimDurationMs'] as int? ?? 300;
+      _keepScreenOn = config['keepScreenOn'] as bool? ?? false;
+      _enableVolumeKeyPage = config['enableVolumeKeyPage'] as bool? ?? false;
+      _volumeKeyPageOnTts = config['volumeKeyPageOnTts'] as bool? ?? false;
+      _enableLongPressMenu = config['enableLongPressMenu'] as bool? ?? true;
+      _autoScrollSpeed = config['autoScrollSpeed'] as int? ?? 50;
+      _autoPageIntervalSeconds = config['autoPageIntervalSeconds'] as int? ?? 0;
+      _horizontalPadding =
+          (config['horizontalPadding'] as num?)?.toDouble() ?? 16.0;
+      _verticalPadding =
+          (config['verticalPadding'] as num?)?.toDouble() ?? 12.0;
+      _paragraphIndent = config['paragraphIndent'] as String? ?? '\u3000\u3000';
+      _fontWeightIndex = config['fontWeightIndex'] as int? ?? 1;
       final highlightRulesJson = config['highlightRules'] as List?;
       if (highlightRulesJson != null) {
         _highlightRules = highlightRulesJson
@@ -158,12 +184,29 @@ class ReaderProvider extends ChangeNotifier {
       'loadEpubFonts': _loadEpubFonts,
       'fontOverrides': _fontOverrides,
       'centerTapAction': _centerTapAction.index,
-      'tapZoneActions': _tapZoneActions.map((row) => row.map((a) => a.index).toList()).toList(),
+      'tapZoneActions': _tapZoneActions
+          .map((row) => row.map((a) => a.index).toList())
+          .toList(),
       'letterSpacing': _letterSpacing,
       'paragraphSpacing': _paragraphSpacing,
       'textIndent': _textIndent,
       'highlightRules': _highlightRules.map((e) => e.toJson()).toList(),
       'highlights': _highlights.map((e) => e.toJson()).toList(),
+      'showReadingInfo': _showReadingInfo,
+      'showChapterTitle': _showChapterTitle,
+      'showClock': _showClock,
+      'showProgress': _showProgress,
+      'pageAnimDurationMs': _pageAnimDurationMs,
+      'keepScreenOn': _keepScreenOn,
+      'enableVolumeKeyPage': _enableVolumeKeyPage,
+      'volumeKeyPageOnTts': _volumeKeyPageOnTts,
+      'enableLongPressMenu': _enableLongPressMenu,
+      'autoScrollSpeed': _autoScrollSpeed,
+      'autoPageIntervalSeconds': _autoPageIntervalSeconds,
+      'horizontalPadding': _horizontalPadding,
+      'verticalPadding': _verticalPadding,
+      'paragraphIndent': _paragraphIndent,
+      'fontWeightIndex': _fontWeightIndex,
     });
   }
 
@@ -317,7 +360,8 @@ class ReaderProvider extends ChangeNotifier {
   void updateHighlightNote(String highlightId, String note) {
     final index = _highlights.indexWhere((h) => h.id == highlightId);
     if (index != -1) {
-      _highlights[index] = _highlights[index].copyWith(note: note, updatedAt: DateTime.now());
+      _highlights[index] =
+          _highlights[index].copyWith(note: note, updatedAt: DateTime.now());
       _saveToStorage();
       notifyListeners();
     }
@@ -331,16 +375,16 @@ class ReaderProvider extends ChangeNotifier {
 
   // ==================== 书签相关 ====================
   List<Bookmark> get bookmarks => List.unmodifiable(_bookmarks);
-  
+
   Future<void> loadBookmarks(String bookUrl) async {
     _bookmarks = await _bookmarkService.list(bookUrl);
     notifyListeners();
   }
-  
+
   Future<bool> hasBookmarkForChapter(String bookUrl, int chapterIndex) async {
     return await _bookmarkService.hasBookmarkForChapter(bookUrl, chapterIndex);
   }
-  
+
   Future<Bookmark?> addBookmark({
     required String bookUrl,
     required int chapterIndex,
@@ -361,7 +405,7 @@ class ReaderProvider extends ChangeNotifier {
     }
     return bookmark;
   }
-  
+
   Future<void> removeBookmark(String bookUrl, String bookmarkId) async {
     await _bookmarkService.remove(bookUrl: bookUrl, bookmarkId: bookmarkId);
     _bookmarks.removeWhere((b) => b.id == bookmarkId);
@@ -374,7 +418,7 @@ class ReaderProvider extends ChangeNotifier {
   int get ttsParagraphIndex => _ttsParagraphIndex;
   int get ttsParagraphTotal => _ttsParagraphTotal;
   double get ttsRate => _ttsRate;
-  
+
   Future<void> initTts({
     double rate = 0.5,
     VoidCallback? onStateChanged,
@@ -398,47 +442,45 @@ class ReaderProvider extends ChangeNotifier {
       },
     );
   }
-  
+
   void setTtsChapterContent(String content) {
     _ttsManager?.setChapterContent(content);
     // 计算段落总数
-    _ttsParagraphTotal = content
-        .split(RegExp(r'\n+'))
-        .where((p) => p.trim().isNotEmpty)
-        .length;
+    _ttsParagraphTotal =
+        content.split(RegExp(r'\n+')).where((p) => p.trim().isNotEmpty).length;
     notifyListeners();
   }
-  
+
   Future<void> startTts() async {
     await _ttsManager?.start();
   }
-  
+
   void pauseTts() {
     _ttsManager?.pause();
   }
-  
+
   Future<void> resumeTts() async {
     await _ttsManager?.resume();
   }
-  
+
   void stopTts() {
     _ttsManager?.stop();
   }
-  
+
   Future<void> nextTtsParagraph() async {
     await _ttsManager?.nextParagraph();
   }
-  
+
   Future<void> prevTtsParagraph() async {
     await _ttsManager?.prevParagraph();
   }
-  
+
   Future<void> setTtsRate(double rate) async {
     _ttsRate = rate;
     await _ttsManager?.setRate(rate);
     notifyListeners();
   }
-  
+
   void disposeTts() {
     _ttsManager?.dispose();
     _ttsManager = null;

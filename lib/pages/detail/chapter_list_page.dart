@@ -158,9 +158,12 @@ class _ChapterListPageState extends State<ChapterListPage> {
   }
 
   void _doOpenChapter(Chapter chapter) {
+    final route = _book?.mediaType == MediaType.comic
+        ? AppRoutes.comicReader
+        : AppRoutes.novelReader;
     Navigator.pushReplacementNamed(
       context,
-      AppRoutes.novelReader,
+      route,
       arguments: {
         'bookUrl': widget.bookUrl,
         'chapterIndex': chapter.index,
@@ -433,8 +436,10 @@ class _ChapterListPageState extends State<ChapterListPage> {
               size: 16, color: Theme.of(context).colorScheme.primary)
           : null,
       selected: isCurrent,
-      selectedTileColor:
-          Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.15),
+      selectedTileColor: Theme.of(context)
+          .colorScheme
+          .primaryContainer
+          .withValues(alpha: 0.15),
       onTap: () => _openChapter(chapter),
     );
   }

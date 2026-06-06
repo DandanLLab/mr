@@ -77,16 +77,20 @@ class _SearchPageState extends State<SearchPage> {
           return Column(
             children: [
               _buildFilters(provider),
+              if (provider.isLoading)
+                const LinearProgressIndicator(minHeight: 2),
               Expanded(
-                child: provider.isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : provider.error != null
-                        ? _buildErrorState(provider)
-                        : provider.searchResults.isEmpty
-                            ? _buildEmptyState(provider)
-                            : _isGridView
-                                ? _buildGridView(provider)
-                                : _buildListView(provider),
+                child: provider.error != null
+                    ? _buildErrorState(provider)
+                    : provider.searchResults.isNotEmpty
+                        ? _isGridView
+                            ? _buildGridView(provider)
+                            : _buildListView(provider)
+                        : provider.isLoading
+                            ? const Center(
+                                child: CircularProgressIndicator(),
+                              )
+                            : _buildEmptyState(provider),
               ),
             ],
           );
@@ -257,7 +261,11 @@ class _SearchPageState extends State<SearchPage> {
     final intro = result['intro']?.toString().trim() ?? '';
     final lastChapter = result['lastChapter']?.toString().trim() ?? '';
     final wordCount = result['wordCount']?.toString().trim() ?? '';
+    final sourceName = result['sourceName']?.toString().trim() ?? '';
     final tags = _resultTags(result);
+    final status = _resultStatus(result, tags);
+    final categoryTags =
+        tags.where((tag) => !_isStatusTag(tag) && tag != status).toList();
 
     return InkWell(
       onTap: () => _openDetail(result),
@@ -312,11 +320,12 @@ class _SearchPageState extends State<SearchPage> {
                     spacing: 6,
                     runSpacing: 4,
                     children: [
-                      ...(tags.isEmpty ? const ['暂无标签'] : tags.take(3))
-                          .map(_buildMetadataChip),
                       _buildMetadataChip(
                         wordCount.isEmpty ? '字数未知' : wordCount,
                       ),
+                      if (status.isNotEmpty) _buildMetadataChip(status),
+                      ...categoryTags.take(3).map(_buildMetadataChip),
+                      if (sourceName.isNotEmpty) _buildMetadataChip(sourceName),
                     ],
                   ),
                   const SizedBox(height: 5),
@@ -371,7 +380,16 @@ class _SearchPageState extends State<SearchPage> {
     final intro = result['intro']?.toString().trim() ?? '';
     final lastChapter = result['lastChapter']?.toString().trim() ?? '';
     final wordCount = result['wordCount']?.toString().trim() ?? '';
+    final sourceName = result['sourceName']?.toString().trim() ?? '';
     final tags = _resultTags(result);
+    final status = _resultStatus(result, tags);
+    final categoryTags =
+        tags.where((tag) => !_isStatusTag(tag) && tag != status).toList();
+    final metadata = [
+      wordCount.isEmpty ? '字数未知' : wordCount,
+      if (status.isNotEmpty) status,
+      ...categoryTags.take(2),
+    ];
     return GestureDetector(
       onTap: () => _openDetail(result),
       child: Card(
@@ -415,7 +433,7 @@ class _SearchPageState extends State<SearchPage> {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    '${tags.isEmpty ? "暂无标签" : tags.take(2).join(" · ")} · ${wordCount.isEmpty ? "字数未知" : wordCount}',
+                    metadata.join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -443,6 +461,18 @@ class _SearchPageState extends State<SearchPage> {
                       color: Theme.of(context).colorScheme.primary,
                     ),
                   ),
+                  if (sourceName.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      sourceName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 9,
+                        color: Theme.of(context).colorScheme.secondary,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -473,6 +503,22 @@ class _SearchPageState extends State<SearchPage> {
         .map((tag) => tag.trim())
         .where((tag) => tag.isNotEmpty)
         .toList();
+  }
+
+  String _resultStatus(
+    Map<String, dynamic> result,
+    List<String> tags,
+  ) {
+    final status = result['status']?.toString().trim() ?? '';
+    if (status.isNotEmpty) return status;
+    return tags.where(_isStatusTag).firstOrNull ?? '';
+  }
+
+  bool _isStatusTag(String tag) {
+    final normalized = tag.trim();
+    return RegExp(
+      r'^(连载|连载中|更新中|完结|已完结|完本|已完本|暂停|断更)$',
+    ).hasMatch(normalized);
   }
 
   Widget _buildMetadataChip(String text) {
