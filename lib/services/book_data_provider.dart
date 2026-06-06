@@ -137,7 +137,10 @@ class OnlineBookDataProvider implements BookDataProvider {
   @override
   Future<List<Chapter>> getChapterList(Book book) async {
     final webBook = await _getWebBook();
-    final tocUrl = book.tocUrl ?? book.bookUrl;
+    final configuredTocUrl = book.tocUrl?.trim();
+    final tocUrl = configuredTocUrl == null || configuredTocUrl.isEmpty
+        ? book.bookUrl
+        : configuredTocUrl;
     return webBook.getChapterList(tocUrl, book: book);
   }
 
