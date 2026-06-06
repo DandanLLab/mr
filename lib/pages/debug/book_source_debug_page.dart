@@ -448,11 +448,15 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
 
   Future<void> _debugSearch(String keyword) async {
     if (_debugCancelled) return;
-    final webBook = _webBook!;
+    // 借鉴 legado：每次搜索创建新的 WebBook 实例，避免状态残留
+    final webBook = WebBook(_source!);
     _addLog('︾开始解析搜索页');
 
     final results = await webBook.searchBook(keyword);
     if (_debugCancelled) return;
+
+    // 保存搜索HTML到调试页面的 _webBook 实例
+    _webBook?.lastSearchHtml = webBook.lastSearchHtml;
 
     final searchHtml = webBook.lastSearchHtml ?? '';
     _addLog('≡获取成功', state: 10, sourceHtml: searchHtml);

@@ -1746,53 +1746,37 @@ class _ElementSelector {
       );
     }
 
-    // 支持 .0 或 .!0 或 :0:1:2 格式
-    // 借鉴 legado：只有 legado 内部规则关键字后的 .数字 才是索引选择器
-    // 避免 CSS class 名中的数字被误解析（如 class.coll-g-2 中的 .2）
-    final dotMatch = RegExp(r'^(.*)([.!])(-?\d+)(?::(-?\d+))?(?::(-?\d+))?$')
-        .firstMatch(rule);
-    if (dotMatch != null) {
-      final beforeDot = dotMatch.group(1) ?? '';
-      // 检查 .数字 前的部分是否是 legado 关键字格式
-      // legado 格式：关键字.值.索引，如 class.book-item.0
-      // CSS 格式：选择器.数字，如 .coll-g-2 或 div.col-lg-3
-      // 区分方法：legado 关键字格式的第一个 . 前是已知关键字
-      final firstDotIdx = beforeDot.indexOf('.');
-      final isLegadoIndex = firstDotIdx >= 0 &&
-          _legadoKeywords.contains(beforeDot.substring(0, firstDotIdx));
-
-      if (isLegadoIndex) {
-        rule = beforeDot.trim();
-        exclude = dotMatch.group(2) == '!';
-
-        final start = int.tryParse(dotMatch.group(3) ?? '');
-        final end = int.tryParse(dotMatch.group(4) ?? '');
-        final step = int.tryParse(dotMatch.group(5) ?? '');
-
-        if (start != null) {
-          if (end != null) {
-            final s = start;
-            final e = end;
-            final st = step ?? 1;
-            if (st > 0) {
-              for (var i = s; i <= e; i += st) {
-                indexes.add(i);
-              }
-            } else {
-              for (var i = s; i >= e; i += st) {
-                indexes.add(i);
-              }
-            }
-          } else {
-            indexes.add(start);
+    // 借鉴 legado 的索引解析方式：按 . 分割，检查最后一段是否是纯数字
+    // legado 格式：关键字.值.索引，如 class.book-item.0、tag.div.!0
+    // class.coll-g-2 → 最后一段 coll-g-2 不是纯数字 → 无索引
+    // class.book-item.0 → 最后一段 0 是纯数字 → 索引 0
+    // tag.div.!0 → 最后一段 !0 以 ! 开头 → 排除索引 0
+    final firstDotIdx = rule.indexOf('.');
+    if (firstDotIdx >= 0) {
+      final prefix = rule.substring(0, firstDotIdx);
+      if (_legadoKeywords.contains(prefix)) {
+        // legado 关键字格式，检查最后一段是否是索引
+        final lastDotIdx = rule.lastIndexOf('.');
+        if (lastDotIdx > firstDotIdx) {
+          // 有多个 .，最后一段可能是索引
+          final lastSegment = rule.substring(lastDotIdx + 1);
+          final excludeIdx = lastSegment.startsWith('!');
+          final numStr = excludeIdx ? lastSegment.substring(1) : lastSegment;
+          final idx = int.tryParse(numStr);
+          if (idx != null) {
+            // 最后一段是纯数字，是索引
+            rule = rule.substring(0, lastDotIdx);
+            exclude = excludeIdx;
+            indexes.add(idx);
+            return _ElementSelector(rule, indexes, exclude);
           }
         }
-
+        // 只有一个 . 或最后一段不是纯数字，无索引
         return _ElementSelector(rule, indexes, exclude);
       }
-      // 不是 legado 索引格式，不解析 .数字，保持原规则
     }
 
+    // 非 legado 关键字格式（CSS 选择器等），不解析索引
     return _ElementSelector(rule, indexes, exclude);
   }
 

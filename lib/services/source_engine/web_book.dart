@@ -845,6 +845,16 @@ class WebBook {
         }
       }
 
+      // 调试：如果元素不为空但结果为空，输出详细诊断
+      if (bookElements.isNotEmpty && dedupedResults.isEmpty) {
+        final diagInfo = '元素数:${bookElements.length}, 但所有元素name为空!\n'
+            'name规则: ${searchRule.name ?? ""}\n'
+            '第一个元素类型: ${bookElements.first.runtimeType}\n'
+            '第一个元素HTML: ${bookElements.first is dom.Element ? (bookElements.first as dom.Element).outerHtml.length > 500 ? (bookElements.first as dom.Element).outerHtml.substring(0, 500) + "..." : (bookElements.first as dom.Element).outerHtml : "$bookElements.first"}';
+        AppLogger.instance.warn(LogCategory.parse, '搜索结果诊断', detail: diagInfo);
+        debugPrint('⚠️ $diagInfo');
+      }
+
       debugPrint('📖 最终结果数量: ${dedupedResults.length}');
       return dedupedResults;
     } catch (e, stackTrace) {
