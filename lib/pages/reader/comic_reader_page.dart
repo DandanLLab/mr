@@ -1,15 +1,18 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
+import 'package:html/parser.dart' as html_parser;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../models/book.dart';
 import '../../models/book_source.dart';
 import '../../models/chapter.dart';
 import '../../services/book_data_provider.dart';
+import '../../services/source_engine/analyze_url.dart';
 import '../../services/storage_service.dart';
 
 enum MangaReadMode { scroll, horizontal, japanese }
@@ -53,6 +56,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   bool _hideFooter = false;
   int _preloadCount = 10;
   Map<String, String> _imageHeaders = const {};
+  final Map<String, Map<String, String>> _imageOptionHeaders = {};
   String _sourceName = '';
 
   final ScrollController _scrollController = ScrollController();
@@ -65,6 +69,14 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       (chapter) => chapter.index == _currentChapterIndex,
       orElse: () => _chapters.first,
     );
+  }
+
+  int get _horizontalLeadingCount => _hideChapterTitle ? 0 : 1;
+
+  int get _horizontalItemCount => _images.length + (_hideChapterTitle ? 0 : 2);
+
+  int _horizontalPageForImage(int imageIndex) {
+    return imageIndex + _horizontalLeadingCount;
   }
 
   @override
@@ -127,9 +139,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
         if (sourceData != null) {
           final source = BookSource.fromJson(sourceData);
           _sourceName = source.bookSourceName;
-          final headers = source.getHeaderMap();
-          headers.putIfAbsent('Referer', () => source.bookSourceUrl);
-          _imageHeaders = headers;
+          _imageHeaders = source.getHeaderMap();
         }
       }
       if (_chapters.isEmpty) {
@@ -160,7 +170,10 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
 
     try {
       final content = await _dataProvider!.getContent(_book!, chapter);
-      final images = _extractImageUrls(content ?? '');
+      final images = _extractImageUrls(
+        content ?? '',
+        baseUrl: chapter.url ?? _book!.bookUrl,
+      );
       if (images.isEmpty) {
         throw StateError('本章没有解析到图片');
       }
@@ -183,30 +196,80 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     }
   }
 
-  List<String> _extractImageUrls(String content) {
+  List<String> _extractImageUrls(
+    String content, {
+    required String baseUrl,
+  }) {
     final urls = <String>[];
     final seen = <String>{};
+    _imageOptionHeaders.clear();
 
     void add(String? raw) {
       if (raw == null) return;
-      final value = raw.trim().replaceAll('&amp;', '&').replaceAll(r'\/', '/');
-      if (!value.startsWith('http://') && !value.startsWith('https://')) {
+      var value = raw
+          .trim()
+          .replaceAll('&amp;', '&')
+          .replaceAll(r'\/', '/')
+          .replaceAll(r'\"', '"');
+      if (value.isEmpty || value.startsWith('blob:')) {
         return;
       }
-      if (seen.add(value)) urls.add(value);
+
+      if (value.startsWith('data:')) {
+        if (seen.add(value)) urls.add(value);
+        return;
+      }
+
+      final parsed = AnalyzeUrl.parse(value, baseUrl: baseUrl);
+      value = parsed.url.trim();
+      final uri = Uri.tryParse(value);
+      if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
+        return;
+      }
+      if (seen.add(value)) {
+        urls.add(value);
+        final optionHeaders = parsed.option?.headers;
+        if (optionHeaders != null && optionHeaders.isNotEmpty) {
+          _imageOptionHeaders[value] = optionHeaders;
+        }
+      }
     }
 
-    final imageTagPattern = RegExp(
-      r'''<(?:img|image)[^>]+(?:src|data-src|data-original)\s*=\s*["']([^"']+)["']''',
-      caseSensitive: false,
-    );
-    for (final match in imageTagPattern.allMatches(content)) {
-      add(match.group(1));
+    final document = html_parser.parseFragment(content);
+    for (final image in document.querySelectorAll('img, image')) {
+      add(
+        image.attributes['src'] ??
+            image.attributes['data-src'] ??
+            image.attributes['data-original'] ??
+            image.attributes['data-url'] ??
+            image.attributes['data-lazy-src'] ??
+            image.attributes['lazy-src'],
+      );
+      final srcSet = image.attributes['srcset'];
+      if (srcSet != null && srcSet.trim().isNotEmpty) {
+        for (final candidate in srcSet.split(',')) {
+          add(candidate.trim().split(RegExp(r'\s+')).firstOrNull);
+        }
+      }
     }
 
-    for (final line in content.split(RegExp(r'[\r\n]+'))) {
+    final normalizedContent = content
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+        .replaceAll(
+          RegExp(r'</?(?:p|div|li)[^>]*>', caseSensitive: false),
+          '\n',
+        );
+    for (final line in normalizedContent.split(RegExp(r'[\r\n]+'))) {
       final value = line.trim();
-      if (RegExp(r'^https?://\S+$', caseSensitive: false).hasMatch(value)) {
+      if (value.isNotEmpty &&
+          !value.startsWith('<') &&
+          (value.startsWith('data:') ||
+              value.startsWith('http://') ||
+              value.startsWith('https://') ||
+              value.startsWith('//') ||
+              value.startsWith('/') ||
+              value.startsWith('./') ||
+              value.startsWith('../'))) {
         add(value);
       }
     }
@@ -228,9 +291,40 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     return urls;
   }
 
+  Map<String, String> _headersForImage(String url) {
+    final headers = <String, String>{..._imageHeaders};
+    final optionHeaders = _imageOptionHeaders[url];
+    if (optionHeaders != null) {
+      headers.addAll(optionHeaders);
+    }
+    headers.putIfAbsent(
+      'Referer',
+      () => _chapter?.url ?? _book?.bookUrl ?? '',
+    );
+    headers.removeWhere((_, value) => value.trim().isEmpty);
+    return headers;
+  }
+
+  Uint8List? _decodeDataImage(String source) {
+    final comma = source.indexOf(',');
+    if (comma < 0) return null;
+    try {
+      final metadata = source.substring(0, comma).toLowerCase();
+      final payload = source.substring(comma + 1);
+      if (metadata.contains(';base64')) {
+        return base64Decode(base64.normalize(payload));
+      }
+      return Uint8List.fromList(Uri.decodeComponent(payload).codeUnits);
+    } catch (_) {
+      return null;
+    }
+  }
+
   void _resetControllers() {
     _pageController?.dispose();
-    _pageController = PageController(initialPage: _currentPageIndex);
+    _pageController = PageController(
+      initialPage: _horizontalPageForImage(_currentPageIndex),
+    );
   }
 
   void _jumpToCurrentPage() {
@@ -239,7 +333,9 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
         _scrollController.jumpTo(0);
       }
     } else if (_pageController?.hasClients == true) {
-      _pageController!.jumpToPage(_currentPageIndex);
+      _pageController!.jumpToPage(
+        _horizontalPageForImage(_currentPageIndex),
+      );
     }
   }
 
@@ -285,10 +381,11 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     final end =
         (_currentPageIndex + _preloadCount + 1).clamp(0, _images.length);
     for (var index = _currentPageIndex + 1; index < end; index++) {
+      if (_images[index].startsWith('data:')) continue;
       precacheImage(
         CachedNetworkImageProvider(
           _images[index],
-          headers: _imageHeaders,
+          headers: _headersForImage(_images[index]),
         ),
         context,
       );
@@ -369,12 +466,14 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
           ),
         SliverList.builder(
           itemCount: _images.length,
-          itemBuilder: (context, index) => _buildImage(
-            _images[index],
-            fit: BoxFit.fitWidth,
-            minHeight: index == _images.length - 1
-                ? MediaQuery.sizeOf(context).height * 0.66
-                : 0,
+          itemBuilder: (context, index) => RepaintBoundary(
+            child: _buildImage(
+              _images[index],
+              fit: BoxFit.fitWidth,
+              minHeight: index == _images.length - 1
+                  ? MediaQuery.sizeOf(context).height * 0.66
+                  : 0,
+            ),
           ),
         ),
         if (!_hideChapterTitle)
@@ -391,17 +490,51 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       controller: _pageController,
       reverse: _readMode == MangaReadMode.japanese,
       physics: const PageScrollPhysics(),
-      itemCount: _images.length,
-      onPageChanged: (index) {
-        setState(() => _currentPageIndex = index);
+      itemCount: _horizontalItemCount,
+      onPageChanged: (itemIndex) {
+        final imageIndex = itemIndex - _horizontalLeadingCount;
+        if (imageIndex < 0 || imageIndex >= _images.length) return;
+        setState(() => _currentPageIndex = imageIndex);
         _scheduleProgressSave();
         _preloadImages();
       },
-      itemBuilder: (context, index) {
-        return SafeArea(
-          child: _buildImage(_images[index], fit: BoxFit.contain),
+      itemBuilder: (context, itemIndex) {
+        if (!_hideChapterTitle && itemIndex == 0) {
+          return _buildHorizontalChapterEdge(
+            '阅读 ${_chapter?.title ?? ''}',
+          );
+        }
+        if (!_hideChapterTitle && itemIndex == _horizontalItemCount - 1) {
+          return _buildHorizontalChapterEdge(
+            '已读完 ${_chapter?.title ?? ''}',
+          );
+        }
+        final imageIndex = itemIndex - _horizontalLeadingCount;
+        return _buildImage(
+          _images[imageIndex],
+          fit: BoxFit.contain,
         );
       },
+    );
+  }
+
+  Widget _buildHorizontalChapterEdge(String text) {
+    return ColoredBox(
+      color: const Color(0xFF101010),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Text(
+            text,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 17,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -410,52 +543,59 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     required BoxFit fit,
     double minHeight = 0,
   }) {
-    final image = CachedNetworkImage(
-      imageUrl: url,
-      httpHeaders: _imageHeaders,
-      width: double.infinity,
-      fit: fit,
-      fadeInDuration: const Duration(milliseconds: 120),
-      progressIndicatorBuilder: (context, _, progress) {
-        final value = progress.progress;
-        return Container(
-          constraints: BoxConstraints(
-            minHeight: minHeight > 0
-                ? minHeight
-                : MediaQuery.sizeOf(context).height * 0.55,
-          ),
-          color: const Color(0xFF101010),
-          alignment: Alignment.center,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(
-                value: value,
-                color: Colors.white,
-                strokeWidth: 3,
-              ),
-              if (value != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  '${(value * 100).round()}%',
-                  style: const TextStyle(color: Colors.white70),
+    final data = url.startsWith('data:') ? _decodeDataImage(url) : null;
+    final Widget image;
+    if (data != null) {
+      image = Image.memory(
+        data,
+        width: double.infinity,
+        fit: fit,
+        gaplessPlayback: true,
+        filterQuality: FilterQuality.medium,
+        errorBuilder: (_, __, ___) => _buildImageError(),
+      );
+    } else if (url.startsWith('data:')) {
+      image = _buildImageError(message: 'Base64 图片解析失败');
+    } else {
+      image = CachedNetworkImage(
+        imageUrl: url,
+        httpHeaders: _headersForImage(url),
+        width: double.infinity,
+        fit: fit,
+        fadeInDuration: Duration.zero,
+        fadeOutDuration: Duration.zero,
+        progressIndicatorBuilder: (context, _, progress) {
+          final value = progress.progress;
+          return Container(
+            constraints: BoxConstraints(
+              minHeight: minHeight > 0
+                  ? minHeight
+                  : MediaQuery.sizeOf(context).height * 0.55,
+            ),
+            color: const Color(0xFF101010),
+            alignment: Alignment.center,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(
+                  value: value,
+                  color: Colors.white,
+                  strokeWidth: 3,
                 ),
+                if (value != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '${(value * 100).round()}%',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                ],
               ],
-            ],
-          ),
-        );
-      },
-      errorWidget: (context, _, __) => Container(
-        height: MediaQuery.sizeOf(context).height * 0.65,
-        color: const Color(0xFF101010),
-        alignment: Alignment.center,
-        child: FilledButton.tonalIcon(
-          onPressed: () => setState(() {}),
-          icon: const Icon(Icons.refresh),
-          label: const Text('重新加载图片'),
-        ),
-      ),
-    );
+            ),
+          );
+        },
+        errorWidget: (_, __, ___) => _buildImageError(),
+      );
+    }
 
     final child = ConstrainedBox(
       constraints: BoxConstraints(minHeight: minHeight),
@@ -468,6 +608,22 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       panEnabled: true,
       scaleEnabled: true,
       child: child,
+    );
+  }
+
+  Widget _buildImageError({String message = '图片加载失败'}) {
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.65,
+      child: ColoredBox(
+        color: const Color(0xFF101010),
+        child: Center(
+          child: FilledButton.tonalIcon(
+            onPressed: () => setState(() {}),
+            icon: const Icon(Icons.refresh),
+            label: Text(message),
+          ),
+        ),
+      ),
     );
   }
 
@@ -566,53 +722,126 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             color: Colors.black.withValues(alpha: 0.86),
             child: SafeArea(
               bottom: false,
-              child: SizedBox(
-                height: 56,
-                child: Row(
-                  children: [
-                    IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
-                      tooltip: '返回',
-                    ),
-                    Expanded(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    height: 56,
+                    child: Row(
+                      children: [
+                        IconButton(
+                          onPressed: () => Navigator.pop(context),
+                          icon:
+                              const Icon(Icons.arrow_back, color: Colors.white),
+                          tooltip: '返回',
+                        ),
+                        Expanded(
+                          child: Text(
                             _book?.displayName ?? '',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               color: Colors.white,
+                              fontSize: 18,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          Text(
+                        ),
+                        IconButton(
+                          onPressed: _downloadCurrentChapter,
+                          icon: const Icon(Icons.download, color: Colors.white),
+                          tooltip: '下载',
+                        ),
+                        IconButton(
+                          onPressed: _loadChapter,
+                          icon: const Icon(Icons.refresh, color: Colors.white),
+                          tooltip: '刷新',
+                        ),
+                        PopupMenuButton<String>(
+                          icon:
+                              const Icon(Icons.more_vert, color: Colors.white),
+                          tooltip: '更多',
+                          onSelected: (value) {
+                            switch (value) {
+                              case 'mode':
+                                _cycleReadMode();
+                                break;
+                              case 'brightness':
+                                _showQuickSettings();
+                                break;
+                              case 'settings':
+                                _showQuickSettings();
+                                break;
+                            }
+                          },
+                          itemBuilder: (context) => const [
+                            PopupMenuItem(value: 'mode', child: Text('自动翻页')),
+                            PopupMenuItem(
+                                value: 'brightness', child: Text('亮度')),
+                            PopupMenuItem(value: 'settings', child: Text('设置')),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 2, 4, 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _chapter?.title ?? '',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _chapter?.url ?? '',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white60,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          constraints: const BoxConstraints(maxWidth: 124),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 6,
+                          ),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.primary,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: Text(
                             _sourceName.isEmpty ? '未知书源' : _sourceName,
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white60,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onPrimary,
                               fontSize: 11,
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                    IconButton(
-                      onPressed: _loadChapter,
-                      icon: const Icon(Icons.refresh, color: Colors.white),
-                      tooltip: '刷新',
-                    ),
-                    IconButton(
-                      onPressed: _showChapterList,
-                      icon: const Icon(Icons.list, color: Colors.white),
-                      tooltip: '目录',
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -633,12 +862,10 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                   children: [
                     Row(
                       children: [
-                        IconButton(
+                        TextButton(
                           onPressed:
                               _hasPreviousChapter ? _previousChapter : null,
-                          icon: const Icon(Icons.chevron_left),
-                          color: Colors.white,
-                          tooltip: '上一章',
+                          child: const Text('上一章'),
                         ),
                         Expanded(
                           child: Slider(
@@ -656,11 +883,9 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                                 : (value) => _goToPage(value.round()),
                           ),
                         ),
-                        IconButton(
+                        TextButton(
                           onPressed: _hasNextChapter ? _nextChapter : null,
-                          icon: const Icon(Icons.chevron_right),
-                          color: Colors.white,
-                          tooltip: '下一章',
+                          child: const Text('下一章'),
                         ),
                       ],
                     ),
@@ -669,6 +894,8 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                       children: [
                         _menuButton(Icons.list, '目录', _showChapterList),
                         _menuButton(_modeIcon, _modeLabel, _cycleReadMode),
+                        _menuButton(
+                            Icons.brightness_6, '亮度', _showQuickSettings),
                         _menuButton(Icons.tune, '设置', _showQuickSettings),
                       ],
                     ),
@@ -683,10 +910,25 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   }
 
   Widget _menuButton(IconData icon, String label, VoidCallback action) {
-    return TextButton.icon(
-      onPressed: action,
-      icon: Icon(icon, color: Colors.white),
-      label: Text(label, style: const TextStyle(color: Colors.white)),
+    return InkWell(
+      onTap: action,
+      borderRadius: BorderRadius.circular(4),
+      child: SizedBox(
+        width: 64,
+        height: 54,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: Colors.white, size: 21),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              maxLines: 1,
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -704,12 +946,30 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   String get _modeLabel {
     switch (_readMode) {
       case MangaReadMode.scroll:
-        return '连续';
+        return '自动';
       case MangaReadMode.horizontal:
         return '横向';
       case MangaReadMode.japanese:
         return '日漫';
     }
+  }
+
+  Future<void> _downloadCurrentChapter() async {
+    if (_images.isEmpty) return;
+    final tasks = _images
+        .where((url) => !url.startsWith('data:'))
+        .map(
+          (url) => precacheImage(
+            CachedNetworkImageProvider(url, headers: _headersForImage(url)),
+            context,
+          ),
+        )
+        .toList();
+    await Future.wait(tasks);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已加入预缓存')),
+    );
   }
 
   void _handleTap(TapUpDetails details) {
@@ -788,7 +1048,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     final target = page.clamp(0, _images.length - 1);
     setState(() => _currentPageIndex = target);
     if (_readMode != MangaReadMode.scroll) {
-      _pageController?.jumpToPage(target);
+      _pageController?.jumpToPage(_horizontalPageForImage(target));
     }
   }
 
