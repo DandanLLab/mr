@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import '../../providers/search_provider.dart';
+import '../../models/book.dart';
 import '../../models/book_source.dart';
 import '../../routes/app_routes.dart';
 
@@ -21,16 +23,18 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void initState() {
     super.initState();
-    
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<SearchProvider>();
-      provider.loadBookSources();
+      provider.loadBookSources().then((_) {
+        if (!mounted || widget.initialKeyword == null) return;
+        _performSearch();
+      });
       provider.loadSearchHistory();
     });
 
     if (widget.initialKeyword != null) {
       _searchController.text = widget.initialKeyword!;
-      _performSearch();
     }
   }
 
@@ -249,52 +253,99 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildListResultItem(Map<String, dynamic> result) {
-    return ListTile(
-      leading: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          width: 48,
-          height: 64,
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          child: const Icon(Icons.book),
+    final coverUrl = result['coverUrl']?.toString() ?? '';
+    final intro = result['intro']?.toString().trim() ?? '';
+    final lastChapter = result['lastChapter']?.toString().trim() ?? '';
+    final wordCount = result['wordCount']?.toString().trim() ?? '';
+    final tags = _resultTags(result);
+
+    return InkWell(
+      onTap: () => _openDetail(result),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: SizedBox(
+                width: 72,
+                height: 100,
+                child: coverUrl.isEmpty
+                    ? _coverPlaceholder()
+                    : CachedNetworkImage(
+                        imageUrl: coverUrl,
+                        fit: BoxFit.cover,
+                        placeholder: (_, __) => _coverPlaceholder(),
+                        errorWidget: (_, __, ___) => _coverPlaceholder(),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    result['name']?.toString() ?? '未知书名',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    result['author']?.toString().trim().isNotEmpty == true
+                        ? result['author'].toString()
+                        : '未知作者',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      ...(tags.isEmpty ? const ['暂无标签'] : tags.take(3))
+                          .map(_buildMetadataChip),
+                      _buildMetadataChip(
+                        wordCount.isEmpty ? '字数未知' : wordCount,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    intro.isEmpty ? '暂无简介' : intro,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      height: 1.3,
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    '最新：${lastChapter.isEmpty ? "暂无章节信息" : lastChapter}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
-      title: Text(result['name'] ?? '未知书名'),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(result['author'] ?? '未知作者'),
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  result['sourceName'] ?? '',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Theme.of(context).colorScheme.onPrimaryContainer,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-      onTap: () {
-        Navigator.pushNamed(
-          context,
-          AppRoutes.detail,
-          arguments: {
-            'bookUrl': result['bookUrl'],
-            'bookData': result,
-          },
-        );
-      },
     );
   }
 
@@ -302,8 +353,8 @@ class _SearchPageState extends State<SearchPage> {
     return GridView.builder(
       padding: const EdgeInsets.all(12),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        childAspectRatio: 0.65,
+        crossAxisCount: 2,
+        childAspectRatio: 0.58,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
       ),
@@ -316,27 +367,27 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildGridResultItem(Map<String, dynamic> result) {
+    final coverUrl = result['coverUrl']?.toString() ?? '';
+    final intro = result['intro']?.toString().trim() ?? '';
+    final lastChapter = result['lastChapter']?.toString().trim() ?? '';
+    final wordCount = result['wordCount']?.toString().trim() ?? '';
+    final tags = _resultTags(result);
     return GestureDetector(
-      onTap: () {
-        Navigator.pushNamed(
-          context,
-          AppRoutes.detail,
-          arguments: {
-            'bookUrl': result['bookUrl'],
-            'bookData': result,
-          },
-        );
-      },
+      onTap: () => _openDetail(result),
       child: Card(
         clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
-              child: Container(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: const Center(child: Icon(Icons.book, size: 48)),
-              ),
+              child: coverUrl.isEmpty
+                  ? _coverPlaceholder()
+                  : CachedNetworkImage(
+                      imageUrl: coverUrl,
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) => _coverPlaceholder(),
+                      errorWidget: (_, __, ___) => _coverPlaceholder(),
+                    ),
             ),
             Padding(
               padding: const EdgeInsets.all(8),
@@ -362,6 +413,36 @@ class _SearchPageState extends State<SearchPage> {
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '${tags.isEmpty ? "暂无标签" : tags.take(2).join(" · ")} · ${wordCount.isEmpty ? "字数未知" : wordCount}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    intro.isEmpty ? '暂无简介' : intro,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    lastChapter.isEmpty ? '暂无章节信息' : lastChapter,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -369,6 +450,76 @@ class _SearchPageState extends State<SearchPage> {
         ),
       ),
     );
+  }
+
+  Widget _coverPlaceholder() {
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: const Center(child: Icon(Icons.book, size: 36)),
+    );
+  }
+
+  List<String> _resultTags(Map<String, dynamic> result) {
+    final rawTags = result['tags'];
+    if (rawTags is List) {
+      return rawTags
+          .map((tag) => tag.toString().trim())
+          .where((tag) => tag.isNotEmpty)
+          .toList();
+    }
+    final kind = result['kind']?.toString() ?? '';
+    return kind
+        .split(RegExp(r'[,，/|·\s]+'))
+        .map((tag) => tag.trim())
+        .where((tag) => tag.isNotEmpty)
+        .toList();
+  }
+
+  Widget _buildMetadataChip(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(text, style: const TextStyle(fontSize: 10)),
+    );
+  }
+
+  void _openDetail(Map<String, dynamic> result) {
+    final bookData = <String, dynamic>{
+      ...result,
+      'mediaType': _mediaTypeForResult(result).index,
+      'originType': BookOriginType.online.index,
+      'addedTime': DateTime.now().toIso8601String(),
+    };
+    Navigator.pushNamed(
+      context,
+      AppRoutes.detail,
+      arguments: {
+        'bookUrl': result['bookUrl'],
+        'bookData': bookData,
+      },
+    );
+  }
+
+  MediaType _mediaTypeForResult(Map<String, dynamic> result) {
+    final sourceUrl = result['sourceUrl']?.toString();
+    final source = context
+        .read<SearchProvider>()
+        .bookSources
+        .where((item) => item.bookSourceUrl == sourceUrl)
+        .firstOrNull;
+    switch (source?.bookSourceType) {
+      case BookSourceType.image:
+        return MediaType.comic;
+      case BookSourceType.video:
+        return MediaType.video;
+      case BookSourceType.audio:
+        return MediaType.audio;
+      default:
+        return MediaType.novel;
+    }
   }
 
   void _performSearch() {
@@ -426,7 +577,8 @@ class _SearchPageState extends State<SearchPage> {
                               ElevatedButton(
                                 onPressed: () {
                                   Navigator.pop(context);
-                                  Navigator.pushNamed(context, AppRoutes.profile);
+                                  Navigator.pushNamed(
+                                      context, AppRoutes.profile);
                                 },
                                 child: const Text('导入书源'),
                               ),
@@ -443,14 +595,17 @@ class _SearchPageState extends State<SearchPage> {
                             return CheckboxListTile(
                               value: isSelected,
                               onChanged: (checked) {
-                                provider.toggleSourceSelection(source.bookSourceUrl);
+                                provider.toggleSourceSelection(
+                                    source.bookSourceUrl);
                               },
                               title: Text(source.bookSourceName),
                               subtitle: Text(
                                 source.bookSourceGroup ?? '默认分组',
                                 style: TextStyle(
                                   fontSize: 12,
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
                                 ),
                               ),
                               secondary: _buildSourceTypeIcon(source),

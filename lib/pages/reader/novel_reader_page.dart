@@ -6,6 +6,7 @@ import '../../models/chapter.dart';
 import '../../models/highlight.dart';
 import '../../providers/reader_provider.dart';
 import '../../providers/bookshelf_provider.dart';
+import '../../services/book_data_provider.dart';
 import '../../services/local_book/local_book_service.dart';
 import '../../services/storage_service.dart';
 import '../../widgets/reader/reader_control_overlay.dart';
@@ -15,11 +16,13 @@ import '../../widgets/reader/reader_tts_bar.dart';
 class NovelReaderPage extends StatefulWidget {
   final String bookUrl;
   final int chapterIndex;
+  final Book? initialBook;
 
   const NovelReaderPage({
     super.key,
     required this.bookUrl,
     this.chapterIndex = 0,
+    this.initialBook,
   });
 
   @override
@@ -36,6 +39,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   bool _isLoading = true;
   Book? _book;
   List<Chapter> _chapters = [];
+  BookDataProvider? _dataProvider;
 
   String? _prevContent;
   String? _nextContent;
@@ -130,10 +134,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final provider = context.read<ReaderProvider>();
     if (_hasBookmark) {
       // 移除书签
-      final bookmarks = provider.bookmarks.where((b) =>
-        b.bookUrl == _book!.bookUrl &&
-        b.chapterIndex == _currentChapterIndex
-      ).toList();
+      final bookmarks = provider.bookmarks
+          .where((b) =>
+              b.bookUrl == _book!.bookUrl &&
+              b.chapterIndex == _currentChapterIndex)
+          .toList();
       for (final b in bookmarks) {
         await provider.removeBookmark(_book!.bookUrl, b.id);
       }
@@ -206,15 +211,26 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   Future<void> _loadBookAndChapters() async {
-    final bookData = StorageService.instance.getBook(widget.bookUrl);
-    if (bookData != null) {
-      _book = Book.fromJson(bookData);
-      _chapters = await LocalBookService.instance.getChapterList(_book!);
-      _totalChapters = _chapters.length;
-      _currentChapterIndex =
-          _book!.durChapterIndex.clamp(0, _totalChapters - 1);
+    try {
+      final bookData = StorageService.instance.getBook(widget.bookUrl);
+      _book = bookData != null ? Book.fromJson(bookData) : widget.initialBook;
+      if (_book != null) {
+        _dataProvider = createBookDataProvider(_book!);
+        _chapters = await _dataProvider!.getChapterList(_book!);
+        _totalChapters = _chapters.length;
+        if (_totalChapters > 0) {
+          _currentChapterIndex =
+              widget.chapterIndex.clamp(0, _totalChapters - 1);
+        }
+      }
+      await _loadChapterContent();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _content = '加载失败：$e';
+      });
     }
-    await _loadChapterContent();
   }
 
   Future<void> _loadChapterContent() async {
@@ -242,7 +258,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       return;
     }
 
-    final content = await LocalBookService.instance.getContent(_book!, chapter);
+    final content = await _dataProvider!.getContent(_book!, chapter);
 
     _preloadAdjacentChapters();
 
@@ -255,7 +271,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
       // 更新TTS内容
       context.read<ReaderProvider>().setTtsChapterContent(_content);
-      
+
       // 检查书签
       _checkBookmark();
 
@@ -274,8 +290,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
     if (_currentChapterIndex > 0) {
       final prevChapter = _chapters[_currentChapterIndex - 1];
-      _prevContent =
-          await LocalBookService.instance.getContent(_book!, prevChapter);
+      _prevContent = await _dataProvider!.getContent(_book!, prevChapter);
       _prevChapterTitle = prevChapter.title;
     } else {
       _prevContent = null;
@@ -284,8 +299,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
     if (_currentChapterIndex < _totalChapters - 1) {
       final nextChapter = _chapters[_currentChapterIndex + 1];
-      _nextContent =
-          await LocalBookService.instance.getContent(_book!, nextChapter);
+      _nextContent = await _dataProvider!.getContent(_book!, nextChapter);
       _nextChapterTitle = nextChapter.title;
     } else {
       _nextContent = null;
@@ -297,8 +311,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     if (_book == null || _nextContent != null) return;
     if (_currentChapterIndex < _totalChapters - 1) {
       final nextChapter = _chapters[_currentChapterIndex + 1];
-      _nextContent =
-          await LocalBookService.instance.getContent(_book!, nextChapter);
+      _nextContent = await _dataProvider!.getContent(_book!, nextChapter);
       _nextChapterTitle = nextChapter.title;
       if (mounted) setState(() {});
     }
@@ -324,7 +337,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     var currentPage = StringBuffer();
 
     for (final para in paragraphs) {
-      if (currentPage.length + para.length > charsPerPage && currentPage.isNotEmpty) {
+      if (currentPage.length + para.length > charsPerPage &&
+          currentPage.isNotEmpty) {
         pages.add(currentPage.toString());
         currentPage = StringBuffer();
       }
@@ -601,15 +615,20 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                     tapZones: [0, 4, 0, 0, 1, 0, 0, 3, 2],
                     isNightMode: provider.isNightMode,
                     onFontSizeChanged: (value) => provider.setFontSize(value),
-                    onLineHeightChanged: (value) => provider.setLineHeight(value),
-                    onLetterSpacingChanged: (value) => provider.setLetterSpacing(value),
-                    onParagraphSpacingChanged: (value) => provider.setParagraphSpacing(value),
+                    onLineHeightChanged: (value) =>
+                        provider.setLineHeight(value),
+                    onLetterSpacingChanged: (value) =>
+                        provider.setLetterSpacing(value),
+                    onParagraphSpacingChanged: (value) =>
+                        provider.setParagraphSpacing(value),
                     onHorizontalPaddingChanged: (value) {},
                     onVerticalPaddingChanged: (value) {},
                     onParagraphIndentChanged: (value) {},
                     onFontWeightChanged: (value) {},
-                    onFontFamilyChanged: (value) => provider.setFontFamily(value),
-                    onBackgroundColorChanged: (value) => provider.setBackgroundColor(value),
+                    onFontFamilyChanged: (value) =>
+                        provider.setFontFamily(value),
+                    onBackgroundColorChanged: (value) =>
+                        provider.setBackgroundColor(value),
                     onBackgroundImageChanged: (value) {},
                     onShowReadingInfoChanged: (value) {},
                     onShowChapterTitleChanged: (value) {},
@@ -622,7 +641,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                       }
                     },
                     onPageAnimDurationChanged: (value) {},
-                    onScreenBrightnessChanged: (value) => provider.setBrightness(value),
+                    onScreenBrightnessChanged: (value) =>
+                        provider.setBrightness(value),
                     onKeepScreenOnChanged: (value) {},
                     onEnableVolumeKeyPageChanged: (value) {},
                     onVolumeKeyPageOnTtsChanged: (value) {},
@@ -724,9 +744,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             fontWeight: FontWeight.bold,
             color: provider.textColor,
             height: provider.lineHeight,
-            fontFamily: provider.fontFamily.isNotEmpty
-                ? provider.fontFamily
-                : null,
+            fontFamily:
+                provider.fontFamily.isNotEmpty ? provider.fontFamily : null,
           ),
         ),
         SizedBox(height: provider.paragraphSpacing),
@@ -785,8 +804,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         color: provider.textColor,
         height: provider.lineHeight,
         letterSpacing: provider.letterSpacing,
-        fontFamily:
-            provider.fontFamily.isNotEmpty ? provider.fontFamily : null,
+        fontFamily: provider.fontFamily.isNotEmpty ? provider.fontFamily : null,
       ),
     );
   }
@@ -1051,12 +1069,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                     child: Stack(
                       children: [
                         // Current page
-                        _buildPageContent(provider, _pages.isNotEmpty
-                            ? _pages[_currentPage.clamp(0, _pages.length - 1)]
-                            : ''),
+                        _buildPageContent(
+                            provider,
+                            _pages.isNotEmpty
+                                ? _pages[
+                                    _currentPage.clamp(0, _pages.length - 1)]
+                                : ''),
                         // Curl effect overlay
-                        if (_isDragging)
-                          _buildCurlEffect(provider),
+                        if (_isDragging) _buildCurlEffect(provider),
                       ],
                     ),
                   ),
@@ -1109,9 +1129,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                 fontWeight: FontWeight.bold,
                 color: provider.textColor,
                 height: provider.lineHeight,
-                fontFamily: provider.fontFamily.isNotEmpty
-                    ? provider.fontFamily
-                    : null,
+                fontFamily:
+                    provider.fontFamily.isNotEmpty ? provider.fontFamily : null,
               ),
             ),
             SizedBox(height: provider.paragraphSpacing),
@@ -1195,7 +1214,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     );
   }
 
-  Widget _highlightActionButton(String label, IconData icon, VoidCallback onTap) {
+  Widget _highlightActionButton(
+      String label, IconData icon, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
       child: Padding(
@@ -1478,9 +1498,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           ),
           Expanded(
             child: Slider(
-              value: _totalChapters > 0
-                  ? _currentChapterIndex.toDouble()
-                  : 0,
+              value: _totalChapters > 0 ? _currentChapterIndex.toDouble() : 0,
               min: 0,
               max: (_totalChapters - 1).clamp(0, 999999).toDouble(),
               onChanged: (value) {
@@ -1517,9 +1535,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                 onTap: _showChapterList,
               ),
               _quickActionButton(
-                icon: provider.isNightMode
-                    ? Icons.light_mode
-                    : Icons.dark_mode,
+                icon: provider.isNightMode ? Icons.light_mode : Icons.dark_mode,
                 label: provider.isNightMode ? '日间' : '夜间',
                 onTap: () {
                   provider.toggleNightMode();
@@ -1671,9 +1687,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                       controller: scrollController,
                       itemCount: _totalChapters,
                       itemBuilder: (context, index) {
-                        final chapter = index < _chapters.length
-                            ? _chapters[index]
-                            : null;
+                        final chapter =
+                            index < _chapters.length ? _chapters[index] : null;
                         return ListTile(
                           title: Text(
                             chapter?.title ?? '第${index + 1}章',
@@ -2011,8 +2026,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                             color: isSelected
                                 ? Theme.of(context).colorScheme.primary
                                 : null,
-                            fontWeight:
-                                isSelected ? FontWeight.bold : null,
+                            fontWeight: isSelected ? FontWeight.bold : null,
                           ),
                         ),
                       ],
@@ -2483,8 +2497,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                               color: c.color,
                               shape: BoxShape.circle,
                               border: selectedColor == c
-                                  ? Border.all(
-                                      color: Colors.black, width: 2)
+                                  ? Border.all(color: Colors.black, width: 2)
                                   : null,
                             ),
                           ),
@@ -2716,9 +2729,12 @@ class _PageCurlPainter extends CustomPainter {
       curlPath.lineTo(touchX, height);
       // Bezier curl at the edge
       curlPath.cubicTo(
-        touchX + curlHeight, height * 0.75,
-        touchX + curlHeight, height * 0.25,
-        touchX, 0,
+        touchX + curlHeight,
+        height * 0.75,
+        touchX + curlHeight,
+        height * 0.25,
+        touchX,
+        0,
       );
     } else {
       curlPath.moveTo(touchX, 0);
@@ -2726,9 +2742,12 @@ class _PageCurlPainter extends CustomPainter {
       curlPath.lineTo(0, height);
       curlPath.lineTo(touchX, height);
       curlPath.cubicTo(
-        touchX - curlHeight, height * 0.75,
-        touchX - curlHeight, height * 0.25,
-        touchX, 0,
+        touchX - curlHeight,
+        height * 0.75,
+        touchX - curlHeight,
+        height * 0.25,
+        touchX,
+        0,
       );
     }
 
