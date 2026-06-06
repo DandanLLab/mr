@@ -8,7 +8,7 @@ enum DiscoveryCategory { recommend, novel, comic, video, audio }
 class DiscoveryProvider extends ChangeNotifier {
   DiscoveryCategory _currentCategory = DiscoveryCategory.recommend;
   List<BookSource> _bookSources = [];
-  Set<String> _selectedSourceIds = {};
+  final Set<String> _selectedSourceIds = {};
   bool _isLoading = false;
   List<dynamic> _content = [];
   String? _currentGroupId;

@@ -1046,7 +1046,7 @@ class _ContentEditPageState extends State<_ContentEditPage> {
   late TextEditingController _controller;
   String _searchKeyword = '';
   int _currentIndex = -1;
-  List<int> _matchPositions = [];
+  final List<int> _matchPositions = [];
   String _originalContent = '';
   bool _showSearchPanel = false;
 
@@ -1201,7 +1201,7 @@ class _ContentEditPageState extends State<_ContentEditPage> {
                 color: Theme.of(context).cardColor,
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
+                    color: Colors.black.withValues(alpha: 0.1),
                     blurRadius: 4,
                   ),
                 ],

@@ -34,7 +34,7 @@ class BookCard extends StatelessWidget {
               child: Stack(
                 children: [
                   Container(
-                    color: Theme.of(context).colorScheme.surfaceVariant,
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
                     child: Center(
                       child: cover != null
                           ? Image.network(
@@ -101,7 +101,7 @@ class BookCard extends StatelessWidget {
                     LinearProgressIndicator(
                       value: progress,
                       backgroundColor:
-                          Theme.of(context).colorScheme.surfaceVariant,
+                          Theme.of(context).colorScheme.surfaceContainerHighest,
                     ),
                   ],
                 ],

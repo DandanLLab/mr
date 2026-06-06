@@ -119,7 +119,7 @@ class _ExploreShowPageState extends State<ExploreShowPage> {
           children: [
             Expanded(
               child: Container(
-                color: Theme.of(context).colorScheme.surfaceVariant,
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 child: Center(
                   child: Icon(
                     Icons.book,

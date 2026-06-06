@@ -149,7 +149,7 @@ class _DetailPageState extends State<DetailPage> {
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
               child: Container(
-                color: Theme.of(context).colorScheme.surface.withOpacity(0.85),
+                color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.85),
               ),
             ),
           ),
@@ -474,19 +474,21 @@ class _DetailPageState extends State<DetailPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('修改分组'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: groups
-              .map((group) => RadioListTile<String>(
-                    title: Text(group),
-                    value: group,
-                    groupValue: _book!.groupId ?? '全部',
-                    onChanged: (value) {
-                      Navigator.pop(context);
-                      // TODO: 更新分组
-                    },
-                  ))
-              .toList(),
+        content: RadioGroup<String>(
+          groupValue: _book!.groupId ?? '全部',
+          onChanged: (value) {
+            Navigator.pop(context);
+            // TODO: 更新分组
+          },
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: groups
+                .map((group) => RadioListTile<String>(
+                      title: Text(group),
+                      value: group,
+                    ))
+                .toList(),
+          ),
         ),
       ),
     );
@@ -577,7 +579,7 @@ class _DetailPageState extends State<DetailPage> {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
           color:
-              Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
+              Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Row(

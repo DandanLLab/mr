@@ -19,11 +19,11 @@ class _AudioPlayerPageState extends State<AudioPlayerPage>
   late AnimationController _animationController;
   bool _isPlaying = false;
   int _currentTrackIndex = 0;
-  int _totalTracks = 30;
+  final int _totalTracks = 30;
   String _trackTitle = '';
-  String _albumTitle = '示例专辑';
+  final String _albumTitle = '示例专辑';
   Duration _currentPosition = Duration.zero;
-  Duration _totalDuration = const Duration(minutes: 5);
+  final Duration _totalDuration = const Duration(minutes: 5);
   double _volume = 1.0;
   int _timerMinutes = 0;
   // ignore: unused_field
@@ -104,7 +104,7 @@ class _AudioPlayerPageState extends State<AudioPlayerPage>
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
                   blurRadius: 30,
                   offset: const Offset(0, 10),
                 ),
@@ -312,36 +312,30 @@ class _AudioPlayerPageState extends State<AudioPlayerPage>
       builder: (context) {
         return AlertDialog(
           title: const Text('定时停止'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ...options.map((minutes) {
-                return RadioListTile<int>(
-                  title: Text('$minutes 分钟'),
-                  value: minutes,
-                  groupValue: _timerMinutes,
-                  onChanged: (value) {
-                    setState(() {
-                      _timerMinutes = value!;
-                      _isTimerActive = true;
-                    });
-                    Navigator.pop(context);
-                  },
-                );
-              }),
-              RadioListTile<int>(
-                title: const Text('关闭'),
-                value: 0,
-                groupValue: _timerMinutes,
-                onChanged: (value) {
-                  setState(() {
-                    _timerMinutes = 0;
-                    _isTimerActive = false;
-                  });
-                  Navigator.pop(context);
-                },
-              ),
-            ],
+          content: RadioGroup<int>(
+            groupValue: _timerMinutes,
+            onChanged: (value) {
+              setState(() {
+                _timerMinutes = value!;
+                _isTimerActive = value != 0;
+              });
+              Navigator.pop(context);
+            },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ...options.map((minutes) {
+                  return RadioListTile<int>(
+                    title: Text('$minutes 分钟'),
+                    value: minutes,
+                  );
+                }),
+                RadioListTile<int>(
+                  title: const Text('关闭'),
+                  value: 0,
+                ),
+              ],
+            ),
           ),
         );
       },

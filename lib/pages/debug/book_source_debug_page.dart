@@ -87,11 +87,11 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
 
   // 示例文本
   String _textMy = '我的';
-  String _textXt = '系统';
+  final String _textXt = '系统';
   String _textFx = '系统::http://xxx';
-  String _textInfo = 'https://m.qidian.com/book/1015609210';
-  String _textToc = '++https://www.zhaishuyuan.com/read/303...';
-  String _textContent = '--https://www.zhaishuyuan.com/chapter/3...';
+  final String _textInfo = 'https://m.qidian.com/book/1015609210';
+  final String _textToc = '++https://www.zhaishuyuan.com/read/303...';
+  final String _textContent = '--https://www.zhaishuyuan.com/chapter/3...';
 
   @override
   void initState() {
@@ -1320,9 +1320,12 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
 
   Widget _buildLogViewerBody() {
     final filteredLogs = _appLogs.where((e) {
-      if (e.level.index < _logFilterLevel.index) return false;
-      if (_logFilterCategory != null && e.category != _logFilterCategory)
+      if (e.level.index < _logFilterLevel.index) {
         return false;
+      }
+      if (_logFilterCategory != null && e.category != _logFilterCategory) {
+        return false;
+      }
       return true;
     }).toList();
 

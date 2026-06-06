@@ -10,7 +10,7 @@ class BookshelfProvider extends ChangeNotifier {
   String? _currentGroupId;
   SortType _sortType = SortType.recentRead;
   bool _isGridView = true;
-  Set<String> _selectedBookIds = {};
+  final Set<String> _selectedBookIds = {};
   bool _isBatchMode = false;
 
   List<Book> get books => _filteredBooks;
@@ -136,6 +136,22 @@ class BookshelfProvider extends ChangeNotifier {
       _selectedBookIds.add(bookUrl);
     }
     notifyListeners();
+  }
+
+  Future<void> moveBookToGroup(String bookUrl, String? groupId) async {
+    final index = _books.indexWhere((book) => book.bookUrl == bookUrl);
+    if (index != -1) {
+      final json = _books[index].toJson();
+      if (groupId != null) {
+        json['groupId'] = groupId;
+      } else {
+        json.remove('groupId');
+      }
+      _books[index] = Book.fromJson(json);
+      await StorageService.instance.addToBookshelf(_books[index].toJson());
+      _applyFilterAndSort();
+      notifyListeners();
+    }
   }
 
   Future<void> batchRemove() async {

@@ -263,7 +263,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
   @override
   Widget build(BuildContext ctx) {
     final labelStyle = TextStyle(color: _isNightMode ? Colors.white : Colors.black87, fontSize: 14);
-    final chipStyle = const TextStyle(fontSize: 12);
+    const chipStyle = TextStyle(fontSize: 12);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
@@ -411,7 +411,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
               title: Text('显示阅读信息', style: labelStyle),
               value: _showReadingInfo,
               dense: true,
-              activeColor: Colors.blue,
+              activeThumbColor: Colors.blue,
               onChanged: (v) => setState(() {
                 _showReadingInfo = v;
                 _update();
@@ -421,7 +421,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
               title: Text('章节标题', style: labelStyle),
               value: _showChapterTitle,
               dense: true,
-              activeColor: Colors.blue,
+              activeThumbColor: Colors.blue,
               onChanged: (v) => setState(() {
                 _showChapterTitle = v;
                 _update();
@@ -431,7 +431,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
               title: Text('时间', style: labelStyle),
               value: _showClock,
               dense: true,
-              activeColor: Colors.blue,
+              activeThumbColor: Colors.blue,
               onChanged: (v) => setState(() {
                 _showClock = v;
                 _update();
@@ -441,7 +441,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
               title: Text('进度', style: labelStyle),
               value: _showProgress,
               dense: true,
-              activeColor: Colors.blue,
+              activeThumbColor: Colors.blue,
               onChanged: (v) => setState(() {
                 _showProgress = v;
                 _update();
@@ -507,10 +507,12 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
                 label: Text(e.value, style: chipStyle),
                 selected: _pageAnim == e.key,
                 onSelected: (sel) {
-                  if (sel) setState(() {
-                    _pageAnim = e.key;
-                    _update();
-                  });
+                  if (sel) {
+                    setState(() {
+                      _pageAnim = e.key;
+                      _update();
+                    });
+                  }
                 },
               )).toList(),
             ),
@@ -538,7 +540,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
               title: Text('跟随系统亮度', style: labelStyle),
               value: _screenBrightness < 0,
               dense: true,
-              activeColor: Colors.blue,
+              activeThumbColor: Colors.blue,
               onChanged: (v) => setState(() {
                 _screenBrightness = v ? -1.0 : 0.7;
                 _update();
@@ -566,7 +568,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
               ),
               value: _keepScreenOn,
               dense: true,
-              activeColor: Colors.blue,
+              activeThumbColor: Colors.blue,
               onChanged: (v) => setState(() {
                 _keepScreenOn = v;
                 _update();
@@ -585,7 +587,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
               ),
               value: _enableVolumeKeyPage,
               dense: true,
-              activeColor: Colors.blue,
+              activeThumbColor: Colors.blue,
               onChanged: (v) => setState(() {
                 _enableVolumeKeyPage = v;
                 _update();
@@ -599,7 +601,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
               ),
               value: _volumeKeyPageOnTts,
               dense: true,
-              activeColor: Colors.blue,
+              activeThumbColor: Colors.blue,
               onChanged: (v) => setState(() {
                 _volumeKeyPageOnTts = v;
                 _update();
@@ -618,7 +620,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
               ),
               contentPadding: EdgeInsets.zero,
               dense: true,
-              activeColor: Colors.blue,
+              activeThumbColor: Colors.blue,
               value: _enableLongPressMenu,
               onChanged: (v) => setState(() {
                 _enableLongPressMenu = v;
@@ -636,11 +638,13 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
                   label: const Text('日间'),
                   selected: !_isNightMode,
                   onSelected: (sel) {
-                    if (sel) setState(() {
-                      _isNightMode = false;
-                      _backgroundColor = const Color(0xFFFFF8E1);
-                      _update();
-                    });
+                    if (sel) {
+                      setState(() {
+                        _isNightMode = false;
+                        _backgroundColor = const Color(0xFFFFF8E1);
+                        _update();
+                      });
+                    }
                   },
                 ),
                 const SizedBox(width: 8),
@@ -648,11 +652,13 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
                   label: const Text('夜间'),
                   selected: _isNightMode,
                   onSelected: (sel) {
-                    if (sel) setState(() {
-                      _isNightMode = true;
-                      _backgroundColor = const Color(0xFF1A1A1A);
-                      _update();
-                    });
+                    if (sel) {
+                      setState(() {
+                        _isNightMode = true;
+                        _backgroundColor = const Color(0xFF1A1A1A);
+                        _update();
+                      });
+                    }
                   },
                 ),
               ],

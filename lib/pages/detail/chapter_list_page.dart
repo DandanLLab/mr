@@ -422,7 +422,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                 color: Theme.of(context)
                     .colorScheme
                     .onSurfaceVariant
-                    .withOpacity(0.6),
+                    .withValues(alpha: 0.6),
               ),
             ),
           ],
@@ -434,7 +434,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
           : null,
       selected: isCurrent,
       selectedTileColor:
-          Theme.of(context).colorScheme.primaryContainer.withOpacity(0.15),
+          Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.15),
       onTap: () => _openChapter(chapter),
     );
   }

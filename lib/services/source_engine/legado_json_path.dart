@@ -46,8 +46,9 @@ class LegadoJsonPath {
           if (ch == "'" && !inDoubleQuote) inSingleQuote = !inSingleQuote;
           if (ch == '"' && !inSingleQuote) inDoubleQuote = !inDoubleQuote;
           if (!inSingleQuote && !inDoubleQuote) {
-            if (ch == '{') depth++;
-            else if (ch == '}') {
+            if (ch == '{') {
+              depth++;
+            } else if (ch == '}') {
               depth--;
               if (depth == 0) {
                 final innerPath = path.substring(contentStart, i).trim();
@@ -257,11 +258,15 @@ class LegadoJsonPath {
     if (step > 0) {
       start = start.clamp(0, value.length);
       end = end.clamp(0, value.length);
-      for (var i = start; i < end; i += step) yield value[i];
+      for (var i = start; i < end; i += step) {
+        yield value[i];
+      }
     } else {
       start = start.clamp(0, value.length - 1);
       end = end.clamp(-1, value.length - 1);
-      for (var i = start; i > end; i += step) yield value[i];
+      for (var i = start; i > end; i += step) {
+        yield value[i];
+      }
     }
   }
 

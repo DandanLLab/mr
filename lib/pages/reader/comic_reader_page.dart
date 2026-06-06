@@ -17,10 +17,10 @@ class ComicReaderPage extends StatefulWidget {
 class _ComicReaderPageState extends State<ComicReaderPage> {
   bool _showMenu = false;
   int _currentChapterIndex = 0;
-  int _totalChapters = 50;
+  final int _totalChapters = 50;
   String _chapterTitle = '';
   List<String> _images = [];
-  ScrollController _scrollController = ScrollController();
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -67,7 +67,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
           SliverToBoxAdapter(
             child: Container(
               height: kToolbarHeight,
-              color: Colors.black.withOpacity(0.7),
+              color: Colors.black.withValues(alpha: 0.7),
             ),
           ),
         SliverList(
@@ -82,7 +82,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
           SliverToBoxAdapter(
             child: Container(
               height: 80,
-              color: Colors.black.withOpacity(0.7),
+              color: Colors.black.withValues(alpha: 0.7),
             ),
           ),
       ],
@@ -132,7 +132,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   Widget _buildTopBar() {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.7),
+        color: Colors.black.withValues(alpha: 0.7),
       ),
       child: SafeArea(
         child: Row(
@@ -169,7 +169,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   Widget _buildBottomBar() {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.7),
+        color: Colors.black.withValues(alpha: 0.7),
       ),
       child: SafeArea(
         child: Column(

@@ -4,6 +4,9 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 
 import '../models/book_source.dart';
+import '../models/rules/book_info_rule.dart';
+import '../models/rules/toc_rule.dart';
+import '../models/rules/content_rule.dart';
 import 'storage_service.dart';
 
 typedef SourceTextFetcher = Future<String> Function(
@@ -61,8 +64,78 @@ class BookSourceImportService {
     );
   }
 
-  Future<BookSourceImportResult> importBytes(Uint8List bytes) {
-    return importText(utf8.decode(bytes, allowMalformed: true));
+  Future<BookSourceImportResult> importBytes(Uint8List bytes, {String? fileExtension}) {
+    final text = utf8.decode(bytes, allowMalformed: true);
+    // 根据文件后缀判定格式
+    if (fileExtension == 'js') {
+      return importJsText(text);
+    }
+    return importText(text);
+  }
+
+  /// 导入 JS 格式书源文件
+  Future<BookSourceImportResult> importJsText(String jsCode) async {
+    final jsCodeTrimmed = jsCode.trim();
+    if (jsCodeTrimmed.isEmpty) {
+      throw const FormatException('JS书源内容为空');
+    }
+
+    // 从JS代码注释中提取元数据
+    String name = '';
+    String url = '';
+    String group = 'JS书源';
+
+    final nameMatch = RegExp(r'@name\s+(.+)', caseSensitive: false).firstMatch(jsCodeTrimmed);
+    if (nameMatch != null) name = nameMatch.group(1)?.trim() ?? '';
+    final urlMatch = RegExp(r'@url\s+(.+)', caseSensitive: false).firstMatch(jsCodeTrimmed);
+    if (urlMatch != null) url = urlMatch.group(1)?.trim() ?? '';
+    final groupMatch = RegExp(r'@group\s+(.+)', caseSensitive: false).firstMatch(jsCodeTrimmed);
+    if (groupMatch != null) group = groupMatch.group(1)?.trim() ?? 'JS书源';
+
+    // 自动生成缺失的元数据
+    if (name.isEmpty) name = 'JS书源_${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
+    if (url.isEmpty) url = 'js_${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
+
+    // 检测代码中定义了哪些函数
+    final hasSearch = RegExp(r'function\s+search\s*\(').hasMatch(jsCodeTrimmed);
+    final hasExplore = RegExp(r'function\s+explore\s*\(').hasMatch(jsCodeTrimmed);
+    final hasBookInfo = RegExp(r'function\s+bookInfo\s*\(').hasMatch(jsCodeTrimmed);
+    final hasToc = RegExp(r'function\s+toc\s*\(').hasMatch(jsCodeTrimmed);
+    final hasContent = RegExp(r'function\s+content\s*\(').hasMatch(jsCodeTrimmed);
+
+    final source = BookSource(
+      bookSourceUrl: url,
+      bookSourceName: name,
+      bookSourceGroup: group,
+      jsLib: jsCodeTrimmed,
+      engine: 'quickjs',
+      sourceFormat: 'js',
+      searchUrl: hasSearch ? '<js>search(result)</js>' : null,
+      exploreUrl: hasExplore ? '<js>explore(result)</js>' : null,
+      ruleBookInfo: hasBookInfo ? BookInfoRule(init: '<js>bookInfo(result)</js>') : null,
+      ruleToc: hasToc ? TocRule(chapterList: '<js>toc(result)</js>') : null,
+      ruleContent: hasContent ? ContentRule(content: '<js>content(result)</js>') : null,
+    );
+
+    var added = 0;
+    var updated = 0;
+    var unchanged = 0;
+    final old = storage.getBookSource(source.bookSourceUrl);
+    if (old == null) {
+      added++;
+    } else if (_sameJson(old, source.toJson())) {
+      unchanged++;
+    } else {
+      updated++;
+    }
+    await storage.saveBookSource(source.toJson());
+
+    return BookSourceImportResult(
+      sources: [source],
+      added: added,
+      updated: updated,
+      unchanged: unchanged,
+    );
   }
 
   Future<List<BookSource>> parseText(String text,

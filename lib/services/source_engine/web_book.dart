@@ -324,10 +324,25 @@ class WebBook {
   }
 
   /// 解析可能包含 JS 的 URL
-  /// 支持 @js: 前缀的动态 URL 生成
+  /// 借鉴 legado：先做变量替换，只有真正的 JS 规则才走 JS 执行
+  /// 支持 @js: 前缀的动态 URL 生成和 {{key}}/{{page}} 模板替换
   Future<String> _resolveUrl(String url, {String? keyword, int? page}) async {
-    if (_isJsRule(url)) {
-      final jsResult = await _executeJs(url, baseUrl: source.bookSourceUrl);
+    // 借鉴 legado：区分真正的 JS 规则和 URL 模板
+    // 只有以 @js:/<js>/@rhino: 等前缀开头的才是 JS 规则
+    // 包含 {{}} 的 URL 模板只做变量替换，不走 JS 执行
+    final isRealJsRule = url.startsWith('@js:') ||
+        url.startsWith('@rhino:') ||
+        url.startsWith('@quickjs:') ||
+        url.startsWith('@java:') ||
+        url.startsWith('@ts:') ||
+        url.startsWith('<js>');
+
+    if (isRealJsRule) {
+      final extraEnv = <String, dynamic>{};
+      if (keyword != null) extraEnv['key'] = keyword;
+      if (page != null) extraEnv['page'] = page;
+      final jsResult = await _executeJs(url, baseUrl: source.bookSourceUrl,
+          extraEnv: extraEnv.isNotEmpty ? extraEnv : null);
       if (jsResult != null && jsResult.isNotEmpty) {
         // JS 返回的 URL 可能还需要替换占位符
         var resolved = jsResult;
@@ -342,7 +357,18 @@ class WebBook {
         return resolved;
       }
     }
-    return url;
+
+    // URL 模板变量替换（借鉴 legado 的 searchUrl 解析）
+    var resolved = url;
+    if (keyword != null) {
+      resolved = resolved
+          .replaceAll('{{key}}', Uri.encodeComponent(keyword))
+          .replaceAll('{{searchKey}}', Uri.encodeComponent(keyword));
+    }
+    if (page != null) {
+      resolved = resolved.replaceAll('{{page}}', page.toString());
+    }
+    return resolved;
   }
 
   /// 将相对链接拼接成绝对链接
@@ -698,7 +724,8 @@ class WebBook {
           searchRule.checkKeyWord!.isNotEmpty) {
         if (_isJsRule(searchRule.checkKeyWord)) {
           final checkResult = await _executeJs(searchRule.checkKeyWord!,
-              result: keyword, baseUrl: source.bookSourceUrl);
+              result: keyword, baseUrl: source.bookSourceUrl,
+              extraEnv: {'key': keyword, 'page': page});
           if (checkResult == null ||
               checkResult.isEmpty ||
               checkResult == 'false') {
@@ -733,6 +760,12 @@ class WebBook {
       var bookElements = analyzer.getElements(actualBookListRule);
       AppLogger.instance.logParseResult('搜索列表', bookElements.length);
 
+      // 调试：记录元素类型
+      if (bookElements.isNotEmpty) {
+        AppLogger.instance.debug(LogCategory.parse, '搜索列表元素类型',
+          detail: '第一个元素类型: ${bookElements.first.runtimeType}, 总数: ${bookElements.length}');
+      }
+
       // 借鉴 legado：列表反转
       if (reverseList && bookElements.isNotEmpty) {
         bookElements = bookElements.reversed.toList();
@@ -756,6 +789,12 @@ class WebBook {
 
         var name = itemAnalyzer.getString(searchRule.name ?? '');
         var author = itemAnalyzer.getString(searchRule.author ?? '');
+
+        // 调试日志：记录字段提取结果
+        if (name == null || name.isEmpty) {
+          AppLogger.instance.warn(LogCategory.parse, '第${i + 1}个元素书名为空',
+            detail: 'name规则: ${searchRule.name ?? ""}, 元素类型: ${element.runtimeType}, 元素文本: ${element is dom.Element ? (element.text.length > 100 ? "${element.text.substring(0, 100)}..." : element.text) : "$element"}');
+        }
         final coverUrl =
             itemAnalyzer.getString(searchRule.coverUrl ?? '', isUrl: true);
         var intro = itemAnalyzer.getString(searchRule.intro ?? '');

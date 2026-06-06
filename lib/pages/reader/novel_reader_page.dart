@@ -55,11 +55,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   final ScrollController _scrollController = ScrollController();
 
   // Highlight selection state
-  String _selectedText = '';
-  int _selectionStart = -1;
-  int _selectionEnd = -1;
+  final String _selectedText = '';
+  final int _selectionStart = -1;
+  final int _selectionEnd = -1;
   bool _showHighlightMenu = false;
-  Offset _highlightMenuPosition = Offset.zero;
+  final Offset _highlightMenuPosition = Offset.zero;
 
   // Animation
   late AnimationController _menuAnimController;
@@ -71,7 +71,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   bool _isDragging = false;
 
   // 增强版控制
-  bool _useEnhancedControls = true;
+  final bool _useEnhancedControls = true;
   bool _showSettingsSheet = false;
   bool _hasBookmark = false;
   double _ttsSpeed = 1.0;
@@ -758,7 +758,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     return Padding(
       padding: EdgeInsets.symmetric(vertical: provider.paragraphSpacing * 2),
       child: Divider(
-        color: provider.textColor.withOpacity(0.2),
+        color: provider.textColor.withValues(alpha: 0.2),
         thickness: 1,
       ),
     );
@@ -1424,7 +1424,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         color: Theme.of(context).colorScheme.surface,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: Colors.black.withValues(alpha: 0.1),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -1467,7 +1467,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         color: Theme.of(context).colorScheme.surface,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: Colors.black.withValues(alpha: 0.1),
             blurRadius: 8,
             offset: const Offset(0, -2),
           ),
@@ -2002,8 +2002,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                                 ? Theme.of(context)
                                     .colorScheme
                                     .primary
-                                    .withOpacity(0.2)
-                                : Colors.grey.withOpacity(0.1),
+                                    .withValues(alpha: 0.2)
+                                : Colors.grey.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(12),
                             border: isSelected
                                 ? Border.all(
@@ -2656,7 +2656,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             TextButton(
               onPressed: () {
                 if (originalController.text.isEmpty ||
-                    overrideController.text.isEmpty) return;
+                    overrideController.text.isEmpty) {
+                  return;
+                }
                 provider.setFontOverride(
                   originalController.text,
                   overrideController.text,

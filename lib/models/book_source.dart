@@ -19,7 +19,7 @@ class BookSource {
   final bool enabled;
   final bool enabledExplore;
   final String? jsLib;
-  final String? engine; // 书源级引擎声明: "rhino" | "quickjs" | null(自动识别)
+  final String? engine;
   final bool enabledCookieJar;
   final String? concurrentRate;
   final String? header;
@@ -44,10 +44,8 @@ class BookSource {
   final bool eventListener;
   final bool customButton;
   final bool nextPageLazyLoad;
-
-  /// 书源变量（借鉴 legado 的 BookSource.variable）
-  /// 用于 @put/@get 规则的持久化存储，格式为 JSON 字符串
   final String? variable;
+  final String? sourceFormat;
 
   const BookSource({
     required this.bookSourceUrl,
@@ -85,6 +83,7 @@ class BookSource {
     this.customButton = false,
     this.nextPageLazyLoad = false,
     this.variable,
+    this.sourceFormat,
   });
 
   BookSource copyWith({
@@ -123,6 +122,7 @@ class BookSource {
     bool? customButton,
     bool? nextPageLazyLoad,
     String? variable,
+    String? sourceFormat,
   }) {
     return BookSource(
       bookSourceUrl: bookSourceUrl ?? this.bookSourceUrl,
@@ -160,6 +160,7 @@ class BookSource {
       customButton: customButton ?? this.customButton,
       nextPageLazyLoad: nextPageLazyLoad ?? this.nextPageLazyLoad,
       variable: variable ?? this.variable,
+      sourceFormat: sourceFormat ?? this.sourceFormat,
     );
   }
 
@@ -214,6 +215,7 @@ class BookSource {
       customButton: _asBool(json['customButton']),
       nextPageLazyLoad: _asBool(json['nextPageLazyLoad']),
       variable: json['variable'] as String?,
+      sourceFormat: json['sourceFormat'] as String?,
     );
   }
 
@@ -276,40 +278,34 @@ class BookSource {
       if (customButton) 'customButton': customButton,
       if (nextPageLazyLoad) 'nextPageLazyLoad': nextPageLazyLoad,
       if (variable != null) 'variable': variable,
+      if (sourceFormat != null) 'sourceFormat': sourceFormat,
     };
   }
 
-  /// 获取搜索规则（确保非空）
   SearchRule getSearchRule() {
     return ruleSearch ?? const SearchRule();
   }
 
-  /// 获取发现规则（确保非空）
   ExploreRule getExploreRule() {
     return ruleExplore ?? const ExploreRule();
   }
 
-  /// 获取书籍信息规则（确保非空）
   BookInfoRule getBookInfoRule() {
     return ruleBookInfo ?? const BookInfoRule();
   }
 
-  /// 获取目录规则（确保非空）
   TocRule getTocRule() {
     return ruleToc ?? const TocRule();
   }
 
-  /// 获取正文规则（确保非空）
   ContentRule getContentRule() {
     return ruleContent ?? const ContentRule();
   }
 
-  /// 获取段评规则（确保非空）
   ReviewRule getReviewRule() {
     return ruleReview ?? const ReviewRule();
   }
 
-  /// 解析书源级引擎声明
   JsEngineType? get engineType {
     if (engine == null) return null;
     switch (engine!.toLowerCase()) {
@@ -337,7 +333,6 @@ class BookSource {
     }
   }
 
-  /// 获取显示名称（包含分组）
   String get displayName {
     if (bookSourceGroup == null || bookSourceGroup!.isEmpty) {
       return bookSourceName;
@@ -345,7 +340,6 @@ class BookSource {
     return '$bookSourceName ($bookSourceGroup)';
   }
 
-  /// 解析请求头
   Map<String, String> getHeaderMap() {
     if (header == null || header!.isEmpty) {
       return {};
@@ -357,7 +351,6 @@ class BookSource {
         return decoded.map((k, v) => MapEntry(k.toString(), v.toString()));
       }
     } catch (_) {
-      // 尝试按行解析
       final headers = <String, String>{};
       for (final line in header!.split('\n')) {
         final parts = line.split(':');
@@ -371,10 +364,6 @@ class BookSource {
     return {};
   }
 
-  // ===== 变量管理（借鉴 legado 的 BookSource.variable）=====
-
-  /// 获取变量 Map
-  /// variable 字段为 JSON 字符串格式，如 {"key1":"value1","key2":"value2"}
   Map<String, String> getVariableMap() {
     if (variable == null || variable!.isEmpty) return {};
     try {
@@ -386,19 +375,16 @@ class BookSource {
     return {};
   }
 
-  /// 设置变量并返回新的 BookSource 实例
   BookSource putVariable(String key, String value) {
     final vars = getVariableMap();
     vars[key] = value;
     return copyWith(variable: jsonEncode(vars));
   }
 
-  /// 获取变量值
   String getVariable(String key) {
     return getVariableMap()[key] ?? '';
   }
 
-  /// 删除变量并返回新的 BookSource 实例
   BookSource removeVariable(String key) {
     final vars = getVariableMap();
     vars.remove(key);

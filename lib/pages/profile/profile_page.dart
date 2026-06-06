@@ -15,11 +15,11 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   String _nickname = '小蛋子';
-  int _readingTime = 0;
+  final int _readingTime = 0;
   int _bookCount = 0;
   int _sourceCount = 0;
-  int _miniprogramCount = 0;
-  int _pluginCount = 0;
+  final int _miniprogramCount = 0;
+  final int _pluginCount = 0;
 
   @override
   void initState() {
@@ -329,37 +329,29 @@ class _ProfilePageState extends State<ProfilePage> {
       builder: (context) {
         return AlertDialog(
           title: const Text('主题设置'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              RadioListTile<ThemeMode>(
-                title: const Text('跟随系统'),
-                value: ThemeMode.system,
-                groupValue: provider.themeMode,
-                onChanged: (mode) {
-                  provider.setThemeMode(mode!);
-                  Navigator.pop(context);
-                },
-              ),
-              RadioListTile<ThemeMode>(
-                title: const Text('浅色模式'),
-                value: ThemeMode.light,
-                groupValue: provider.themeMode,
-                onChanged: (mode) {
-                  provider.setThemeMode(mode!);
-                  Navigator.pop(context);
-                },
-              ),
-              RadioListTile<ThemeMode>(
-                title: const Text('深色模式'),
-                value: ThemeMode.dark,
-                groupValue: provider.themeMode,
-                onChanged: (mode) {
-                  provider.setThemeMode(mode!);
-                  Navigator.pop(context);
-                },
-              ),
-            ],
+          content: RadioGroup<ThemeMode>(
+            groupValue: provider.themeMode,
+            onChanged: (mode) {
+              provider.setThemeMode(mode!);
+              Navigator.pop(context);
+            },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                RadioListTile<ThemeMode>(
+                  title: const Text('跟随系统'),
+                  value: ThemeMode.system,
+                ),
+                RadioListTile<ThemeMode>(
+                  title: const Text('浅色模式'),
+                  value: ThemeMode.light,
+                ),
+                RadioListTile<ThemeMode>(
+                  title: const Text('深色模式'),
+                  value: ThemeMode.dark,
+                ),
+              ],
+            ),
           ),
         );
       },

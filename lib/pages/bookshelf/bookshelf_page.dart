@@ -464,18 +464,18 @@ class _BookshelfPageState extends State<BookshelfPage> {
                           imageUrl: book.coverUrl,
                           fit: BoxFit.cover,
                           placeholder: (context, url) => Container(
-                            color: Theme.of(context).colorScheme.surfaceVariant,
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
                             child: const Center(
                               child: CircularProgressIndicator(),
                             ),
                           ),
                           errorWidget: (context, url, error) => Container(
-                            color: Theme.of(context).colorScheme.surfaceVariant,
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
                             child: const Icon(Icons.book, size: 48),
                           ),
                         )
                       : Container(
-                          color: Theme.of(context).colorScheme.surfaceVariant,
+                          color: Theme.of(context).colorScheme.surfaceContainerHighest,
                           child: const Icon(Icons.book, size: 48),
                         ),
                 ),
@@ -506,7 +506,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
                       const SizedBox(height: 4),
                       LinearProgressIndicator(
                         value: book.progress,
-                        backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
+                        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
                       ),
                     ],
                   ),
@@ -602,7 +602,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
                           imageUrl: book.coverUrl,
                           fit: BoxFit.cover,
                           placeholder: (context, url) => Container(
-                            color: Theme.of(context).colorScheme.surfaceVariant,
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
                           ),
                           errorWidget: (context, url, error) => const Icon(Icons.book),
                         )
@@ -798,7 +798,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
                       Positioned.fill(
                         child: Container(
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Center(
@@ -822,7 +822,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
             color: Theme.of(context).colorScheme.surface,
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.1),
+                color: Colors.black.withValues(alpha: 0.1),
                 blurRadius: 8,
                 offset: const Offset(0, -2),
               ),
@@ -1076,23 +1076,41 @@ class _BookshelfPageState extends State<BookshelfPage> {
   }
 
   void _showMoveToGroupDialog(Book book, BookshelfProvider provider) {
+    String? selectedGroup = book.groupId;
     showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('移动到分组'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: _groups.map((group) {
-              return RadioListTile<String>(
-                title: Text(group),
-                value: group,
-                groupValue: book.groupId ?? '全部',
-                onChanged: (value) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('移动到分组'),
+            content: RadioGroup<String>(
+              groupValue: selectedGroup,
+              onChanged: (String? value) {
+                setDialogState(() => selectedGroup = value);
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: _groups.map((group) {
+                  return RadioListTile<String>(
+                    title: Text(group),
+                    value: group,
+                  );
+                }).toList(),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  provider.moveBookToGroup(book.bookUrl, selectedGroup == '全部' ? null : selectedGroup);
                   Navigator.pop(context);
                 },
-              );
-            }).toList(),
+                child: const Text('确定'),
+              ),
+            ],
           ),
         );
       },

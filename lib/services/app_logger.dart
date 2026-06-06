@@ -174,8 +174,8 @@ class AppLogger {
   }
 
   /// 记录网络请求失败
-  void logRequestError(String url, String error) {
-    error;
+  void logRequestError(String url, String errorMsg) {
+    _log(LogLevel.error, LogCategory.network, '✗ $url', detail: errorMsg);
   }
 
   // ===== JS 引擎专用 =====
@@ -193,8 +193,8 @@ class AppLogger {
   }
 
   /// 记录 JS 执行失败
-  void logJsError(String engine, String error) {
-    error;
+  void logJsError(String engine, String errorMsg) {
+    _log(LogLevel.error, LogCategory.js, '[$engine] 执行失败', detail: errorMsg);
   }
 
   // ===== 规则解析专用 =====

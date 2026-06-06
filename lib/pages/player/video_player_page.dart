@@ -18,9 +18,9 @@ class VideoPlayerPage extends StatefulWidget {
 class _VideoPlayerPageState extends State<VideoPlayerPage> {
   VideoPlayerController? _controller;
   bool _isPlaying = false;
-  bool _showControls = true;
+  final bool _showControls = true;
   int _currentEpisodeIndex = 0;
-  int _totalEpisodes = 24;
+  final int _totalEpisodes = 24;
   String _episodeTitle = '';
   double _playbackSpeed = 1.0;
 
@@ -92,7 +92,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Colors.black.withOpacity(0.7),
+            Colors.black.withValues(alpha: 0.7),
             Colors.transparent,
           ],
         ),
@@ -168,7 +168,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
           begin: Alignment.bottomCenter,
           end: Alignment.topCenter,
           colors: [
-            Colors.black.withOpacity(0.7),
+            Colors.black.withValues(alpha: 0.7),
             Colors.transparent,
           ],
         ),
@@ -383,21 +383,23 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       builder: (context) {
         return AlertDialog(
           title: const Text('播放速度'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: speeds.map((speed) {
-              return RadioListTile<double>(
-                title: Text('${speed}x'),
-                value: speed,
-                groupValue: _playbackSpeed,
-                onChanged: (value) {
-                  setState(() {
-                    _playbackSpeed = value!;
-                  });
-                  Navigator.pop(context);
-                },
-              );
-            }).toList(),
+          content: RadioGroup<double>(
+            groupValue: _playbackSpeed,
+            onChanged: (value) {
+              setState(() {
+                _playbackSpeed = value!;
+              });
+              Navigator.pop(context);
+            },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: speeds.map((speed) {
+                return RadioListTile<double>(
+                  title: Text('${speed}x'),
+                  value: speed,
+                );
+              }).toList(),
+            ),
           ),
         );
       },

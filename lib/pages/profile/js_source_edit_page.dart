@@ -184,6 +184,7 @@ function content(url) {
       enabledCookieJar: true,
       engine: 'quickjs',
       jsLib: code,
+      sourceFormat: 'js',
       header: headerMeta,
       searchUrl: searchUrlMeta ?? '',
       exploreUrl: exploreUrlMeta ?? '',
@@ -234,29 +235,18 @@ function content(url) {
 
   /// 保存书源（内部存储，不需要权限）
   Future<void> _saveSource() async {
-    // 先尝试从JS代码中提取元数据
+    // 从JS代码中提取元数据（@name, @url, @group 等）
     _tryExtractMetadata();
 
-    // 如果仍然缺少名称或URL，弹出对话框
-    if (_sourceUrl.isEmpty || _sourceName.isEmpty) {
-      final result = await _showSourceInfoDialog();
-      if (result == null) return;
-      _sourceName = result['name'] ?? '';
-      _sourceUrl = result['url'] ?? '';
-      _sourceGroup = result['group'] ?? 'JS书源';
-    }
-
+    // 自动补全缺失的元数据，不弹对话框
     if (_sourceName.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入书源名称')),
-      );
-      return;
+      _sourceName = 'JS书源_${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
     }
     if (_sourceUrl.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入书源URL')),
-      );
-      return;
+      _sourceUrl = 'js_${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
+    }
+    if (_sourceGroup.isEmpty) {
+      _sourceGroup = 'JS书源';
     }
 
     setState(() => _isSaving = true);
