@@ -106,9 +106,12 @@ tasks.register("downloadNodeBinaries") {
             val libNode = File(abiDir, "libnode.so")
             val versionFile = File(abiDir, ".node_version")
 
-            // 检查是否已下载且版本匹配
-            if (libNode.exists() && libNode.length() > 0 && versionFile.exists() && versionFile.readText().trim() == nodeVersion) {
-                logger.lifecycle("[Node.js] ${abi} 已存在 (v${nodeVersion})，跳过下载")
+            // 本地目录已有 libnode.so 就直接跳过下载
+            if (libNode.exists() && libNode.length() > 0) {
+                logger.lifecycle("[Node.js] ${abi} 本地已存在 libnode.so (${libNode.length() / 1024 / 1024}MB)，跳过下载")
+                if (!versionFile.exists()) {
+                    versionFile.writeText(nodeVersion)
+                }
                 continue
             }
 
@@ -117,11 +120,15 @@ tasks.register("downloadNodeBinaries") {
             try {
                 val tarFile = File(abiDir, "node.tar.xz")
 
-                logger.lifecycle("[Node.js] 下载 ${abi}: ${url}")
-
-                // 下载
-                ant.withGroovyBuilder {
-                    "get"("src" to url, "dest" to tarFile, "verbose" to true)
+                // 本地已有 node.tar.xz 就跳过下载，直接解压
+                if (tarFile.exists() && tarFile.length() > 0) {
+                    logger.lifecycle("[Node.js] ${abi} 本地已存在 node.tar.xz (${tarFile.length() / 1024 / 1024}MB)，跳过下载，直接解压")
+                } else {
+                    logger.lifecycle("[Node.js] 下载 ${abi}: ${url}")
+                    // 下载
+                    ant.withGroovyBuilder {
+                        "get"("src" to url, "dest" to tarFile, "verbose" to true)
+                    }
                 }
 
                 if (!tarFile.exists() || tarFile.length() == 0L) {
