@@ -911,13 +911,16 @@ class _DetailPageState extends State<DetailPage> {
       );
       return;
     }
+    final routeName = _book?.mediaType == MediaType.comic
+        ? AppRoutes.comicReader
+        : AppRoutes.novelReader;
     Navigator.pushNamed(
       context,
-      AppRoutes.novelReader,
+      routeName,
       arguments: {
         'bookUrl': widget.bookUrl,
         'chapterIndex': _book?.durChapterIndex ?? 0,
-        'bookData': _book,
+        'initialBook': _book,
       },
     );
   }

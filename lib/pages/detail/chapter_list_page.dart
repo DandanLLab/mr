@@ -158,13 +158,16 @@ class _ChapterListPageState extends State<ChapterListPage> {
   }
 
   void _doOpenChapter(Chapter chapter) {
+    final routeName = _book?.mediaType == MediaType.comic
+        ? AppRoutes.comicReader
+        : AppRoutes.novelReader;
     Navigator.pushReplacementNamed(
       context,
-      AppRoutes.novelReader,
+      routeName,
       arguments: {
         'bookUrl': widget.bookUrl,
         'chapterIndex': chapter.index,
-        'bookData': _book,
+        'initialBook': _book,
       },
     );
   }
