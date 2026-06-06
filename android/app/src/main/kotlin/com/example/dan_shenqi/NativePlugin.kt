@@ -393,6 +393,50 @@ class NativePlugin(private val context: Context) {
             env.forEach { (key, value) ->
                 org.mozilla.javascript.ScriptableObject.putProperty(scope, key, value)
             }
+            // 注入 console 对象（日志输出到 Android Log）
+            val consoleObj = cx.newObject(scope)
+            val logFn = object : org.mozilla.javascript.BaseFunction() {
+                override fun call(cx: org.mozilla.javascript.Context, scope: org.mozilla.javascript.Scriptable, thisObj: org.mozilla.javascript.Scriptable?, args: Array<Any?>): Any {
+                    val sb = StringBuilder()
+                    for (arg in args) { if (sb.isNotEmpty()) sb.append(" "); sb.append(arg?.toString() ?: "null") }
+                    Log.d("RhinoConsole", sb.toString())
+                    return org.mozilla.javascript.Undefined.instance
+                }
+            }
+            for (method in listOf("log", "info", "debug")) {
+                org.mozilla.javascript.ScriptableObject.putProperty(consoleObj, method, logFn)
+            }
+            val warnFn = object : org.mozilla.javascript.BaseFunction() {
+                override fun call(cx: org.mozilla.javascript.Context, scope: org.mozilla.javascript.Scriptable, thisObj: org.mozilla.javascript.Scriptable?, args: Array<Any?>): Any {
+                    val sb = StringBuilder()
+                    for (arg in args) { if (sb.isNotEmpty()) sb.append(" "); sb.append(arg?.toString() ?: "null") }
+                    Log.w("RhinoConsole", sb.toString())
+                    return org.mozilla.javascript.Undefined.instance
+                }
+            }
+            org.mozilla.javascript.ScriptableObject.putProperty(consoleObj, "warn", warnFn)
+            val errorFn = object : org.mozilla.javascript.BaseFunction() {
+                override fun call(cx: org.mozilla.javascript.Context, scope: org.mozilla.javascript.Scriptable, thisObj: org.mozilla.javascript.Scriptable?, args: Array<Any?>): Any {
+                    val sb = StringBuilder()
+                    for (arg in args) { if (sb.isNotEmpty()) sb.append(" "); sb.append(arg?.toString() ?: "null") }
+                    Log.e("RhinoConsole", sb.toString())
+                    return org.mozilla.javascript.Undefined.instance
+                }
+            }
+            org.mozilla.javascript.ScriptableObject.putProperty(consoleObj, "error", errorFn)
+            org.mozilla.javascript.ScriptableObject.putProperty(scope, "console", consoleObj)
+            // 注入 java.log（兼容 legado 书源）
+            val javaObj = cx.newObject(scope)
+            val javaLogFn = object : org.mozilla.javascript.BaseFunction() {
+                override fun call(cx: org.mozilla.javascript.Context, scope: org.mozilla.javascript.Scriptable, thisObj: org.mozilla.javascript.Scriptable?, args: Array<Any?>): Any {
+                    val sb = StringBuilder()
+                    for (arg in args) { if (sb.isNotEmpty()) sb.append(" "); sb.append(arg?.toString() ?: "null") }
+                    Log.d("RhinoJava", sb.toString())
+                    return org.mozilla.javascript.Undefined.instance
+                }
+            }
+            org.mozilla.javascript.ScriptableObject.putProperty(javaObj, "log", javaLogFn)
+            org.mozilla.javascript.ScriptableObject.putProperty(scope, "java", javaObj)
             val evalResult = cx.evaluateString(scope, code, "<jsRule>", 1, null)
             return org.mozilla.javascript.Context.toString(evalResult)
         } catch (e: Exception) {
@@ -637,6 +681,50 @@ class NativePlugin(private val context: Context) {
                 bindings.forEach { (key, value) ->
                     org.mozilla.javascript.ScriptableObject.putProperty(scope, key, value)
                 }
+                // 注入 console 对象
+                val consoleObj = cx.newObject(scope)
+                val logFn = object : org.mozilla.javascript.BaseFunction() {
+                    override fun call(cx: org.mozilla.javascript.Context, scope: org.mozilla.javascript.Scriptable, thisObj: org.mozilla.javascript.Scriptable?, args: Array<Any?>): Any {
+                        val sb = StringBuilder()
+                        for (arg in args) { if (sb.isNotEmpty()) sb.append(" "); sb.append(arg?.toString() ?: "null") }
+                        Log.d("RhinoConsole", sb.toString())
+                        return org.mozilla.javascript.Undefined.instance
+                    }
+                }
+                for (method in listOf("log", "info", "debug")) {
+                    org.mozilla.javascript.ScriptableObject.putProperty(consoleObj, method, logFn)
+                }
+                val warnFn = object : org.mozilla.javascript.BaseFunction() {
+                    override fun call(cx: org.mozilla.javascript.Context, scope: org.mozilla.javascript.Scriptable, thisObj: org.mozilla.javascript.Scriptable?, args: Array<Any?>): Any {
+                        val sb = StringBuilder()
+                        for (arg in args) { if (sb.isNotEmpty()) sb.append(" "); sb.append(arg?.toString() ?: "null") }
+                        Log.w("RhinoConsole", sb.toString())
+                        return org.mozilla.javascript.Undefined.instance
+                    }
+                }
+                org.mozilla.javascript.ScriptableObject.putProperty(consoleObj, "warn", warnFn)
+                val errorFn = object : org.mozilla.javascript.BaseFunction() {
+                    override fun call(cx: org.mozilla.javascript.Context, scope: org.mozilla.javascript.Scriptable, thisObj: org.mozilla.javascript.Scriptable?, args: Array<Any?>): Any {
+                        val sb = StringBuilder()
+                        for (arg in args) { if (sb.isNotEmpty()) sb.append(" "); sb.append(arg?.toString() ?: "null") }
+                        Log.e("RhinoConsole", sb.toString())
+                        return org.mozilla.javascript.Undefined.instance
+                    }
+                }
+                org.mozilla.javascript.ScriptableObject.putProperty(consoleObj, "error", errorFn)
+                org.mozilla.javascript.ScriptableObject.putProperty(scope, "console", consoleObj)
+                // 注入 java.log
+                val javaObj = cx.newObject(scope)
+                val javaLogFn = object : org.mozilla.javascript.BaseFunction() {
+                    override fun call(cx: org.mozilla.javascript.Context, scope: org.mozilla.javascript.Scriptable, thisObj: org.mozilla.javascript.Scriptable?, args: Array<Any?>): Any {
+                        val sb = StringBuilder()
+                        for (arg in args) { if (sb.isNotEmpty()) sb.append(" "); sb.append(arg?.toString() ?: "null") }
+                        Log.d("RhinoJava", sb.toString())
+                        return org.mozilla.javascript.Undefined.instance
+                    }
+                }
+                org.mozilla.javascript.ScriptableObject.putProperty(javaObj, "log", javaLogFn)
+                org.mozilla.javascript.ScriptableObject.putProperty(scope, "java", javaObj)
                 val evalResult = cx.evaluateString(scope, script, "<script>", 1, null)
                 result.success(org.mozilla.javascript.Context.toString(evalResult))
             } finally {

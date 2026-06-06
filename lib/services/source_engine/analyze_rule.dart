@@ -1048,10 +1048,12 @@ class AnalyzeRule {
   /// 在需要 java.ajax() 等异步操作时使用此方法
   Future<String?> applyJsAsync(dynamic content, String jsCode) async {
     try {
-      // 收集上下文变量
+      // 收集上下文变量（包含 key/page 等自定义变量）
       final env = <String, dynamic>{
         'baseUrl': _baseUrl ?? '',
       };
+      env.addAll(_variableMap);
+      env.addAll(_variables);
       if (_sourceInfo != null) env['source'] = _sourceInfo;
       if (_bookInfo != null) env['book'] = _bookInfo;
       if (_chapterInfo != null) env['chapter'] = _chapterInfo;
@@ -1187,9 +1189,18 @@ class AnalyzeRule {
         }
         // 否则尝试作为JS执行
         try {
+          final vars = <String, dynamic>{};
+          vars.addAll(_variableMap);
+          vars.addAll(_variables);
+          if (_sourceInfo != null) vars['source'] = _sourceInfo;
+          if (_bookInfo != null) vars['book'] = _bookInfo;
+          if (_chapterInfo != null) vars['chapter'] = _chapterInfo;
+          if (!vars.containsKey('cookie')) vars['cookie'] = <String, String>{};
+          if (!vars.containsKey('src')) vars['src'] = _content;
+
           return JsEngine.instance
                   .executeSync(expr, _content,
-                      baseUrl: _baseUrl, sourceEngine: _sourceEngine)
+                      baseUrl: _baseUrl, sourceEngine: _sourceEngine, variables: vars)
                   ?.toString() ??
               '';
         } catch (_) {

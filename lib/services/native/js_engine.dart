@@ -1533,7 +1533,7 @@ class JsEngine {
       AppLogger.instance.warn(LogCategory.js, '预缓存桥接调用失败，继续执行JS', detail: e.toString());
     }
 
-    return _executeQuickJSRule(resolved.code, result: content, env: mergedEnv);
+    return _executeQuickJSRule(resolved.code, result: content, env: mergedEnv, variables: _extractVariables(mergedEnv));
   }
 
   /// 处理带书籍上下文的 JS 规则
@@ -1644,6 +1644,20 @@ class JsEngine {
 
   // ===== QuickJS 规则执行 =====
 
+  /// 从 env 中提取非核心变量，用于注入到 JS 作用域
+  static const _coreEnvVars = {'result', 'baseUrl', 'content', 'src', 'book', 'chapter', 'source', 'cookie', 'title'};
+
+  Map<String, dynamic>? _extractVariables(Map<String, dynamic>? env) {
+    if (env == null) return null;
+    final vars = <String, dynamic>{};
+    for (final entry in env.entries) {
+      if (!_coreEnvVars.contains(entry.key)) {
+        vars[entry.key] = entry.value;
+      }
+    }
+    return vars.isEmpty ? null : vars;
+  }
+
   Future<String?> _executeQuickJSRule(String jsCode, {
     String? result,
     Map<String, dynamic>? env,
@@ -1736,6 +1750,8 @@ class JsEngine {
       final strResult = evalResult.stringResult;
       // undefined → 返回空字符串而不是 null（书源规则可能不需要返回值）
       if (strResult == 'undefined') return '';
+      // null → 返回 Dart null，避免 "null" 字符串被当作有效结果
+      if (strResult == 'null') return null;
       return strResult;
     } catch (e) {
       debugPrint('JsEngine QuickJS exception: $e');
@@ -1750,7 +1766,7 @@ class JsEngine {
   void _flushConsoleLogs() {
     if (!_initialized || _jsRuntime == null) return;
     try {
-      final logsResult = evaluate('typeof console !== "undefined" && console._getLogs ? console._getLogs() : []');
+      final logsResult = evaluate('typeof console !== "undefined" && console._getLogs ? JSON.stringify(console._getLogs()) : "[]"');
       if (logsResult == null || logsResult == '[]' || logsResult == 'undefined') return;
 
       final logsJson = logsResult;

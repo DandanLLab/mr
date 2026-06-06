@@ -327,7 +327,11 @@ class WebBook {
   /// 支持 @js: 前缀的动态 URL 生成
   Future<String> _resolveUrl(String url, {String? keyword, int? page}) async {
     if (_isJsRule(url)) {
-      final jsResult = await _executeJs(url, baseUrl: source.bookSourceUrl);
+      final extraEnv = <String, dynamic>{};
+      if (keyword != null) extraEnv['key'] = keyword;
+      if (page != null) extraEnv['page'] = page;
+      final jsResult = await _executeJs(url, baseUrl: source.bookSourceUrl,
+          extraEnv: extraEnv.isNotEmpty ? extraEnv : null);
       if (jsResult != null && jsResult.isNotEmpty) {
         // JS 返回的 URL 可能还需要替换占位符
         var resolved = jsResult;
@@ -697,7 +701,8 @@ class WebBook {
           searchRule.checkKeyWord!.isNotEmpty) {
         if (_isJsRule(searchRule.checkKeyWord)) {
           final checkResult = await _executeJs(searchRule.checkKeyWord!,
-              result: keyword, baseUrl: source.bookSourceUrl);
+              result: keyword, baseUrl: source.bookSourceUrl,
+              extraEnv: {'key': keyword, 'page': page});
           if (checkResult == null ||
               checkResult.isEmpty ||
               checkResult == 'false') {
