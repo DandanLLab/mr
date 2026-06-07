@@ -41,6 +41,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   List<Chapter> _chapters = [];
   BookDataProvider? _dataProvider;
   double _sliderValue = 0; // 滑动进度条的实时值
+  bool _isSliderDragging = false; // 进度条是否正在拖拽
 
   String? _prevContent;
   String? _nextContent;
@@ -279,6 +280,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       _checkBookmark();
 
       _repaginate();
+
+      // 滚动模式下重置滚动位置到顶部
+      final provider = context.read<ReaderProvider>();
+      if (provider.pageMode == PageMode.scroll && _scrollController.hasClients) {
+        _scrollController.jumpTo(0);
+      }
 
       context.read<BookshelfProvider>().updateBookProgress(
             widget.bookUrl,
@@ -573,7 +580,15 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                     _sliderValue = value;
                   });
                 },
+                onSliderChangeStart: () {
+                  setState(() {
+                    _isSliderDragging = true;
+                  });
+                },
                 onSliderChangeEnd: (value) {
+                  setState(() {
+                    _isSliderDragging = false;
+                  });
                   _currentChapterIndex = value;
                   _loadChapterContent();
                 },
@@ -1492,40 +1507,74 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   Widget _buildProgressSlider() {
     final maxCh = (_totalChapters - 1).clamp(0, 999999).toDouble();
+    final displayChapter = (_sliderValue + 1).round();
+    // 拖拽时显示预览章节名
+    final previewTitle = _isSliderDragging && _chapters.isNotEmpty
+        ? _chapters[(_sliderValue.round()).clamp(0, _chapters.length - 1)].title
+        : null;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            '${(_sliderValue + 1).round()}',
-            style: const TextStyle(fontSize: 12),
-          ),
-          Expanded(
-            child: SliderTheme(
-              data: SliderThemeData(
-                trackHeight: 4,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
-              ),
-              child: Slider(
-                value: _totalChapters > 0 ? _sliderValue.clamp(0.0, maxCh) : 0,
-                min: 0,
-                max: maxCh > 0 ? maxCh : 1,
-                onChanged: (value) {
-                  setState(() {
-                    _sliderValue = value;
-                  });
-                },
-                onChangeEnd: (value) {
-                  _currentChapterIndex = value.round();
-                  _loadChapterContent();
-                },
+          // 拖拽时显示章节预览
+          if (_isSliderDragging && previewTitle != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                previewTitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
-          ),
-          Text(
-            '$_totalChapters',
-            style: const TextStyle(fontSize: 12),
+          Row(
+            children: [
+              Text(
+                '$displayChapter',
+                style: const TextStyle(fontSize: 12),
+              ),
+              Expanded(
+                child: SliderTheme(
+                  data: SliderThemeData(
+                    trackHeight: 4,
+                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+                  ),
+                  child: Slider(
+                    value: _totalChapters > 0 ? _sliderValue.clamp(0.0, maxCh) : 0,
+                    min: 0,
+                    max: maxCh > 0 ? maxCh : 1,
+                    onChangeStart: (value) {
+                      setState(() {
+                        _isSliderDragging = true;
+                      });
+                    },
+                    onChanged: (value) {
+                      setState(() {
+                        _sliderValue = value;
+                      });
+                    },
+                    onChangeEnd: (value) {
+                      setState(() {
+                        _isSliderDragging = false;
+                      });
+                      _currentChapterIndex = value.round();
+                      _loadChapterContent();
+                    },
+                  ),
+                ),
+              ),
+              Text(
+                '$_totalChapters',
+                style: const TextStyle(fontSize: 12),
+              ),
+            ],
           ),
         ],
       ),

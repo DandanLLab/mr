@@ -56,6 +56,8 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   List<String> _images = [];
   int _currentChapterIndex = 0;
   int _currentPageIndex = 0;
+  double _sliderPageIndex = 0; // 进度条拖拽时的视觉位置
+  bool _isSliderDragging = false; // 进度条是否正在拖拽
   bool _isLoading = true;
   bool _showMenu = false;
   String? _error;
@@ -86,6 +88,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   PageController? _pageController;
   Timer? _footerTimer;
   Timer? _autoPageTimer;
+  final List<GlobalKey> _imageKeys = []; // 用于滚动模式定位图片
 
   Chapter? get _chapter {
     if (_chapters.isEmpty) return null;
@@ -267,6 +270,9 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       _currentPageIndex = pageIndex.clamp(0, images.length - 1);
       _pageNotifier.value = _currentPageIndex;
       _images = images;
+      // 初始化图片的 GlobalKey 用于滚动模式定位
+      _imageKeys.clear();
+      _imageKeys.addAll(List.generate(images.length, (_) => GlobalKey()));
       _resetControllers();
       await _saveProgress();
       if (!mounted) return;
@@ -608,6 +614,9 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
         SliverList.builder(
           itemCount: _images.length,
           itemBuilder: (context, index) => RepaintBoundary(
+            key: _imageKeys.isNotEmpty && index < _imageKeys.length
+                ? _imageKeys[index]
+                : null,
             child: _buildImage(
               _images[index],
               fit: BoxFit.fitWidth,
@@ -1204,17 +1213,27 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                         child: Slider(
                           value: _images.isEmpty
                               ? 0
-                              : _currentPageIndex.toDouble(),
+                              : (_isSliderDragging
+                                  ? _sliderPageIndex
+                                  : _currentPageIndex.toDouble()),
                           min: 0,
                           max: _images.length > 1
                               ? (_images.length - 1).toDouble()
                               : 1,
-                          divisions: _images.length > 1
-                              ? _images.length - 1
-                              : 1,
                           onChanged: _images.isEmpty
                               ? null
-                              : (value) => _goToPage(value.round()),
+                              : (value) {
+                                  setState(() {
+                                    _sliderPageIndex = value;
+                                    _isSliderDragging = true;
+                                  });
+                                },
+                          onChangeEnd: (value) {
+                            setState(() {
+                              _isSliderDragging = false;
+                            });
+                            _goToPage(value.round());
+                          },
                         ),
                       ),
                       TextButton(
@@ -1483,6 +1502,20 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     _pageNotifier.value = target;
     if (_readMode != MangaReadMode.scroll) {
       _pageController?.jumpToPage(_horizontalPageForImage(target));
+    } else {
+      // 滚动模式：使用 Scrollable.ensureVisible 定位到目标图片
+      if (target < _imageKeys.length) {
+        final key = _imageKeys[target];
+        final currentContext = key.currentContext;
+        if (currentContext != null) {
+          Scrollable.ensureVisible(
+            currentContext,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+            alignment: 0.0, // 滚动到顶部
+          );
+        }
+      }
     }
   }
 
