@@ -444,9 +444,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
         await _debugBookInfo(key);
       } else {
         _addLog('⇒开始搜索关键字:$key');
-        if (_source?.ruleSearch?.bookList != null) {
-          _addLog('≡搜索规则: ${_source?.ruleSearch?.bookList}');
-        }
+
         await _debugSearch(key);
       }
     } catch (e) {
