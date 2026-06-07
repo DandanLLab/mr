@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../models/book.dart';
 import '../../models/book_source.dart';
@@ -46,6 +47,8 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   static const _brightnessKey = 'mangaScreenBrightness';
   static const _einkKey = 'mangaEinkMode';
   static const _grayscaleKey = 'mangaGrayscale';
+  static const _eyeCareKey = 'mangaEyeCareMode';
+  static const _keepScreenOnKey = 'mangaKeepScreenOn';
 
   Book? _book;
   BookDataProvider? _dataProvider;
@@ -68,6 +71,8 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   int _preloadCount = 10;
   bool _einkMode = false;
   bool _grayscaleImages = false;
+  bool _eyeCareMode = false;
+  bool _keepScreenOn = false;
   final List<String> _imageLoadLog = [];
   Map<String, String> _imageHeaders = const {};
   final Map<String, Map<String, String>> _imageOptionHeaders = {};
@@ -152,6 +157,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     unawaited(
       NativeChannel.instance.setScreenBrightness(_originalScreenBrightness),
     );
+    unawaited(WakelockPlus.disable());
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
@@ -175,8 +181,13 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       _screenBrightness = prefs.getDouble(_brightnessKey) ?? -1;
       _einkMode = prefs.getBool(_einkKey) ?? false;
       _grayscaleImages = prefs.getBool(_grayscaleKey) ?? false;
+      _eyeCareMode = prefs.getBool(_eyeCareKey) ?? false;
+      _keepScreenOn = prefs.getBool(_keepScreenOnKey) ?? false;
     });
     await NativeChannel.instance.setScreenBrightness(_screenBrightness);
+    if (_keepScreenOn) {
+      WakelockPlus.enable();
+    }
   }
 
   Future<void> _saveSettings() async {
@@ -190,6 +201,8 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       prefs.setDouble(_brightnessKey, _screenBrightness),
       prefs.setBool(_einkKey, _einkMode),
       prefs.setBool(_grayscaleKey, _grayscaleImages),
+      prefs.setBool(_eyeCareKey, _eyeCareMode),
+      prefs.setBool(_keepScreenOnKey, _keepScreenOn),
     ]);
   }
 
@@ -471,43 +484,58 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _readerBackground,
-      body: Stack(
-        children: [
-          Positioned.fill(child: _buildZoomableReader()),
-          if (!_hideFooter && !_isLoading && _error == null) _buildInfoFooter(),
-          Positioned.fill(
-            child: IgnorePointer(
-              ignoring: !_showMenu,
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 180),
-                reverseDuration: const Duration(milliseconds: 130),
-                switchInCurve: Curves.easeOutCubic,
-                switchOutCurve: Curves.easeInCubic,
-                transitionBuilder: (child, animation) {
-                  return FadeTransition(
-                    opacity: animation,
-                    child: SlideTransition(
-                      position: Tween<Offset>(
-                        begin: const Offset(0, 0.015),
-                        end: Offset.zero,
-                      ).animate(animation),
-                      child: child,
-                    ),
-                  );
-                },
-                child: _showMenu
-                    ? KeyedSubtree(
-                        key: const ValueKey('comic_menu'),
-                        child: _buildMenu(),
-                      )
-                    : const SizedBox.shrink(key: ValueKey('comic_menu_hidden')),
-              ),
+    Widget body = Stack(
+      children: [
+        Positioned.fill(child: _buildZoomableReader()),
+        if (!_hideFooter && !_isLoading && _error == null) _buildInfoFooter(),
+        Positioned.fill(
+          child: IgnorePointer(
+            ignoring: !_showMenu,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              reverseDuration: const Duration(milliseconds: 130),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, animation) {
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0, 0.015),
+                      end: Offset.zero,
+                    ).animate(animation),
+                    child: child,
+                  ),
+                );
+              },
+              child: _showMenu
+                  ? KeyedSubtree(
+                      key: const ValueKey('comic_menu'),
+                      child: _buildMenu(),
+                    )
+                  : const SizedBox.shrink(key: ValueKey('comic_menu_hidden')),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
+    );
+
+    // 护眼模式：添加暖色调滤镜，减少蓝光
+    if (_eyeCareMode) {
+      body = ColorFiltered(
+        colorFilter: const ColorFilter.matrix(<double>[
+          1.1, 0, 0, 0, 0,    // R 增强红色
+          0, 0.95, 0, 0, 0,   // G 略微降低绿色
+          0, 0, 0.8, 0, 0,    // B 降低蓝色
+          0, 0, 0, 1, 0,
+        ]),
+        child: body,
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: _readerBackground,
+      body: body,
     );
   }
 
@@ -957,8 +985,29 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                               children: [
                                 const Text('墨水屏'),
                                 const Spacer(),
-                                if (_einkMode)
-                                  Icon(Icons.check, color: Theme.of(context).colorScheme.primary, size: 20),
+                                Container(
+                                  width: 18,
+                                  height: 18,
+                                  decoration: BoxDecoration(
+                                    border: Border.all(
+                                      color: _einkMode
+                                          ? Theme.of(context).colorScheme.primary
+                                          : _menuForeground.withValues(alpha: 0.5),
+                                      width: 1.5,
+                                    ),
+                                    borderRadius: BorderRadius.circular(3),
+                                    color: _einkMode
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Colors.transparent,
+                                  ),
+                                  child: _einkMode
+                                      ? Icon(
+                                          Icons.check,
+                                          size: 14,
+                                          color: Theme.of(context).colorScheme.onPrimary,
+                                        )
+                                      : null,
+                                ),
                               ],
                             ),
                           ),
@@ -968,8 +1017,29 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                               children: [
                                 const Text('图片灰色'),
                                 const Spacer(),
-                                if (_grayscaleImages)
-                                  Icon(Icons.check, color: Theme.of(context).colorScheme.primary, size: 20),
+                                Container(
+                                  width: 18,
+                                  height: 18,
+                                  decoration: BoxDecoration(
+                                    border: Border.all(
+                                      color: _grayscaleImages
+                                          ? Theme.of(context).colorScheme.primary
+                                          : _menuForeground.withValues(alpha: 0.5),
+                                      width: 1.5,
+                                    ),
+                                    borderRadius: BorderRadius.circular(3),
+                                    color: _grayscaleImages
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Colors.transparent,
+                                  ),
+                                  child: _grayscaleImages
+                                      ? Icon(
+                                          Icons.check,
+                                          size: 14,
+                                          color: Theme.of(context).colorScheme.onPrimary,
+                                        )
+                                      : null,
+                                ),
                               ],
                             ),
                           ),
@@ -1585,7 +1655,23 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       backgroundColor: _menuBackground,
       builder: (context) => StatefulBuilder(
         builder: (context, setSheetState) {
-          Future<void> updateBrightness(double value) async {
+          // 滑动过程中实时更新亮度（不保存）
+          void updateBrightnessImmediate(double value) {
+            setState(() => _screenBrightness = value);
+            setSheetState(() {});
+            // 不等待，直接设置屏幕亮度
+            NativeChannel.instance.setScreenBrightness(value);
+          }
+
+          // 滑动结束时保存设置
+          Future<void> saveBrightness(double value) async {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setDouble(_brightnessKey, value);
+          }
+
+          // 切换跟随系统亮度
+          Future<void> toggleFollowSystem(bool followSystem) async {
+            final value = followSystem ? -1.0 : 0.5;
             setState(() => _screenBrightness = value);
             setSheetState(() {});
             await NativeChannel.instance.setScreenBrightness(value);
@@ -1593,8 +1679,25 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             await prefs.setDouble(_brightnessKey, value);
           }
 
+          Future<void> toggleEyeCare(bool value) async {
+            setState(() => _eyeCareMode = value);
+            setSheetState(() {});
+            unawaited(_saveSettings());
+          }
+
+          Future<void> toggleKeepScreenOn(bool value) async {
+            setState(() => _keepScreenOn = value);
+            setSheetState(() {});
+            if (value) {
+              await WakelockPlus.enable();
+            } else {
+              await WakelockPlus.disable();
+            }
+            unawaited(_saveSettings());
+          }
+
           final followsSystem = _screenBrightness < 0;
-          final sliderValue = followsSystem ? 0.7 : _screenBrightness;
+          final sliderValue = followsSystem ? 0.5 : _screenBrightness;
           return SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
@@ -1618,8 +1721,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                       style: TextStyle(color: _menuForeground),
                     ),
                     value: followsSystem,
-                    onChanged: (value) =>
-                        updateBrightness(value ? -1 : sliderValue),
+                    onChanged: toggleFollowSystem,
                   ),
                   Row(
                     children: [
@@ -1629,14 +1731,17 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                       ),
                       Expanded(
                         child: Slider(
-                          value: sliderValue.clamp(0.05, 1.0),
-                          min: 0.05,
+                          value: sliderValue.clamp(0.01, 1.0),
+                          min: 0.01,
                           max: 1,
-                          divisions: 19,
+                          divisions: 99,
                           label: '${(sliderValue * 100).round()}%',
                           onChanged: followsSystem
                               ? null
-                              : (value) => updateBrightness(value),
+                              : updateBrightnessImmediate,
+                          onChangeEnd: followsSystem
+                              ? null
+                              : saveBrightness,
                         ),
                       ),
                       Icon(
@@ -1655,6 +1760,40 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                         ),
                       ),
                     ],
+                  ),
+                  const Divider(height: 24),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    secondary: Icon(
+                      Icons.remove_red_eye_outlined,
+                      color: _menuForeground,
+                    ),
+                    title: Text(
+                      '护眼模式',
+                      style: TextStyle(color: _menuForeground),
+                    ),
+                    subtitle: Text(
+                      '减少蓝光，保护眼睛',
+                      style: TextStyle(
+                        color: _menuForeground.withValues(alpha: 0.6),
+                        fontSize: 12,
+                      ),
+                    ),
+                    value: _eyeCareMode,
+                    onChanged: toggleEyeCare,
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    secondary: Icon(
+                      Icons.screen_lock_portrait_outlined,
+                      color: _menuForeground,
+                    ),
+                    title: Text(
+                      '屏幕常亮',
+                      style: TextStyle(color: _menuForeground),
+                    ),
+                    value: _keepScreenOn,
+                    onChanged: toggleKeepScreenOn,
                   ),
                 ],
               ),
@@ -2121,12 +2260,13 @@ class _ComicZoomLayerState extends State<_ComicZoomLayer>
   }
 
   void _onPointerMove(PointerMoveEvent event) {
-    if (!widget.enabled || !_pointers.containsKey(event.pointer)) return;
-    final previous = _pointers[event.pointer]!;
+    // 即使缩放禁用，也需要更新 _tapMoved 以区分滑动和点击
     if (_tapDownPosition != null &&
         (event.localPosition - _tapDownPosition!).distance > 18) {
       _tapMoved = true;
     }
+    if (!widget.enabled || !_pointers.containsKey(event.pointer)) return;
+    final previous = _pointers[event.pointer]!;
     _pointers[event.pointer] = event.localPosition;
 
     if (_pointers.length >= 2 && _pinchStartDistance > 0) {

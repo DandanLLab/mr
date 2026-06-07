@@ -69,6 +69,8 @@ dependencies:
   json_annotation: ^4.9.0
   # TTS 文字转语音
   flutter_tts: ^3.8.5
+  # 屏幕常亮
+  wakelock_plus: ^1.2.8
 
 dev_dependencies:
   flutter_test:
