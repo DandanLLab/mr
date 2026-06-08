@@ -494,6 +494,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
           ? _filteredChapters.reversed.toList()
           : _filteredChapters;
       return Scrollbar(
+        thumbVisibility: true,
         child: ListView.builder(
           itemCount: chapters.length,
           itemBuilder: (context, index) =>
@@ -525,6 +526,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
       return Center(child: Text('没有匹配的书签', style: TextStyle(color: fg.withValues(alpha: 0.5))));
     }
     return Scrollbar(
+      thumbVisibility: true,
       child: ListView.builder(
         itemCount: list.length,
         itemBuilder: (context, index) {
@@ -599,6 +601,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
     final chapters =
         _isChapterReversed ? _chapters.reversed.toList() : _chapters;
     return Scrollbar(
+      thumbVisibility: true,
       child: ListView.builder(
         itemCount: chapters.length,
         itemBuilder: (context, index) => _buildChapterItem(chapters[index]),
@@ -610,6 +613,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
     final groups =
         _isChapterReversed ? _volumeGroups.reversed.toList() : _volumeGroups;
     return Scrollbar(
+      thumbVisibility: true,
       child: ListView.builder(
         itemCount: groups.length,
         itemBuilder: (context, index) {

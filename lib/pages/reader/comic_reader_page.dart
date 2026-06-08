@@ -2876,6 +2876,7 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
   bool _searchBookText = true;
   bool _searchContent = true;
   final Set<int> _expandedVolumes = {};
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -2883,6 +2884,33 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
     _loadCacheInfo();
     _loadBookmarks();
     _loadPrefs();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToCurrentChapter();
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _scrollToCurrentChapter() {
+    if (!_scrollController.hasClients) return;
+    if (widget.currentChapterIndex <= 0) return;
+
+    // 找到当前章节在列表中的位置
+    final display = _buildDisplayChapters(_filteredChapters);
+    final targetIndex = display.indexWhere((ch) => ch.index == widget.currentChapterIndex);
+    if (targetIndex < 0) return;
+
+    // 估算位置 - 每个item大约48高度
+    final estimatedOffset = targetIndex * 48.0;
+    _scrollController.animateTo(
+      estimatedOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
   }
 
   Future<void> _loadPrefs() async {
@@ -3119,7 +3147,10 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
   Widget _buildChapterList(Color fg, bool isOnline) {
     final display = _buildDisplayChapters(_filteredChapters);
     return Scrollbar(
+      controller: _scrollController,
+      thumbVisibility: true,
       child: ListView.builder(
+        controller: _scrollController,
         itemCount: display.length,
         itemBuilder: (context, index) {
           final chapter = display[index];
@@ -3236,6 +3267,7 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
       return Center(child: Text('没有匹配的书签', style: TextStyle(color: fg.withValues(alpha: 0.5))));
     }
     return Scrollbar(
+      thumbVisibility: true,
       child: ListView.builder(
         itemCount: list.length,
         itemBuilder: (context, index) {
