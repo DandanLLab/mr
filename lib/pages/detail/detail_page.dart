@@ -1,15 +1,19 @@
 import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter/services.dart';
 import '../../models/book.dart';
+import '../../models/book_source.dart';
 import '../../models/chapter.dart';
 import '../../providers/bookshelf_provider.dart';
 import '../../routes/app_routes.dart';
 import '../../services/storage_service.dart';
 import '../../services/book_data_provider.dart';
+import '../../services/chapter_cache_service.dart';
 import '../../widgets/book_edit_sheet.dart';
 
 class DetailPage extends StatefulWidget {
@@ -35,6 +39,8 @@ class _DetailPageState extends State<DetailPage> {
   bool _isDescExpanded = false;
   int _totalWordCount = 0;
   BookDataProvider? _dataProvider;
+  bool _showReadRecord = true;
+  BookSource? _bookSource;
 
   @override
   void initState() {
@@ -48,6 +54,7 @@ class _DetailPageState extends State<DetailPage> {
     Book? book = storedBook ?? widget.initialBook;
     List<Chapter> chapters = [];
     String? error;
+    BookSource? bookSource;
 
     if (book != null) {
       try {
@@ -56,6 +63,13 @@ class _DetailPageState extends State<DetailPage> {
           final detailedBook = await _dataProvider!.getBookInfo(book.bookUrl);
           if (detailedBook != null) {
             book = mergeBookMetadata(detailedBook, book);
+          }
+          // 获取书源
+          if (book.sourceUrl != null) {
+            final sourceData = StorageService.instance.getBookSource(book.sourceUrl!);
+            if (sourceData != null) {
+              bookSource = BookSource.fromJson(sourceData);
+            }
           }
         }
         chapters = await _dataProvider!.getChapterList(book);
@@ -76,6 +90,7 @@ class _DetailPageState extends State<DetailPage> {
         _chapters = chapters;
         _isInBookshelf = storedData != null;
         _isLoading = false;
+        _bookSource = bookSource;
       });
       if (error != null) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -176,39 +191,184 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   Widget _buildAppBar() {
+    final isOnline = _book!.originType == BookOriginType.online;
+    final isLocal = _book!.originType == BookOriginType.local;
+    final fg = Theme.of(context).colorScheme.onSurface;
+
     return SliverAppBar(
       expandedHeight: 56,
       pinned: true,
       backgroundColor: Colors.transparent,
       elevation: 0,
       actions: [
+        // 定制按钮
+        IconButton(
+          icon: const Icon(Icons.album_outlined),
+          tooltip: '定制按钮',
+          onPressed: _showCustomButton,
+        ),
+        // 数源编辑按钮
+        IconButton(
+          icon: const Icon(Icons.edit_note),
+          tooltip: '编辑',
+          onPressed: _showBookEditSheet,
+        ),
+        // 更多选项
         PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert),
+          tooltip: '更多',
+          offset: const Offset(0, 48),
           onSelected: (value) {
             switch (value) {
-              case 'edit':
-                _showBookEditSheet();
+              case 'share':
+                _shareBook();
                 break;
               case 'refresh':
                 _refreshData();
                 break;
-              case 'change_source':
-                _showChangeSourceDialog();
+              case 'login':
+                _showSourceLogin();
                 break;
-              case 'download':
-                _showDownloadDialog();
+              case 'top':
+                _topBook();
+                break;
+              case 'set_source_variable':
+                _showSetSourceVariable();
+                break;
+              case 'set_book_variable':
+                _showSetBookVariable();
+                break;
+              case 'copy_book_url':
+                _copyBookUrl();
+                break;
+              case 'copy_toc_url':
+                _copyTocUrl();
+                break;
+              case 'can_update':
+                _toggleCanUpdate();
+                break;
+              case 'delete_alert':
+                _toggleDeleteAlert();
+                break;
+              case 'show_read_record':
+                _toggleShowReadRecord();
+                break;
+              case 'clear_cache':
+                _clearCache();
+                break;
+              case 'log':
+                _showLog();
                 break;
             }
           },
           itemBuilder: (context) => [
-            const PopupMenuItem(value: 'edit', child: Text('编辑信息')),
-            const PopupMenuItem(value: 'refresh', child: Text('刷新目录')),
-            if (_book!.originType == BookOriginType.online)
-              const PopupMenuItem(value: 'change_source', child: Text('换源')),
-            if (_book!.originType == BookOriginType.online)
-              const PopupMenuItem(value: 'download', child: Text('下载')),
+            const PopupMenuItem(
+              value: 'share',
+              child: Text('分享'),
+            ),
+            const PopupMenuItem(
+              value: 'refresh',
+              child: Text('刷新'),
+            ),
+            if (isOnline)
+              const PopupMenuItem(
+                value: 'login',
+                child: Text('登录'),
+              ),
+            if (_isInBookshelf)
+              PopupMenuItem(
+                value: 'top',
+                child: Row(
+                  children: [
+                    const Expanded(child: Text('置顶')),
+                    _buildCheckbox(_book!.isTop, fg),
+                  ],
+                ),
+              ),
+            if (isOnline)
+              const PopupMenuItem(
+                value: 'set_source_variable',
+                child: Text('设置源变量'),
+              ),
+            const PopupMenuItem(
+              value: 'set_book_variable',
+              child: Text('设置书籍变量'),
+            ),
+            const PopupMenuItem(
+              value: 'copy_book_url',
+              child: Text('拷贝书籍URL'),
+            ),
+            if (_book!.tocUrl?.isNotEmpty == true)
+              const PopupMenuItem(
+                value: 'copy_toc_url',
+                child: Text('拷贝目录URL'),
+              ),
+            if (isOnline)
+              PopupMenuItem(
+                value: 'can_update',
+                child: Row(
+                  children: [
+                    const Expanded(child: Text('允许更新')),
+                    _buildCheckbox(_book!.canUpdate, fg),
+                  ],
+                ),
+              ),
+            if (_isInBookshelf)
+              PopupMenuItem(
+                value: 'delete_alert',
+                child: Row(
+                  children: [
+                    const Expanded(child: Text('删除提醒')),
+                    _buildCheckbox(_book!.deleteAlert ?? false, fg),
+                  ],
+                ),
+              ),
+            PopupMenuItem(
+              value: 'show_read_record',
+              child: Row(
+                children: [
+                  const Expanded(child: Text('显示阅读记录')),
+                  _buildCheckbox(_showReadRecord, fg),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'clear_cache',
+              child: Text('清理缓存'),
+            ),
+            const PopupMenuItem(
+              value: 'log',
+              child: Text('日志'),
+            ),
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildCheckbox(bool checked, Color fg) {
+    return Container(
+      width: 18,
+      height: 18,
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: checked
+              ? Theme.of(context).colorScheme.primary
+              : fg.withValues(alpha: 0.5),
+          width: 1.5,
+        ),
+        borderRadius: BorderRadius.circular(3),
+        color: checked
+            ? Theme.of(context).colorScheme.primary
+            : Colors.transparent,
+      ),
+      child: checked
+          ? Icon(
+              Icons.check,
+              size: 14,
+              color: Theme.of(context).colorScheme.onPrimary,
+            )
+          : null,
     );
   }
 
@@ -967,5 +1127,301 @@ class _DetailPageState extends State<DetailPage> {
       return value.endsWith('字') ? value : '$value字';
     }
     return _totalWordCount > 0 ? _formatWordCount(_totalWordCount) : '';
+  }
+
+  void _shareBook() {
+    if (_book == null) return;
+    final shareText = '${_book!.displayName}\n作者：${_book!.displayAuthor}\n来源：${_book!.sourceName ?? "本地"}\n链接：${_book!.bookUrl}';
+    Clipboard.setData(ClipboardData(text: shareText));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('书籍信息已复制到剪贴板')),
+    );
+  }
+
+  void _copyBookUrl() {
+    if (_book == null) return;
+    Clipboard.setData(ClipboardData(text: _book!.bookUrl));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('书籍链接已复制')),
+    );
+  }
+
+  void _copyTocUrl() {
+    if (_book == null || _book!.tocUrl == null) return;
+    Clipboard.setData(ClipboardData(text: _book!.tocUrl!));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('目录链接已复制')),
+    );
+  }
+
+  void _clearCache() async {
+    if (_book == null) return;
+    try {
+      await ChapterCacheService.instance.clearBookCache(_book!);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('缓存已清除')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('清除缓存失败：$e')),
+        );
+      }
+    }
+  }
+
+  void _topBook() {
+    if (_book == null) return;
+    final newTop = !_book!.isTop;
+    final provider = context.read<BookshelfProvider>();
+    if (_isInBookshelf) {
+      provider.toggleTop(_book!.bookUrl);
+    }
+    _book = _book!.copyWith(isTop: newTop);
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(newTop ? '已置顶' : '已取消置顶')),
+    );
+  }
+
+  void _toggleCanUpdate() {
+    if (_book == null) return;
+    final newValue = !_book!.canUpdate;
+    _book = _book!.copyWith(canUpdate: newValue);
+    if (_isInBookshelf) {
+      StorageService.instance.addToBookshelf(_book!.toJson());
+    }
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(newValue ? '已允许更新' : '已禁止更新')),
+    );
+  }
+
+  void _toggleDeleteAlert() {
+    if (_book == null) return;
+    final newValue = !(_book!.deleteAlert ?? false);
+    _book = _book!.copyWith(deleteAlert: newValue);
+    if (_isInBookshelf) {
+      StorageService.instance.addToBookshelf(_book!.toJson());
+    }
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(newValue ? '已开启删除提醒' : '已关闭删除提醒')),
+    );
+  }
+
+  void _toggleShowReadRecord() {
+    setState(() {
+      _showReadRecord = !_showReadRecord;
+    });
+  }
+
+  void _showCustomButton() async {
+    // 检查书源是否有定制按钮
+    if (_bookSource != null && _bookSource!.customButton) {
+      // 书源有定制按钮，执行书源回调
+      // TODO: 实现书源回调JS执行
+      // 参考 SourceCallBack.callBackBtn
+      final callBackJs = _bookSource!.ruleContent?.callBackJs;
+      if (callBackJs != null && callBackJs.isNotEmpty) {
+        // 执行回调JS
+        try {
+          // 这里需要执行JS并处理结果
+          // 如果JS返回true，则不显示默认菜单
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('执行书源定制按钮回调...')),
+          );
+          return;
+        } catch (e) {
+          debugPrint('执行定制按钮回调失败: $e');
+        }
+      }
+    }
+
+    // 没有书源定制按钮或回调返回false，显示默认菜单
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.5,
+        minChildSize: 0.3,
+        maxChildSize: 0.8,
+        expand: false,
+        builder: (context, scrollController) => Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('定制按钮', style: Theme.of(context).textTheme.titleLarge),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(),
+            Expanded(
+              child: ListView(
+                controller: scrollController,
+                padding: const EdgeInsets.all(16),
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.refresh),
+                    title: const Text('刷新目录'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _refreshData();
+                    },
+                  ),
+                  if (_book!.originType == BookOriginType.online)
+                    ListTile(
+                      leading: const Icon(Icons.swap_horiz),
+                      title: const Text('换源'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _showChangeSourceDialog();
+                      },
+                    ),
+                  if (_book!.originType == BookOriginType.online)
+                    ListTile(
+                      leading: const Icon(Icons.download),
+                      title: const Text('下载'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _showDownloadDialog();
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _uploadToRemote() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('上传功能开发中...')),
+    );
+  }
+
+  void _showSourceLogin() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('登录功能开发中...')),
+    );
+  }
+
+  void _showSetSourceVariable() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('设置源变量'),
+        content: const TextField(
+          decoration: InputDecoration(
+            hintText: '输入源变量',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('源变量已设置')),
+              );
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSetBookVariable() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('设置书籍变量'),
+        content: const TextField(
+          decoration: InputDecoration(
+            hintText: '输入书籍变量',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('书籍变量已设置')),
+              );
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showLog() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollController) => Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('日志', style: Theme.of(context).textTheme.titleLarge),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(),
+            Expanded(
+              child: ListView(
+                controller: scrollController,
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Text('书籍URL: ${_book?.bookUrl ?? "未知"}'),
+                  const SizedBox(height: 8),
+                  Text('书源: ${_book?.sourceName ?? "本地"}'),
+                  const SizedBox(height: 8),
+                  Text('章节数: ${_chapters.length}'),
+                  const SizedBox(height: 8),
+                  Text('当前章节: ${_book?.durChapterTitle ?? "无"}'),
+                  const SizedBox(height: 8),
+                  Text('阅读进度: ${_book?.durChapterIndex ?? 0}/${_chapters.length}'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

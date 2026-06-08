@@ -30,6 +30,8 @@ class Book {
   final bool canUpdate;
   final int? customOrder;
   final DateTime addedTime;
+  final bool? splitLongChapter;
+  final bool? deleteAlert;
 
   // 自定义元数据字段
   final String? customName;
@@ -81,6 +83,8 @@ class Book {
     this.canUpdate = true,
     this.customOrder,
     required this.addedTime,
+    this.splitLongChapter,
+    this.deleteAlert,
     this.customName,
     this.customAuthor,
     this.customCoverUrl,
@@ -128,6 +132,8 @@ class Book {
     bool? canUpdate,
     int? customOrder,
     DateTime? addedTime,
+    bool? splitLongChapter,
+    bool? deleteAlert,
     String? customName,
     String? customAuthor,
     String? customCoverUrl,
@@ -165,6 +171,8 @@ class Book {
       canUpdate: canUpdate ?? this.canUpdate,
       customOrder: customOrder ?? this.customOrder,
       addedTime: addedTime ?? this.addedTime,
+      splitLongChapter: splitLongChapter ?? this.splitLongChapter,
+      deleteAlert: deleteAlert ?? this.deleteAlert,
       customName: customName ?? this.customName,
       customAuthor: customAuthor ?? this.customAuthor,
       customCoverUrl: customCoverUrl ?? this.customCoverUrl,
@@ -212,6 +220,8 @@ class Book {
       addedTime: json['addedTime'] != null
           ? DateTime.parse(json['addedTime'] as String)
           : DateTime.now(),
+      splitLongChapter: json['splitLongChapter'] as bool?,
+      deleteAlert: json['deleteAlert'] as bool?,
       customName: json['customName'] as String?,
       customAuthor: json['customAuthor'] as String?,
       customCoverUrl: json['customCoverUrl'] as String?,
@@ -253,6 +263,8 @@ class Book {
       'canUpdate': canUpdate,
       if (customOrder != null) 'customOrder': customOrder,
       'addedTime': addedTime.toIso8601String(),
+      if (splitLongChapter != null) 'splitLongChapter': splitLongChapter,
+      if (deleteAlert != null) 'deleteAlert': deleteAlert,
       if (customName != null) 'customName': customName,
       if (customAuthor != null) 'customAuthor': customAuthor,
       if (customCoverUrl != null) 'customCoverUrl': customCoverUrl,
