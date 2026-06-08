@@ -891,30 +891,38 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
         PopupMenuButton<_DebugMenuAction>(
           icon: const Icon(Icons.more_vert),
           color: Colors.white,
+          tooltip: '更多选项',
+          offset: const Offset(0, 48),
           onSelected: _onMenuSelected,
           itemBuilder: (context) => const [
             PopupMenuItem(
               value: _DebugMenuAction.searchSource,
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Text('搜索源码'),
             ),
             PopupMenuItem(
               value: _DebugMenuAction.bookSource,
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Text('详情源码'),
             ),
             PopupMenuItem(
               value: _DebugMenuAction.tocSource,
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Text('目录源码'),
             ),
             PopupMenuItem(
               value: _DebugMenuAction.contentSource,
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Text('正文源码'),
             ),
             PopupMenuItem(
               value: _DebugMenuAction.refreshExploreKinds,
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Text('刷新发现'),
             ),
             PopupMenuItem(
               value: _DebugMenuAction.help,
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Text('帮助'),
             ),
           ],

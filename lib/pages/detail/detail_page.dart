@@ -268,18 +268,21 @@ class _DetailPageState extends State<DetailPage> {
             }
           },
           itemBuilder: (context) => [
-            const PopupMenuItem(
+            PopupMenuItem(
               value: 'refresh',
-              child: Text('刷新'),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: const Text('刷新'),
             ),
             if (isOnline)
               const PopupMenuItem(
                 value: 'login',
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 child: Text('登录'),
               ),
             if (_isInBookshelf)
               PopupMenuItem(
                 value: 'top',
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 child: Row(
                   children: [
                     const Expanded(child: Text('置顶')),
@@ -290,24 +293,29 @@ class _DetailPageState extends State<DetailPage> {
             if (isOnline)
               const PopupMenuItem(
                 value: 'set_source_variable',
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 child: Text('设置源变量'),
               ),
             const PopupMenuItem(
               value: 'set_book_variable',
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Text('设置书籍变量'),
             ),
             const PopupMenuItem(
               value: 'copy_book_url',
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Text('拷贝书籍URL'),
             ),
             if (_book!.tocUrl?.isNotEmpty == true)
               const PopupMenuItem(
                 value: 'copy_toc_url',
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 child: Text('拷贝目录URL'),
               ),
             if (isOnline)
               PopupMenuItem(
                 value: 'can_update',
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 child: Row(
                   children: [
                     const Expanded(child: Text('允许更新')),
@@ -318,6 +326,7 @@ class _DetailPageState extends State<DetailPage> {
             if (_isInBookshelf)
               PopupMenuItem(
                 value: 'delete_alert',
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 child: Row(
                   children: [
                     const Expanded(child: Text('删除提醒')),
@@ -327,6 +336,7 @@ class _DetailPageState extends State<DetailPage> {
               ),
             PopupMenuItem(
               value: 'show_read_record',
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
                 children: [
                   const Expanded(child: Text('显示阅读记录')),
@@ -336,10 +346,12 @@ class _DetailPageState extends State<DetailPage> {
             ),
             const PopupMenuItem(
               value: 'clear_cache',
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Text('清理缓存'),
             ),
             const PopupMenuItem(
               value: 'log',
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Text('日志'),
             ),
           ],

@@ -98,19 +98,27 @@ class _InternalBrowserPageState extends State<InternalBrowserPage> {
                   ),
                   PopupMenuButton<String>(
                     tooltip: '更多',
+                    offset: const Offset(0, 48),
                     onSelected: _handleMenuAction,
                     itemBuilder: (context) => [
                       const PopupMenuItem(
                         value: 'browser',
+                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         child: Text('浏览器打开'),
                       ),
-                      const PopupMenuItem(value: 'copy', child: Text('拷贝URL')),
+                      const PopupMenuItem(
+                        value: 'copy',
+                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        child: Text('拷贝URL'),
+                      ),
                       const PopupMenuItem(
                         value: 'fullscreen',
+                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         child: Text('全屏'),
                       ),
                       PopupMenuItem(
                         value: 'log',
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         child: Row(
                           children: [
                             const Expanded(child: Text('输出日志')),
@@ -143,11 +151,13 @@ class _InternalBrowserPageState extends State<InternalBrowserPage> {
                       if (_hasSource)
                         const PopupMenuItem(
                           value: 'disable',
+                          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           child: Text('禁用源'),
                         ),
                       if (_hasSource)
                         const PopupMenuItem(
                           value: 'delete',
+                          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           child: Text('删除源'),
                         ),
                     ],

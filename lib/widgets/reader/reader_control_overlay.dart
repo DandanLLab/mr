@@ -161,6 +161,8 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
         PopupMenuButton<String>(
           icon: Icon(Icons.more_vert, color: cs.onSurfaceVariant, size: 24),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          tooltip: '更多选项',
+          offset: const Offset(0, 48),
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
           onSelected: (v) {
@@ -169,6 +171,7 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
           itemBuilder: (_) => [
             PopupMenuItem(
               value: 'bookmark',
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
                 children: [
                   Icon(widget.hasBookmark ? Icons.bookmark : Icons.bookmark_border, size: 20),

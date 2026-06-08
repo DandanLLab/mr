@@ -61,58 +61,47 @@ class _BookshelfPageState extends State<BookshelfPage> {
           ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
+            tooltip: '更多选项',
+            offset: const Offset(0, 48),
             onSelected: (value) => _handleMenuSelection(value),
             itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'refresh',
-                child: ListTile(
-                  leading: Icon(Icons.refresh),
-                  title: Text('更新目录'),
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'import_local',
-                child: ListTile(
-                  leading: Icon(Icons.folder),
-                  title: Text('本地导入'),
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'import_url',
-                child: ListTile(
-                  leading: Icon(Icons.link),
-                  title: Text('URL导入'),
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                value: 'batch',
-                child: ListTile(
-                  leading: Icon(Icons.checklist),
-                  title: Text('批量管理'),
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'group_manage',
-                child: ListTile(
-                  leading: Icon(Icons.folder_open),
-                  title: Text('分组管理'),
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'config',
-                child: ListTile(
-                  leading: Icon(Icons.settings),
-                  title: Text('书架设置'),
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ),
-            ],
+            const PopupMenuItem(
+              value: 'refresh',
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.refresh, size: 18), SizedBox(width: 12), Text('更新目录')]),
+            ),
+            const PopupMenuItem(
+              value: 'import_local',
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.folder, size: 18), SizedBox(width: 12), Text('本地导入')]),
+            ),
+            const PopupMenuItem(
+              value: 'import_url',
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.link, size: 18), SizedBox(width: 12), Text('URL导入')]),
+            ),
+            const PopupMenuItem(
+              value: 'batch',
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.checklist, size: 18), SizedBox(width: 12), Text('批量管理')]),
+            ),
+            const PopupMenuItem(
+              value: 'group_manage',
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.folder_open, size: 18), SizedBox(width: 12), Text('分组管理')]),
+            ),
+            const PopupMenuItem(
+              value: 'config',
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.settings, size: 18), SizedBox(width: 12), Text('书架设置')]),
+            ),
+          ],
           ),
         ],
       ),

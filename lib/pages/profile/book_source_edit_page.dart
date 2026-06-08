@@ -605,6 +605,8 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
             ),
             // 更多菜单
             PopupMenuButton<String>(
+              tooltip: '更多选项',
+              offset: const Offset(0, 48),
               onSelected: (value) {
                 switch (value) {
                   case 'login':
@@ -652,97 +654,81 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                 if (loginUrl.isNotEmpty)
                   const PopupMenuItem(
                     value: 'login',
-                    child: ListTile(
-                      leading: Icon(Icons.login),
-                      title: Text('登录'),
-                    ),
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    height: 48,
+                    child: Row(children: [Icon(Icons.login, size: 18), SizedBox(width: 12), Text('登录')]),
                   ),
                 const PopupMenuItem(
                   value: 'search',
-                  child: ListTile(
-                    leading: Icon(Icons.search),
-                    title: Text('搜索'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.search, size: 18), SizedBox(width: 12), Text('搜索')]),
                 ),
                 const PopupMenuItem(
                   value: 'clear_cookie',
-                  child: ListTile(
-                    leading: Icon(Icons.cookie),
-                    title: Text('Cookie'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.cookie, size: 18), SizedBox(width: 12), Text('Cookie')]),
                 ),
                 const PopupMenuItem(
                   value: 'json',
-                  child: ListTile(
-                    leading: Icon(Icons.code),
-                    title: Text('JSON编辑'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.code, size: 18), SizedBox(width: 12), Text('JSON编辑')]),
                 ),
                 PopupMenuItem(
                   value: 'auto_complete',
-                  child: ListTile(
-                    leading: Icon(_autoComplete ? Icons.check_box : Icons.check_box_outline_blank),
-                    title: const Text('自动补全'),
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(_autoComplete ? Icons.check_box : Icons.check_box_outline_blank, size: 18), const SizedBox(width: 12), const Text('自动补全')]),
                 ),
-                const PopupMenuDivider(),
                 const PopupMenuItem(
                   value: 'copy',
-                  child: ListTile(
-                    leading: Icon(Icons.copy),
-                    title: Text('复制书源'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.copy, size: 18), SizedBox(width: 12), Text('拷贝源')]),
                 ),
                 const PopupMenuItem(
                   value: 'paste',
-                  child: ListTile(
-                    leading: Icon(Icons.paste),
-                    title: Text('粘贴书源'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.paste, size: 18), SizedBox(width: 12), Text('粘贴源')]),
                 ),
                 const PopupMenuItem(
                   value: 'variable',
-                  child: ListTile(
-                    leading: Icon(Icons.settings),
-                    title: Text('设置源变量'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.settings, size: 18), SizedBox(width: 12), Text('设置源变量')]),
                 ),
-                const PopupMenuDivider(),
                 const PopupMenuItem(
                   value: 'qr_import',
-                  child: ListTile(
-                    leading: Icon(Icons.qr_code_scanner),
-                    title: Text('二维码导入'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.qr_code_scanner, size: 18), SizedBox(width: 12), Text('二维码导入')]),
                 ),
                 const PopupMenuItem(
                   value: 'qr_share',
-                  child: ListTile(
-                    leading: Icon(Icons.qr_code),
-                    title: Text('二维码分享'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.qr_code, size: 18), SizedBox(width: 12), Text('二维码分享')]),
                 ),
                 const PopupMenuItem(
                   value: 'share',
-                  child: ListTile(
-                    leading: Icon(Icons.share),
-                    title: Text('字符串分享'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.share, size: 18), SizedBox(width: 12), Text('字符串分享')]),
                 ),
-                const PopupMenuDivider(),
                 const PopupMenuItem(
                   value: 'log',
-                  child: ListTile(
-                    leading: Icon(Icons.article),
-                    title: Text('日志'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.article, size: 18), SizedBox(width: 12), Text('日志')]),
                 ),
                 const PopupMenuItem(
                   value: 'help',
-                  child: ListTile(
-                    leading: Icon(Icons.help),
-                    title: Text('帮助'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.help, size: 18), SizedBox(width: 12), Text('帮助')]),
                 ),
               ],
             ),
@@ -1184,6 +1170,8 @@ class _ContentEditPageState extends State<_ContentEditPage> {
           ),
           // 更多菜单
           PopupMenuButton<String>(
+            tooltip: '更多选项',
+            offset: const Offset(0, 48),
             onSelected: (value) {
               switch (value) {
                 case 'reset':
@@ -1197,17 +1185,13 @@ class _ContentEditPageState extends State<_ContentEditPage> {
             itemBuilder: (context) => [
               const PopupMenuItem(
                 value: 'reset',
-                child: ListTile(
-                  leading: Icon(Icons.refresh),
-                  title: Text('重置'),
-                ),
+                height: 36,
+                child: Row(children: [Icon(Icons.refresh, size: 18), SizedBox(width: 12), Text('重置')]),
               ),
               const PopupMenuItem(
                 value: 'copy_all',
-                child: ListTile(
-                  leading: Icon(Icons.copy),
-                  title: Text('复制全部'),
-                ),
+                height: 36,
+                child: Row(children: [Icon(Icons.copy, size: 18), SizedBox(width: 12), Text('复制全部')]),
               ),
             ],
           ),

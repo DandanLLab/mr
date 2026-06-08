@@ -37,6 +37,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
   Set<int> _expandedVolumes = {};
   int _totalWordCount = 0;
   final ScrollController _scrollController = ScrollController();
+  final PageController _pageController = PageController();
   bool _confirmChapterJump = false;
   BookDataProvider? _dataProvider;
   String? _loadError;
@@ -57,6 +58,13 @@ class _ChapterListPageState extends State<ChapterListPage> {
     _loadPrefs();
     _loadData();
     _loadBookmarks();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _pageController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadBookmarks() async {
@@ -312,16 +320,19 @@ class _ChapterListPageState extends State<ChapterListPage> {
                               _menuItem('fold_volume', '卷名折叠', _foldVolume, fg),
                               const PopupMenuItem(
                                 value: 'regex_config',
+                                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                                 child: Text('正则配置'),
                               ),
                             ]
                           : [
                               const PopupMenuItem(
                                 value: 'export',
+                                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                                 child: Text('导出'),
                               ),
                               const PopupMenuItem(
                                 value: 'export_md',
+                                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                                 child: Text('导出(MD)'),
                               ),
                               _menuItem('bm_search_chapter', '搜索章节名', _searchChapterName, fg),
@@ -342,6 +353,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
   PopupMenuItem<String> _menuItem(String value, String label, bool checked, Color fg) {
     return PopupMenuItem(
       value: value,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
           Expanded(child: Text(label)),
@@ -451,6 +463,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
 
   Widget _buildBody(Color fg, bool isOnline) {
     return PageView(
+      controller: _pageController,
       onPageChanged: (index) => setState(() => _currentTab = index),
       children: [
         _buildChapterContent(isOnline),
@@ -462,7 +475,13 @@ class _ChapterListPageState extends State<ChapterListPage> {
   Widget _buildTab(int index, String text, Color fg) {
     final selected = _currentTab == index;
     return GestureDetector(
-      onTap: () => setState(() => _currentTab = index),
+      onTap: () {
+        _pageController.animateToPage(
+          index,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+        );
+      },
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

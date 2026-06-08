@@ -2943,6 +2943,7 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
               PopupMenuButton<String>(
                 icon: Icon(Icons.more_vert, color: fg),
                 tooltip: '更多',
+                offset: const Offset(0, 48),
                 onSelected: _handleMenuAction,
                 itemBuilder: _currentTab == 0
                     ? (context) => [
@@ -2954,10 +2955,12 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
                     : (context) => [
                           const PopupMenuItem(
                             value: 'export',
+                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             child: Text('导出'),
                           ),
                           const PopupMenuItem(
                             value: 'export_md',
+                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             child: Text('导出(MD)'),
                           ),
                           const PopupMenuDivider(),
@@ -2997,6 +3000,7 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
   PopupMenuItem<String> _menuItem(String value, String label, bool checked, Color fg) {
     return PopupMenuItem(
       value: value,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
           Expanded(child: Text(label)),

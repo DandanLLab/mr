@@ -1206,6 +1206,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                       PopupMenuButton<String>(
                         icon: Icon(Icons.more_vert, color: _menuForeground),
                         tooltip: '更多',
+                        offset: const Offset(0, 48),
                         onSelected: (value) {
                           switch (value) {
                             case 'footer':
@@ -1223,9 +1224,14 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                           }
                         },
                         itemBuilder: (context) => [
-                          const PopupMenuItem(value: 'footer', child: Text('页脚配置')),
+                          const PopupMenuItem(
+                            value: 'footer',
+                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: Text('页脚配置'),
+                          ),
                           PopupMenuItem(
                             value: 'eink',
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             child: Row(
                               children: [
                                 const Text('墨水屏'),
@@ -1258,6 +1264,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                           ),
                           PopupMenuItem(
                             value: 'grayscale',
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             child: Row(
                               children: [
                                 const Text('图片灰色'),
@@ -1288,7 +1295,11 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                               ],
                             ),
                           ),
-                          const PopupMenuItem(value: 'log', child: Text('日志')),
+                          const PopupMenuItem(
+                            value: 'log',
+                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: Text('日志'),
+                          ),
                         ],
                       ),
                     ],
@@ -1356,10 +1367,12 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                       PopupMenuButton<String>(
                         enabled: _bookSource != null,
                         tooltip: '书源操作',
+                        offset: const Offset(0, 48),
                         onSelected: _handleSourceAction,
                         itemBuilder: (context) => const [
                           PopupMenuItem(
                             value: 'edit',
+                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             child: ListTile(
                               leading: Icon(Icons.edit_outlined),
                               title: Text('编辑书源'),
@@ -1368,6 +1381,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                           ),
                           PopupMenuItem(
                             value: 'disable',
+                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             child: ListTile(
                               leading: Icon(Icons.block),
                               title: Text('禁用书源'),
@@ -2877,6 +2891,7 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
   bool _searchContent = true;
   final Set<int> _expandedVolumes = {};
   final ScrollController _scrollController = ScrollController();
+  final PageController _pageController = PageController();
 
   @override
   void initState() {
@@ -2892,6 +2907,7 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _pageController.dispose();
     super.dispose();
   }
 
@@ -3053,10 +3069,12 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
                           : (context) => [
                                 const PopupMenuItem(
                                   value: 'export',
+                                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                                   child: Text('导出'),
                                 ),
                                 const PopupMenuItem(
                                   value: 'export_md',
+                                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                                   child: Text('导出(MD)'),
                                 ),
                                 _menuItem('bm_search_chapter', '搜索章节名', _searchChapterName, fg),
@@ -3070,6 +3088,7 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
         SizedBox(
           height: MediaQuery.of(context).size.height * 0.5,
           child: PageView(
+            controller: _pageController,
             onPageChanged: (index) => setState(() => _currentTab = index),
             children: [
               _buildChapterList(fg, isOnline),
@@ -3084,6 +3103,7 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
   PopupMenuItem<String> _menuItem(String value, String label, bool checked, Color fg) {
     return PopupMenuItem(
       value: value,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
           Expanded(child: Text(label)),
@@ -3118,7 +3138,13 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
   Widget _buildTab(int index, String text, Color fg) {
     final selected = _currentTab == index;
     return GestureDetector(
-      onTap: () => setState(() => _currentTab = index),
+      onTap: () {
+        _pageController.animateToPage(
+          index,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+        );
+      },
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
