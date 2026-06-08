@@ -66,6 +66,9 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
   // 是否有修改
   bool _hasChanges = false;
 
+  // 缓存 TextEditingController
+  final Map<String, TextEditingController> _controllers = {};
+
   @override
   void initState() {
     super.initState();
@@ -76,6 +79,9 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
   @override
   void dispose() {
     _tabController.dispose();
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -583,7 +589,7 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
       onWillPop: _onWillPop,
       child: Scaffold(
         appBar: AppBar(
-          title: Text(_originalSource?.bookSourceName ?? '新建书源'),
+          title: const Text('编辑书源', overflow: TextOverflow.visible, style: TextStyle(fontWeight: FontWeight.w500)),
           actions: [
             // 内容编辑
             IconButton(
@@ -758,12 +764,12 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
               child: TabBarView(
                 controller: _tabController,
                 children: [
-                  _buildEditList(_baseEntities),
-                  _buildEditList(_searchEntities),
-                  _buildEditList(_exploreEntities),
-                  _buildEditList(_infoEntities),
-                  _buildEditList(_tocEntities),
-                  _buildEditList(_contentEntities),
+                  _buildEditList(_baseEntities, 'base'),
+                  _buildEditList(_searchEntities, 'search'),
+                  _buildEditList(_exploreEntities, 'explore'),
+                  _buildEditList(_infoEntities, 'info'),
+                  _buildEditList(_tocEntities, 'toc'),
+                  _buildEditList(_contentEntities, 'content'),
                 ],
               ),
             ),
@@ -782,23 +788,30 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
         children: [
           const Text('类型'),
           const SizedBox(width: 4),
-          DropdownButton<int>(
-            value: _sourceType,
-            isDense: true,
-            underline: const SizedBox(),
-            items: const [
-              DropdownMenuItem(value: 0, child: Text('文字')),
-              DropdownMenuItem(value: 1, child: Text('音频')),
-              DropdownMenuItem(value: 2, child: Text('图片')),
-              DropdownMenuItem(value: 3, child: Text('文件')),
-              DropdownMenuItem(value: 4, child: Text('视频')),
-            ],
-            onChanged: (value) {
+          PopupMenuButton<int>(
+            initialValue: _sourceType,
+            tooltip: '选择类型',
+            offset: const Offset(0, 40),
+            onSelected: (value) {
               setState(() {
-                _sourceType = value ?? 0;
+                _sourceType = value;
                 _hasChanges = true;
               });
             },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 0, child: Text('文字')),
+              PopupMenuItem(value: 1, child: Text('音频')),
+              PopupMenuItem(value: 2, child: Text('图片')),
+              PopupMenuItem(value: 3, child: Text('文件')),
+              PopupMenuItem(value: 4, child: Text('视频')),
+            ],
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(['文字', '音频', '图片', '文件', '视频'][_sourceType]),
+                const Icon(Icons.arrow_drop_down),
+              ],
+            ),
           ),
           const SizedBox(width: 8),
           // 启用
@@ -972,13 +985,14 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
     );
   }
 
-  Widget _buildEditList(List<EditEntity> entities) {
+  Widget _buildEditList(List<EditEntity> entities, String tabPrefix) {
     return ListView.builder(
       padding: const EdgeInsets.all(8),
       itemCount: entities.length,
       itemBuilder: (context, index) {
         final entity = entities[index];
-        final hasValue = entity.value.isNotEmpty;
+        final controllerKey = '${tabPrefix}_${entity.key}';
+        final controller = _getControllerByKey(controllerKey, entity.value);
         
         return Container(
           margin: const EdgeInsets.only(top: 3),
@@ -986,41 +1000,32 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
             border: Border.all(color: Theme.of(context).dividerColor),
             borderRadius: BorderRadius.circular(4),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (hasValue)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                  child: Text(
-                    entity.hint,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).hintColor,
-                    ),
-                  ),
-                ),
-              TextField(
-                controller: TextEditingController(text: entity.value),
-                decoration: InputDecoration(
-                  hintText: hasValue ? null : entity.hint,
-                  border: InputBorder.none,
-                  isDense: true,
-                  contentPadding: EdgeInsets.fromLTRB(12, hasValue ? 4 : 12, 12, 8),
-                ),
-                maxLines: null,
-                minLines: 1,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-                onChanged: (value) {
-                  entity.value = value;
-                  _hasChanges = true;
-                },
-              ),
-            ],
+          child: TextFormField(
+            controller: controller,
+            decoration: InputDecoration(
+              labelText: entity.hint,
+              border: InputBorder.none,
+              isDense: true,
+              contentPadding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            ),
+            maxLines: null,
+            minLines: 1,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+            onChanged: (value) {
+              entity.value = value;
+              _hasChanges = true;
+            },
           ),
         );
       },
     );
+  }
+
+  TextEditingController _getControllerByKey(String key, String initialValue) {
+    if (!_controllers.containsKey(key)) {
+      _controllers[key] = TextEditingController(text: initialValue);
+    }
+    return _controllers[key]!;
   }
 
   void _showHelp() {
