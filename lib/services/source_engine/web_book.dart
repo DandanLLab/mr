@@ -279,6 +279,11 @@ class WebBook {
   String? lastTocHtml;
   String? lastContentHtml;
 
+  // 缓存原始元素数量（用于调试）
+  int lastSearchElementCount = 0;
+  int lastExploreElementCount = 0;
+  int lastTocElementCount = 0;
+
   WebBook(this.source, {HttpClient? client})
       : _client = client ?? HttpClient.instance;
 
@@ -763,6 +768,9 @@ class WebBook {
       var bookElements = analyzer.getElements(actualBookListRule);
       AppLogger.instance.logParseResult('搜索列表', bookElements.length);
 
+      // 保存原始元素数量（用于调试）
+      lastSearchElementCount = bookElements.length;
+
       // 调试：记录元素类型
       if (bookElements.isNotEmpty) {
         AppLogger.instance.debug(LogCategory.parse, '搜索列表元素类型',
@@ -934,6 +942,10 @@ class WebBook {
 
       final results = <Map<String, dynamic>>[];
       final bookElements = analyzer.getElements(bookListRule);
+
+      // 保存原始元素数量（用于调试）
+      lastExploreElementCount = bookElements.length;
+
       for (var element in bookElements) {
         // 关键修复：处理非 HTML 字符串元素
         if (element is String && element.isNotEmpty && !element.trim().startsWith('<')) {
@@ -1131,6 +1143,10 @@ class WebBook {
       }
 
       final chapterElements = analyzer.getElements(chapterListRule);
+
+      // 保存原始元素数量（用于调试）
+      lastTocElementCount = chapterElements.length;
+
       var chapterNames = <String>[];
       var chapterUrls = <String>[];
       final chapterVolumes = <bool>[];

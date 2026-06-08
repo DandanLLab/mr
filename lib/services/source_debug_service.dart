@@ -230,15 +230,16 @@ class SourceDebugService {
 
       final searchHtml = webBook.lastSearchHtml ?? '';
       final searchUrl = webBook.lastSearchUrl ?? '';
+      final elementCount = webBook.lastSearchElementCount;
 
       log('≡获取成功:${searchUrl.isNotEmpty ? searchUrl : ""}',
           state: DebugState.searchSrc.code, sourceHtml: searchHtml);
 
       log('┌获取书籍列表');
-      log('└列表大小:${results.length}');
+      log('└列表大小:$elementCount');
 
       if (results.isEmpty) {
-        log('≡未获取到书籍', state: DebugState.error.code);
+        log('︽未获取到书籍', state: DebugState.error.code);
         return;
       }
 
@@ -274,15 +275,16 @@ class SourceDebugService {
 
       final exploreHtml = webBook.lastExploreHtml ?? '';
       final exploreResultUrl = webBook.lastExploreUrl ?? '';
+      final elementCount = webBook.lastExploreElementCount;
 
       log('≡获取成功:${exploreResultUrl.isNotEmpty ? exploreResultUrl : ""}',
           state: DebugState.exploreSrc.code, sourceHtml: exploreHtml);
 
       log('┌获取书籍列表');
-      log('└列表大小:${results.length}');
+      log('└列表大小:$elementCount');
 
       if (results.isEmpty) {
-        log('≡未获取到书籍', state: DebugState.error.code);
+        log('︽未获取到书籍', state: DebugState.error.code);
         return;
       }
 
@@ -386,14 +388,15 @@ class SourceDebugService {
       if (_isCancelled) return;
 
       final tocHtml = webBook.lastTocHtml ?? '';
+      final elementCount = webBook.lastTocElementCount;
       log('≡获取成功:$tocUrl',
           state: DebugState.tocSrc.code, sourceHtml: tocHtml);
 
       log('┌获取目录列表');
-      log('└列表大小:${chapters.length}');
+      log('└列表大小:$elementCount');
 
       if (chapters.isEmpty) {
-        log('≡没有正文章节', state: DebugState.error.code);
+        log('◇章节列表为空', state: DebugState.error.code);
         return;
       }
 
