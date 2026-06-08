@@ -26,6 +26,20 @@ enum BookshelfSort {
   byAuthor,    // 按作者
   byLatest,    // 按最新章节
   byAddTime,   // 按添加时间
+  byManual,    // 手动排序
+}
+
+/// 书名显示方式
+enum BookNameDisplay {
+  show,        // 显示
+  hide,        // 隐藏
+  overlay,     // 覆盖在封面上
+}
+
+/// 分组样式
+enum GroupStyle {
+  none,        // 不分组
+  byGroup,     // 按分组
 }
 
 class BookshelfPage extends StatefulWidget {
@@ -38,14 +52,19 @@ class BookshelfPage extends StatefulWidget {
 class _BookshelfPageState extends State<BookshelfPage> {
   final List<String> _groups = ['全部', '追更', '漫画', '已完结'];
   int _selectedGroupIndex = 0;
-  
+
   // 书架配置
   BookshelfLayout _layout = BookshelfLayout.grid3;
   BookshelfSort _sort = BookshelfSort.byTime;
+  BookNameDisplay _bookNameDisplay = BookNameDisplay.show;
+  GroupStyle _groupStyle = GroupStyle.byGroup;
   bool _showUnread = true;
   bool _showLastUpdateTime = true;
   bool _showBookName = true;
+  bool _showWaitUpdate = true;
+  bool _showFastScroller = false;
   int _gridColumnCount = 3;
+  double _margin = 8.0;
 
   @override
   Widget build(BuildContext context) {
@@ -90,6 +109,12 @@ class _BookshelfPageState extends State<BookshelfPage> {
               child: Row(children: [Icon(Icons.checklist, size: 18), SizedBox(width: 12), Text('批量管理')]),
             ),
             const PopupMenuItem(
+              value: 'download',
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.download, size: 18), SizedBox(width: 12), Text('缓存导出')]),
+            ),
+            const PopupMenuItem(
               value: 'group_manage',
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               height: 48,
@@ -100,6 +125,18 @@ class _BookshelfPageState extends State<BookshelfPage> {
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               height: 48,
               child: Row(children: [Icon(Icons.settings, size: 18), SizedBox(width: 12), Text('书架设置')]),
+            ),
+            const PopupMenuItem(
+              value: 'export_bookshelf',
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.upload_file, size: 18), SizedBox(width: 12), Text('导出书架')]),
+            ),
+            const PopupMenuItem(
+              value: 'import_bookshelf',
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.download_for_offline, size: 18), SizedBox(width: 12), Text('导入书架')]),
             ),
           ],
           ),
@@ -141,11 +178,20 @@ class _BookshelfPageState extends State<BookshelfPage> {
       case 'batch':
         provider.enterBatchMode();
         break;
+      case 'download':
+        _showCacheExportDialog();
+        break;
       case 'group_manage':
         _showGroupManageDialog();
         break;
       case 'config':
         _showBookshelfConfigDialog();
+        break;
+      case 'export_bookshelf':
+        _exportBookshelf();
+        break;
+      case 'import_bookshelf':
+        _importBookshelf();
         break;
     }
   }
@@ -253,6 +299,17 @@ class _BookshelfPageState extends State<BookshelfPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // 分组样式
+                Text('分组样式', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    _buildGroupStyleChip('不分组', GroupStyle.none, setDialogState),
+                    _buildGroupStyleChip('按分组', GroupStyle.byGroup, setDialogState),
+                  ],
+                ),
+                const SizedBox(height: 16),
                 // 布局选择
                 Text('布局样式', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
@@ -276,10 +333,22 @@ class _BookshelfPageState extends State<BookshelfPage> {
                   spacing: 8,
                   children: [
                     _buildSortChip('阅读时间', BookshelfSort.byTime, setDialogState),
-                    _buildSortChip('书名', BookshelfSort.byName, setDialogState),
-                    _buildSortChip('作者', BookshelfSort.byAuthor, setDialogState),
                     _buildSortChip('最新章节', BookshelfSort.byLatest, setDialogState),
+                    _buildSortChip('书名', BookshelfSort.byName, setDialogState),
+                    _buildSortChip('手动排序', BookshelfSort.byManual, setDialogState),
                     _buildSortChip('添加时间', BookshelfSort.byAddTime, setDialogState),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                // 书名显示方式
+                Text('书名显示', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    _buildBookNameChip('显示', BookNameDisplay.show, setDialogState),
+                    _buildBookNameChip('隐藏', BookNameDisplay.hide, setDialogState),
+                    _buildBookNameChip('覆盖', BookNameDisplay.overlay, setDialogState),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -299,10 +368,27 @@ class _BookshelfPageState extends State<BookshelfPage> {
                   contentPadding: EdgeInsets.zero,
                 ),
                 SwitchListTile(
-                  title: const Text('显示书名'),
-                  value: _showBookName,
-                  onChanged: (v) => setDialogState(() => _showBookName = v),
+                  title: const Text('显示待更新数'),
+                  value: _showWaitUpdate,
+                  onChanged: (v) => setDialogState(() => _showWaitUpdate = v),
                   contentPadding: EdgeInsets.zero,
+                ),
+                SwitchListTile(
+                  title: const Text('显示快速滚动条'),
+                  value: _showFastScroller,
+                  onChanged: (v) => setDialogState(() => _showFastScroller = v),
+                  contentPadding: EdgeInsets.zero,
+                ),
+                const SizedBox(height: 16),
+                // 边距设置
+                Text('边距设置: ${_margin.toInt()}', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                Slider(
+                  value: _margin,
+                  min: 0,
+                  max: 60,
+                  divisions: 12,
+                  onChanged: (v) => setDialogState(() => _margin = v),
                 ),
               ],
             ),
@@ -340,6 +426,30 @@ class _BookshelfPageState extends State<BookshelfPage> {
       onSelected: (selected) {
         if (selected) {
           setDialogState(() => _sort = sort);
+        }
+      },
+    );
+  }
+
+  Widget _buildBookNameChip(String label, BookNameDisplay display, StateSetter setDialogState) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: _bookNameDisplay == display,
+      onSelected: (selected) {
+        if (selected) {
+          setDialogState(() => _bookNameDisplay = display);
+        }
+      },
+    );
+  }
+
+  Widget _buildGroupStyleChip(String label, GroupStyle style, StateSetter setDialogState) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: _groupStyle == style,
+      onSelected: (selected) {
+        if (selected) {
+          setDialogState(() => _groupStyle = style);
         }
       },
     );
@@ -421,12 +531,12 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   Widget _buildGridView(BookshelfProvider provider) {
     return GridView.builder(
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.all(_margin),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: _gridColumnCount,
         childAspectRatio: 0.65,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
+        crossAxisSpacing: _margin,
+        mainAxisSpacing: _margin,
       ),
       itemCount: provider.books.length,
       itemBuilder: (context, index) {
@@ -448,61 +558,118 @@ class _BookshelfPageState extends State<BookshelfPage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Expanded(
-                  child: book.coverUrl.isNotEmpty
-                      ? CachedNetworkImage(
-                          imageUrl: book.coverUrl,
-                          fit: BoxFit.cover,
-                          placeholder: (context, url) => Container(
-                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                            child: const Center(
-                              child: CircularProgressIndicator(),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // 封面
+                      book.coverUrl.isNotEmpty
+                          ? CachedNetworkImage(
+                              imageUrl: book.coverUrl,
+                              fit: BoxFit.cover,
+                              placeholder: (context, url) => Container(
+                                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                child: const Center(
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              ),
+                              errorWidget: (context, url, error) => Container(
+                                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                child: const Icon(Icons.book, size: 48),
+                              ),
+                            )
+                          : Container(
+                              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                              child: const Icon(Icons.book, size: 48),
+                            ),
+                      // 书名覆盖在封面上
+                      if (_bookNameDisplay == BookNameDisplay.overlay)
+                        Positioned(
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.transparent,
+                                  Colors.black.withValues(alpha: 0.7),
+                                ],
+                              ),
+                            ),
+                            child: Text(
+                              book.name,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                                shadows: [
+                                  Shadow(
+                                    offset: Offset(0, 1),
+                                    blurRadius: 2,
+                                    color: Colors.black54,
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                          errorWidget: (context, url, error) => Container(
-                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                            child: const Icon(Icons.book, size: 48),
-                          ),
-                        )
-                      : Container(
-                          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                          child: const Icon(Icons.book, size: 48),
                         ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        book.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        book.author,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      LinearProgressIndicator(
-                        value: book.progress,
-                        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-                      ),
                     ],
                   ),
                 ),
+                // 书名显示在下方
+                if (_bookNameDisplay == BookNameDisplay.show)
+                  Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          book.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w500,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        LinearProgressIndicator(
+                          value: book.progress,
+                          backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                        ),
+                      ],
+                    ),
+                  ),
               ],
             ),
           ),
+          // 未读数徽章
+          if (_showUnread && book.unreadCount > 0)
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '${book.unreadCount}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          // 本地标签
           if (book.originType == BookOriginType.local)
             Positioned(
               top: 8,
@@ -510,26 +677,34 @@ class _BookshelfPageState extends State<BookshelfPage> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primary,
+                  color: Theme.of(context).colorScheme.primaryContainer,
                   borderRadius: BorderRadius.circular(4),
                 ),
-                child: const Text(
+                child: Text(
                   '本地',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
                     fontSize: 10,
                   ),
                 ),
               ),
             ),
+          // 置顶图标
           if (book.isTop)
             Positioned(
-              top: 8,
+              bottom: _bookNameDisplay == BookNameDisplay.show ? 48 : 8,
               right: 8,
-              child: Icon(
-                Icons.push_pin,
-                size: 16,
-                color: Theme.of(context).colorScheme.primary,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.push_pin,
+                  size: 14,
+                  color: Colors.white,
+                ),
               ),
             ),
         ],
@@ -550,7 +725,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   Widget _buildListBookCard(Book book, BookshelfProvider provider) {
     final isCompact = _layout == BookshelfLayout.listCompact;
-    
+
     return Slidable(
       endActionPane: ActionPane(
         motion: const DrawerMotion(),
@@ -575,7 +750,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
         onTap: () => _openBook(book),
         onLongPress: () => _showBookOptions(book, provider),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: EdgeInsets.symmetric(horizontal: _margin, vertical: 8),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -586,16 +761,46 @@ class _BookshelfPageState extends State<BookshelfPage> {
                   width: isCompact ? 48 : 66,
                   height: isCompact ? 64 : 90,
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: book.coverUrl.isNotEmpty
-                      ? CachedNetworkImage(
+                  child: Stack(
+                    children: [
+                      if (book.coverUrl.isNotEmpty)
+                        CachedNetworkImage(
                           imageUrl: book.coverUrl,
                           fit: BoxFit.cover,
+                          width: double.infinity,
+                          height: double.infinity,
                           placeholder: (context, url) => Container(
                             color: Theme.of(context).colorScheme.surfaceContainerHighest,
                           ),
-                          errorWidget: (context, url, error) => const Icon(Icons.book),
+                          errorWidget: (context, url, error) => const Center(
+                            child: Icon(Icons.book, size: 32),
+                          ),
                         )
-                      : const Icon(Icons.book),
+                      else
+                        const Center(child: Icon(Icons.book, size: 32)),
+                      // 未读数徽章
+                      if (_showUnread && book.unreadCount > 0)
+                        Positioned(
+                          top: 4,
+                          right: 4,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.primary,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '${book.unreadCount}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -605,37 +810,46 @@ class _BookshelfPageState extends State<BookshelfPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // 书名行
-                    if (_showBookName)
-                      Row(
-                        children: [
-                          Expanded(
+                    Row(
+                      children: [
+                        if (book.isTop)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 4),
+                            child: Icon(
+                              Icons.push_pin,
+                              size: 14,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                          ),
+                        Expanded(
+                          child: Text(
+                            book.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        if (book.originType == BookOriginType.local)
+                          Container(
+                            margin: const EdgeInsets.only(left: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
                             child: Text(
-                              book.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
+                              '本地',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Theme.of(context).colorScheme.onPrimaryContainer,
                               ),
                             ),
                           ),
-                          if (_showUnread && book.unreadCount > 0)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.primary,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(
-                                '${book.unreadCount}',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
+                      ],
+                    ),
                     if (!isCompact) ...[
                       const SizedBox(height: 4),
                       // 作者行
@@ -681,8 +895,8 @@ class _BookshelfPageState extends State<BookshelfPage> {
                         const SizedBox(width: 4),
                         Expanded(
                           child: Text(
-                            book.durChapterTitle.isNotEmpty 
-                                ? book.durChapterTitle 
+                            book.durChapterTitle.isNotEmpty
+                                ? book.durChapterTitle
                                 : '未开始阅读',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -697,49 +911,32 @@ class _BookshelfPageState extends State<BookshelfPage> {
                     if (!isCompact) ...[
                       const SizedBox(height: 4),
                       // 最新章节行
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.new_releases_outlined,
-                            size: 14,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              book.latestChapterTitle.isNotEmpty 
-                                  ? '最新: ${book.latestChapterTitle}' 
-                                  : '',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      if (book.latestChapterTitle.isNotEmpty)
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.new_releases_outlined,
+                              size: 14,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                '最新: ${book.latestChapterTitle}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
+                          ],
+                        ),
                     ],
                   ],
                 ),
               ),
-              // 来源标签
-              if (book.originType == BookOriginType.local)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    '本地',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).colorScheme.onPrimaryContainer,
-                    ),
-                  ),
-                ),
             ],
           ),
         ),
@@ -1111,6 +1308,84 @@ class _BookshelfPageState extends State<BookshelfPage> {
       context,
       AppRoutes.detail,
       arguments: {'bookUrl': book.bookUrl},
+    );
+  }
+
+  void _showCacheExportDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('缓存导出'),
+        content: const Text('缓存导出功能可以导出书籍缓存文件，方便在其他设备使用。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              // TODO: 实现缓存导出
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('缓存导出功能开发中...')),
+              );
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _exportBookshelf() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('导出书架'),
+        content: const Text('将书架数据导出为JSON文件，方便备份或迁移。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              // TODO: 实现导出书架
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('导出书架功能开发中...')),
+              );
+            },
+            child: const Text('导出'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _importBookshelf() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('导入书架'),
+        content: const Text('从JSON文件导入书架数据。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              // TODO: 实现导入书架
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('导入书架功能开发中...')),
+              );
+            },
+            child: const Text('选择文件'),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -938,7 +938,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
       onTap: onTap ?? () => _fillExample(value),
       child: Container(
         width: width,
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
           color: const Color(0xFFD9D9D9),
           borderRadius: BorderRadius.circular(22),
@@ -949,7 +949,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(
             color: Colors.black87,
-            fontSize: 18,
+            fontSize: 14,
             height: 1.15,
           ),
         ),
@@ -959,21 +959,21 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
 
   Widget _buildHelpPanel() {
     const labelStyle = TextStyle(
-      fontSize: 18,
+      fontSize: 14,
       color: Colors.black54,
       height: 1.25,
     );
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 18, 22, 8),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text('调试搜索>>输入关键字，如：', style: labelStyle),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Wrap(
-            spacing: 14,
-            runSpacing: 12,
+            spacing: 10,
+            runSpacing: 8,
             children: [
               _buildExampleChip(
                 _textMy,
@@ -987,18 +987,18 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
               ),
             ],
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
           const Text('调试发现>>输入发现URL，如：', style: labelStyle),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           _buildExampleChip(
             _textFx,
             _textFx,
             fullWidth: true,
             onTap: () => _submitDebug(_textFx),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
           const Text('调试详情页>>输入详情页URL，如：', style: labelStyle),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           _buildExampleChip(
             _textInfo,
             _textInfo,
@@ -1009,18 +1009,18 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
                   : _textInfo,
             ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
           const Text('调试目录页>>输入目录页URL，如：', style: labelStyle),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           _buildExampleChip(
             _textToc,
             _textToc,
             fullWidth: true,
             onTap: () => _submitPrefixed('++'),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
           const Text('调试正文页>>输入正文页URL，如：', style: labelStyle),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           _buildExampleChip(
             _textContent,
             _textContent,

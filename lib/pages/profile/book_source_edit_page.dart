@@ -749,7 +749,9 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
             // Tab标签栏
             TabBar(
               controller: _tabController,
-              isScrollable: true,
+              isScrollable: false,
+              labelPadding: EdgeInsets.zero,
+              labelStyle: const TextStyle(fontSize: 13),
               tabs: const [
                 Tab(text: '基本'),
                 Tab(text: '搜索'),
@@ -781,17 +783,18 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
 
   /// 第一行选项：类型、启用、发现、自动保存Cookie
   Widget _buildOptionsRow1() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    return Padding(
+      padding: const EdgeInsets.only(left: 8),
       child: Row(
         children: [
-          const Text('类型'),
-          const SizedBox(width: 4),
+          const Text('类型：'),
+          const SizedBox(width: 12),
           PopupMenuButton<int>(
             initialValue: _sourceType,
             tooltip: '选择类型',
-            offset: const Offset(0, 40),
+            offset: const Offset(0, 24),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 60, maxWidth: 80),
             onSelected: (value) {
               setState(() {
                 _sourceType = value;
@@ -805,15 +808,17 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
               PopupMenuItem(value: 3, child: Text('文件')),
               PopupMenuItem(value: 4, child: Text('视频')),
             ],
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(['文字', '音频', '图片', '文件', '视频'][_sourceType]),
-                const Icon(Icons.arrow_drop_down),
-              ],
+            child: UnderlineWidget(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(['文字', '音频', '图片', '文件', '视频'][_sourceType]),
+                  const Icon(Icons.arrow_drop_down, size: 20),
+                ],
+              ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           // 启用
           InkWell(
             onTap: () {
@@ -833,13 +838,14 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                       _hasChanges = true;
                     });
                   },
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 const Text('启用'),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           // 发现
           InkWell(
             onTap: () {
@@ -859,13 +865,14 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                       _hasChanges = true;
                     });
                   },
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 const Text('发现'),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           // 自动保存Cookie
           InkWell(
             onTap: () {
@@ -885,9 +892,10 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                       _hasChanges = true;
                     });
                   },
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                const Text('自动保存Cookie'),
+                const Text('Cookie'),
               ],
             ),
           ),
@@ -898,9 +906,8 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
 
   /// 第二行选项：事件监听器、自定义按钮、下一页懒加载
   Widget _buildOptionsRow2() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    return Padding(
+      padding: const EdgeInsets.only(left: 8),
       child: Row(
         children: [
           // 事件监听器
@@ -922,13 +929,14 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                       _hasChanges = true;
                     });
                   },
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                const Text('事件监听器'),
+                const Text('事件监听'),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           // 自定义按钮
           InkWell(
             onTap: () {
@@ -948,13 +956,14 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                       _hasChanges = true;
                     });
                   },
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 const Text('自定义按钮'),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           // 下一页懒加载
           InkWell(
             onTap: () {
@@ -974,7 +983,8 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                       _hasChanges = true;
                     });
                   },
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 const Text('下一页懒加载'),
               ],
@@ -987,35 +997,28 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
 
   Widget _buildEditList(List<EditEntity> entities, String tabPrefix) {
     return ListView.builder(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       itemCount: entities.length,
       itemBuilder: (context, index) {
         final entity = entities[index];
         final controllerKey = '${tabPrefix}_${entity.key}';
         final controller = _getControllerByKey(controllerKey, entity.value);
         
-        return Container(
-          margin: const EdgeInsets.only(top: 3),
-          decoration: BoxDecoration(
-            border: Border.all(color: Theme.of(context).dividerColor),
-            borderRadius: BorderRadius.circular(4),
+        return TextFormField(
+          controller: controller,
+          decoration: InputDecoration(
+            labelText: entity.hint,
+            floatingLabelBehavior: FloatingLabelBehavior.auto,
+            isDense: true,
+            contentPadding: const EdgeInsets.only(top: 8, bottom: 4),
           ),
-          child: TextFormField(
-            controller: controller,
-            decoration: InputDecoration(
-              labelText: entity.hint,
-              border: InputBorder.none,
-              isDense: true,
-              contentPadding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-            ),
-            maxLines: null,
-            minLines: 1,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-            onChanged: (value) {
-              entity.value = value;
-              _hasChanges = true;
-            },
-          ),
+          maxLines: null,
+          minLines: 1,
+          style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+          onChanged: (value) {
+            entity.value = value;
+            _hasChanges = true;
+          },
         );
       },
     );
@@ -1276,6 +1279,35 @@ class _ContentEditPageState extends State<_ContentEditPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 带下划线的组件
+class UnderlineWidget extends StatelessWidget {
+  final Widget child;
+
+  const UnderlineWidget({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 2),
+          child: child,
+        ),
+        Container(
+          height: 1.5,
+          width: 48,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(1),
+          ),
+        ),
+      ],
     );
   }
 }
