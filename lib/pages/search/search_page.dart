@@ -372,28 +372,27 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildListResultItem(Map<String, dynamic> result) {
+    // 参考原版布局：封面 80x110，书名16sp，作者/最新/简介12sp
     final coverUrl = result['coverUrl']?.toString() ?? '';
     final intro = result['intro']?.toString().trim() ?? '';
     final lastChapter = result['lastChapter']?.toString().trim() ?? '';
-    final wordCount = result['wordCount']?.toString().trim() ?? '';
+    final author = result['author']?.toString().trim() ?? '未知作者';
     final sourceName = result['sourceName']?.toString().trim() ?? '';
     final tags = _resultTags(result);
-    final status = _resultStatus(result, tags);
-    final categoryTags =
-        tags.where((tag) => !_isStatusTag(tag) && tag != status).toList();
 
     return InkWell(
       onTap: () => _openDetail(result),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: const EdgeInsets.all(8),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 封面（参考原版：80x110）
             ClipRRect(
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(4),
               child: SizedBox(
-                width: 72,
-                height: 100,
+                width: 80,
+                height: 110,
                 child: coverUrl.isEmpty
                     ? _coverPlaceholder()
                     : CachedNetworkImage(
@@ -404,59 +403,60 @@ class _SearchPageState extends State<SearchPage> {
                       ),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 8),
+            // 右侧信息
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // 书名（参考原版：16sp）
                   Text(
                     result['name']?.toString() ?? '未知书名',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontSize: 16,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 3),
+                  // 作者（参考原版：12sp）
                   Text(
-                    result['author']?.toString().trim().isNotEmpty == true
-                        ? result['author'].toString()
-                        : '未知作者',
+                    '作者：$author',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 13,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    children: [
-                      _buildMetadataChip(
-                        wordCount.isEmpty ? '字数未知' : wordCount,
-                      ),
-                      if (status.isNotEmpty) _buildMetadataChip(status),
-                      ...categoryTags.take(3).map(_buildMetadataChip),
-                      if (sourceName.isNotEmpty) _buildMetadataChip(sourceName),
-                    ],
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    intro.isEmpty ? '暂无简介' : intro,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      height: 1.3,
                       fontSize: 12,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(height: 5),
+                  const SizedBox(height: 3),
+                  // 分类标签
+                  if (tags.isNotEmpty)
+                    Wrap(
+                      spacing: 4,
+                      runSpacing: 2,
+                      children: tags.take(3).map((tag) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                          child: Text(
+                            tag,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  if (tags.isNotEmpty) const SizedBox(height: 3),
+                  // 最新章节（参考原版：12sp）
                   Text(
-                    '最新：${lastChapter.isEmpty ? "暂无章节信息" : lastChapter}',
+                    lastChapter.isEmpty ? '暂无章节' : '最新：$lastChapter',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -464,6 +464,31 @@ class _SearchPageState extends State<SearchPage> {
                       color: Theme.of(context).colorScheme.primary,
                     ),
                   ),
+                  const SizedBox(height: 3),
+                  // 简介（参考原版：12sp）
+                  Text(
+                    intro.isEmpty ? '暂无简介' : intro,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.3,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  // 书源名称
+                  if (sourceName.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      sourceName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -491,27 +516,24 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildGridResultItem(Map<String, dynamic> result) {
+    // 参考原版布局优化
     final coverUrl = result['coverUrl']?.toString() ?? '';
-    final intro = result['intro']?.toString().trim() ?? '';
     final lastChapter = result['lastChapter']?.toString().trim() ?? '';
-    final wordCount = result['wordCount']?.toString().trim() ?? '';
+    final author = result['author']?.toString().trim() ?? '未知作者';
     final sourceName = result['sourceName']?.toString().trim() ?? '';
-    final tags = _resultTags(result);
-    final status = _resultStatus(result, tags);
-    final categoryTags =
-        tags.where((tag) => !_isStatusTag(tag) && tag != status).toList();
-    final metadata = [
-      wordCount.isEmpty ? '字数未知' : wordCount,
-      if (status.isNotEmpty) status,
-      ...categoryTags.take(2),
-    ];
+    
     return GestureDetector(
       onTap: () => _openDetail(result),
       child: Card(
         clipBehavior: Clip.antiAlias,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(4),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // 封面
             Expanded(
               child: coverUrl.isEmpty
                   ? _coverPlaceholder()
@@ -523,22 +545,24 @@ class _SearchPageState extends State<SearchPage> {
                     ),
             ),
             Padding(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(6),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // 书名
                   Text(
                     result['name'] ?? '未知书名',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w500,
                       fontSize: 12,
                     ),
                   ),
                   const SizedBox(height: 2),
+                  // 作者
                   Text(
-                    result['author'] ?? '未知作者',
+                    author,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -546,45 +570,27 @@ class _SearchPageState extends State<SearchPage> {
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    metadata.join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 9,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
                   const SizedBox(height: 2),
+                  // 最新章节
                   Text(
-                    intro.isEmpty ? '暂无简介' : intro,
+                    lastChapter.isEmpty ? '暂无章节' : lastChapter,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 9,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    lastChapter.isEmpty ? '暂无章节信息' : lastChapter,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 9,
+                      fontSize: 10,
                       color: Theme.of(context).colorScheme.primary,
                     ),
                   ),
+                  // 书源
                   if (sourceName.isNotEmpty) ...[
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 1),
                     Text(
                       sourceName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 9,
-                        color: Theme.of(context).colorScheme.secondary,
+                        color: Theme.of(context).colorScheme.outline,
                       ),
                     ),
                   ],
@@ -618,33 +624,6 @@ class _SearchPageState extends State<SearchPage> {
         .map((tag) => tag.trim())
         .where((tag) => tag.isNotEmpty)
         .toList();
-  }
-
-  String _resultStatus(
-    Map<String, dynamic> result,
-    List<String> tags,
-  ) {
-    final status = result['status']?.toString().trim() ?? '';
-    if (status.isNotEmpty) return status;
-    return tags.where(_isStatusTag).firstOrNull ?? '';
-  }
-
-  bool _isStatusTag(String tag) {
-    final normalized = tag.trim();
-    return RegExp(
-      r'^(连载|连载中|更新中|完结|已完结|完本|已完本|暂停|断更)$',
-    ).hasMatch(normalized);
-  }
-
-  Widget _buildMetadataChip(String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(text, style: const TextStyle(fontSize: 10)),
-    );
   }
 
   void _openDetail(Map<String, dynamic> result) {
