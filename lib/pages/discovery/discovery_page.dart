@@ -32,48 +32,70 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
     return Scaffold(
       body: Column(
         children: [
-          // 页眉（标题栏 + 搜索框）
+          // 参考原版：TitleBar (AppBarLayout) - 搜索框和标题栏在同一行
           Container(
             padding: EdgeInsets.only(
               top: MediaQuery.of(context).padding.top,
             ),
+            color: Theme.of(context).colorScheme.surface,
             child: Column(
               children: [
-                // 标题栏
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                // Toolbar + 搜索框在同一行（不显示标题文字）
+                SizedBox(
+                  height: 48,
                   child: Row(
                     children: [
-                      Text(
-                        '发现',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
+                      const SizedBox(width: 8),
+                      // 搜索框（参考原版：高度30dp）
+                      Expanded(
+                        child: SizedBox(
+                          height: 32,
+                          child: TextField(
+                            controller: _searchController,
+                            decoration: InputDecoration(
+                              hintText: '搜索书源',
+                              hintStyle: const TextStyle(fontSize: 13),
+                              prefixIcon: const Icon(Icons.search, size: 16),
+                              suffixIcon: _searchQuery.isNotEmpty
+                                  ? IconButton(
+                                      icon: const Icon(Icons.clear, size: 16),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
+                                      onPressed: () {
+                                        _searchController.clear();
+                                        setState(() {
+                                          _searchQuery = '';
+                                        });
+                                      },
+                                    )
+                                  : null,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                              isDense: true,
+                            ),
+                            style: const TextStyle(fontSize: 13),
+                            onChanged: (value) {
+                              setState(() {
+                                _searchQuery = value;
+                              });
+                            },
+                          ),
                         ),
                       ),
-                      const Spacer(),
-                      // 分组按钮
-                      PopupMenuButton<String>(
-                        icon: const Icon(Icons.folder_outlined),
-                        tooltip: '分组',
-                        onSelected: (value) {
-                          if (value.startsWith('group:')) {
-                            _searchController.text = value;
-                            setState(() {
-                              _searchQuery = value;
-                            });
-                          }
-                        },
-                        itemBuilder: (context) => [
-                          const PopupMenuItem(
-                            value: '',
-                            child: Text('全部'),
-                          ),
-                        ],
+                      const SizedBox(width: 4),
+                      // 收藏分组
+                      IconButton(
+                        icon: const Icon(Icons.folder_outlined, size: 20),
+                        tooltip: '收藏分组',
+                        onPressed: () {},
                       ),
                       // 排序按钮
                       PopupMenuButton<String>(
-                        icon: const Icon(Icons.sort),
+                        icon: const Icon(Icons.sort, size: 20),
                         tooltip: '排序',
+                        offset: const Offset(0, 48),
                         onSelected: (value) {},
                         itemBuilder: (context) => [
                           const PopupMenuItem(
@@ -101,28 +123,99 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
                     ],
                   ),
                 ),
-                // 搜索框
-                _buildSearchBar(),
               ],
             ),
           ),
-          Expanded(child: _buildSourceList()),
+          // 书源列表
+          Expanded(
+            child: _buildSourceList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchBarWithActions() {
+    // 参考原版设计：搜索框和分组按钮在同一行
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+      child: Row(
+        children: [
+          // 分组按钮
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.folder_outlined, size: 20),
+            tooltip: '分组',
+            offset: const Offset(0, 48), // 向下偏移，避免遮挡
+            onSelected: (value) {
+              if (value.startsWith('group:')) {
+                _searchController.text = value;
+                setState(() {
+                  _searchQuery = value;
+                });
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: '',
+                child: Text('全部'),
+              ),
+            ],
+          ),
+          // 搜索框
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: '搜索书源',
+                hintStyle: const TextStyle(fontSize: 14),
+                prefixIcon: const Icon(Icons.search, size: 18),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        padding: EdgeInsets.zero,
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() {
+                            _searchQuery = '';
+                          });
+                        },
+                      )
+                    : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                isDense: true,
+              ),
+              style: const TextStyle(fontSize: 14),
+              onChanged: (value) {
+                setState(() {
+                  _searchQuery = value;
+                });
+              },
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildSearchBar() {
+    // 参考原版设计：紧凑的搜索框（高度30dp）
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      height: 40,
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
       child: TextField(
         controller: _searchController,
         decoration: InputDecoration(
           hintText: '搜索书源',
-          prefixIcon: const Icon(Icons.search, size: 20),
+          hintStyle: const TextStyle(fontSize: 14),
+          prefixIcon: const Icon(Icons.search, size: 18),
           suffixIcon: _searchQuery.isNotEmpty
               ? IconButton(
-                  icon: const Icon(Icons.clear, size: 20),
+                  icon: const Icon(Icons.clear, size: 18),
+                  padding: EdgeInsets.zero,
                   onPressed: () {
                     _searchController.clear();
                     setState(() {
@@ -132,11 +225,12 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
                 )
               : null,
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: BorderRadius.circular(20),
           ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
           isDense: true,
         ),
+        style: const TextStyle(fontSize: 14),
         onChanged: (value) {
           setState(() {
             _searchQuery = value;

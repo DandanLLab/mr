@@ -91,11 +91,6 @@ class _ProfilePageState extends State<ProfilePage> {
               subtitle: '字典翻译规则管理',
               onTap: () {},
             ),
-          ]),
-
-          // 设置
-          _buildCategoryTitle('设置'),
-          _buildSection([
             Consumer<AppProvider>(
               builder: (context, provider, child) {
                 return _buildListItem(
@@ -113,6 +108,11 @@ class _ProfilePageState extends State<ProfilePage> {
               value: false,
               onChanged: (value) {},
             ),
+          ]),
+
+          // 设置
+          _buildCategoryTitle('设置'),
+          _buildSection([
             _buildListItem(
               icon: Icons.backup,
               title: '备份恢复',
@@ -154,11 +154,6 @@ class _ProfilePageState extends State<ProfilePage> {
               subtitle: '管理本地存储的书籍',
               onTap: () {},
             ),
-          ]),
-
-          // 关于
-          _buildCategoryTitle('关于'),
-          _buildSection([
             _buildListItem(
               icon: Icons.info_outline,
               title: '关于',

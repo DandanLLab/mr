@@ -115,6 +115,10 @@ class _MainPageState extends State<MainPage> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
+        height: 56, // 参考原版：最小高度50dp
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        surfaceTintColor: Theme.of(context).colorScheme.surfaceTint,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysHide, // 参考原版：只显示图标不显示文字
         onDestinationSelected: (index) {
           setState(() {
             _currentIndex = index;

@@ -52,6 +52,7 @@ class BookshelfPage extends StatefulWidget {
 class _BookshelfPageState extends State<BookshelfPage> {
   final List<String> _groups = ['全部', '追更', '漫画', '已完结'];
   int _selectedGroupIndex = 0;
+  late PageController _pageController;
 
   // 书架配置
   BookshelfLayout _layout = BookshelfLayout.grid3;
@@ -67,102 +68,132 @@ class _BookshelfPageState extends State<BookshelfPage> {
   double _margin = 8.0;
 
   @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(initialPage: _selectedGroupIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Consumer<BookshelfProvider>(
         builder: (context, provider, child) {
+          // 参考原版 Style1：TabLayout + ViewPager
+          // 分组标签和搜索在同一排，左右滑动切换分组
           return Column(
             children: [
-              // 页眉（标题栏 + 搜索框）
+              // 顶部栏：分组标签 + 搜索按钮 + 更多菜单（同一排）
               Container(
                 padding: EdgeInsets.only(
                   top: MediaQuery.of(context).padding.top,
                 ),
-                child: Column(
-                  children: [
-                    // 标题栏
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                      child: Row(
-                        children: [
-                          Text(
-                            '书架',
-                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
+                color: Theme.of(context).colorScheme.surface,
+                child: SizedBox(
+                  height: 48,
+                  child: Row(
+                    children: [
+                      // 分组标签（横向滚动）
+                      Expanded(
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          itemCount: _groups.length,
+                          itemBuilder: (context, index) {
+                            final isSelected = index == _selectedGroupIndex;
+                            return GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _selectedGroupIndex = index;
+                                });
+                                provider.setGroup(_groups[index]);
+                                _pageController.animateToPage(
+                                  index,
+                                  duration: const Duration(milliseconds: 300),
+                                  curve: Curves.easeInOut,
+                                );
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
+                                alignment: Alignment.center,
+                                child: Text(
+                                  _groups[index],
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
+                                    color: isSelected
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Theme.of(context).colorScheme.onSurface,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      // 搜索按钮
+                      IconButton(
+                        icon: const Icon(Icons.search),
+                        tooltip: '搜索',
+                        onPressed: () {
+                          Navigator.pushNamed(context, AppRoutes.search);
+                        },
+                      ),
+                      // 更多菜单
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert),
+                        tooltip: '更多选项',
+                        offset: const Offset(0, 48),
+                        onSelected: (value) => _handleMenuSelection(value),
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(
+                            value: 'refresh',
+                            child: Text('更新目录'),
                           ),
-                          const Spacer(),
-                          // 更多菜单
-                          PopupMenuButton<String>(
-                            icon: const Icon(Icons.more_vert),
-                            tooltip: '更多选项',
-                            offset: const Offset(0, 48),
-                            onSelected: (value) => _handleMenuSelection(value),
-                            itemBuilder: (context) => [
-                              const PopupMenuItem(
-                                value: 'refresh',
-                                child: Text('更新目录'),
-                              ),
-                              const PopupMenuItem(
-                                value: 'import_local',
-                                child: Text('本地导入'),
-                              ),
-                              const PopupMenuItem(
-                                value: 'import_url',
-                                child: Text('URL导入'),
-                              ),
-                              const PopupMenuItem(
-                                value: 'batch',
-                                child: Text('批量管理'),
-                              ),
-                              const PopupMenuItem(
-                                value: 'download',
-                                child: Text('缓存导出'),
-                              ),
-                              const PopupMenuItem(
-                                value: 'group_manage',
-                                child: Text('分组管理'),
-                              ),
-                              const PopupMenuItem(
-                                value: 'config',
-                                child: Text('书架设置'),
-                              ),
-                              const PopupMenuItem(
-                                value: 'export_bookshelf',
-                                child: Text('导出书架'),
-                              ),
-                              const PopupMenuItem(
-                                value: 'import_bookshelf',
-                                child: Text('导入书架'),
-                              ),
-                            ],
+                          const PopupMenuItem(
+                            value: 'import_local',
+                            child: Text('本地导入'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'import_url',
+                            child: Text('URL导入'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'batch',
+                            child: Text('批量管理'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'download',
+                            child: Text('缓存导出'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'group_manage',
+                            child: Text('分组管理'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'config',
+                            child: Text('书架设置'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'export_bookshelf',
+                            child: Text('导出书架'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'import_bookshelf',
+                            child: Text('导入书架'),
                           ),
                         ],
                       ),
-                    ),
-                    // 搜索框
-                    Container(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                      child: TextField(
-                        decoration: InputDecoration(
-                          hintText: '搜索书架',
-                          prefixIcon: const Icon(Icons.search, size: 20),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                          isDense: true,
-                        ),
-                        onTap: () {
-                          Navigator.pushNamed(context, AppRoutes.search);
-                        },
-                        readOnly: true,
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-              _buildGroupTabs(provider),
+              // 书籍列表（支持左右滑动切换分组）
               Expanded(
                 child: provider.isBatchMode
                     ? _buildBatchView(provider)
@@ -171,10 +202,6 @@ class _BookshelfPageState extends State<BookshelfPage> {
             ],
           );
         },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showImportDialog,
-        child: const Icon(Icons.add),
       ),
     );
   }
@@ -492,56 +519,29 @@ class _BookshelfPageState extends State<BookshelfPage> {
   Widget _buildMainView(BookshelfProvider provider) {
     final isList = _layout == BookshelfLayout.list || _layout == BookshelfLayout.listCompact;
     
-    if (provider.books.isEmpty) {
-      return _buildEmptyState();
-    }
-
-    return RefreshIndicator(
-      onRefresh: provider.loadBooks,
-      child: isList
-          ? _buildListView(provider)
-          : _buildGridView(provider),
-    );
-  }
-
-  Widget _buildGroupTabs(BookshelfProvider provider) {
-    return Container(
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        itemCount: _groups.length + 1,
-        itemBuilder: (context, index) {
-          if (index == _groups.length) {
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: ActionChip(
-                label: const Text('+ 新建分组'),
-                onPressed: () {
-                  _showCreateGroupDialog();
-                },
-              ),
-            );
-          }
-
-          final isSelected = index == _selectedGroupIndex;
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: FilterChip(
-              label: Text(_groups[index]),
-              selected: isSelected,
-              onSelected: (selected) {
-                setState(() {
-                  _selectedGroupIndex = index;
-                });
-                provider.setGroup(
-                  index == 0 ? null : _groups[index],
-                );
-              },
-            ),
-          );
-        },
-      ),
+    // 参考原版：使用 PageView 支持左右滑动切换分组
+    return PageView.builder(
+      controller: _pageController,
+      itemCount: _groups.length,
+      onPageChanged: (index) {
+        setState(() {
+          _selectedGroupIndex = index;
+        });
+        provider.setGroup(_groups[index]);
+      },
+      itemBuilder: (context, pageIndex) {
+        // 每个分组的书籍列表
+        if (provider.books.isEmpty) {
+          return _buildEmptyState();
+        }
+        
+        return RefreshIndicator(
+          onRefresh: provider.loadBooks,
+          child: isList
+              ? _buildListView(provider)
+              : _buildGridView(provider),
+        );
+      },
     );
   }
 
@@ -563,6 +563,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
   }
 
   Widget _buildGridBookCard(Book book, BookshelfProvider provider) {
+    // 参考原版设计：简洁的网格卡片
     return GestureDetector(
       onTap: () => _openBook(book),
       onLongPress: () => _showBookOptions(book, provider),
@@ -570,6 +571,10 @@ class _BookshelfPageState extends State<BookshelfPage> {
         children: [
           Card(
             clipBehavior: Clip.antiAlias,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(4),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -590,12 +595,12 @@ class _BookshelfPageState extends State<BookshelfPage> {
                               ),
                               errorWidget: (context, url, error) => Container(
                                 color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                                child: const Icon(Icons.book, size: 48),
+                                child: const Icon(Icons.book, size: 32),
                               ),
                             )
                           : Container(
                               color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                              child: const Icon(Icons.book, size: 48),
+                              child: const Icon(Icons.book, size: 32),
                             ),
                       // 书名覆盖在封面上
                       if (_bookNameDisplay == BookNameDisplay.overlay)
@@ -637,28 +642,19 @@ class _BookshelfPageState extends State<BookshelfPage> {
                     ],
                   ),
                 ),
-                // 书名显示在下方
+                // 书名显示在下方（参考原版：12sp，2行）
                 if (_bookNameDisplay == BookNameDisplay.show)
                   Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          book.name,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w500,
-                            fontSize: 12,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        LinearProgressIndicator(
-                          value: book.progress,
-                          backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-                        ),
-                      ],
+                    padding: const EdgeInsets.fromLTRB(4, 6, 4, 4),
+                    child: Text(
+                      book.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w500,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
               ],
@@ -667,10 +663,10 @@ class _BookshelfPageState extends State<BookshelfPage> {
           // 未读数徽章
           if (_showUnread && book.unreadCount > 0)
             Positioned(
-              top: 8,
-              right: 8,
+              top: 4,
+              right: 4,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.primary,
                   borderRadius: BorderRadius.circular(10),
@@ -688,19 +684,19 @@ class _BookshelfPageState extends State<BookshelfPage> {
           // 本地标签
           if (book.originType == BookOriginType.local)
             Positioned(
-              top: 8,
-              left: 8,
+              top: 4,
+              left: 4,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: BorderRadius.circular(3),
                 ),
                 child: Text(
                   '本地',
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.onPrimaryContainer,
-                    fontSize: 10,
+                    fontSize: 9,
                   ),
                 ),
               ),
@@ -708,17 +704,17 @@ class _BookshelfPageState extends State<BookshelfPage> {
           // 置顶图标
           if (book.isTop)
             Positioned(
-              bottom: _bookNameDisplay == BookNameDisplay.show ? 48 : 8,
-              right: 8,
+              bottom: _bookNameDisplay == BookNameDisplay.show ? 32 : 4,
+              right: 4,
               child: Container(
-                padding: const EdgeInsets.all(4),
+                padding: const EdgeInsets.all(3),
                 decoration: BoxDecoration(
                   color: Colors.black54,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Icon(
                   Icons.push_pin,
-                  size: 14,
+                  size: 12,
                   color: Colors.white,
                 ),
               ),
