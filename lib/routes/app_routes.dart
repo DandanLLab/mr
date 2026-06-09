@@ -9,6 +9,12 @@ import '../pages/profile/profile_page.dart';
 import '../pages/profile/book_source_manage_page.dart';
 import '../pages/profile/book_source_edit_page.dart';
 import '../pages/profile/read_record_page.dart';
+import '../pages/profile/bookmark_page.dart';
+import '../pages/profile/storage_manage_page.dart';
+import '../pages/profile/backup_restore_page.dart';
+import '../pages/profile/replace_rule_page.dart';
+import '../pages/profile/dict_rule_page.dart';
+import '../pages/profile/txt_toc_rule_page.dart';
 import '../pages/search/search_page.dart';
 import '../pages/detail/detail_page.dart';
 import '../pages/reader/novel_reader_page.dart';
@@ -29,6 +35,12 @@ class AppRoutes {
   static const String bookSourceManage = '/book-source-manage';
   static const String bookSourceEdit = '/book-source-edit';
   static const String readRecord = '/read-record';
+  static const String bookmark = '/bookmark';
+  static const String storageManage = '/storage-manage';
+  static const String backupRestore = '/backup-restore';
+  static const String replaceRule = '/replace-rule';
+  static const String dictRule = '/dict-rule';
+  static const String txtTocRule = '/txt-toc-rule';
   static const String search = '/search';
   static const String detail = '/detail';
   static const String novelReader = '/novel-reader';
@@ -64,6 +76,18 @@ class AppRoutes {
         return MaterialPageRoute(
           builder: (_) => ReadRecordPage(bookUrl: args?['bookUrl']),
         );
+      case bookmark:
+        return MaterialPageRoute(builder: (_) => const BookmarkPage());
+      case storageManage:
+        return MaterialPageRoute(builder: (_) => const StorageManagePage());
+      case backupRestore:
+        return MaterialPageRoute(builder: (_) => const BackupRestorePage());
+      case replaceRule:
+        return MaterialPageRoute(builder: (_) => const ReplaceRulePage());
+      case dictRule:
+        return MaterialPageRoute(builder: (_) => const DictRulePage());
+      case txtTocRule:
+        return MaterialPageRoute(builder: (_) => const TxtTocRulePage());
       case search:
         return MaterialPageRoute(builder: (_) => const SearchPage());
       case detail:

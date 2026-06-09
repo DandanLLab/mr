@@ -15,6 +15,7 @@ import '../../services/chapter_cache_service.dart';
 import '../../services/local_book/local_book_service.dart';
 import '../../services/reader_bookmark_service.dart';
 import '../../services/storage_service.dart';
+import '../../services/read_record_service.dart';
 import '../../widgets/reader/reader_control_overlay.dart';
 import '../../widgets/reader/reader_settings_sheet.dart';
 import '../../widgets/reader/reader_tts_bar.dart';
@@ -83,12 +84,16 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   bool _showSettingsSheet = false;
   bool _hasBookmark = false;
   double _ttsSpeed = 1.0;
+  
+  // 阅读记录
+  int _readStartTime = 0;
 
   @override
   void initState() {
     super.initState();
     _currentChapterIndex = widget.chapterIndex;
     _sliderValue = widget.chapterIndex.toDouble();
+    _readStartTime = ReadRecordService.instance.startReading();
 
     _menuAnimController = AnimationController(
       vsync: this,
@@ -112,6 +117,22 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     _pageController?.dispose();
     context.read<ReaderProvider>().disposeTts();
     super.dispose();
+  }
+
+  /// 保存阅读记录
+  void _saveReadRecord() {
+    if (_book != null && _readStartTime > 0) {
+      debugPrint('[NovelReader] Saving read record: ${_book!.name}');
+      ReadRecordService.instance.endReading(
+        bookUrl: _book!.bookUrl,
+        bookName: _book!.name,
+        bookAuthor: _book!.author,
+        coverUrl: _book!.coverUrl,
+        startTime: _readStartTime,
+        chapterIndex: _currentChapterIndex,
+        chapterTitle: _chapterTitle,
+      );
+    }
   }
 
   Future<void> _initTts() async {
@@ -520,31 +541,38 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   Widget build(BuildContext context) {
     final provider = context.watch<ReaderProvider>();
 
-    return Scaffold(
-      backgroundColor: provider.backgroundColor,
-      body: GestureDetector(
-        onTapDown: _handleTap,
-        onLongPressStart: _onLongPressStart,
-        child: Stack(
-          children: [
-            _buildContent(provider),
-            // TTS 播放控制条
-            if (provider.isTtsPlaying)
-              ReaderTtsBar(
-                isSpeaking: provider.isTtsPlaying,
-                isPaused: provider.isTtsPaused,
-                paragraphIndex: provider.ttsParagraphIndex,
-                paragraphTotal: provider.ttsParagraphTotal,
-                fontSize: provider.fontSize,
-                textColor: provider.textColor,
-                backgroundColor: provider.backgroundColor,
-                onPrev: _prevTtsParagraph,
-                onNext: _nextTtsParagraph,
-                onPause: _pauseTts,
-                onResume: _resumeTts,
-                onStop: _stopTts,
-                onCycleSpeed: _cycleTtsSpeed,
-                onSpeedChanged: (speed) {
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          _saveReadRecord();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: provider.backgroundColor,
+        body: GestureDetector(
+          onTapDown: _handleTap,
+          onLongPressStart: _onLongPressStart,
+          child: Stack(
+            children: [
+              _buildContent(provider),
+              // TTS 播放控制条
+              if (provider.isTtsPlaying)
+                ReaderTtsBar(
+                  isSpeaking: provider.isTtsPlaying,
+                  isPaused: provider.isTtsPaused,
+                  paragraphIndex: provider.ttsParagraphIndex,
+                  paragraphTotal: provider.ttsParagraphTotal,
+                  fontSize: provider.fontSize,
+                  textColor: provider.textColor,
+                  backgroundColor: provider.backgroundColor,
+                  onPrev: _prevTtsParagraph,
+                  onNext: _nextTtsParagraph,
+                  onPause: _pauseTts,
+                  onResume: _resumeTts,
+                  onStop: _stopTts,
+                  onCycleSpeed: _cycleTtsSpeed,
+                  onSpeedChanged: (speed) {
                   _ttsSpeed = speed;
                   provider.setTtsRate(speed);
                 },
@@ -695,6 +723,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               ),
           ],
         ),
+      ),
       ),
     );
   }

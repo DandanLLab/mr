@@ -77,19 +77,19 @@ class _ProfilePageState extends State<ProfilePage> {
               icon: Icons.text_snippet,
               title: 'TXT目录规则',
               subtitle: '管理TXT文件目录解析规则',
-              onTap: () {},
+              onTap: () => Navigator.pushNamed(context, AppRoutes.txtTocRule),
             ),
             _buildListItem(
               icon: Icons.find_replace,
               title: '替换净化',
               subtitle: '内容替换规则管理',
-              onTap: () {},
+              onTap: () => Navigator.pushNamed(context, AppRoutes.replaceRule),
             ),
             _buildListItem(
               icon: Icons.translate,
               title: '字典规则',
               subtitle: '字典翻译规则管理',
-              onTap: () {},
+              onTap: () => Navigator.pushNamed(context, AppRoutes.dictRule),
             ),
             Consumer<AppProvider>(
               builder: (context, provider, child) {
@@ -117,7 +117,7 @@ class _ProfilePageState extends State<ProfilePage> {
               icon: Icons.backup,
               title: '备份恢复',
               subtitle: 'WebDAV备份与恢复',
-              onTap: () {},
+              onTap: () => Navigator.pushNamed(context, AppRoutes.backupRestore),
             ),
             _buildListItem(
               icon: Icons.color_lens,
@@ -140,7 +140,7 @@ class _ProfilePageState extends State<ProfilePage> {
               icon: Icons.bookmark,
               title: '书签',
               subtitle: '查看所有书签',
-              onTap: () {},
+              onTap: () => Navigator.pushNamed(context, AppRoutes.bookmark),
             ),
             _buildListItem(
               icon: Icons.history,
@@ -152,7 +152,7 @@ class _ProfilePageState extends State<ProfilePage> {
               icon: Icons.storage,
               title: '存储管理',
               subtitle: '管理本地存储的书籍',
-              onTap: () {},
+              onTap: () => Navigator.pushNamed(context, AppRoutes.storageManage),
             ),
             _buildListItem(
               icon: Icons.info_outline,

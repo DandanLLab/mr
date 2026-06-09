@@ -20,6 +20,7 @@ import '../../services/native/platform_channel.dart';
 import '../../services/reader_bookmark_service.dart';
 import '../../services/source_engine/analyze_url.dart';
 import '../../services/storage_service.dart';
+import '../../services/read_record_service.dart';
 
 enum MangaReadMode { scroll, horizontal, japanese }
 
@@ -93,6 +94,9 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   // 预加载设置拖动临时变量
   final ValueNotifier<double> _preloadSliderValue = ValueNotifier(10.0);
   bool _isPreloadDragging = false;
+  
+  // 阅读记录
+  int _readStartTime = 0;
 
   final ScrollController _scrollController = ScrollController();
   final GlobalKey<_ComicZoomLayerState> _zoomLayerKey =
@@ -153,6 +157,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   void initState() {
     super.initState();
     _currentChapterIndex = widget.chapterIndex;
+    _readStartTime = ReadRecordService.instance.startReading();
     _scrollController.addListener(_updateScrollProgress);
     _initializeReader();
   }
@@ -759,10 +764,37 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       );
     }
 
-    return Scaffold(
-      backgroundColor: _readerBackground,
-      body: body,
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          _saveReadRecord();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: _readerBackground,
+        body: body,
+      ),
     );
+  }
+
+  /// 保存阅读记录
+  void _saveReadRecord() {
+    if (_book != null && _readStartTime > 0) {
+      final chapterTitle = _chapters.isNotEmpty && _currentChapterIndex < _chapters.length
+          ? _chapters[_currentChapterIndex].title
+          : '';
+      debugPrint('[ComicReader] Saving read record: ${_book!.name}');
+      ReadRecordService.instance.endReading(
+        bookUrl: _book!.bookUrl,
+        bookName: _book!.name,
+        bookAuthor: _book!.author,
+        coverUrl: _book!.coverUrl,
+        startTime: _readStartTime,
+        chapterIndex: _currentChapterIndex,
+        chapterTitle: chapterTitle,
+      );
+    }
   }
 
   Widget _buildReader() {
