@@ -30,20 +30,82 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('发现'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              context.read<DiscoveryProvider>().loadBookSources();
-            },
-          ),
-        ],
-      ),
       body: Column(
         children: [
-          _buildSearchBar(),
+          // 页眉（标题栏 + 搜索框）
+          Container(
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top,
+            ),
+            child: Column(
+              children: [
+                // 标题栏
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  child: Row(
+                    children: [
+                      Text(
+                        '发现',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Spacer(),
+                      // 分组按钮
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.folder_outlined),
+                        tooltip: '分组',
+                        onSelected: (value) {
+                          if (value.startsWith('group:')) {
+                            _searchController.text = value;
+                            setState(() {
+                              _searchQuery = value;
+                            });
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(
+                            value: '',
+                            child: Text('全部'),
+                          ),
+                        ],
+                      ),
+                      // 排序按钮
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.sort),
+                        tooltip: '排序',
+                        onSelected: (value) {},
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(
+                            value: 'manual',
+                            child: Text('手动排序'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'name',
+                            child: Text('按名称'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'url',
+                            child: Text('按URL'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'time',
+                            child: Text('按更新时间'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'respond',
+                            child: Text('按响应时间'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                // 搜索框
+                _buildSearchBar(),
+              ],
+            ),
+          ),
           Expanded(child: _buildSourceList()),
         ],
       ),
@@ -52,15 +114,15 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
 
   Widget _buildSearchBar() {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       child: TextField(
         controller: _searchController,
         decoration: InputDecoration(
           hintText: '搜索书源',
-          prefixIcon: const Icon(Icons.search),
+          prefixIcon: const Icon(Icons.search, size: 20),
           suffixIcon: _searchQuery.isNotEmpty
               ? IconButton(
-                  icon: const Icon(Icons.clear),
+                  icon: const Icon(Icons.clear, size: 20),
                   onPressed: () {
                     _searchController.clear();
                     setState(() {
@@ -72,7 +134,8 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(24),
           ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+          isDense: true,
         ),
         onChanged: (value) {
           setState(() {
@@ -151,72 +214,50 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
     final isExpanded = _expandedSources.contains(source.bookSourceUrl);
     final exploreKinds = _parseExploreKinds(source.exploreUrl);
 
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(8),
+      ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 标题行 - 参考原版简洁设计
           InkWell(
             onTap: () => _toggleExpand(source.bookSourceUrl),
             onLongPress: () => _showSourceOptions(source),
-            borderRadius: BorderRadius.circular(12),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(8),
+              ),
               child: Row(
                 children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Center(
-                      child: Text(
-                        source.bookSourceName.isNotEmpty
-                            ? source.bookSourceName[0]
-                            : '?',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).colorScheme.onPrimaryContainer,
-                        ),
+                  Expanded(
+                    child: Text(
+                      source.bookSourceName,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w500,
+                        fontSize: 15,
+                        color: Theme.of(context).colorScheme.onSurface,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          source.bookSourceName,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                          ),
-                        ),
-                        if (source.bookSourceGroup != null &&
-                            source.bookSourceGroup!.isNotEmpty)
-                          Text(
-                            source.bookSourceGroup!,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
+                  // 展开/折叠箭头
                   Icon(
                     isExpanded
-                        ? Icons.keyboard_arrow_up
-                        : Icons.keyboard_arrow_down,
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_right,
+                    size: 20,
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ],
               ),
             ),
           ),
+          // 展开后的分类标签
           if (isExpanded && exploreKinds.isNotEmpty)
             _buildExploreKinds(source, exploreKinds),
         ],
@@ -275,16 +316,28 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
     List<Map<String, String>> kinds,
   ) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
       child: Wrap(
         spacing: 8,
         runSpacing: 8,
         children: kinds.map((kind) {
-          return ActionChip(
-            label: Text(kind['title'] ?? ''),
-            onPressed: () {
-              _openExplore(source, kind);
-            },
+          return Material(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(16),
+            child: InkWell(
+              onTap: () => _openExplore(source, kind),
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                child: Text(
+                  kind['title'] ?? '',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+              ),
+            ),
           );
         }).toList(),
       ),

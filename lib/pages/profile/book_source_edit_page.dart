@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../models/book_source.dart';
 import '../../models/rules/search_rule.dart';
 import '../../models/rules/explore_rule.dart';
@@ -9,6 +11,7 @@ import '../../models/rules/book_info_rule.dart';
 import '../../models/rules/toc_rule.dart';
 import '../../models/rules/content_rule.dart';
 import '../../services/storage_service.dart';
+import '../../services/cookie_service.dart';
 import '../../routes/app_routes.dart';
 
 /// 编辑字段实体
@@ -513,10 +516,90 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
     );
   }
 
-  void _clearCookie() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Cookie已清除')),
+  /// 二维码导入书源
+  void _importFromQr() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => _QrImportPage(
+          onScanned: (String jsonStr) {
+            try {
+              final json = jsonDecode(jsonStr) as Map<String, dynamic>;
+              final newSource = BookSource.fromJson(json);
+              setState(() {
+                _source = newSource;
+                _initEntities();
+                _updateAllControllers();
+                _hasChanges = true;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('导入成功')),
+              );
+              return true;
+            } catch (e) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('导入失败: $e')),
+              );
+              return false;
+            }
+          },
+        ),
+      ),
     );
+  }
+
+  /// 登录书源
+  void _loginWithSource() {
+    final source = _buildSourceFromEntities();
+    final loginUrl = source.loginUrl;
+
+    if (loginUrl == null || loginUrl.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('该书源未配置登录地址')),
+      );
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => _SourceLoginPage(
+          source: source,
+          onLoginSuccess: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('登录成功')),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _clearCookie() async {
+    final source = _buildSourceFromEntities();
+    final url = source.bookSourceUrl;
+
+    if (url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('书源地址为空，无法清除Cookie')),
+      );
+      return;
+    }
+
+    try {
+      await CookieService.instance.removeCookie(url);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cookie已清除')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('清除Cookie失败: $e')),
+        );
+      }
+    }
   }
 
   void _shareSource() {
@@ -619,6 +702,7 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
               onSelected: (value) {
                 switch (value) {
                   case 'login':
+                    _loginWithSource();
                     break;
                   case 'search':
                     _searchWithSource();
@@ -644,6 +728,7 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                     _showSourceVariable();
                     break;
                   case 'qr_import':
+                    _importFromQr();
                     break;
                   case 'qr_share':
                     _shareSource();
@@ -677,7 +762,7 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                   value: 'clear_cookie',
                   padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   height: 48,
-                  child: Row(children: [Icon(Icons.cookie, size: 18), SizedBox(width: 12), Text('Cookie')]),
+                  child: Row(children: [Icon(Icons.cookie, size: 18), SizedBox(width: 12), Text('清除Cookie')]),
                 ),
                 const PopupMenuItem(
                   value: 'json',
@@ -1442,6 +1527,198 @@ class _SourceHelpPageState extends State<_SourceHelpPage> with SingleTickerProvi
                 ),
               ],
             ),
+    );
+  }
+}
+
+/// 二维码导入页面
+class _QrImportPage extends StatefulWidget {
+  final bool Function(String) onScanned;
+
+  const _QrImportPage({required this.onScanned});
+
+  @override
+  State<_QrImportPage> createState() => _QrImportPageState();
+}
+
+class _QrImportPageState extends State<_QrImportPage> {
+  final MobileScannerController _controller = MobileScannerController(
+    detectionSpeed: DetectionSpeed.noDuplicates,
+  );
+  bool _processed = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onDetect(BarcodeCapture capture) {
+    if (_processed) return;
+
+    final barcodes = capture.barcodes;
+    for (final barcode in barcodes) {
+      final value = barcode.rawValue;
+      if (value != null && value.isNotEmpty) {
+        _processed = true;
+        _controller.stop();
+
+        final success = widget.onScanned(value);
+        if (success && mounted) {
+          Navigator.pop(context);
+        } else {
+          // 如果失败，允许重新扫描
+          _processed = false;
+          _controller.start();
+        }
+        break;
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('扫描二维码'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.flash_on),
+            onPressed: () => _controller.toggleTorch(),
+            tooltip: '切换闪光灯',
+          ),
+        ],
+      ),
+      body: MobileScanner(
+        controller: _controller,
+        onDetect: _onDetect,
+      ),
+    );
+  }
+}
+
+/// 书源登录页面
+class _SourceLoginPage extends StatefulWidget {
+  final BookSource source;
+  final VoidCallback onLoginSuccess;
+
+  const _SourceLoginPage({
+    required this.source,
+    required this.onLoginSuccess,
+  });
+
+  @override
+  State<_SourceLoginPage> createState() => _SourceLoginPageState();
+}
+
+class _SourceLoginPageState extends State<_SourceLoginPage> {
+  InAppWebViewController? _webViewController;
+  bool _isLoading = true;
+  bool _checking = false;
+
+  String get _loginUrl {
+    final loginUrl = widget.source.loginUrl ?? '';
+    final baseUrl = widget.source.bookSourceUrl;
+
+    // 如果 loginUrl 已经是完整 URL，直接使用
+    if (loginUrl.startsWith('http://') || loginUrl.startsWith('https://')) {
+      return loginUrl;
+    }
+
+    // 否则拼接 baseUrl
+    if (baseUrl.isNotEmpty) {
+      final baseUri = Uri.tryParse(baseUrl);
+      if (baseUri != null) {
+        return baseUri.resolve(loginUrl).toString();
+      }
+    }
+
+    return loginUrl;
+  }
+
+  Future<void> _saveCookies(String url) async {
+    try {
+      final cookieManager = CookieManager.instance();
+      final cookies = await cookieManager.getCookies(url: WebUri(url));
+
+      final cookieStr = cookies.map((c) => '${c.name}=${c.value}').join('; ');
+      if (cookieStr.isNotEmpty) {
+        await CookieService.instance.setCookie(url, cookieStr);
+      }
+    } catch (e) {
+      debugPrint('保存 Cookie 失败: $e');
+    }
+  }
+
+  void _onCheckLogin() {
+    setState(() {
+      _checking = true;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('正在检查登录状态...')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('登录 - ${widget.source.bookSourceName}'),
+        actions: [
+          TextButton(
+            onPressed: _checking ? null : _onCheckLogin,
+            child: const Text('完成'),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          InAppWebView(
+            initialUrlRequest: URLRequest(url: WebUri(_loginUrl)),
+            initialSettings: InAppWebViewSettings(
+              javaScriptEnabled: true,
+              domStorageEnabled: true,
+              databaseEnabled: true,
+              useHybridComposition: true,
+            ),
+            onWebViewCreated: (controller) {
+              _webViewController = controller;
+            },
+            onLoadStart: (controller, url) async {
+              if (url != null) {
+                await _saveCookies(url.toString());
+              }
+            },
+            onLoadStop: (controller, url) async {
+              setState(() {
+                _isLoading = false;
+              });
+
+              if (url != null) {
+                await _saveCookies(url.toString());
+              }
+
+              // 如果正在检查登录状态，完成登录
+              if (_checking) {
+                widget.onLoginSuccess();
+                if (mounted) {
+                  Navigator.pop(context);
+                }
+              }
+            },
+            onReceivedError: (controller, request, error) {
+              setState(() {
+                _isLoading = false;
+              });
+            },
+          ),
+          if (_isLoading)
+            const Center(
+              child: CircularProgressIndicator(),
+            ),
+        ],
+      ),
     );
   }
 }

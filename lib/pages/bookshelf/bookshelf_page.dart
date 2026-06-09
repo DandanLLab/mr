@@ -69,83 +69,99 @@ class _BookshelfPageState extends State<BookshelfPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('书架'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: () {
-              Navigator.pushNamed(context, AppRoutes.search);
-            },
-          ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            tooltip: '更多选项',
-            offset: const Offset(0, 48),
-            onSelected: (value) => _handleMenuSelection(value),
-            itemBuilder: (context) => [
-            const PopupMenuItem(
-              value: 'refresh',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.refresh, size: 18), SizedBox(width: 12), Text('更新目录')]),
-            ),
-            const PopupMenuItem(
-              value: 'import_local',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.folder, size: 18), SizedBox(width: 12), Text('本地导入')]),
-            ),
-            const PopupMenuItem(
-              value: 'import_url',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.link, size: 18), SizedBox(width: 12), Text('URL导入')]),
-            ),
-            const PopupMenuItem(
-              value: 'batch',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.checklist, size: 18), SizedBox(width: 12), Text('批量管理')]),
-            ),
-            const PopupMenuItem(
-              value: 'download',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.download, size: 18), SizedBox(width: 12), Text('缓存导出')]),
-            ),
-            const PopupMenuItem(
-              value: 'group_manage',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.folder_open, size: 18), SizedBox(width: 12), Text('分组管理')]),
-            ),
-            const PopupMenuItem(
-              value: 'config',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.settings, size: 18), SizedBox(width: 12), Text('书架设置')]),
-            ),
-            const PopupMenuItem(
-              value: 'export_bookshelf',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.upload_file, size: 18), SizedBox(width: 12), Text('导出书架')]),
-            ),
-            const PopupMenuItem(
-              value: 'import_bookshelf',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.download_for_offline, size: 18), SizedBox(width: 12), Text('导入书架')]),
-            ),
-          ],
-          ),
-        ],
-      ),
       body: Consumer<BookshelfProvider>(
         builder: (context, provider, child) {
           return Column(
             children: [
+              // 页眉（标题栏 + 搜索框）
+              Container(
+                padding: EdgeInsets.only(
+                  top: MediaQuery.of(context).padding.top,
+                ),
+                child: Column(
+                  children: [
+                    // 标题栏
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                      child: Row(
+                        children: [
+                          Text(
+                            '书架',
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const Spacer(),
+                          // 更多菜单
+                          PopupMenuButton<String>(
+                            icon: const Icon(Icons.more_vert),
+                            tooltip: '更多选项',
+                            offset: const Offset(0, 48),
+                            onSelected: (value) => _handleMenuSelection(value),
+                            itemBuilder: (context) => [
+                              const PopupMenuItem(
+                                value: 'refresh',
+                                child: Text('更新目录'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'import_local',
+                                child: Text('本地导入'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'import_url',
+                                child: Text('URL导入'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'batch',
+                                child: Text('批量管理'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'download',
+                                child: Text('缓存导出'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'group_manage',
+                                child: Text('分组管理'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'config',
+                                child: Text('书架设置'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'export_bookshelf',
+                                child: Text('导出书架'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'import_bookshelf',
+                                child: Text('导入书架'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    // 搜索框
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                      child: TextField(
+                        decoration: InputDecoration(
+                          hintText: '搜索书架',
+                          prefixIcon: const Icon(Icons.search, size: 20),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                          isDense: true,
+                        ),
+                        onTap: () {
+                          Navigator.pushNamed(context, AppRoutes.search);
+                        },
+                        readOnly: true,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               _buildGroupTabs(provider),
               Expanded(
                 child: provider.isBatchMode

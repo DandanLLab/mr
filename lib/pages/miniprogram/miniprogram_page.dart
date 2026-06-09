@@ -14,18 +14,43 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('小程序'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: _showInstallDialog,
+      body: Column(
+        children: [
+          // 页眉（标题栏）
+          Container(
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top,
+            ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              child: Row(
+                children: [
+                  Text(
+                    '小程序',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    onPressed: () {},
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.add),
+                    onPressed: _showInstallDialog,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Expanded(
+            child: _miniprograms.isEmpty
+                ? _buildEmptyState()
+                : _buildList(),
           ),
         ],
       ),
-      body: _miniprograms.isEmpty
-          ? _buildEmptyState()
-          : _buildGrid(),
     );
   }
 
@@ -36,14 +61,14 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
         children: [
           Icon(
             Icons.apps_outlined,
-            size: 80,
+            size: 64,
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
           const SizedBox(height: 16),
           Text(
             '暂无小程序',
             style: TextStyle(
-              fontSize: 18,
+              fontSize: 16,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
@@ -52,7 +77,7 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
             '点击右上角按钮安装小程序',
             style: TextStyle(
               fontSize: 14,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
             ),
           ),
         ],
@@ -60,73 +85,82 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
     );
   }
 
-  Widget _buildGrid() {
-    return GridView.builder(
-      padding: const EdgeInsets.all(16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 4,
-        childAspectRatio: 0.8,
-        crossAxisSpacing: 16,
-        mainAxisSpacing: 16,
-      ),
+  Widget _buildList() {
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
       itemCount: _miniprograms.length,
       itemBuilder: (context, index) {
         final mp = _miniprograms[index];
-        return _buildMiniprogramCard(mp);
+        return _buildMiniprogramItem(mp);
       },
     );
   }
 
-  Widget _buildMiniprogramCard(Miniprogram mp) {
-    return GestureDetector(
-      onTap: () => _launchMiniprogram(mp),
-      onLongPress: () => _showMiniprogramOptions(mp),
-      child: Column(
-        children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primaryContainer,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: mp.icon != null
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: Image.network(
-                      mp.icon!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Icon(
-                          Icons.apps,
-                          size: 32,
-                          color: Theme.of(context).colorScheme.onPrimaryContainer,
-                        );
-                      },
-                    ),
-                  )
-                : Icon(
-                    Icons.apps,
-                    size: 32,
-                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+  Widget _buildMiniprogramItem(Miniprogram mp) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ListTile(
+        leading: Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primaryContainer,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: mp.icon != null
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(
+                    mp.icon!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Icon(
+                        Icons.apps,
+                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                      );
+                    },
                   ),
+                )
+              : Icon(
+                  Icons.apps,
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                ),
+        ),
+        title: Text(
+          mp.name,
+          style: const TextStyle(fontWeight: FontWeight.w500),
+        ),
+        subtitle: Text(
+          'v${mp.version} · ${mp.description ?? "暂无描述"}',
+          style: TextStyle(
+            fontSize: 12,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
-          const SizedBox(height: 8),
-          Text(
-            mp.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 12),
-          ),
-          Text(
-            'v${mp.version}',
-            style: TextStyle(
-              fontSize: 10,
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (mp.size != null)
+              Text(
+                '${(mp.size! / 1024).toStringAsFixed(1)} KB',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            const SizedBox(width: 8),
+            Icon(
+              Icons.chevron_right,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
-          ),
-        ],
+          ],
+        ),
+        onTap: () => _launchMiniprogram(mp),
+        onLongPress: () => _showMiniprogramOptions(mp),
       ),
     );
   }
@@ -158,7 +192,7 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                leading: const Icon(Icons.info),
+                leading: const Icon(Icons.info_outline),
                 title: const Text('查看详情'),
                 onTap: () {
                   Navigator.pop(context);
@@ -173,8 +207,16 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.delete),
-                title: const Text('卸载'),
+                leading: Icon(
+                  Icons.delete_outline,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                title: Text(
+                  '卸载',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   _uninstallMiniprogram(mp);
@@ -197,11 +239,14 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('版本: ${mp.version}'),
+              _buildDetailRow('版本', 'v${mp.version}'),
               const SizedBox(height: 8),
-              Text('描述: ${mp.description ?? "无"}'),
+              _buildDetailRow('描述', mp.description ?? '无'),
               const SizedBox(height: 8),
-              Text('占用空间: ${mp.size != null ? "${(mp.size! / 1024).toStringAsFixed(2)} KB" : "未知"}'),
+              _buildDetailRow(
+                '占用空间',
+                mp.size != null ? '${(mp.size! / 1024).toStringAsFixed(2)} KB' : '未知',
+              ),
             ],
           ),
           actions: [
@@ -212,6 +257,23 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
           ],
         );
       },
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '$label: ',
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+        Expanded(
+          child: Text(value),
+        ),
+      ],
     );
   }
 
@@ -234,7 +296,12 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
                 });
                 Navigator.pop(context);
               },
-              child: const Text('确定'),
+              child: Text(
+                '卸载',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
             ),
           ],
         );
@@ -285,6 +352,7 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
             controller: controller,
             decoration: const InputDecoration(
               hintText: 'https://example.com/miniprogram.dan',
+              border: OutlineInputBorder(),
             ),
           ),
           actions: [
