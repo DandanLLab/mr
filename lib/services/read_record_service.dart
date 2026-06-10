@@ -203,6 +203,44 @@ class ReadRecordService {
     }
   }
 
+  /// 合并同名书籍的阅读记录
+  Future<void> mergeRecords({
+    required String sourceBookName,
+    required String sourceBookAuthor,
+    required String targetBookName,
+    required String targetBookAuthor,
+  }) async {
+    try {
+      final records = await getAllRecords();
+      
+      // 将源书籍的记录合并到目标书籍
+      for (int i = 0; i < records.length; i++) {
+        if (records[i].bookName == sourceBookName && records[i].bookAuthor == sourceBookAuthor) {
+          records[i] = ReadRecord(
+            id: records[i].id,
+            bookUrl: records[i].bookUrl,
+            bookName: targetBookName,
+            bookAuthor: targetBookAuthor,
+            coverUrl: records[i].coverUrl,
+            readTime: records[i].readTime,
+            startTime: records[i].startTime,
+            endTime: records[i].endTime,
+            chapterIndex: records[i].chapterIndex,
+            chapterTitle: records[i].chapterTitle,
+          );
+        }
+      }
+      
+      await StorageService.instance.cacheData(
+        _recordKey,
+        jsonEncode(records.map((r) => r.toJson()).toList()),
+      );
+      debugPrint('[ReadRecord] Merged $sourceBookName to $targetBookName');
+    } catch (e) {
+      debugPrint('[ReadRecord] mergeRecords failed: $e');
+    }
+  }
+
   /// 获取总阅读时长
   Future<int> getTotalReadTime() async {
     final records = await getAllRecords();
