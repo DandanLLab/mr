@@ -52,6 +52,9 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     setState(() {
       _enableReadRecord = prefs.getBool('enable_read_record') ?? true;
       _skipDeleteConfirm = prefs.getBool('skip_delete_confirm') ?? false;
+      // 读取保存的显示模式
+      final displayModeIndex = prefs.getInt('read_record_display_mode') ?? 0;
+      _displayMode = DisplayMode.values[displayModeIndex.clamp(0, DisplayMode.values.length - 1)];
     });
   }
 
@@ -98,10 +101,13 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     });
   }
 
-  void _toggleDisplayMode() {
+  Future<void> _toggleDisplayMode() async {
     setState(() {
       _displayMode = DisplayMode.values[(_displayMode.index + 1) % DisplayMode.values.length];
     });
+    // 保存显示模式
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('read_record_display_mode', _displayMode.index);
   }
 
   String _getDisplayModeName() {
@@ -321,14 +327,23 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+          padding: EdgeInsets.zero,
+        ),
+        leadingWidth: 44,
+        centerTitle: false,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('阅读记录'),
+            const Text('阅读记录', style: TextStyle(fontSize: 18)),
             Text(
               _getDisplayModeName(),
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 11,
+                height: 1.2,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
@@ -628,6 +643,10 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                       ? CachedNetworkImage(
                           imageUrl: record.coverUrl,
                           fit: BoxFit.cover,
+                          cacheKey: record.coverUrl,
+                          memCacheWidth: 100,
+                          maxWidthDiskCache: 200,
+                          placeholder: (_, __) => _buildStackDefaultCover(),
                           errorWidget: (_, __, ___) => _buildStackDefaultCover(),
                         )
                       : _buildStackDefaultCover(),
@@ -803,10 +822,12 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: Theme.of(context).colorScheme.outlineVariant,
-            width: 0.5,
-          ),
+          border: Theme.of(context).brightness == Brightness.dark
+              ? Border.all(
+                  color: Theme.of(context).colorScheme.outline.withOpacity(0.42),
+                  width: 1,
+                )
+              : null,
         ),
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -820,6 +841,10 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         width: 44,
                         height: 60,
                         fit: BoxFit.cover,
+                        cacheKey: record.coverUrl,
+                        memCacheWidth: 100,
+                        maxWidthDiskCache: 200,
+                        placeholder: (_, __) => _buildDefaultCover(),
                         errorWidget: (_, __, ___) => _buildDefaultCover(),
                       )
                     : _buildDefaultCover(),
@@ -1031,10 +1056,12 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: Theme.of(context).colorScheme.outlineVariant,
-            width: 0.5,
-          ),
+          border: Theme.of(context).brightness == Brightness.dark
+              ? Border.all(
+                  color: Theme.of(context).colorScheme.outline.withOpacity(0.42),
+                  width: 1,
+                )
+              : null,
         ),
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -1048,6 +1075,10 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         width: 44,
                         height: 60,
                         fit: BoxFit.cover,
+                        cacheKey: record.coverUrl,
+                        memCacheWidth: 100,
+                        maxWidthDiskCache: 200,
+                        placeholder: (_, __) => _buildDefaultCover(),
                         errorWidget: (_, __, ___) => _buildDefaultCover(),
                       )
                     : _buildDefaultCover(),
@@ -1221,6 +1252,10 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                       width: 40,
                       height: 54,
                       fit: BoxFit.cover,
+                      cacheKey: record.coverUrl,
+                      memCacheWidth: 100,
+                      maxWidthDiskCache: 200,
+                      placeholder: (_, __) => _buildDefaultCover(size: 40),
                       errorWidget: (_, __, ___) => _buildDefaultCover(size: 40),
                     )
                   : _buildDefaultCover(size: 40),
