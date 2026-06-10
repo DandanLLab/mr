@@ -4,6 +4,7 @@ import '../../providers/app_provider.dart';
 import '../../providers/bookshelf_provider.dart';
 import '../../providers/discovery_provider.dart';
 import 'book_source_manage_page.dart';
+import '../settings/theme_settings_page.dart';
 import '../../routes/app_routes.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -38,33 +39,45 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: ListView(
-        padding: EdgeInsets.only(
-          top: MediaQuery.of(context).padding.top,
-        ),
+      body: Column(
         children: [
-          // 顶部标题栏
+          // 顶部标题栏（高度48dp，与其他主页面一致）
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                Text(
-                  '我的',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top,
+            ),
+            color: Theme.of(context).colorScheme.primary,
+            child: SizedBox(
+              height: 48,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Text(
+                      '我的',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.help_outline, color: Colors.white),
+                      tooltip: '帮助',
+                      onPressed: () {
+                        _showHelpDialog();
+                      },
+                    ),
+                  ],
                 ),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.help_outline),
-                  tooltip: '帮助',
-                  onPressed: () {
-                    _showHelpDialog();
-                  },
-                ),
-              ],
+              ),
             ),
           ),
+          // 内容列表
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.only(top: 8),
+              children: [
           // 书源管理（无分类标题）
           _buildSection([
             _buildListItem(
@@ -123,7 +136,12 @@ class _ProfilePageState extends State<ProfilePage> {
               icon: Icons.color_lens,
               title: '主题设置',
               subtitle: '自定义主题颜色和样式',
-              onTap: () {},
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const ThemeSettingsPage(),
+                ),
+              ),
             ),
             _buildListItem(
               icon: Icons.settings,
@@ -167,6 +185,9 @@ class _ProfilePageState extends State<ProfilePage> {
           ]),
 
           const SizedBox(height: 24),
+              ],
+            ),
+          ),
         ],
       ),
     );

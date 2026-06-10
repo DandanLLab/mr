@@ -37,7 +37,7 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
             padding: EdgeInsets.only(
               top: MediaQuery.of(context).padding.top,
             ),
-            color: Theme.of(context).colorScheme.surface,
+            color: Theme.of(context).colorScheme.primary,
             child: Column(
               children: [
                 // Toolbar + 搜索框在同一行（不显示标题文字）
@@ -87,13 +87,13 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
                       const SizedBox(width: 4),
                       // 收藏分组
                       IconButton(
-                        icon: const Icon(Icons.folder_outlined, size: 20),
+                        icon: const Icon(Icons.folder_outlined, size: 20, color: Colors.white),
                         tooltip: '收藏分组',
                         onPressed: () {},
                       ),
                       // 排序按钮
                       PopupMenuButton<String>(
-                        icon: const Icon(Icons.sort, size: 20),
+                        icon: const Icon(Icons.sort, size: 20, color: Colors.white),
                         tooltip: '排序',
                         offset: const Offset(0, 48),
                         onSelected: (value) {},

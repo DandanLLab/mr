@@ -117,7 +117,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
                 padding: EdgeInsets.only(
                   top: MediaQuery.of(context).padding.top,
                 ),
-                color: Theme.of(context).colorScheme.surface,
+                color: Theme.of(context).colorScheme.primary,
                 child: SizedBox(
                   height: 48,
                   child: Row(
@@ -141,26 +141,26 @@ class _BookshelfPageState extends State<BookshelfPage> {
                                 );
                               },
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 16),
-                                alignment: Alignment.center,
-                                child: Text(
-                                  groups[index],
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
-                                    color: isSelected
-                                        ? Theme.of(context).colorScheme.primary
-                                        : Theme.of(context).colorScheme.onSurface,
-                                  ),
-                                ),
-                              ),
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          alignment: Alignment.center,
+                          child: Text(
+                            groups[index],
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
+                              color: isSelected
+                                  ? Colors.white
+                                  : Colors.white70,
+                            ),
+                          ),
+                        ),
                             );
                           },
                         ),
                       ),
                       // 搜索按钮
                       IconButton(
-                        icon: const Icon(Icons.search),
+                        icon: const Icon(Icons.search, color: Colors.white),
                         tooltip: '搜索',
                         onPressed: () {
                           Navigator.pushNamed(context, AppRoutes.search);
@@ -168,7 +168,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
                       ),
                       // 更多菜单
                       PopupMenuButton<String>(
-                        icon: const Icon(Icons.more_vert),
+                        icon: const Icon(Icons.more_vert, color: Colors.white),
                         tooltip: '更多选项',
                         offset: const Offset(0, 48),
                         onSelected: (value) => _handleMenuSelection(value),

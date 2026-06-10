@@ -29,7 +29,7 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
             padding: EdgeInsets.only(
               top: MediaQuery.of(context).padding.top,
             ),
-            color: Theme.of(context).colorScheme.surface,
+            color: Theme.of(context).colorScheme.primary,
             child: Column(
               children: [
                 // Toolbar + 搜索框在同一行（不显示标题文字）
@@ -79,25 +79,25 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
                       const SizedBox(width: 4),
                       // 历史记录
                       IconButton(
-                        icon: const Icon(Icons.history, size: 20),
+                        icon: const Icon(Icons.history, size: 20, color: Colors.white),
                         tooltip: '历史记录',
                         onPressed: () {},
                       ),
                       // 收藏分组
                       IconButton(
-                        icon: const Icon(Icons.folder_outlined, size: 20),
+                        icon: const Icon(Icons.folder_outlined, size: 20, color: Colors.white),
                         tooltip: '收藏分组',
                         onPressed: () {},
                       ),
                       // 设置
                       IconButton(
-                        icon: const Icon(Icons.settings, size: 20),
+                        icon: const Icon(Icons.settings, size: 20, color: Colors.white),
                         tooltip: '设置',
                         onPressed: () {},
                       ),
                       // 更多菜单
                       PopupMenuButton<String>(
-                        icon: const Icon(Icons.more_vert, size: 20),
+                        icon: const Icon(Icons.more_vert, size: 20, color: Colors.white),
                         tooltip: '更多',
                         offset: const Offset(0, 48),
                         onSelected: (value) {
