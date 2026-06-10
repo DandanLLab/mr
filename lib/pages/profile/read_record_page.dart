@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/read_record_service.dart';
 import '../../routes/app_routes.dart';
+import '../../widgets/swipe_action_container.dart';
 
 enum DisplayMode { aggregate, timeline, latest, readTime }
 enum HeatmapMode { count, time }
@@ -31,6 +31,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
   bool _showSearch = false;
   DisplayMode _displayMode = DisplayMode.aggregate;
   bool _enableReadRecord = true;
+  bool _skipDeleteConfirm = false;
   
   // 日历相关
   DateTime _currentMonth = DateTime.now();
@@ -42,14 +43,15 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
   @override
   void initState() {
     super.initState();
-    _loadReadRecordEnabled();
+    _loadSettings();
     _loadRecords();
   }
 
-  Future<void> _loadReadRecordEnabled() async {
+  Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _enableReadRecord = prefs.getBool('enable_read_record') ?? true;
+      _skipDeleteConfirm = prefs.getBool('skip_delete_confirm') ?? false;
     });
   }
 
@@ -129,22 +131,55 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
   }
 
   Future<void> _deleteRecord(ReadRecordSummary record) async {
+    // 如果已设置跳过确认，直接删除
+    if (_skipDeleteConfirm) {
+      await _service.deleteRecordsByBook(record.bookName, record.bookAuthor);
+      _loadRecords();
+      return;
+    }
+
+    bool skipNextTime = false;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('清除确认'),
-        content: Text('确定要清除 "${record.bookName}" 的阅读记录吗？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('确认删除'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('确定要删除这条阅读记录吗？'),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Checkbox(
+                    value: skipNextTime,
+                    onChanged: (value) => setState(() => skipNextTime = value ?? false),
+                  ),
+                  const Text('不再提示'),
+                ],
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('清除'),
-          ),
-        ],
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () async {
+                if (skipNextTime) {
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setBool('skip_delete_confirm', true);
+                  _skipDeleteConfirm = true;
+                }
+                Navigator.pop(context, true);
+              },
+              style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error),
+              child: const Text('删除'),
+            ),
+          ],
+        ),
       ),
     );
 
@@ -155,8 +190,62 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
   }
 
   Future<void> _deleteSingleRecord(ReadRecord record) async {
-    await _service.deleteRecord(record.id);
-    _loadRecords();
+    // 如果已设置跳过确认，直接删除
+    if (_skipDeleteConfirm) {
+      await _service.deleteRecord(record.id);
+      _loadRecords();
+      return;
+    }
+
+    bool skipNextTime = false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('确认删除'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('确定要删除这条阅读记录吗？'),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Checkbox(
+                    value: skipNextTime,
+                    onChanged: (value) => setState(() => skipNextTime = value ?? false),
+                  ),
+                  const Text('不再提示'),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () async {
+                if (skipNextTime) {
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setBool('skip_delete_confirm', true);
+                  _skipDeleteConfirm = true;
+                }
+                Navigator.pop(context, true);
+              },
+              style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error),
+              child: const Text('删除'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed == true) {
+      await _service.deleteRecord(record.id);
+      _loadRecords();
+    }
   }
 
   Future<void> _clearAllRecords() async {
@@ -239,37 +328,10 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
             onPressed: _toggleDisplayMode,
             tooltip: '切换视图',
           ),
-          PopupMenuButton<String>(
+          IconButton(
             icon: const Icon(Icons.more_vert),
-            onSelected: (value) {
-              if (value == 'toggle_record') {
-                _toggleReadRecord();
-              } else if (value == 'clear_all') {
-                _clearAllRecords();
-              }
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'toggle_record',
-                child: Row(
-                  children: [
-                    Icon(_enableReadRecord ? Icons.visibility_off : Icons.visibility),
-                    const SizedBox(width: 8),
-                    Text(_enableReadRecord ? '关闭阅读记录' : '开启阅读记录'),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'clear_all',
-                child: Row(
-                  children: [
-                    Icon(Icons.delete),
-                    SizedBox(width: 8),
-                    Text('清除全部记录'),
-                  ],
-                ),
-              ),
-            ],
+            onPressed: () => _showMoreMenu(context),
+            tooltip: '更多',
           ),
         ],
       ),
@@ -310,6 +372,35 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                 ),
               ],
             ),
+    );
+  }
+
+  void _showMoreMenu(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(_enableReadRecord ? Icons.visibility_off : Icons.visibility),
+              title: Text(_enableReadRecord ? '关闭阅读记录' : '开启阅读记录'),
+              onTap: () {
+                Navigator.pop(context);
+                _toggleReadRecord();
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.delete, color: Theme.of(context).colorScheme.error),
+              title: Text('清除全部记录', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              onTap: () {
+                Navigator.pop(context);
+                _clearAllRecords();
+              },
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -648,8 +739,9 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
             ...dateRecords.asMap().entries.map((entry) {
               final idx = entry.key;
               final record = entry.value;
+              final isFirst = idx == 0;
               final isLast = idx == dateRecords.length - 1;
-              return _buildTimelineItem(record, isLast);
+              return _buildTimelineItem(record, isFirst, isLast);
             }),
           ],
         );
@@ -672,157 +764,140 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
   }
 
   Widget _buildLatestRecordItem(ReadRecordSummary record) {
-    return Slidable(
-      key: Key(record.bookUrl),
-      startActionPane: ActionPane(
-        motion: const ScrollMotion(),
-        children: [
-          CustomSlidableAction(
-            onPressed: (_) => _deleteRecord(record),
-            backgroundColor: Colors.red,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.delete, size: 24),
-                SizedBox(height: 4),
-                Text('删除', style: TextStyle(fontSize: 12)),
-              ],
-            ),
+    final content = InkWell(
+      onTap: () {
+        Navigator.pushNamed(context, AppRoutes.detail, arguments: {
+          'bookUrl': record.bookUrl,
+        });
+      },
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+            width: 0.5,
           ),
-        ],
-      ),
-      child: InkWell(
-        onTap: () {
-          Navigator.pushNamed(context, AppRoutes.detail, arguments: {
-            'bookUrl': record.bookUrl,
-          });
-        },
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: Theme.of(context).colorScheme.outlineVariant,
-              width: 0.5,
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: record.coverUrl.isNotEmpty
-                      ? CachedNetworkImage(
-                          imageUrl: record.coverUrl,
-                          width: 44,
-                          height: 60,
-                          fit: BoxFit.cover,
-                          errorWidget: (_, __, ___) => _buildDefaultCover(),
-                        )
-                      : _buildDefaultCover(),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        record.bookName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        record.bookAuthor.isNotEmpty ? record.bookAuthor : '未知作者',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.schedule,
-                            size: 14,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            _formatDuration(record.totalReadTime),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '·',
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            _formatDateTime(record.lastReadTime),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                // 三个点菜单
-                PopupMenuButton<String>(
-                  icon: Icon(Icons.more_vert, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  onSelected: (value) {
-                    if (value == 'delete') {
-                      _deleteRecord(record);
-                    } else if (value == 'merge') {
-                      _showMergeDialog(record);
-                    }
-                  },
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(
-                      value: 'merge',
-                      child: Row(
-                        children: [
-                          Icon(Icons.merge),
-                          SizedBox(width: 8),
-                          Text('合并同名书籍'),
-                        ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: record.coverUrl.isNotEmpty
+                    ? CachedNetworkImage(
+                        imageUrl: record.coverUrl,
+                        width: 44,
+                        height: 60,
+                        fit: BoxFit.cover,
+                        errorWidget: (_, __, ___) => _buildDefaultCover(),
+                      )
+                    : _buildDefaultCover(),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      record.bookName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
-                    PopupMenuItem(
-                      value: 'delete',
-                      child: Row(
-                        children: [
-                          Icon(Icons.delete, color: Theme.of(context).colorScheme.error),
-                          const SizedBox(width: 8),
-                          Text('删除', style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                        ],
+                    const SizedBox(height: 4),
+                    Text(
+                      record.bookAuthor.isNotEmpty ? record.bookAuthor : '未知作者',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.schedule,
+                          size: 14,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _formatDuration(record.totalReadTime),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '·',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _formatDateTime(record.lastReadTime),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+              // 三个点菜单
+              PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                onSelected: (value) {
+                  if (value == 'delete') {
+                    _deleteRecord(record);
+                  } else if (value == 'merge') {
+                    _showMergeDialog(record);
+                  }
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'merge',
+                    child: Row(
+                      children: [
+                        Icon(Icons.merge),
+                        SizedBox(width: 8),
+                        Text('合并同名书籍'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete, color: Theme.of(context).colorScheme.error),
+                        const SizedBox(width: 8),
+                        Text('删除', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
+    );
+
+    return SwipeActionContainer(
+      startActions: [createSwipeDeleteAction(context, () => _deleteRecord(record))],
+      child: content,
     );
   }
 
@@ -916,272 +991,258 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
   }
 
   Widget _buildSummaryItem(ReadRecordSummary record, {bool showReadTime = false}) {
-    return Slidable(
-      key: Key(record.bookUrl),
-      startActionPane: ActionPane(
-        motion: const ScrollMotion(),
-        children: [
-          CustomSlidableAction(
-            onPressed: (_) => _deleteRecord(record),
-            backgroundColor: Colors.red,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.delete, size: 24),
-                SizedBox(height: 4),
-                Text('删除', style: TextStyle(fontSize: 12)),
-              ],
-            ),
+    final content = InkWell(
+      onTap: () {
+        Navigator.pushNamed(context, AppRoutes.detail, arguments: {
+          'bookUrl': record.bookUrl,
+        });
+      },
+      onLongPress: () => _deleteRecord(record),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+            width: 0.5,
           ),
-        ],
-      ),
-      child: InkWell(
-        onTap: () {
-          Navigator.pushNamed(context, AppRoutes.detail, arguments: {
-            'bookUrl': record.bookUrl,
-          });
-        },
-        onLongPress: () => _deleteRecord(record),
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: Theme.of(context).colorScheme.outlineVariant,
-              width: 0.5,
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: record.coverUrl.isNotEmpty
-                      ? CachedNetworkImage(
-                          imageUrl: record.coverUrl,
-                          width: 44,
-                          height: 60,
-                          fit: BoxFit.cover,
-                          errorWidget: (_, __, ___) => _buildDefaultCover(),
-                        )
-                      : _buildDefaultCover(),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        record.bookName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                        ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: record.coverUrl.isNotEmpty
+                    ? CachedNetworkImage(
+                        imageUrl: record.coverUrl,
+                        width: 44,
+                        height: 60,
+                        fit: BoxFit.cover,
+                        errorWidget: (_, __, ___) => _buildDefaultCover(),
+                      )
+                    : _buildDefaultCover(),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      record.bookName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        record.bookAuthor.isNotEmpty ? record.bookAuthor : '未知作者',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      record.bookAuthor.isNotEmpty ? record.bookAuthor : '未知作者',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.schedule,
+                          size: 14,
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.schedule,
-                            size: 14,
+                        const SizedBox(width: 4),
+                        Text(
+                          _formatDuration(record.totalReadTime),
+                          style: TextStyle(
+                            fontSize: 12,
                             color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
-                          const SizedBox(width: 4),
-                          Text(
-                            _formatDuration(record.totalReadTime),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '·',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '·',
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _formatDateTime(record.lastReadTime),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
-                          const SizedBox(width: 8),
-                          Text(
-                            _formatDateTime(record.lastReadTime),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              if (showReadTime)
+                Text(
+                  _formatDuration(record.totalReadTime),
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
-                if (showReadTime)
-                  Text(
-                    _formatDuration(record.totalReadTime),
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-              ],
-            ),
+            ],
           ),
         ),
       ),
     );
+
+    return SwipeActionContainer(
+      startActions: [createSwipeDeleteAction(context, () => _deleteRecord(record))],
+      child: content,
+    );
   }
 
-  Widget _buildTimelineItem(ReadRecord record, bool isLast) {
+  Widget _buildTimelineItem(ReadRecord record, bool isFirst, bool isLast) {
     final timeFormat = '${record.startTime ~/ 3600 % 24}:${(record.startTime % 3600 ~/ 60).toString().padLeft(2, '0')}';
     
-    return Slidable(
-      key: Key(record.id),
-      startActionPane: ActionPane(
-        motion: const ScrollMotion(),
-        children: [
-          CustomSlidableAction(
-            onPressed: (_) => _deleteSingleRecord(record),
-            backgroundColor: Colors.red,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.delete, size: 24),
-                SizedBox(height: 4),
-                Text('删除', style: TextStyle(fontSize: 12)),
-              ],
-            ),
-          ),
-        ],
-      ),
-      child: InkWell(
-        onTap: () {
-          Navigator.pushNamed(context, AppRoutes.detail, arguments: {
-            'bookUrl': record.bookUrl,
-          });
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 时间线指示器
-                Column(
-                  children: [
-                    Container(
-                      width: 12,
-                      height: 12,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primary,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
-                            blurRadius: 4,
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (!isLast)
-                      Expanded(
-                        child: Container(
-                          width: 2,
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
-                            borderRadius: BorderRadius.circular(1),
-                          ),
+    final content = InkWell(
+      onTap: () {
+        Navigator.pushNamed(context, AppRoutes.detail, arguments: {
+          'bookUrl': record.bookUrl,
+        });
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // 时间线指示器
+            SizedBox(
+              width: 20,
+              child: Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.center,
+                children: [
+                  // 上半部分线
+                  if (!isFirst)
+                    Positioned(
+                      bottom: 7,
+                      child: Container(
+                        width: 2,
+                        height: 16,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
+                          borderRadius: BorderRadius.circular(1),
                         ),
                       ),
-                  ],
+                    ),
+                  // 下半部分线
+                  if (!isLast)
+                    Positioned(
+                      top: 7,
+                      child: Container(
+                        width: 2,
+                        height: 16,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
+                          borderRadius: BorderRadius.circular(1),
+                        ),
+                      ),
+                    ),
+                  // 圆点
+                  Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                          blurRadius: 4,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            // 时间
+            SizedBox(
+              width: 48,
+              child: Text(
+                timeFormat,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-                const SizedBox(width: 8),
-                // 时间
-                SizedBox(
-                  width: 48,
-                  child: Text(
-                    timeFormat,
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(width: 8),
+            // 封面
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: record.coverUrl.isNotEmpty
+                  ? CachedNetworkImage(
+                      imageUrl: record.coverUrl,
+                      width: 40,
+                      height: 54,
+                      fit: BoxFit.cover,
+                      errorWidget: (_, __, ___) => _buildDefaultCover(size: 40),
+                    )
+                  : _buildDefaultCover(size: 40),
+            ),
+            const SizedBox(width: 12),
+            // 信息
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    record.bookName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    record.bookAuthor.isNotEmpty ? record.bookAuthor : '未知作者',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 12,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
-                    textAlign: TextAlign.center,
                   ),
-                ),
-                const SizedBox(width: 8),
-                // 封面
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: record.coverUrl.isNotEmpty
-                      ? CachedNetworkImage(
-                          imageUrl: record.coverUrl,
-                          width: 40,
-                          height: 54,
-                          fit: BoxFit.cover,
-                          errorWidget: (_, __, ___) => _buildDefaultCover(size: 40),
-                        )
-                      : _buildDefaultCover(size: 40),
-                ),
-                const SizedBox(width: 12),
-                // 信息
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        record.bookName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        record.bookAuthor.isNotEmpty ? record.bookAuthor : '未知作者',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        record.chapterTitle.isNotEmpty ? record.chapterTitle : '第${record.chapterIndex + 1}章',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: 2),
+                  Text(
+                    record.chapterTitle.isNotEmpty ? record.chapterTitle : '第${record.chapterIndex + 1}章',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
+    );
+
+    return SwipeActionContainer(
+      startActions: [createSwipeDeleteAction(context, () => _deleteSingleRecord(record))],
+      child: content,
     );
   }
 
