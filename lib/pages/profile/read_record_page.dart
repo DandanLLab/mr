@@ -275,16 +275,44 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
   }
 
   void _showCalendar() {
+    // 重置为当前月份
+    setState(() {
+      _currentMonth = DateTime.now();
+    });
+    
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      showDragHandle: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.9,
-        minChildSize: 0.5,
-        maxChildSize: 0.95,
-        expand: false,
-        builder: (context, scrollController) => _buildCalendarSheet(scrollController),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          return DraggableScrollableSheet(
+            initialChildSize: 0.75,
+            minChildSize: 0.5,
+            maxChildSize: 0.85,
+            expand: false,
+            builder: (context, scrollController) => _buildCalendarSheet(
+              scrollController,
+              onDateSelected: (date) {
+                setState(() {
+                  _selectedDate = date;
+                });
+                Navigator.pop(sheetContext);
+              },
+              onModeChanged: (mode) {
+                setSheetState(() {
+                  _heatmapMode = mode;
+                });
+              },
+              onMonthChanged: (month) {
+                setSheetState(() {
+                  _currentMonth = month;
+                });
+              },
+            ),
+          );
+        },
       ),
     );
   }
@@ -328,10 +356,39 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
             onPressed: _toggleDisplayMode,
             tooltip: '切换视图',
           ),
-          IconButton(
+          PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
-            onPressed: () => _showMoreMenu(context),
             tooltip: '更多',
+            offset: const Offset(0, 48),
+            onSelected: (value) {
+              if (value == 'toggle') {
+                _toggleReadRecord();
+              } else if (value == 'clear') {
+                _clearAllRecords();
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'toggle',
+                child: Row(
+                  children: [
+                    Icon(_enableReadRecord ? Icons.visibility_off : Icons.visibility),
+                    const SizedBox(width: 8),
+                    Text(_enableReadRecord ? '关闭阅读记录' : '开启阅读记录'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'clear',
+                child: Row(
+                  children: [
+                    Icon(Icons.delete, color: Theme.of(context).colorScheme.error),
+                    const SizedBox(width: 8),
+                    Text('清除全部记录', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -372,35 +429,6 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                 ),
               ],
             ),
-    );
-  }
-
-  void _showMoreMenu(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: Icon(_enableReadRecord ? Icons.visibility_off : Icons.visibility),
-              title: Text(_enableReadRecord ? '关闭阅读记录' : '开启阅读记录'),
-              onTap: () {
-                Navigator.pop(context);
-                _toggleReadRecord();
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.delete, color: Theme.of(context).colorScheme.error),
-              title: Text('清除全部记录', style: TextStyle(color: Theme.of(context).colorScheme.error)),
-              onTap: () {
-                Navigator.pop(context);
-                _clearAllRecords();
-              },
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -1256,10 +1284,15 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
   }
 
   // 日历底部弹窗
-  Widget _buildCalendarSheet(ScrollController controller) {
+  Widget _buildCalendarSheet(
+    ScrollController controller, {
+    required Function(DateTime?) onDateSelected,
+    required Function(HeatmapMode) onModeChanged,
+    required Function(DateTime) onMonthChanged,
+  }) {
     return SingleChildScrollView(
       controller: controller,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1286,34 +1319,29 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
               // 模式切换
               Row(
                 children: [
-                  FilterChip(
-                    selected: _heatmapMode == HeatmapMode.count,
-                    onSelected: (selected) {
-                      setState(() => _heatmapMode = HeatmapMode.count);
-                    },
-                    label: const Text('次数'),
-                  ),
+                  _buildModeChip('次数', _heatmapMode == HeatmapMode.count, () {
+                    onModeChanged(HeatmapMode.count);
+                  }),
                   const SizedBox(width: 4),
-                  FilterChip(
-                    selected: _heatmapMode == HeatmapMode.time,
-                    onSelected: (selected) {
-                      setState(() => _heatmapMode = HeatmapMode.time);
-                    },
-                    label: const Text('时长'),
-                  ),
+                  _buildModeChip('时长', _heatmapMode == HeatmapMode.time, () {
+                    onModeChanged(HeatmapMode.time);
+                  }),
                 ],
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           // 日历
-          _buildCalendar(),
+          _buildCalendar(onDateSelected, onMonthChanged),
         ],
       ),
     );
   }
 
-  Widget _buildCalendar() {
+  Widget _buildCalendar(
+    Function(DateTime?) onDateSelected,
+    Function(DateTime) onMonthChanged,
+  ) {
     final firstDayOfMonth = DateTime(_currentMonth.year, _currentMonth.month, 1);
     final lastDayOfMonth = DateTime(_currentMonth.year, _currentMonth.month + 1, 0);
     
@@ -1366,9 +1394,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                   IconButton(
                     icon: const Icon(Icons.chevron_left),
                     onPressed: () {
-                      setState(() {
-                        _currentMonth = DateTime(_currentMonth.year, _currentMonth.month - 1);
-                      });
+                      onMonthChanged(DateTime(_currentMonth.year, _currentMonth.month - 1));
                     },
                   ),
                   Column(
@@ -1378,7 +1404,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                       Text(
-                        _heatmapMode == HeatmapMode.count ? '按次数显示' : '按时长显示',
+                        _heatmapMode == HeatmapMode.count ? '按阅读次数显示' : '按阅读时长显示',
                         style: TextStyle(
                           fontSize: 12,
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -1389,9 +1415,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                   IconButton(
                     icon: const Icon(Icons.chevron_right),
                     onPressed: () {
-                      setState(() {
-                        _currentMonth = DateTime(_currentMonth.year, _currentMonth.month + 1);
-                      });
+                      onMonthChanged(DateTime(_currentMonth.year, _currentMonth.month + 1));
                     },
                   ),
                 ],
@@ -1434,8 +1458,28 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
           runSpacing: 4,
           children: List.generate(totalCells, (index) {
             final dayOffset = index - firstWeekday;
-            if (dayOffset < 0 || dayOffset >= daysInMonth) {
-              return _buildEmptyCell();
+            final isCurrentMonth = dayOffset >= 0 && dayOffset < daysInMonth;
+            
+            if (!isCurrentMonth) {
+              // 非当前月份的日期
+              DateTime date;
+              if (dayOffset < 0) {
+                // 上月末的日期
+                final prevMonth = DateTime(_currentMonth.year, _currentMonth.month, 0);
+                date = DateTime(prevMonth.year, prevMonth.month, prevMonth.day + dayOffset + 1);
+              } else {
+                // 下月初的日期
+                date = DateTime(_currentMonth.year, _currentMonth.month + 1, dayOffset - daysInMonth + 1);
+              }
+              return _buildDayCell(
+                date.day,
+                0,
+                maxValue,
+                false,
+                false,
+                () {},
+                isCurrentMonth: false,
+              );
             }
             
             final day = dayOffset + 1;
@@ -1452,10 +1496,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                 : ((_dailyReadTimes[date] ?? 0) ~/ 60);
             
             return _buildDayCell(day, value, maxValue, isToday, isSelected, () {
-              setState(() {
-                _selectedDate = isSelected ? null : date;
-              });
-              Navigator.pop(context);
+              onDateSelected(isSelected ? null : date);
             });
           }),
         ),
@@ -1524,8 +1565,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                 ),
                 TextButton(
                   onPressed: () {
-                    setState(() => _selectedDate = null);
-                    Navigator.pop(context);
+                    onDateSelected(null);
                   },
                   child: Row(
                     children: [
@@ -1577,7 +1617,15 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     );
   }
 
-  Widget _buildDayCell(int day, int value, int maxValue, bool isToday, bool isSelected, VoidCallback onTap) {
+  Widget _buildDayCell(
+    int day,
+    int value,
+    int maxValue,
+    bool isToday,
+    bool isSelected,
+    VoidCallback onTap, {
+    bool isCurrentMonth = true,
+  }) {
     final cellSize = (MediaQuery.of(context).size.width - 48) / 7 - 4;
     
     Color bgColor;
@@ -1586,14 +1634,17 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     if (isSelected) {
       bgColor = Theme.of(context).colorScheme.primary;
       textColor = Theme.of(context).colorScheme.onPrimary;
+    } else if (!isCurrentMonth) {
+      bgColor = Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.22);
+      textColor = Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.35);
     } else if (value <= 0) {
-      bgColor = Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5);
+      bgColor = Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.38);
       textColor = Theme.of(context).colorScheme.onSurfaceVariant;
     } else {
       final ratio = (value / maxValue).clamp(0.0, 1.0);
       final intensity = ratio * ratio;
       bgColor = Color.lerp(
-        Theme.of(context).colorScheme.primaryContainer.withOpacity(0.4),
+        Theme.of(context).colorScheme.primaryContainer.withOpacity(0.42),
         Theme.of(context).colorScheme.primary,
         intensity,
       )!;
@@ -1603,7 +1654,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     }
     
     return GestureDetector(
-      onTap: onTap,
+      onTap: isCurrentMonth ? onTap : null,
       child: Container(
         width: cellSize,
         height: cellSize,
@@ -1641,6 +1692,36 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
       Theme.of(context).colorScheme.primary,
       intensity,
     )!;
+  }
+
+  Widget _buildModeChip(String label, bool selected, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected
+              ? Theme.of(context).colorScheme.primaryContainer
+              : Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).colorScheme.outline,
+            width: 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            color: selected
+                ? Theme.of(context).colorScheme.onPrimaryContainer
+                : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
   }
 
   String _formatDuration(int seconds) {
