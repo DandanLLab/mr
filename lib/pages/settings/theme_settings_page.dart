@@ -43,8 +43,8 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
         actions: [
           IconButton(
             icon: Icon(
-              isDark ? Icons.light_mode : Icons.dark_mode,
-              color: isDark ? Colors.amber : Colors.indigo,
+              isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+              color: Colors.white,
             ),
             tooltip: isDark ? '切换到日间模式' : '切换到夜间模式',
             onPressed: () {
@@ -128,9 +128,17 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
   }
 
   Widget _buildSection(List<Widget> children) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: colorScheme.surface.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: colorScheme.onSurface.withOpacity(0.04),
+          width: 1,
+        ),
+      ),
       child: Column(children: children),
     );
   }
@@ -377,7 +385,7 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
             margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
             height: 42,
             decoration: BoxDecoration(
-              color: colorScheme.surfaceContainerHighest,
+              color: colorScheme.surface.withOpacity(0.18),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
@@ -393,7 +401,7 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
                     child: Container(
                       margin: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
-                        color: !_isNightTheme ? colorScheme.surface : null,
+                        color: !_isNightTheme ? colorScheme.surface.withOpacity(0.2) : null,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Center(
@@ -420,7 +428,7 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
                     child: Container(
                       margin: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
-                        color: _isNightTheme ? colorScheme.surface : null,
+                        color: _isNightTheme ? colorScheme.surface.withOpacity(0.2) : null,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Center(
@@ -579,13 +587,6 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
             height: 102,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(10), // ui_panel_radius
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.15),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
-                ),
-              ],
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(10),
@@ -624,7 +625,7 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         constraints: const BoxConstraints(maxWidth: 118),
                         decoration: BoxDecoration(
-                          color: colorScheme.surfaceContainerHighest,
+                          color: colorScheme.surface.withOpacity(0.18),
                           borderRadius: BorderRadius.circular(13),
                         ),
                         child: Text(
@@ -702,7 +703,7 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
         constraints: const BoxConstraints(minWidth: 56),
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerHighest,
+          color: colorScheme.surface.withOpacity(0.18),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Center(
