@@ -396,6 +396,8 @@ function content(url) {
             ),
             // 更多菜单（代码片段、行号、帮助、书源信息等）
             PopupMenuButton<String>(
+              tooltip: '更多选项',
+              offset: const Offset(0, 48),
               onSelected: (value) {
                 switch (value) {
                   case 'snippet':
@@ -435,13 +437,41 @@ function content(url) {
                 }
               },
               itemBuilder: (context) => [
-                const PopupMenuItem(value: 'snippet', child: Text('代码片段')),
-                PopupMenuItem(value: 'linenum', child: Text(_showLineNumbers ? '隐藏行号' : '显示行号')),
-                const PopupMenuItem(value: 'help', child: Text('帮助文档')),
-                const PopupMenuItem(value: 'info', child: Text('书源信息')),
-                const PopupMenuItem(value: 'format', child: Text('格式化代码')),
-                const PopupMenuItem(value: 'copy', child: Text('复制全部代码')),
-                const PopupMenuItem(value: 'clear', child: Text('清空代码')),
+                const PopupMenuItem(
+                  value: 'snippet',
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Text('代码片段'),
+                ),
+                PopupMenuItem(
+                  value: 'linenum',
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Text(_showLineNumbers ? '隐藏行号' : '显示行号'),
+                ),
+                const PopupMenuItem(
+                  value: 'help',
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Text('帮助文档'),
+                ),
+                const PopupMenuItem(
+                  value: 'info',
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Text('书源信息'),
+                ),
+                const PopupMenuItem(
+                  value: 'format',
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Text('格式化代码'),
+                ),
+                const PopupMenuItem(
+                  value: 'copy',
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Text('复制全部代码'),
+                ),
+                const PopupMenuItem(
+                  value: 'clear',
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Text('清空代码'),
+                ),
               ],
             ),
           ],

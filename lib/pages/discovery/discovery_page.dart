@@ -30,37 +30,192 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('发现'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              context.read<DiscoveryProvider>().loadBookSources();
-            },
+      body: Column(
+        children: [
+          // 参考原版：TitleBar (AppBarLayout) - 搜索框和标题栏在同一行
+          Container(
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top,
+            ),
+            color: Theme.of(context).colorScheme.surface,
+            child: Column(
+              children: [
+                // Toolbar + 搜索框在同一行（不显示标题文字）
+                SizedBox(
+                  height: 48,
+                  child: Row(
+                    children: [
+                      const SizedBox(width: 8),
+                      // 搜索框（参考原版：高度30dp）
+                      Expanded(
+                        child: SizedBox(
+                          height: 32,
+                          child: TextField(
+                            controller: _searchController,
+                            decoration: InputDecoration(
+                              hintText: '搜索书源',
+                              hintStyle: const TextStyle(fontSize: 13),
+                              prefixIcon: const Icon(Icons.search, size: 16),
+                              suffixIcon: _searchQuery.isNotEmpty
+                                  ? IconButton(
+                                      icon: const Icon(Icons.clear, size: 16),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
+                                      onPressed: () {
+                                        _searchController.clear();
+                                        setState(() {
+                                          _searchQuery = '';
+                                        });
+                                      },
+                                    )
+                                  : null,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                              isDense: true,
+                            ),
+                            style: const TextStyle(fontSize: 13),
+                            onChanged: (value) {
+                              setState(() {
+                                _searchQuery = value;
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      // 收藏分组
+                      IconButton(
+                        icon: const Icon(Icons.folder_outlined, size: 20),
+                        tooltip: '收藏分组',
+                        onPressed: () {},
+                      ),
+                      // 排序按钮
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.sort, size: 20),
+                        tooltip: '排序',
+                        offset: const Offset(0, 48),
+                        onSelected: (value) {},
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(
+                            value: 'manual',
+                            child: Text('手动排序'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'name',
+                            child: Text('按名称'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'url',
+                            child: Text('按URL'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'time',
+                            child: Text('按更新时间'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'respond',
+                            child: Text('按响应时间'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // 书源列表
+          Expanded(
+            child: _buildSourceList(),
           ),
         ],
       ),
-      body: Column(
+    );
+  }
+
+  Widget _buildSearchBarWithActions() {
+    // 参考原版设计：搜索框和分组按钮在同一行
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+      child: Row(
         children: [
-          _buildSearchBar(),
-          Expanded(child: _buildSourceList()),
+          // 分组按钮
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.folder_outlined, size: 20),
+            tooltip: '分组',
+            offset: const Offset(0, 48), // 向下偏移，避免遮挡
+            onSelected: (value) {
+              if (value.startsWith('group:')) {
+                _searchController.text = value;
+                setState(() {
+                  _searchQuery = value;
+                });
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: '',
+                child: Text('全部'),
+              ),
+            ],
+          ),
+          // 搜索框
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: '搜索书源',
+                hintStyle: const TextStyle(fontSize: 14),
+                prefixIcon: const Icon(Icons.search, size: 18),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        padding: EdgeInsets.zero,
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() {
+                            _searchQuery = '';
+                          });
+                        },
+                      )
+                    : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                isDense: true,
+              ),
+              style: const TextStyle(fontSize: 14),
+              onChanged: (value) {
+                setState(() {
+                  _searchQuery = value;
+                });
+              },
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildSearchBar() {
+    // 参考原版设计：紧凑的搜索框（高度30dp）
     return Container(
-      padding: const EdgeInsets.all(12),
+      height: 40,
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
       child: TextField(
         controller: _searchController,
         decoration: InputDecoration(
           hintText: '搜索书源',
-          prefixIcon: const Icon(Icons.search),
+          hintStyle: const TextStyle(fontSize: 14),
+          prefixIcon: const Icon(Icons.search, size: 18),
           suffixIcon: _searchQuery.isNotEmpty
               ? IconButton(
-                  icon: const Icon(Icons.clear),
+                  icon: const Icon(Icons.clear, size: 18),
+                  padding: EdgeInsets.zero,
                   onPressed: () {
                     _searchController.clear();
                     setState(() {
@@ -70,10 +225,12 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
                 )
               : null,
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: BorderRadius.circular(20),
           ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+          isDense: true,
         ),
+        style: const TextStyle(fontSize: 14),
         onChanged: (value) {
           setState(() {
             _searchQuery = value;
@@ -151,72 +308,50 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
     final isExpanded = _expandedSources.contains(source.bookSourceUrl);
     final exploreKinds = _parseExploreKinds(source.exploreUrl);
 
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(8),
+      ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 标题行 - 参考原版简洁设计
           InkWell(
             onTap: () => _toggleExpand(source.bookSourceUrl),
             onLongPress: () => _showSourceOptions(source),
-            borderRadius: BorderRadius.circular(12),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(8),
+              ),
               child: Row(
                 children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Center(
-                      child: Text(
-                        source.bookSourceName.isNotEmpty
-                            ? source.bookSourceName[0]
-                            : '?',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).colorScheme.onPrimaryContainer,
-                        ),
+                  Expanded(
+                    child: Text(
+                      source.bookSourceName,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w500,
+                        fontSize: 15,
+                        color: Theme.of(context).colorScheme.onSurface,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          source.bookSourceName,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                          ),
-                        ),
-                        if (source.bookSourceGroup != null &&
-                            source.bookSourceGroup!.isNotEmpty)
-                          Text(
-                            source.bookSourceGroup!,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
+                  // 展开/折叠箭头
                   Icon(
                     isExpanded
-                        ? Icons.keyboard_arrow_up
-                        : Icons.keyboard_arrow_down,
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_right,
+                    size: 20,
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ],
               ),
             ),
           ),
+          // 展开后的分类标签
           if (isExpanded && exploreKinds.isNotEmpty)
             _buildExploreKinds(source, exploreKinds),
         ],
@@ -275,16 +410,28 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
     List<Map<String, String>> kinds,
   ) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
       child: Wrap(
         spacing: 8,
         runSpacing: 8,
         children: kinds.map((kind) {
-          return ActionChip(
-            label: Text(kind['title'] ?? ''),
-            onPressed: () {
-              _openExplore(source, kind);
-            },
+          return Material(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(16),
+            child: InkWell(
+              onTap: () => _openExplore(source, kind),
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                child: Text(
+                  kind['title'] ?? '',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+              ),
+            ),
           );
         }).toList(),
       ),

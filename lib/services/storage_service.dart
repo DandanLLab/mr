@@ -314,6 +314,11 @@ class StorageService {
     return _cacheBox!.get(key);
   }
 
+  Future<dynamic> getCachedDataAsync(String key) async {
+    _cacheBox = await _ensureBox('cache', _cacheBox);
+    return _cacheBox?.get(key);
+  }
+
   Future<void> clearCache() async {
     _cacheBox = await _ensureBox('cache', _cacheBox);
     await _cacheBox?.clear();

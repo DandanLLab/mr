@@ -3,7 +3,8 @@ import 'package:flutter/services.dart';
 
 /// 阅读器增强版控制面板
 /// 复刻 legado_flutter 的 ReaderControlOverlay 设计
-class ReaderControlOverlay extends StatelessWidget {
+/// 优化：拖拽进度条时禁止背景点击关闭
+class ReaderControlOverlay extends StatefulWidget {
   final String bookName;
   final String chapterTitle;
   final String sourceName;
@@ -32,6 +33,7 @@ class ReaderControlOverlay extends StatelessWidget {
   final VoidCallback onShowSettings;
   final ValueChanged<double> onSliderChanged;
   final ValueChanged<int> onSliderChangeEnd;
+  final VoidCallback? onSliderChangeStart;
 
   const ReaderControlOverlay({
     super.key,
@@ -63,7 +65,16 @@ class ReaderControlOverlay extends StatelessWidget {
     required this.onShowSettings,
     required this.onSliderChanged,
     required this.onSliderChangeEnd,
+    this.onSliderChangeStart,
   });
+
+  @override
+  State<ReaderControlOverlay> createState() => _ReaderControlOverlayState();
+}
+
+class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
+  bool _isSliderDragging = false;
+  double _dragValue = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -80,11 +91,11 @@ class ReaderControlOverlay extends StatelessWidget {
         Expanded(
           child: Stack(
             children: [
-              // 点击关闭
+              // 点击关闭（拖拽进度条时禁止关闭）
               Positioned.fill(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: onClose,
+                  onTap: _isSliderDragging ? null : widget.onClose,
                 ),
               ),
               // 悬浮按钮
@@ -127,10 +138,10 @@ class ReaderControlOverlay extends StatelessWidget {
   }
 
   Widget _buildHeaderRow1(BuildContext context, ColorScheme cs) {
-    final title = bookName.isNotEmpty ? bookName : (chapterTitle.isNotEmpty ? chapterTitle : '阅读');
+    final title = widget.bookName.isNotEmpty ? widget.bookName : (widget.chapterTitle.isNotEmpty ? widget.chapterTitle : '阅读');
     return Row(
       children: [
-        _buildIconBtn(Icons.arrow_back, cs, tooltip: '返回', onTap: onBack),
+        _buildIconBtn(Icons.arrow_back, cs, tooltip: '返回', onTap: widget.onBack),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
@@ -144,23 +155,26 @@ class ReaderControlOverlay extends StatelessWidget {
             ),
           ),
         ),
-        _buildIconBtn(Icons.swap_horiz, cs, tooltip: '换源', onTap: onChangeSource),
-        _buildIconBtn(Icons.refresh, cs, tooltip: '刷新', onTap: onRefresh),
-        _buildIconBtn(Icons.download, cs, tooltip: '缓存', onTap: onDownload),
+        _buildIconBtn(Icons.swap_horiz, cs, tooltip: '换源', onTap: widget.onChangeSource),
+        _buildIconBtn(Icons.refresh, cs, tooltip: '刷新', onTap: widget.onRefresh),
+        _buildIconBtn(Icons.download, cs, tooltip: '缓存', onTap: widget.onDownload),
         PopupMenuButton<String>(
           icon: Icon(Icons.more_vert, color: cs.onSurfaceVariant, size: 24),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          tooltip: '更多选项',
+          offset: const Offset(0, 48),
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
           onSelected: (v) {
-            if (v == 'bookmark') onToggleBookmark();
+            if (v == 'bookmark') widget.onToggleBookmark();
           },
           itemBuilder: (_) => [
             PopupMenuItem(
               value: 'bookmark',
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
                 children: [
-                  Icon(hasBookmark ? Icons.bookmark : Icons.bookmark_border, size: 20),
+                  Icon(widget.hasBookmark ? Icons.bookmark : Icons.bookmark_border, size: 20),
                   const SizedBox(width: 8),
                   const Text('书签'),
                 ],
@@ -173,7 +187,7 @@ class ReaderControlOverlay extends StatelessWidget {
   }
 
   Widget _buildHeaderRow2(ColorScheme cs) {
-    final label = sourceName.isNotEmpty ? sourceName : '书源';
+    final label = widget.sourceName.isNotEmpty ? widget.sourceName : '书源';
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
@@ -184,9 +198,9 @@ class ReaderControlOverlay extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (chapterTitle.isNotEmpty)
+                if (widget.chapterTitle.isNotEmpty)
                   Text(
-                    chapterTitle,
+                    widget.chapterTitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
@@ -221,10 +235,10 @@ class ReaderControlOverlay extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        _buildFab(Icons.search, cs, onTap: onStartSearch),
-        _buildFab(isAutoScroll ? Icons.pause : Icons.autorenew, cs, onTap: onToggleAutoScroll),
-        _buildFab(isNightMode ? Icons.wb_sunny : Icons.nightlight_round, cs, onTap: onToggleNightMode),
-        _buildFab(Icons.settings, cs, onTap: onShowSettings),
+        _buildFab(Icons.search, cs, onTap: widget.onStartSearch),
+        _buildFab(widget.isAutoScroll ? Icons.pause : Icons.autorenew, cs, onTap: widget.onToggleAutoScroll),
+        _buildFab(widget.isNightMode ? Icons.wb_sunny : Icons.nightlight_round, cs, onTap: widget.onToggleNightMode),
+        _buildFab(Icons.settings, cs, onTap: widget.onShowSettings),
       ],
     );
   }
@@ -247,38 +261,54 @@ class ReaderControlOverlay extends StatelessWidget {
   }
 
   Widget _buildProgressBar(BuildContext context, ColorScheme cs) {
-    final maxCh = (totalChapters - 1).toDouble();
+    final maxCh = (widget.totalChapters - 1).toDouble();
     final maxChClamped = maxCh < 0 ? 0.0 : maxCh;
-    final cur = (sliderValue >= 0 ? sliderValue : currentChapter.toDouble())
+    final cur = (widget.sliderValue >= 0 ? widget.sliderValue : widget.currentChapter.toDouble())
         .clamp(0.0, maxChClamped)
         .toDouble();
 
     return Row(
       children: [
-        _buildLabelBtn('上一章', cs, hasPrev ? onPrevChapter : null),
+        _buildLabelBtn('上一章', cs, widget.hasPrev ? widget.onPrevChapter : null),
         Expanded(
           child: SliderTheme(
             data: SliderThemeData(
               trackHeight: 4,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
               activeTrackColor: cs.primary,
               inactiveTrackColor: cs.surfaceContainerHighest,
               thumbColor: cs.primary,
+              overlayColor: cs.primary.withAlpha(0x20),
             ),
             child: Slider(
               value: cur,
               min: 0,
-              max: maxChClamped,
-              divisions: totalChapters > 1 ? totalChapters - 1 : 1,
-              onChanged: onSliderChanged,
+              max: maxChClamped > 0 ? maxChClamped : 1,
+              onChanged: (value) {
+                setState(() {
+                  _dragValue = value;
+                });
+                widget.onSliderChanged(value);
+              },
+              onChangeStart: (value) {
+                setState(() {
+                  _isSliderDragging = true;
+                  _dragValue = value;
+                });
+                widget.onSliderChangeStart?.call();
+              },
               onChangeEnd: (v) {
-                final idx = v.round().clamp(0, totalChapters - 1);
-                onSliderChangeEnd(idx);
+                setState(() {
+                  _isSliderDragging = false;
+                });
+                final idx = v.round().clamp(0, widget.totalChapters - 1);
+                widget.onSliderChangeEnd(idx);
               },
             ),
           ),
         ),
-        _buildLabelBtn('下一章', cs, hasNext ? onNextChapter : null),
+        _buildLabelBtn('下一章', cs, widget.hasNext ? widget.onNextChapter : null),
       ],
     );
   }
@@ -287,10 +317,10 @@ class ReaderControlOverlay extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceAround,
       children: [
-        _buildNavBtn(Icons.list, '目录', cs, onShowDirectory),
-        _buildNavBtn(Icons.headphones, '朗读', cs, onStartTts),
-        _buildNavBtn(Icons.format_size, '界面', cs, onToggleNightMode),
-        _buildNavBtn(Icons.settings, '设置', cs, onShowSettings),
+        _buildNavBtn(Icons.list, '目录', cs, widget.onShowDirectory),
+        _buildNavBtn(Icons.headphones, '朗读', cs, widget.onStartTts),
+        _buildNavBtn(Icons.format_size, '界面', cs, widget.onToggleNightMode),
+        _buildNavBtn(Icons.settings, '设置', cs, widget.onShowSettings),
       ],
     );
   }
@@ -321,7 +351,7 @@ class ReaderControlOverlay extends StatelessWidget {
         child: Text(
           label,
           style: TextStyle(
-            color: onTap != null ? cs.onSurfaceVariant : cs.onSurfaceVariant.withAlpha(0x40),
+            color: onTap != null ? cs.onSurface : cs.onSurface.withAlpha(0x40),
             fontSize: 12,
           ),
         ),

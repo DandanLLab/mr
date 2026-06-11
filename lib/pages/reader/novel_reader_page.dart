@@ -1,14 +1,21 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/book.dart';
 import '../../models/chapter.dart';
 import '../../models/highlight.dart';
 import '../../providers/reader_provider.dart';
 import '../../providers/bookshelf_provider.dart';
 import '../../services/book_data_provider.dart';
+import '../../services/chapter_cache_service.dart';
 import '../../services/local_book/local_book_service.dart';
+import '../../services/reader_bookmark_service.dart';
 import '../../services/storage_service.dart';
+import '../../services/read_record_service.dart';
 import '../../widgets/reader/reader_control_overlay.dart';
 import '../../widgets/reader/reader_settings_sheet.dart';
 import '../../widgets/reader/reader_tts_bar.dart';
@@ -40,6 +47,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   Book? _book;
   List<Chapter> _chapters = [];
   BookDataProvider? _dataProvider;
+  double _sliderValue = 0; // 滑动进度条的实时值
+  bool _isSliderDragging = false; // 进度条是否正在拖拽
 
   String? _prevContent;
   String? _nextContent;
@@ -75,11 +84,16 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   bool _showSettingsSheet = false;
   bool _hasBookmark = false;
   double _ttsSpeed = 1.0;
+  
+  // 阅读记录
+  int _readStartTime = 0;
 
   @override
   void initState() {
     super.initState();
     _currentChapterIndex = widget.chapterIndex;
+    _sliderValue = widget.chapterIndex.toDouble();
+    _readStartTime = ReadRecordService.instance.startReading();
 
     _menuAnimController = AnimationController(
       vsync: this,
@@ -103,6 +117,22 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     _pageController?.dispose();
     context.read<ReaderProvider>().disposeTts();
     super.dispose();
+  }
+
+  /// 保存阅读记录
+  void _saveReadRecord() {
+    if (_book != null && _readStartTime > 0) {
+      debugPrint('[NovelReader] Saving read record: ${_book!.name}');
+      ReadRecordService.instance.endReading(
+        bookUrl: _book!.bookUrl,
+        bookName: _book!.name,
+        bookAuthor: _book!.author,
+        coverUrl: _book!.coverUrl,
+        startTime: _readStartTime,
+        chapterIndex: _currentChapterIndex,
+        chapterTitle: _chapterTitle,
+      );
+    }
   }
 
   Future<void> _initTts() async {
@@ -244,6 +274,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
     setState(() {
       _isLoading = true;
+      _sliderValue = _currentChapterIndex.toDouble();
     });
 
     final chapter = _currentChapterIndex < _chapters.length
@@ -258,8 +289,20 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       return;
     }
 
-    final content = await _dataProvider!.getContent(_book!, chapter,
-        allChapters: _chapters);
+    // 优先从缓存读取
+    String? content;
+    if (_book!.originType == BookOriginType.online) {
+      content = await ChapterCacheService.instance.readChapterContent(_book!, chapter);
+    }
+
+    // 缓存没有则从网络获取
+    if (content == null || content.isEmpty) {
+      content = await _dataProvider!.getContent(_book!, chapter);
+      // 保存到缓存
+      if (content != null && content.isNotEmpty && _book!.originType == BookOriginType.online) {
+        unawaited(ChapterCacheService.instance.saveChapterContent(_book!, chapter, content));
+      }
+    }
 
     _preloadAdjacentChapters();
 
@@ -277,6 +320,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       _checkBookmark();
 
       _repaginate();
+
+      // 滚动模式下重置滚动位置到顶部
+      final provider = context.read<ReaderProvider>();
+      if (provider.pageMode == PageMode.scroll && _scrollController.hasClients) {
+        _scrollController.jumpTo(0);
+      }
 
       context.read<BookshelfProvider>().updateBookProgress(
             widget.bookUrl,
@@ -495,31 +544,38 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   Widget build(BuildContext context) {
     final provider = context.watch<ReaderProvider>();
 
-    return Scaffold(
-      backgroundColor: provider.backgroundColor,
-      body: GestureDetector(
-        onTapDown: _handleTap,
-        onLongPressStart: _onLongPressStart,
-        child: Stack(
-          children: [
-            _buildContent(provider),
-            // TTS 播放控制条
-            if (provider.isTtsPlaying)
-              ReaderTtsBar(
-                isSpeaking: provider.isTtsPlaying,
-                isPaused: provider.isTtsPaused,
-                paragraphIndex: provider.ttsParagraphIndex,
-                paragraphTotal: provider.ttsParagraphTotal,
-                fontSize: provider.fontSize,
-                textColor: provider.textColor,
-                backgroundColor: provider.backgroundColor,
-                onPrev: _prevTtsParagraph,
-                onNext: _nextTtsParagraph,
-                onPause: _pauseTts,
-                onResume: _resumeTts,
-                onStop: _stopTts,
-                onCycleSpeed: _cycleTtsSpeed,
-                onSpeedChanged: (speed) {
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          _saveReadRecord();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: provider.backgroundColor,
+        body: GestureDetector(
+          onTapDown: _handleTap,
+          onLongPressStart: _onLongPressStart,
+          child: Stack(
+            children: [
+              _buildContent(provider),
+              // TTS 播放控制条
+              if (provider.isTtsPlaying)
+                ReaderTtsBar(
+                  isSpeaking: provider.isTtsPlaying,
+                  isPaused: provider.isTtsPaused,
+                  paragraphIndex: provider.ttsParagraphIndex,
+                  paragraphTotal: provider.ttsParagraphTotal,
+                  fontSize: provider.fontSize,
+                  textColor: provider.textColor,
+                  backgroundColor: provider.backgroundColor,
+                  onPrev: _prevTtsParagraph,
+                  onNext: _nextTtsParagraph,
+                  onPause: _pauseTts,
+                  onResume: _resumeTts,
+                  onStop: _stopTts,
+                  onCycleSpeed: _cycleTtsSpeed,
+                  onSpeedChanged: (speed) {
                   _ttsSpeed = speed;
                   provider.setTtsRate(speed);
                 },
@@ -538,7 +594,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                 hasNext: _currentChapterIndex < _totalChapters - 1,
                 isAutoScroll: false,
                 isNightMode: provider.isNightMode,
-                sliderValue: _currentChapterIndex.toDouble(),
+                sliderValue: _sliderValue,
                 onBack: () => Navigator.pop(context),
                 onChangeSource: () {},
                 onRefresh: () {
@@ -571,10 +627,18 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                 onShowSettings: _showEnhancedSettings,
                 onSliderChanged: (value) {
                   setState(() {
-                    _currentChapterIndex = value.round();
+                    _sliderValue = value;
+                  });
+                },
+                onSliderChangeStart: () {
+                  setState(() {
+                    _isSliderDragging = true;
                   });
                 },
                 onSliderChangeEnd: (value) {
+                  setState(() {
+                    _isSliderDragging = false;
+                  });
                   _currentChapterIndex = value;
                   _loadChapterContent();
                 },
@@ -662,6 +726,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -1492,25 +1557,46 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   Widget _buildProgressSlider() {
+    final maxCh = (_totalChapters - 1).clamp(0, 999999).toDouble();
+    final displayChapter = (_sliderValue + 1).round();
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
           Text(
-            '${_currentChapterIndex + 1}',
+            '$displayChapter',
             style: const TextStyle(fontSize: 12),
           ),
           Expanded(
-            child: Slider(
-              value: _totalChapters > 0 ? _currentChapterIndex.toDouble() : 0,
-              min: 0,
-              max: (_totalChapters - 1).clamp(0, 999999).toDouble(),
-              onChanged: (value) {
-                setState(() {
-                  _currentChapterIndex = value.toInt();
-                });
-                _loadChapterContent();
-              },
+            child: SliderTheme(
+              data: SliderThemeData(
+                trackHeight: 4,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+              ),
+              child: Slider(
+                value: _totalChapters > 0 ? _sliderValue.clamp(0.0, maxCh) : 0,
+                min: 0,
+                max: maxCh > 0 ? maxCh : 1,
+                onChangeStart: (value) {
+                  setState(() {
+                    _isSliderDragging = true;
+                  });
+                },
+                onChanged: (value) {
+                  setState(() {
+                    _sliderValue = value;
+                  });
+                },
+                onChangeEnd: (value) {
+                  setState(() {
+                    _isSliderDragging = false;
+                  });
+                  _currentChapterIndex = value.round();
+                  _loadChapterContent();
+                },
+              ),
             ),
           ),
           Text(
@@ -1659,70 +1745,20 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (context) {
-        return DraggableScrollableSheet(
-          initialChildSize: 0.7,
-          minChildSize: 0.3,
-          maxChildSize: 0.9,
-          expand: false,
-          builder: (context, scrollController) {
-            return SafeArea(
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      children: [
-                        Text(
-                          '目录',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const Spacer(),
-                        IconButton(
-                          icon: const Icon(Icons.close),
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Divider(),
-                  Expanded(
-                    child: ListView.builder(
-                      controller: scrollController,
-                      itemCount: _totalChapters,
-                      itemBuilder: (context, index) {
-                        final chapter =
-                            index < _chapters.length ? _chapters[index] : null;
-                        return ListTile(
-                          title: Text(
-                            chapter?.title ?? '第${index + 1}章',
-                            style: TextStyle(
-                              color: index == _currentChapterIndex
-                                  ? Theme.of(context).colorScheme.primary
-                                  : null,
-                              fontWeight: index == _currentChapterIndex
-                                  ? FontWeight.bold
-                                  : null,
-                            ),
-                          ),
-                          dense: true,
-                          onTap: () {
-                            setState(() {
-                              _currentChapterIndex = index;
-                            });
-                            _loadChapterContent();
-                            Navigator.pop(context);
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      showDragHandle: true,
+      builder: (context) => _NovelChapterListPanel(
+        book: _book,
+        chapters: _chapters,
+        totalChapters: _totalChapters,
+        currentChapterIndex: _currentChapterIndex,
+        foregroundColor: Theme.of(context).colorScheme.onSurface,
+        onChapterSelected: (index) {
+          setState(() => _currentChapterIndex = index);
+          _loadChapterContent();
+          Navigator.pop(context);
+        },
+      ),
     );
   }
 
@@ -2788,4 +2824,464 @@ class _HighlightInfo {
     required this.style,
     this.note,
   });
+}
+
+class _NovelChapterListPanel extends StatefulWidget {
+  final Book? book;
+  final List<Chapter> chapters;
+  final int totalChapters;
+  final int currentChapterIndex;
+  final Color foregroundColor;
+  final Function(int) onChapterSelected;
+
+  const _NovelChapterListPanel({
+    this.book,
+    required this.chapters,
+    required this.totalChapters,
+    required this.currentChapterIndex,
+    required this.foregroundColor,
+    required this.onChapterSelected,
+  });
+
+  @override
+  State<_NovelChapterListPanel> createState() => _NovelChapterListPanelState();
+}
+
+class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
+  int _currentTab = 0;
+  bool _showSearch = false;
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  Set<String> _cachedFiles = {};
+  List<Bookmark> _bookmarks = [];
+  bool _isReversed = false;
+  bool _showWordCount = false;
+  bool _useReplace = false;
+  bool _foldVolume = true;
+  bool _searchChapterName = true;
+  bool _searchBookText = true;
+  bool _searchContent = true;
+  final Set<int> _expandedVolumes = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCacheInfo();
+    _loadBookmarks();
+    _loadPrefs();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _showWordCount = prefs.getBool('tocShowWordCount') ?? false;
+      _useReplace = prefs.getBool('tocUseReplace') ?? false;
+      _foldVolume = prefs.getBool('tocFoldVolume') ?? true;
+    });
+  }
+
+  Future<void> _saveBool(String key, bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(key, value);
+  }
+
+  Future<void> _loadCacheInfo() async {
+    if (widget.book == null || widget.book!.originType != BookOriginType.online) return;
+    final files = await ChapterCacheService.instance.getChapterCacheFiles(widget.book!);
+    if (mounted) setState(() => _cachedFiles = files);
+  }
+
+  Future<void> _loadBookmarks() async {
+    if (widget.book == null) return;
+    final bookmarks = await ReaderBookmarkService().list(widget.book!.bookUrl);
+    if (mounted) setState(() => _bookmarks = bookmarks);
+  }
+
+  List<Chapter> get _filteredChapters {
+    var list = widget.chapters;
+    if (_isReversed) list = list.reversed.toList();
+    if (_searchQuery.isEmpty) return list;
+    final query = _searchQuery.toLowerCase();
+    return list.where((c) => c.title.toLowerCase().contains(query)).toList();
+  }
+
+  List<Chapter> _buildDisplayChapters(List<Chapter> source) {
+    if (!_foldVolume) return source;
+    final result = <Chapter>[];
+    var i = 0;
+    while (i < source.length) {
+      final ch = source[i];
+      if (ch.isVolume) {
+        result.add(ch);
+        final isExpanded = _expandedVolumes.contains(ch.index);
+        if (!isExpanded) {
+          i++;
+          while (i < source.length && !source[i].isVolume) {
+            i++;
+          }
+          continue;
+        }
+      }
+      result.add(ch);
+      i++;
+    }
+    return result;
+  }
+
+  List<Bookmark> get _filteredBookmarks {
+    if (_searchQuery.isEmpty) return _bookmarks;
+    final query = _searchQuery.toLowerCase();
+    return _bookmarks.where((b) {
+      bool hit = false;
+      if (_searchChapterName && b.chapterTitle.toLowerCase().contains(query)) hit = true;
+      if (_searchBookText && b.content.toLowerCase().contains(query)) hit = true;
+      if (_searchContent && (b.note?.toLowerCase().contains(query) ?? false)) hit = true;
+      return hit;
+    }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = widget.foregroundColor;
+    final isOnline = widget.book?.originType == BookOriginType.online;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              _buildTab(0, '目录 (${widget.chapters.length})', fg),
+              const SizedBox(width: 16),
+              _buildTab(1, '书签 (${_bookmarks.length})', fg),
+              const Spacer(),
+              IconButton(
+                icon: Icon(_showSearch ? Icons.close : Icons.search, color: fg),
+                onPressed: () => setState(() {
+                  _showSearch = !_showSearch;
+                  if (!_showSearch) {
+                    _searchController.clear();
+                    _searchQuery = '';
+                  }
+                }),
+              ),
+              PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert, color: fg),
+                tooltip: '更多',
+                offset: const Offset(0, 48),
+                onSelected: _handleMenuAction,
+                itemBuilder: _currentTab == 0
+                    ? (context) => [
+                          _menuItem('reverse', '反转目录', _isReversed, fg),
+                          _menuItem('use_replace', '使用替换', _useReplace, fg),
+                          _menuItem('word_count', '加载字数', _showWordCount, fg),
+                          _menuItem('fold_volume', '卷名折叠', _foldVolume, fg),
+                        ]
+                    : (context) => [
+                          const PopupMenuItem(
+                            value: 'export',
+                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: Text('导出'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'export_md',
+                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: Text('导出(MD)'),
+                          ),
+                          const PopupMenuDivider(),
+                          _menuItem('bm_search_chapter', '搜索章节名', _searchChapterName, fg),
+                          _menuItem('bm_search_text', '搜索书文', _searchBookText, fg),
+                          _menuItem('bm_search_note', '搜索备注', _searchContent, fg),
+                        ],
+              ),
+            ],
+          ),
+        ),
+        if (_showSearch)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              controller: _searchController,
+              style: TextStyle(color: fg),
+              decoration: InputDecoration(
+                hintText: '搜索...',
+                hintStyle: TextStyle(color: fg.withValues(alpha: 0.5)),
+                border: InputBorder.none,
+              ),
+              onChanged: (v) => setState(() => _searchQuery = v),
+            ),
+          ),
+        Divider(height: 1, color: fg.withValues(alpha: 0.12)),
+        SizedBox(
+          height: MediaQuery.of(context).size.height * 0.5,
+          child: _currentTab == 0
+              ? _buildChapterList(fg, isOnline)
+              : _buildBookmarkList(fg),
+        ),
+      ],
+    );
+  }
+
+  PopupMenuItem<String> _menuItem(String value, String label, bool checked, Color fg) {
+    return PopupMenuItem(
+      value: value,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Expanded(child: Text(label)),
+          if (checked) Icon(Icons.check, size: 20, color: fg),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTab(int index, String text, Color fg) {
+    final selected = _currentTab == index;
+    return GestureDetector(
+      onTap: () => setState(() => _currentTab = index),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            text,
+            style: TextStyle(
+              color: selected ? fg : fg.withValues(alpha: 0.5),
+              fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
+          if (selected)
+            Container(
+              margin: const EdgeInsets.only(top: 4),
+              width: 24,
+              height: 2,
+              color: fg,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChapterList(Color fg, bool isOnline) {
+    final display = _buildDisplayChapters(_filteredChapters);
+    return ListView.builder(
+      itemCount: display.length,
+      itemBuilder: (context, index) {
+        final chapter = display[index];
+        if (chapter.isVolume) {
+          final isExpanded = _expandedVolumes.contains(chapter.index);
+          return InkWell(
+            onTap: () => setState(() {
+              if (isExpanded) {
+                _expandedVolumes.remove(chapter.index);
+              } else {
+                _expandedVolumes.add(chapter.index);
+              }
+            }),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              color: fg.withValues(alpha: 0.06),
+              child: Row(
+                children: [
+                  Icon(isExpanded ? Icons.keyboard_arrow_down : Icons.chevron_right,
+                      color: fg, size: 20),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(chapter.title,
+                        style: TextStyle(color: fg, fontWeight: FontWeight.bold),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        final isSelected = chapter.index == widget.currentChapterIndex;
+        final fileName = ChapterCacheService.instance.getChapterFileName(chapter);
+        final isCached = !isOnline || _cachedFiles.contains(fileName);
+
+        return ListTile(
+          selected: isSelected,
+          selectedTileColor: fg.withValues(alpha: 0.1),
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  chapter.title,
+                  style: TextStyle(
+                    color: isSelected ? fg : fg.withValues(alpha: 0.8),
+                    fontWeight: isSelected ? FontWeight.bold : null,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (_showWordCount && chapter.wordCount != null && chapter.wordCount! > 0)
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Text(
+                    '${(chapter.wordCount! / 10000).toStringAsFixed(1)}万',
+                    style: TextStyle(color: fg.withValues(alpha: 0.5), fontSize: 12),
+                  ),
+                ),
+              if (chapter.isVip && !chapter.isPay)
+                Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Icon(Icons.lock, size: 16, color: Colors.red.shade400),
+                ),
+              if (!isCached)
+                Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Icon(Icons.cloud_outlined, size: 16, color: fg.withValues(alpha: 0.5)),
+                ),
+            ],
+          ),
+          trailing: isSelected ? Icon(Icons.check, color: fg) : null,
+          onTap: () => widget.onChapterSelected(chapter.index),
+        );
+      },
+    );
+  }
+
+  Widget _buildBookmarkList(Color fg) {
+    if (_bookmarks.isEmpty) {
+      return Center(child: Text('暂无书签', style: TextStyle(color: fg.withValues(alpha: 0.5))));
+    }
+    final list = _searchQuery.isEmpty ? _bookmarks : _filteredBookmarks;
+    if (list.isEmpty) {
+      return Center(child: Text('没有匹配的书签', style: TextStyle(color: fg.withValues(alpha: 0.5))));
+    }
+    return ListView.builder(
+      itemCount: list.length,
+      itemBuilder: (context, index) {
+        final bookmark = list[index];
+        return ListTile(
+          title: Text(bookmark.chapterTitle, style: TextStyle(color: fg)),
+          subtitle: Text(
+            bookmark.note?.isNotEmpty == true ? bookmark.note! : bookmark.content,
+            style: TextStyle(color: fg.withValues(alpha: 0.6)),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: Text(
+            _formatTime(bookmark.createdAt),
+            style: TextStyle(color: fg.withValues(alpha: 0.5), fontSize: 12),
+          ),
+          onTap: () {
+            Navigator.pop(context);
+            widget.onChapterSelected(bookmark.chapterIndex);
+          },
+          onLongPress: () => _deleteBookmark(bookmark),
+        );
+      },
+    );
+  }
+
+  void _handleMenuAction(String action) {
+    setState(() {
+      switch (action) {
+        case 'reverse':
+          _isReversed = !_isReversed;
+          break;
+        case 'use_replace':
+          _useReplace = !_useReplace;
+          _saveBool('tocUseReplace', _useReplace);
+          break;
+        case 'word_count':
+          _showWordCount = !_showWordCount;
+          _saveBool('tocShowWordCount', _showWordCount);
+          break;
+        case 'fold_volume':
+          _foldVolume = !_foldVolume;
+          _saveBool('tocFoldVolume', _foldVolume);
+          break;
+        case 'bm_search_chapter':
+          _searchChapterName = !_searchChapterName;
+          break;
+        case 'bm_search_text':
+          _searchBookText = !_searchBookText;
+          break;
+        case 'bm_search_note':
+          _searchContent = !_searchContent;
+          break;
+        case 'export':
+          _exportBookmarks(false);
+          break;
+        case 'export_md':
+          _exportBookmarks(true);
+          break;
+      }
+    });
+  }
+
+  Future<void> _exportBookmarks(bool asMd) async {
+    if (_bookmarks.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('暂无书签可导出')),
+        );
+      }
+      return;
+    }
+
+    String text;
+    if (asMd) {
+      final buffer = StringBuffer();
+      for (final b in _bookmarks) {
+        buffer.writeln('## ${b.chapterTitle}');
+        if (b.note?.isNotEmpty == true) buffer.writeln('> ${b.note}');
+        buffer.writeln(b.content);
+        buffer.writeln();
+      }
+      text = buffer.toString();
+    } else {
+      final data = _bookmarks.map((b) => b.toJson()).toList();
+      text = const JsonEncoder.withIndent('  ').convert(data);
+    }
+
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(asMd ? '书签已导出为MD' : '书签已复制到剪贴板')),
+      );
+    }
+  }
+
+  void _deleteBookmark(Bookmark bookmark) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除书签'),
+        content: const Text('确定要删除这个书签吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await ReaderBookmarkService().remove(
+                bookUrl: widget.book!.bookUrl,
+                bookmarkId: bookmark.id,
+              );
+              _loadBookmarks();
+            },
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatTime(DateTime time) {
+    return '${time.month}/${time.day} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+  }
 }

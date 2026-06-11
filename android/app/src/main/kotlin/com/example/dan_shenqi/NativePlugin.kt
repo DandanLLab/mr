@@ -1,5 +1,6 @@
 package com.example.dan_shenqi
 
+import android.app.Activity
 import android.content.Context
 import android.os.Build
 import android.util.Base64
@@ -113,6 +114,8 @@ class NativePlugin(private val context: Context) {
             "getData" -> getData(call, result)
             "deleteData" -> deleteData(call, result)
             "getDeviceInfo" -> getDeviceInfo(call, result)
+            "getScreenBrightness" -> getScreenBrightness(result)
+            "setScreenBrightness" -> setScreenBrightness(call, result)
             "executeWebViewJs" -> executeWebViewJs(call, result)
             // 内置 Node.js 运行时
             "nodeSetup" -> nodeSetup(call, result)
@@ -124,6 +127,36 @@ class NativePlugin(private val context: Context) {
     }
 
     // ===== OkHttp 方法 =====
+
+    private fun getScreenBrightness(result: MethodChannel.Result) {
+        val activity = context as? Activity
+        if (activity == null) {
+            result.error("NO_ACTIVITY", "Activity is unavailable", null)
+            return
+        }
+        activity.runOnUiThread {
+            result.success(activity.window.attributes.screenBrightness.toDouble())
+        }
+    }
+
+    private fun setScreenBrightness(call: MethodCall, result: MethodChannel.Result) {
+        val activity = context as? Activity
+        if (activity == null) {
+            result.error("NO_ACTIVITY", "Activity is unavailable", null)
+            return
+        }
+        val value = call.argument<Number>("value")?.toFloat()
+        if (value == null) {
+            result.error("INVALID_VALUE", "value is required", null)
+            return
+        }
+        activity.runOnUiThread {
+            val attributes = activity.window.attributes
+            attributes.screenBrightness = value.coerceIn(-1f, 1f)
+            activity.window.attributes = attributes
+            result.success(true)
+        }
+    }
 
     private fun httpGet(call: MethodCall, result: MethodChannel.Result) {
         val url = call.argument<String>("url")

@@ -1323,6 +1323,8 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
         // 更多按钮
         PopupMenuButton<String>(
           icon: const Icon(Icons.more_vert),
+          tooltip: '更多选项',
+          offset: const Offset(0, 48),
           onSelected: (value) {
             switch (value) {
               case 'add':
@@ -1351,54 +1353,45 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
           itemBuilder: (context) => [
             const PopupMenuItem(
               value: 'add',
-              child: ListTile(
-                leading: Icon(Icons.add),
-                title: Text('新建书源'),
-              ),
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.add, size: 18), SizedBox(width: 12), Text('新建书源')]),
             ),
             const PopupMenuItem(
               value: 'import_local',
-              child: ListTile(
-                leading: Icon(Icons.file_upload),
-                title: Text('本地导入'),
-              ),
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.file_upload, size: 18), SizedBox(width: 12), Text('本地导入')]),
             ),
             const PopupMenuItem(
               value: 'import_url',
-              child: ListTile(
-                leading: Icon(Icons.cloud_download),
-                title: Text('网络导入'),
-              ),
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.cloud_download, size: 18), SizedBox(width: 12), Text('网络导入')]),
             ),
             const PopupMenuItem(
               value: 'export',
-              child: ListTile(
-                leading: Icon(Icons.file_download),
-                title: Text('导出书源'),
-              ),
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.file_download, size: 18), SizedBox(width: 12), Text('导出书源')]),
             ),
-            const PopupMenuDivider(),
             const PopupMenuItem(
               value: 'selection',
-              child: ListTile(
-                leading: Icon(Icons.select_all),
-                title: Text('批量选择'),
-              ),
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.select_all, size: 18), SizedBox(width: 12), Text('批量选择')]),
             ),
             const PopupMenuItem(
               value: 'clear',
-              child: ListTile(
-                leading: Icon(Icons.delete_sweep),
-                title: Text('清空书源'),
-              ),
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.delete_sweep, size: 18), SizedBox(width: 12), Text('清空书源')]),
             ),
-            const PopupMenuDivider(),
             const PopupMenuItem(
               value: 'help',
-              child: ListTile(
-                leading: Icon(Icons.help_outline),
-                title: Text('帮助'),
-              ),
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.help_outline, size: 18), SizedBox(width: 12), Text('帮助')]),
             ),
           ],
         ),
@@ -1425,6 +1418,8 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
           tooltip: '反选',
         ),
         PopupMenuButton<String>(
+          tooltip: '更多选项',
+          offset: const Offset(0, 48),
           onSelected: (value) {
             switch (value) {
               case 'enable':
@@ -1444,32 +1439,27 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
           itemBuilder: (context) => [
             const PopupMenuItem(
               value: 'enable',
-              child: ListTile(
-                leading: Icon(Icons.check_circle),
-                title: Text('启用所选'),
-              ),
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.check_circle, size: 18), SizedBox(width: 12), Text('启用所选')]),
             ),
             const PopupMenuItem(
               value: 'disable',
-              child: ListTile(
-                leading: Icon(Icons.cancel),
-                title: Text('禁用所选'),
-              ),
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.cancel, size: 18), SizedBox(width: 12), Text('禁用所选')]),
             ),
             const PopupMenuItem(
               value: 'export',
-              child: ListTile(
-                leading: Icon(Icons.file_download),
-                title: Text('导出所选'),
-              ),
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.file_download, size: 18), SizedBox(width: 12), Text('导出所选')]),
             ),
-            const PopupMenuDivider(),
             const PopupMenuItem(
               value: 'delete',
-              child: ListTile(
-                leading: Icon(Icons.delete),
-                title: Text('删除所选'),
-              ),
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              height: 48,
+              child: Row(children: [Icon(Icons.delete, size: 18), SizedBox(width: 12), Text('删除所选')]),
             ),
           ],
         ),

@@ -9,11 +9,36 @@ class NativeChannel {
 
   NativeChannel._();
 
-  static const MethodChannel _channel = MethodChannel('com.example.dan_shenqi/native');
+  static const MethodChannel _channel = MethodChannel(
+    'com.example.dan_shenqi/native',
+  );
+
+  Future<double> getScreenBrightness() async {
+    try {
+      return await _channel.invokeMethod<double>('getScreenBrightness') ?? -1;
+    } on PlatformException {
+      return -1;
+    }
+  }
+
+  Future<bool> setScreenBrightness(double value) async {
+    try {
+      return await _channel.invokeMethod<bool>('setScreenBrightness', {
+            'value': value.clamp(-1.0, 1.0),
+          }) ??
+          false;
+    } on PlatformException {
+      return false;
+    }
+  }
 
   /// OkHttp: 高性能 HTTP 请求
   /// 支持拦截器、缓存、WebSocket、HTTP/2、连接池复用
-  Future<String?> httpGet(String url, {Map<String, String>? headers, int timeoutMs = 10000}) async {
+  Future<String?> httpGet(
+    String url, {
+    Map<String, String>? headers,
+    int timeoutMs = 10000,
+  }) async {
     try {
       final result = await _channel.invokeMethod<String>('httpGet', {
         'url': url,
@@ -27,7 +52,12 @@ class NativeChannel {
   }
 
   /// OkHttp: POST 请求
-  Future<String?> httpPost(String url, {String? body, Map<String, String>? headers, int timeoutMs = 10000}) async {
+  Future<String?> httpPost(
+    String url, {
+    String? body,
+    Map<String, String>? headers,
+    int timeoutMs = 10000,
+  }) async {
     try {
       final result = await _channel.invokeMethod<String>('httpPost', {
         'url': url,
@@ -69,7 +99,11 @@ class NativeChannel {
   }
 
   /// Jsoup: 提取元素属性
-  Future<String?> jsoupGetAttr(String html, String cssSelector, String attr) async {
+  Future<String?> jsoupGetAttr(
+    String html,
+    String cssSelector,
+    String attr,
+  ) async {
     try {
       final result = await _channel.invokeMethod<String>('jsoupGetAttr', {
         'html': html,
@@ -95,7 +129,11 @@ class NativeChannel {
   }
 
   /// OkHttp: 带缓存的请求（适用于书源内容缓存）
-  Future<String?> httpGetWithCache(String url, {Map<String, String>? headers, int cacheMaxAge = 3600}) async {
+  Future<String?> httpGetWithCache(
+    String url, {
+    Map<String, String>? headers,
+    int cacheMaxAge = 3600,
+  }) async {
     try {
       final result = await _channel.invokeMethod<String>('httpGetWithCache', {
         'url': url,
@@ -111,7 +149,11 @@ class NativeChannel {
   // ===== 新增桥接方法 =====
 
   /// Jsoup: 从 URL 直接解析 HTML
-  Future<String?> jsoupParseUrl(String url, {Map<String, String>? headers, String? cssSelector}) async {
+  Future<String?> jsoupParseUrl(
+    String url, {
+    Map<String, String>? headers,
+    String? cssSelector,
+  }) async {
     try {
       final result = await _channel.invokeMethod<String>('jsoupParseUrl', {
         'url': url,
@@ -138,7 +180,11 @@ class NativeChannel {
   }
 
   /// OkHttp: 下载文件
-  Future<String?> httpDownload(String url, String savePath, {Map<String, String>? headers}) async {
+  Future<String?> httpDownload(
+    String url,
+    String savePath, {
+    Map<String, String>? headers,
+  }) async {
     try {
       final result = await _channel.invokeMethod<String>('httpDownload', {
         'url': url,
@@ -182,9 +228,7 @@ class NativeChannel {
   /// MD5 哈希
   Future<String?> md5(String data) async {
     try {
-      final result = await _channel.invokeMethod<String>('md5', {
-        'data': data,
-      });
+      final result = await _channel.invokeMethod<String>('md5', {'data': data});
       return result;
     } on PlatformException {
       return null;
@@ -216,7 +260,11 @@ class NativeChannel {
   }
 
   /// 执行 Java 规则
-  Future<String?> evaluateJavaRule(String javaCode, {String? result, Map<String, dynamic>? env}) async {
+  Future<String?> evaluateJavaRule(
+    String javaCode, {
+    String? result,
+    Map<String, dynamic>? env,
+  }) async {
     try {
       final res = await _channel.invokeMethod<String>('evaluateJavaRule', {
         'code': javaCode,
@@ -230,7 +278,10 @@ class NativeChannel {
   }
 
   /// 执行通用脚本（通过 Rhino 引擎）
-  Future<String?> executeScript(String script, {Map<String, dynamic>? bindings}) async {
+  Future<String?> executeScript(
+    String script, {
+    Map<String, dynamic>? bindings,
+  }) async {
     try {
       final res = await _channel.invokeMethod<String>('executeScript', {
         'script': script,
@@ -271,9 +322,7 @@ class NativeChannel {
   /// 删除键值对
   Future<bool> deleteData(String key) async {
     try {
-      await _channel.invokeMethod<void>('deleteData', {
-        'key': key,
-      });
+      await _channel.invokeMethod<void>('deleteData', {'key': key});
       return true;
     } on PlatformException {
       return false;

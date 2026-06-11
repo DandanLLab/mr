@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../models/book_source.dart';
 import '../../models/rules/search_rule.dart';
 import '../../models/rules/explore_rule.dart';
@@ -9,6 +11,7 @@ import '../../models/rules/book_info_rule.dart';
 import '../../models/rules/toc_rule.dart';
 import '../../models/rules/content_rule.dart';
 import '../../services/storage_service.dart';
+import '../../services/cookie_service.dart';
 import '../../routes/app_routes.dart';
 
 /// 编辑字段实体
@@ -66,6 +69,9 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
   // 是否有修改
   bool _hasChanges = false;
 
+  // 缓存 TextEditingController
+  final Map<String, TextEditingController> _controllers = {};
+
   @override
   void initState() {
     super.initState();
@@ -76,6 +82,9 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
   @override
   void dispose() {
     _tabController.dispose();
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -349,6 +358,7 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
               setState(() {
                 _source = newSource;
                 _initEntities();
+                _updateAllControllers();
                 _hasChanges = true;
               });
               return true;
@@ -396,6 +406,7 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                 setState(() {
                   _source = newSource;
                   _initEntities();
+                  _updateAllControllers();
                   _hasChanges = true;
                 });
                 Navigator.pop(context);
@@ -430,6 +441,7 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
         setState(() {
           _source = newSource;
           _initEntities();
+          _updateAllControllers();
           _hasChanges = true;
         });
         ScaffoldMessenger.of(context).showSnackBar(
@@ -504,10 +516,90 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
     );
   }
 
-  void _clearCookie() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Cookie已清除')),
+  /// 二维码导入书源
+  void _importFromQr() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => _QrImportPage(
+          onScanned: (String jsonStr) {
+            try {
+              final json = jsonDecode(jsonStr) as Map<String, dynamic>;
+              final newSource = BookSource.fromJson(json);
+              setState(() {
+                _source = newSource;
+                _initEntities();
+                _updateAllControllers();
+                _hasChanges = true;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('导入成功')),
+              );
+              return true;
+            } catch (e) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('导入失败: $e')),
+              );
+              return false;
+            }
+          },
+        ),
+      ),
     );
+  }
+
+  /// 登录书源
+  void _loginWithSource() {
+    final source = _buildSourceFromEntities();
+    final loginUrl = source.loginUrl;
+
+    if (loginUrl == null || loginUrl.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('该书源未配置登录地址')),
+      );
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => _SourceLoginPage(
+          source: source,
+          onLoginSuccess: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('登录成功')),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _clearCookie() async {
+    final source = _buildSourceFromEntities();
+    final url = source.bookSourceUrl;
+
+    if (url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('书源地址为空，无法清除Cookie')),
+      );
+      return;
+    }
+
+    try {
+      await CookieService.instance.removeCookie(url);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cookie已清除')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('清除Cookie失败: $e')),
+        );
+      }
+    }
   }
 
   void _shareSource() {
@@ -583,7 +675,7 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
       onWillPop: _onWillPop,
       child: Scaffold(
         appBar: AppBar(
-          title: Text(_originalSource?.bookSourceName ?? '新建书源'),
+          title: const Text('编辑书源', overflow: TextOverflow.visible, style: TextStyle(fontWeight: FontWeight.w500)),
           actions: [
             // 内容编辑
             IconButton(
@@ -605,9 +697,12 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
             ),
             // 更多菜单
             PopupMenuButton<String>(
+              tooltip: '更多选项',
+              offset: const Offset(0, 48),
               onSelected: (value) {
                 switch (value) {
                   case 'login':
+                    _loginWithSource();
                     break;
                   case 'search':
                     _searchWithSource();
@@ -633,6 +728,7 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                     _showSourceVariable();
                     break;
                   case 'qr_import':
+                    _importFromQr();
                     break;
                   case 'qr_share':
                     _shareSource();
@@ -652,97 +748,81 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                 if (loginUrl.isNotEmpty)
                   const PopupMenuItem(
                     value: 'login',
-                    child: ListTile(
-                      leading: Icon(Icons.login),
-                      title: Text('登录'),
-                    ),
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    height: 48,
+                    child: Row(children: [Icon(Icons.login, size: 18), SizedBox(width: 12), Text('登录')]),
                   ),
                 const PopupMenuItem(
                   value: 'search',
-                  child: ListTile(
-                    leading: Icon(Icons.search),
-                    title: Text('搜索'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.search, size: 18), SizedBox(width: 12), Text('搜索')]),
                 ),
                 const PopupMenuItem(
                   value: 'clear_cookie',
-                  child: ListTile(
-                    leading: Icon(Icons.cookie),
-                    title: Text('Cookie'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.cookie, size: 18), SizedBox(width: 12), Text('清除Cookie')]),
                 ),
                 const PopupMenuItem(
                   value: 'json',
-                  child: ListTile(
-                    leading: Icon(Icons.code),
-                    title: Text('JSON编辑'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.code, size: 18), SizedBox(width: 12), Text('JSON编辑')]),
                 ),
                 PopupMenuItem(
                   value: 'auto_complete',
-                  child: ListTile(
-                    leading: Icon(_autoComplete ? Icons.check_box : Icons.check_box_outline_blank),
-                    title: const Text('自动补全'),
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(_autoComplete ? Icons.check_box : Icons.check_box_outline_blank, size: 18), const SizedBox(width: 12), const Text('自动补全')]),
                 ),
-                const PopupMenuDivider(),
                 const PopupMenuItem(
                   value: 'copy',
-                  child: ListTile(
-                    leading: Icon(Icons.copy),
-                    title: Text('复制书源'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.copy, size: 18), SizedBox(width: 12), Text('拷贝源')]),
                 ),
                 const PopupMenuItem(
                   value: 'paste',
-                  child: ListTile(
-                    leading: Icon(Icons.paste),
-                    title: Text('粘贴书源'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.paste, size: 18), SizedBox(width: 12), Text('粘贴源')]),
                 ),
                 const PopupMenuItem(
                   value: 'variable',
-                  child: ListTile(
-                    leading: Icon(Icons.settings),
-                    title: Text('设置源变量'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.settings, size: 18), SizedBox(width: 12), Text('设置源变量')]),
                 ),
-                const PopupMenuDivider(),
                 const PopupMenuItem(
                   value: 'qr_import',
-                  child: ListTile(
-                    leading: Icon(Icons.qr_code_scanner),
-                    title: Text('二维码导入'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.qr_code_scanner, size: 18), SizedBox(width: 12), Text('二维码导入')]),
                 ),
                 const PopupMenuItem(
                   value: 'qr_share',
-                  child: ListTile(
-                    leading: Icon(Icons.qr_code),
-                    title: Text('二维码分享'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.qr_code, size: 18), SizedBox(width: 12), Text('二维码分享')]),
                 ),
                 const PopupMenuItem(
                   value: 'share',
-                  child: ListTile(
-                    leading: Icon(Icons.share),
-                    title: Text('字符串分享'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.share, size: 18), SizedBox(width: 12), Text('字符串分享')]),
                 ),
-                const PopupMenuDivider(),
                 const PopupMenuItem(
                   value: 'log',
-                  child: ListTile(
-                    leading: Icon(Icons.article),
-                    title: Text('日志'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.article, size: 18), SizedBox(width: 12), Text('日志')]),
                 ),
                 const PopupMenuItem(
                   value: 'help',
-                  child: ListTile(
-                    leading: Icon(Icons.help),
-                    title: Text('帮助'),
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.help, size: 18), SizedBox(width: 12), Text('帮助')]),
                 ),
               ],
             ),
@@ -757,7 +837,9 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
             // Tab标签栏
             TabBar(
               controller: _tabController,
-              isScrollable: true,
+              isScrollable: false,
+              labelPadding: EdgeInsets.zero,
+              labelStyle: const TextStyle(fontSize: 13),
               tabs: const [
                 Tab(text: '基本'),
                 Tab(text: '搜索'),
@@ -772,12 +854,12 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
               child: TabBarView(
                 controller: _tabController,
                 children: [
-                  _buildEditList(_baseEntities),
-                  _buildEditList(_searchEntities),
-                  _buildEditList(_exploreEntities),
-                  _buildEditList(_infoEntities),
-                  _buildEditList(_tocEntities),
-                  _buildEditList(_contentEntities),
+                  _buildEditList(_baseEntities, 'base'),
+                  _buildEditList(_searchEntities, 'search'),
+                  _buildEditList(_exploreEntities, 'explore'),
+                  _buildEditList(_infoEntities, 'info'),
+                  _buildEditList(_tocEntities, 'toc'),
+                  _buildEditList(_contentEntities, 'content'),
                 ],
               ),
             ),
@@ -789,32 +871,42 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
 
   /// 第一行选项：类型、启用、发现、自动保存Cookie
   Widget _buildOptionsRow1() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    return Padding(
+      padding: const EdgeInsets.only(left: 8),
       child: Row(
         children: [
-          const Text('类型'),
-          const SizedBox(width: 4),
-          DropdownButton<int>(
-            value: _sourceType,
-            isDense: true,
-            underline: const SizedBox(),
-            items: const [
-              DropdownMenuItem(value: 0, child: Text('文字')),
-              DropdownMenuItem(value: 1, child: Text('音频')),
-              DropdownMenuItem(value: 2, child: Text('图片')),
-              DropdownMenuItem(value: 3, child: Text('文件')),
-              DropdownMenuItem(value: 4, child: Text('视频')),
-            ],
-            onChanged: (value) {
+          const Text('类型：'),
+          const SizedBox(width: 12),
+          PopupMenuButton<int>(
+            initialValue: _sourceType,
+            tooltip: '选择类型',
+            offset: const Offset(0, 24),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 60, maxWidth: 80),
+            onSelected: (value) {
               setState(() {
-                _sourceType = value ?? 0;
+                _sourceType = value;
                 _hasChanges = true;
               });
             },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 0, child: Text('文字')),
+              PopupMenuItem(value: 1, child: Text('音频')),
+              PopupMenuItem(value: 2, child: Text('图片')),
+              PopupMenuItem(value: 3, child: Text('文件')),
+              PopupMenuItem(value: 4, child: Text('视频')),
+            ],
+            child: UnderlineWidget(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(['文字', '音频', '图片', '文件', '视频'][_sourceType]),
+                  const Icon(Icons.arrow_drop_down, size: 20),
+                ],
+              ),
+            ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           // 启用
           InkWell(
             onTap: () {
@@ -834,13 +926,14 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                       _hasChanges = true;
                     });
                   },
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 const Text('启用'),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           // 发现
           InkWell(
             onTap: () {
@@ -860,13 +953,14 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                       _hasChanges = true;
                     });
                   },
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 const Text('发现'),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           // 自动保存Cookie
           InkWell(
             onTap: () {
@@ -886,9 +980,10 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                       _hasChanges = true;
                     });
                   },
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                const Text('自动保存Cookie'),
+                const Text('Cookie'),
               ],
             ),
           ),
@@ -899,9 +994,8 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
 
   /// 第二行选项：事件监听器、自定义按钮、下一页懒加载
   Widget _buildOptionsRow2() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    return Padding(
+      padding: const EdgeInsets.only(left: 8),
       child: Row(
         children: [
           // 事件监听器
@@ -923,13 +1017,14 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                       _hasChanges = true;
                     });
                   },
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                const Text('事件监听器'),
+                const Text('事件监听'),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           // 自定义按钮
           InkWell(
             onTap: () {
@@ -949,13 +1044,14 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                       _hasChanges = true;
                     });
                   },
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 const Text('自定义按钮'),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           // 下一页懒加载
           InkWell(
             onTap: () {
@@ -975,7 +1071,8 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                       _hasChanges = true;
                     });
                   },
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 const Text('下一页懒加载'),
               ],
@@ -986,33 +1083,86 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
     );
   }
 
-  Widget _buildEditList(List<EditEntity> entities) {
+  Widget _buildEditList(List<EditEntity> entities, String tabPrefix) {
     return ListView.builder(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       itemCount: entities.length,
       itemBuilder: (context, index) {
         final entity = entities[index];
-        return Padding(
-          padding: const EdgeInsets.only(top: 3),
-          child: TextField(
-            controller: TextEditingController(text: entity.value),
-            decoration: InputDecoration(
-              hintText: entity.hint,
-              border: const OutlineInputBorder(),
-              isDense: true,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            ),
-            maxLines: null,
-            minLines: 1,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-            onChanged: (value) {
-              entity.value = value;
-              _hasChanges = true;
-            },
+        final controllerKey = '${tabPrefix}_${entity.key}';
+        final controller = _getControllerByKey(controllerKey, entity.value);
+        
+        return TextFormField(
+          controller: controller,
+          decoration: InputDecoration(
+            labelText: entity.hint,
+            floatingLabelBehavior: FloatingLabelBehavior.auto,
+            isDense: true,
+            contentPadding: const EdgeInsets.only(top: 8, bottom: 4),
           ),
+          maxLines: null,
+          minLines: 1,
+          style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+          onChanged: (value) {
+            entity.value = value;
+            _hasChanges = true;
+          },
         );
       },
     );
+  }
+
+  TextEditingController _getControllerByKey(String key, String initialValue) {
+    if (!_controllers.containsKey(key)) {
+      _controllers[key] = TextEditingController(text: initialValue);
+    }
+    return _controllers[key]!;
+  }
+
+  /// 更新所有 controller 的值（用于粘贴源等场景）
+  void _updateAllControllers() {
+    // 基本信息
+    for (final entity in _baseEntities) {
+      final key = 'base_${entity.key}';
+      if (_controllers.containsKey(key)) {
+        _controllers[key]!.text = entity.value;
+      }
+    }
+    // 搜索规则
+    for (final entity in _searchEntities) {
+      final key = 'search_${entity.key}';
+      if (_controllers.containsKey(key)) {
+        _controllers[key]!.text = entity.value;
+      }
+    }
+    // 发现规则
+    for (final entity in _exploreEntities) {
+      final key = 'explore_${entity.key}';
+      if (_controllers.containsKey(key)) {
+        _controllers[key]!.text = entity.value;
+      }
+    }
+    // 详情规则
+    for (final entity in _infoEntities) {
+      final key = 'info_${entity.key}';
+      if (_controllers.containsKey(key)) {
+        _controllers[key]!.text = entity.value;
+      }
+    }
+    // 目录规则
+    for (final entity in _tocEntities) {
+      final key = 'toc_${entity.key}';
+      if (_controllers.containsKey(key)) {
+        _controllers[key]!.text = entity.value;
+      }
+    }
+    // 正文规则
+    for (final entity in _contentEntities) {
+      final key = 'content_${entity.key}';
+      if (_controllers.containsKey(key)) {
+        _controllers[key]!.text = entity.value;
+      }
+    }
   }
 
   void _showHelp() {
@@ -1162,6 +1312,8 @@ class _ContentEditPageState extends State<_ContentEditPage> {
           ),
           // 更多菜单
           PopupMenuButton<String>(
+            tooltip: '更多选项',
+            offset: const Offset(0, 48),
             onSelected: (value) {
               switch (value) {
                 case 'reset':
@@ -1175,17 +1327,13 @@ class _ContentEditPageState extends State<_ContentEditPage> {
             itemBuilder: (context) => [
               const PopupMenuItem(
                 value: 'reset',
-                child: ListTile(
-                  leading: Icon(Icons.refresh),
-                  title: Text('重置'),
-                ),
+                height: 36,
+                child: Row(children: [Icon(Icons.refresh, size: 18), SizedBox(width: 12), Text('重置')]),
               ),
               const PopupMenuItem(
                 value: 'copy_all',
-                child: ListTile(
-                  leading: Icon(Icons.copy),
-                  title: Text('复制全部'),
-                ),
+                height: 36,
+                child: Row(children: [Icon(Icons.copy, size: 18), SizedBox(width: 12), Text('复制全部')]),
               ),
             ],
           ),
@@ -1265,6 +1413,35 @@ class _ContentEditPageState extends State<_ContentEditPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 带下划线的组件
+class UnderlineWidget extends StatelessWidget {
+  final Widget child;
+
+  const UnderlineWidget({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 2),
+          child: child,
+        ),
+        Container(
+          height: 1.5,
+          width: 48,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(1),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1350,6 +1527,198 @@ class _SourceHelpPageState extends State<_SourceHelpPage> with SingleTickerProvi
                 ),
               ],
             ),
+    );
+  }
+}
+
+/// 二维码导入页面
+class _QrImportPage extends StatefulWidget {
+  final bool Function(String) onScanned;
+
+  const _QrImportPage({required this.onScanned});
+
+  @override
+  State<_QrImportPage> createState() => _QrImportPageState();
+}
+
+class _QrImportPageState extends State<_QrImportPage> {
+  final MobileScannerController _controller = MobileScannerController(
+    detectionSpeed: DetectionSpeed.noDuplicates,
+  );
+  bool _processed = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onDetect(BarcodeCapture capture) {
+    if (_processed) return;
+
+    final barcodes = capture.barcodes;
+    for (final barcode in barcodes) {
+      final value = barcode.rawValue;
+      if (value != null && value.isNotEmpty) {
+        _processed = true;
+        _controller.stop();
+
+        final success = widget.onScanned(value);
+        if (success && mounted) {
+          Navigator.pop(context);
+        } else {
+          // 如果失败，允许重新扫描
+          _processed = false;
+          _controller.start();
+        }
+        break;
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('扫描二维码'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.flash_on),
+            onPressed: () => _controller.toggleTorch(),
+            tooltip: '切换闪光灯',
+          ),
+        ],
+      ),
+      body: MobileScanner(
+        controller: _controller,
+        onDetect: _onDetect,
+      ),
+    );
+  }
+}
+
+/// 书源登录页面
+class _SourceLoginPage extends StatefulWidget {
+  final BookSource source;
+  final VoidCallback onLoginSuccess;
+
+  const _SourceLoginPage({
+    required this.source,
+    required this.onLoginSuccess,
+  });
+
+  @override
+  State<_SourceLoginPage> createState() => _SourceLoginPageState();
+}
+
+class _SourceLoginPageState extends State<_SourceLoginPage> {
+  InAppWebViewController? _webViewController;
+  bool _isLoading = true;
+  bool _checking = false;
+
+  String get _loginUrl {
+    final loginUrl = widget.source.loginUrl ?? '';
+    final baseUrl = widget.source.bookSourceUrl;
+
+    // 如果 loginUrl 已经是完整 URL，直接使用
+    if (loginUrl.startsWith('http://') || loginUrl.startsWith('https://')) {
+      return loginUrl;
+    }
+
+    // 否则拼接 baseUrl
+    if (baseUrl.isNotEmpty) {
+      final baseUri = Uri.tryParse(baseUrl);
+      if (baseUri != null) {
+        return baseUri.resolve(loginUrl).toString();
+      }
+    }
+
+    return loginUrl;
+  }
+
+  Future<void> _saveCookies(String url) async {
+    try {
+      final cookieManager = CookieManager.instance();
+      final cookies = await cookieManager.getCookies(url: WebUri(url));
+
+      final cookieStr = cookies.map((c) => '${c.name}=${c.value}').join('; ');
+      if (cookieStr.isNotEmpty) {
+        await CookieService.instance.setCookie(url, cookieStr);
+      }
+    } catch (e) {
+      debugPrint('保存 Cookie 失败: $e');
+    }
+  }
+
+  void _onCheckLogin() {
+    setState(() {
+      _checking = true;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('正在检查登录状态...')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('登录 - ${widget.source.bookSourceName}'),
+        actions: [
+          TextButton(
+            onPressed: _checking ? null : _onCheckLogin,
+            child: const Text('完成'),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          InAppWebView(
+            initialUrlRequest: URLRequest(url: WebUri(_loginUrl)),
+            initialSettings: InAppWebViewSettings(
+              javaScriptEnabled: true,
+              domStorageEnabled: true,
+              databaseEnabled: true,
+              useHybridComposition: true,
+            ),
+            onWebViewCreated: (controller) {
+              _webViewController = controller;
+            },
+            onLoadStart: (controller, url) async {
+              if (url != null) {
+                await _saveCookies(url.toString());
+              }
+            },
+            onLoadStop: (controller, url) async {
+              setState(() {
+                _isLoading = false;
+              });
+
+              if (url != null) {
+                await _saveCookies(url.toString());
+              }
+
+              // 如果正在检查登录状态，完成登录
+              if (_checking) {
+                widget.onLoginSuccess();
+                if (mounted) {
+                  Navigator.pop(context);
+                }
+              }
+            },
+            onReceivedError: (controller, request, error) {
+              setState(() {
+                _isLoading = false;
+              });
+            },
+          ),
+          if (_isLoading)
+            const Center(
+              child: CircularProgressIndicator(),
+            ),
+        ],
+      ),
     );
   }
 }

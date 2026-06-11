@@ -110,7 +110,7 @@ class SearchProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> search(String keyword) async {
+  Future<void> search(String keyword, {bool precisionSearch = false}) async {
     if (keyword.isEmpty) return;
 
     final generation = ++_searchGeneration;
@@ -153,7 +153,17 @@ class SearchProvider extends ChangeNotifier {
             result['sourceUrl'] = source.bookSourceUrl;
             result['sourceName'] = source.bookSourceName;
           }
-          _searchResults.addAll(results);
+          
+          // 精准搜索：只保留完全匹配的结果
+          if (precisionSearch) {
+            final filtered = results.where((r) {
+              final name = r['name']?.toString().toLowerCase() ?? '';
+              return name.contains(keyword.toLowerCase());
+            }).toList();
+            _searchResults.addAll(filtered);
+          } else {
+            _searchResults.addAll(results);
+          }
           notifyListeners();
         } catch (e) {
           debugPrint('搜索书源 ${source.bookSourceName} 失败: $e');
@@ -184,6 +194,12 @@ class SearchProvider extends ChangeNotifier {
     _currentKeyword = '';
     _isLoading = false;
     _error = null;
+    notifyListeners();
+  }
+
+  void stopSearch() {
+    _searchGeneration++;
+    _isLoading = false;
     notifyListeners();
   }
 

@@ -6,48 +6,27 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/book.dart';
 import '../../models/book_source.dart';
 import '../../models/chapter.dart';
 import '../../services/app_logger.dart';
-import '../../services/source_engine/source_engine.dart';
+import '../../services/source_debug_service.dart';
 import '../../services/storage_service.dart';
 
-/// 调试状态码
-enum DebugState {
-  searchSrc, // 10: 搜索源码
-  exploreSrc, // 探索源码
-  bookSrc, // 20: 详情源码
-  tocSrc, // 30: 目录源码
-  contentSrc, // 40: 正文源码
-  error, // -1: 错误
-  success, // 1000: 成功完成
-}
-
-/// 调试菜单操作
-enum _DebugMenuAction {
-  searchSource,
-  bookSource,
-  tocSource,
-  contentSource,
-  refreshExploreKinds,
-  help,
-}
-
-class _ExploreKindItem {
-  final String title;
-  final String url;
-
-  const _ExploreKindItem(this.title, this.url);
-}
-
-/// 书源调试页
+/// 书源调试页（优化版）
+/// 
+/// 主要优化点：
+/// 1. 使用 SourceDebugService 单例管理调试逻辑
+/// 2. 简化代码结构，移除冗余方法
+/// 3. 保留完整的调试功能
 class BookSourceDebugPage extends StatefulWidget {
   final String? sourceUrl;
-  final BookSource? source;  // 直接传入书源对象，无需保存即可调试
+  final BookSource? source;
 
   const BookSourceDebugPage({super.key, this.sourceUrl, this.source});
 
@@ -55,32 +34,24 @@ class BookSourceDebugPage extends StatefulWidget {
   State<BookSourceDebugPage> createState() => _BookSourceDebugPageState();
 }
 
-class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
+class _BookSourceDebugPageState extends State<BookSourceDebugPage>
+    implements DebugCallback {
   BookSource? _source;
-  WebBook? _webBook;
 
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
-  final Stopwatch _debugWatch = Stopwatch();
   final List<String> _debugLogs = [];
 
   bool _isLoading = false;
   bool _showHelp = true;
-  bool _debugCancelled = false;
-  int _currentTab = 0; // 0: 调试, 1: 日志
+  int _currentTab = 0;
 
   // AppLogger 订阅
   StreamSubscription<LogEntry>? _logSubscription;
   final List<LogEntry> _appLogs = [];
   LogLevel _logFilterLevel = LogLevel.verbose;
   LogCategory? _logFilterCategory;
-
-  // 源码存储
-  String _searchSrc = '';
-  String _bookSrc = '';
-  String _tocSrc = '';
-  String _contentSrc = '';
 
   // 发现分类缓存
   List<_ExploreKindItem> _exploreKinds = [];
@@ -104,6 +75,9 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     });
     _loadSource();
 
+    // 注册调试回调
+    SourceDebugService.instance.callback = this;
+
     // 订阅 AppLogger 日志流
     _logSubscription = AppLogger.instance.stream.listen((entry) {
       if (!mounted) return;
@@ -124,6 +98,10 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
 
   @override
   void dispose() {
+    // 取消调试回调
+    SourceDebugService.instance.callback = null;
+    SourceDebugService.instance.cancelDebug(destroy: true);
+
     _logSubscription?.cancel();
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -131,24 +109,34 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     super.dispose();
   }
 
+  /// DebugCallback 实现
+  @override
+  void printLog(int state, String msg) {
+    if (!mounted) return;
+    setState(() {
+      _debugLogs.add(msg);
+    });
+  }
+
   Future<void> _loadSource() async {
     debugPrint('=== 调试页面加载书源 ===');
     AppLogger.instance.info(LogCategory.parse, '调试页面加载书源');
 
-    // 优先使用直接传入的 BookSource 对象（无需保存即可调试）
+    // 优先使用直接传入的 BookSource 对象
     if (widget.source != null) {
       _source = widget.source;
-      _webBook = WebBook(_source!);
       debugPrint('✅ 使用传入的书源对象: ${_source!.bookSourceName}');
-      AppLogger.instance.info(LogCategory.parse, '使用传入的书源对象', detail: _source!.bookSourceName);
+      AppLogger.instance.info(
+        LogCategory.parse,
+        '使用传入的书源对象',
+        detail: _source!.bookSourceName,
+      );
       _afterSourceLoaded();
       return;
     }
 
     // 降级：从 StorageService 加载
     final sourceUrl = widget.sourceUrl;
-    debugPrint('sourceUrl: $sourceUrl');
-
     if (sourceUrl == null || sourceUrl.isEmpty) {
       debugPrint('sourceUrl 为空，无法加载书源');
       AppLogger.instance.warn(LogCategory.parse, 'sourceUrl 为空，无法加载书源');
@@ -160,20 +148,23 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
       return;
     }
 
-    // 确保 StorageService 已初始化
     if (!StorageService.instance.isInitialized) {
-      AppLogger.instance.warn(LogCategory.storage, 'StorageService 未初始化，尝试初始化...');
+      AppLogger.instance.warn(
+        LogCategory.storage,
+        'StorageService 未初始化，尝试初始化...',
+      );
       try {
         await StorageService.instance.init();
       } catch (e) {
-        AppLogger.instance.error(LogCategory.storage, 'StorageService 初始化失败', detail: e.toString());
+        AppLogger.instance.error(
+          LogCategory.storage,
+          'StorageService 初始化失败',
+          detail: e.toString(),
+        );
       }
     }
 
     final data = StorageService.instance.getBookSource(sourceUrl);
-    debugPrint('书源数据: ${data != null ? "找到" : "未找到"}');
-    AppLogger.instance.info(LogCategory.storage, '书源查询结果', detail: data != null ? '找到' : '未找到 (sourceUrl: $sourceUrl)');
-
     if (data == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -185,10 +176,8 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
 
     try {
       _source = BookSource.fromJson(data);
-      _webBook = WebBook(_source!);
       debugPrint('书源加载成功: ${_source!.bookSourceName}');
     } catch (e) {
-      debugPrint('书源解析失败: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('书源解析失败: $e')),
@@ -200,9 +189,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     _afterSourceLoaded();
   }
 
-  /// 书源加载后的初始化（解析发现分类等）
   void _afterSourceLoaded() {
-
     final searchKey = _source?.ruleSearch?.checkKeyWord;
     if (searchKey != null && searchKey.isNotEmpty) {
       _searchController.text = searchKey;
@@ -224,52 +211,16 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     }
   }
 
-  /// 刷新发现分类
-  void _refreshExploreKinds() {
-    _exploreKinds = _parseExploreKinds(_source);
-    if (_exploreKinds.isNotEmpty) {
-      _textFx = '${_exploreKinds.first.title}::${_exploreKinds.first.url}';
-    }
-    if (mounted) {
-      setState(() {});
-    }
-    _addLog('≡已刷新发现分类');
-  }
-
-  void _fillExample(String value) {
-    _searchController.text = value;
-    _searchController.selection = TextSelection.collapsed(offset: value.length);
-  }
-
   List<_ExploreKindItem> _parseExploreKinds(BookSource? source) {
     final exploreUrl = source?.exploreUrl?.trim();
     if (exploreUrl == null || exploreUrl.isEmpty) return const [];
 
-    final raw = exploreUrl.startsWith('[') ? exploreUrl : exploreUrl;
-    if (raw.startsWith('@js:') || raw.startsWith('<js>')) {
+    if (exploreUrl.startsWith('@js:') || exploreUrl.startsWith('<js>')) {
       return const [];
     }
 
-    if (raw.startsWith('[')) {
-      try {
-        final decoded = jsonDecode(raw);
-        if (decoded is List) {
-          return decoded
-              .whereType<Map>()
-              .map((e) => _ExploreKindItem(
-                    '${e['title'] ?? ''}'.trim(),
-                    '${e['url'] ?? ''}'.trim(),
-                  ))
-              .where((e) => e.title.isNotEmpty && e.url.isNotEmpty)
-              .toList(growable: false);
-        }
-      } catch (_) {
-        // fall through
-      }
-    }
-
     final items = <_ExploreKindItem>[];
-    for (final line in raw.split(RegExp(r'(&&|\n)+'))) {
+    for (final line in exploreUrl.split(RegExp(r'(&&|\n)+'))) {
       final kindCfg = line.split('::');
       if (kindCfg.isEmpty) continue;
       final title = kindCfg.first.trim();
@@ -288,87 +239,14 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     });
   }
 
-  String _formatStamp(Duration elapsed) {
-    final totalMs = elapsed.inMilliseconds;
-    final minutes = (totalMs ~/ 60000).toString().padLeft(2, '0');
-    final seconds = ((totalMs % 60000) ~/ 1000).toString().padLeft(2, '0');
-    final millis = (totalMs % 1000).toString().padLeft(3, '0');
-    return '$minutes:$seconds.$millis';
-  }
-
-  /// 添加调试日志
-  /// [message] 日志消息
-  /// [state] 状态码：-1错误，0警告，1正常，10搜索源码，20详情源码，30目录源码，40正文源码，1000完成
-  /// [sourceHtml] 源码内容（用于保存）
-  void _addLog(String message, {int state = 1, String? sourceHtml}) {
-    if (_debugCancelled && state > 0 && state != 1000) return;
-
-    final stamp = _formatStamp(_debugWatch.elapsed);
-    final lines = message.split('\n');
-
-    // 根据state保存源码
-    if (sourceHtml != null && sourceHtml.isNotEmpty) {
-      switch (state) {
-        case 10:
-          _searchSrc = sourceHtml;
-          break;
-        case 20:
-          _bookSrc = sourceHtml;
-          break;
-        case 30:
-          _tocSrc = sourceHtml;
-          break;
-        case 40:
-          _contentSrc = sourceHtml;
-          break;
-      }
-    }
-
-    if (!mounted) return;
-
-    setState(() {
-      for (final line in lines) {
-        _debugLogs.add('[$stamp] $line');
-      }
-    });
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
-      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-    });
-  }
-
-  bool _looksLikeUrl(String value) {
-    return value.startsWith('http://') ||
-        value.startsWith('https://') ||
-        value.startsWith('//') ||
-        value.contains('://');
-  }
-
-  String _extractRealUrl(String value) {
-    final trimmed = value.trim();
-    if (trimmed.startsWith('++') || trimmed.startsWith('--')) {
-      return trimmed.substring(2).trim();
-    }
-    if (trimmed.contains('::') && !_looksLikeUrl(trimmed)) {
-      return trimmed.split('::').last.trim();
-    }
-    return trimmed;
-  }
-
   Future<void> _submitDebug([String? value]) async {
     final text = (value ?? _searchController.text).trim();
     if (text.isEmpty) return;
 
-    // 先检查书源是否存在
-    final webBook = _webBook;
     final source = _source;
-    if (source == null || webBook == null) {
+    if (source == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('未获取到书源'),
-          duration: Duration(seconds: 2),
-        ),
+        const SnackBar(content: Text('未获取到书源'), duration: Duration(seconds: 2)),
       );
       return;
     }
@@ -377,78 +255,13 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     if (mounted) {
       setState(() {
         _showHelp = false;
-      });
-    }
-    await _startDebug(text);
-  }
-
-  Future<void> _submitPrefixed(String prefix) async {
-    final query = _searchController.text.trim();
-    if (query.isEmpty || query.length <= 2) {
-      _searchController.text = prefix;
-      _searchController.selection =
-          TextSelection.collapsed(offset: prefix.length);
-      await _submitDebug(prefix);
-      return;
-    }
-
-    final next = query.startsWith(prefix) ? query : '$prefix$query';
-    _searchController.text = next;
-    _searchController.selection = TextSelection.collapsed(offset: next.length);
-    await _submitDebug(next);
-  }
-
-  Future<void> _startDebug(String key) async {
-    // 强制清除规则解析缓存，确保最新的解析逻辑（如 NativePlugin 的更改）能即时生效
-    AnalyzeRule.clearCache();
-
-    // 重置状态
-    _debugCancelled = false;
-    _debugWatch
-      ..reset()
-      ..start();
-    _clearLogs();
-
-    if (mounted) {
-      setState(() {
         _isLoading = true;
+        _debugLogs.clear();
       });
     }
 
     try {
-      _addLog('≡当前书源: ${_source?.bookSourceName} (v${_source?.lastUpdateTime ?? '0'})');
-      if (key.startsWith('++')) {
-        _addLog('⇒开始访问目录页:${_extractRealUrl(key)}');
-        if (_source?.ruleToc?.chapterList != null) {
-          _addLog('≡目录规则: ${_source?.ruleToc?.chapterList}');
-        }
-        await _debugToc(_extractRealUrl(key));
-      } else if (key.startsWith('--')) {
-        _addLog('⇒开始访问正文页:${_extractRealUrl(key)}');
-        if (_source?.ruleContent?.content != null) {
-          _addLog('≡正文规则: ${_source?.ruleContent?.content}');
-        }
-        await _debugContent(_extractRealUrl(key));
-      } else if (key.contains('::') && !_looksLikeUrl(key)) {
-        final url = _extractRealUrl(key);
-        _addLog('⇒开始访问发现页:$url');
-        if (_source?.ruleExplore?.bookList != null) {
-          _addLog('≡发现规则: ${_source?.ruleExplore?.bookList}');
-        }
-        await _debugExplore(key);
-      } else if (_looksLikeUrl(key)) {
-        _addLog('⇒开始访问详情页:$key');
-        if (_source?.ruleBookInfo?.name != null) {
-          _addLog('≡详情规则(书名): ${_source?.ruleBookInfo?.name}');
-        }
-        await _debugBookInfo(key);
-      } else {
-        _addLog('⇒开始搜索关键字:$key');
-
-        await _debugSearch(key);
-      }
-    } catch (e) {
-      _addLog('⇒错误: $e', state: -1);
+      await SourceDebugService.instance.startDebug(source, text);
     } finally {
       if (mounted) {
         setState(() {
@@ -458,301 +271,82 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     }
   }
 
-  Future<void> _debugSearch(String keyword) async {
-    if (_debugCancelled) return;
-    // 借鉴 legado：每次搜索创建新的 WebBook 实例，避免状态残留
-    final webBook = WebBook(_source!);
-    _addLog('︾开始解析搜索页');
-
-    final results = await webBook.searchBook(keyword);
-    if (_debugCancelled) return;
-
-    // 同步搜索结果到 _webBook，确保后续步骤（详情/目录/正文）能使用
-    _webBook = webBook;
-
-    final searchHtml = webBook.lastSearchHtml ?? '';
-    _addLog('≡获取成功', state: 10, sourceHtml: searchHtml);
-
-    _addLog('┌获取书籍列表');
-    _addLog('└列表大小:${results.length}');
-
-    if (results.isEmpty) {
-      _addLog('≡未获取到书籍', state: -1);
-      return;
-    }
-
-    // 仅对第一条搜索结果输出详细字段日志（Legado原版行为：index==0时log=true）
-    final item = results.first;
-    _addLog('┌获取书名');
-    _addLog('└${item['name'] ?? ''}');
-    _addLog('┌获取作者');
-    _addLog('└${item['author'] ?? ''}');
-    _addLog('┌获取分类');
-    final kind = '${item['kind'] ?? ''}'.trim();
-    _addLog(kind.isNotEmpty ? '└$kind' : '└<空>');
-    _addLog('┌获取字数');
-    final wordCount = '${item['wordCount'] ?? ''}'.trim();
-    _addLog(wordCount.isNotEmpty ? '└$wordCount' : '└<空>');
-    _addLog('┌获取最新章节');
-    final lastChapter = '${item['lastChapter'] ?? ''}'.trim();
-    _addLog(lastChapter.isNotEmpty ? '└$lastChapter' : '└<空>');
-    _addLog('┌获取简介');
-    final intro = '${item['intro'] ?? ''}'.trim();
-    _addLog(intro.isNotEmpty ? '└${intro.length > 100 ? '${intro.substring(0, 100)}...' : intro}' : '└<空>');
-    _addLog('┌获取封面链接');
-    _addLog('└${item['coverUrl'] ?? ''}');
-    _addLog('┌获取详情页链接');
-    _addLog('└${item['bookUrl'] ?? ''}');
-
-    _addLog('◇书籍总数:${results.length}');
-    _addLog('︽搜索页解析完成');
-
-    final first = results.first;
-    final bookUrl = '${first['bookUrl'] ?? ''}'.trim();
-    if (bookUrl.isEmpty) {
-      _addLog('≡详情页链接为空，无法继续', state: -1);
-      return;
-    }
-    await _debugBookInfo(bookUrl);
-  }
-
-  Future<void> _debugExplore(String exploreUrl) async {
-    if (_debugCancelled) return;
-    final webBook = WebBook(_source!);
-    final realUrl = _extractRealUrl(exploreUrl);
-    _addLog('︾开始解析发现页');
-
-    final results = await webBook.exploreBook(realUrl);
-    if (_debugCancelled) return;
-
-    // 同步到 _webBook，确保后续步骤能使用
-    _webBook = webBook;
-
-    final exploreHtml = webBook.lastExploreHtml ?? '';
-    _addLog('≡获取成功', state: 15, sourceHtml: exploreHtml);
-
-    _addLog('┌获取书籍列表');
-    _addLog('└列表大小:${results.length}');
-
-    if (results.isEmpty) {
-      _addLog('≡未获取到书籍', state: -1);
-      return;
-    }
-
-    // 仅对第一条发现结果输出详细字段日志（Legado原版行为：index==0时log=true）
-    final item = results.first;
-    _addLog('┌获取书名');
-    _addLog('└${item['name'] ?? ''}');
-    _addLog('┌获取作者');
-    _addLog('└${item['author'] ?? ''}');
-    _addLog('┌获取分类');
-    final kind = '${item['kind'] ?? ''}'.trim();
-    _addLog(kind.isNotEmpty ? '└$kind' : '└<空>');
-    _addLog('┌获取简介');
-    final intro = '${item['intro'] ?? ''}'.trim();
-    _addLog(intro.isNotEmpty ? '└${intro.length > 100 ? '${intro.substring(0, 100)}...' : intro}' : '└<空>');
-    _addLog('┌获取封面链接');
-    _addLog('└${item['coverUrl'] ?? ''}');
-    _addLog('┌获取详情页链接');
-    _addLog('└${item['bookUrl'] ?? ''}');
-
-    _addLog('◇书籍总数:${results.length}');
-    _addLog('︽发现页解析完成');
-
-    final first = results.first;
-    final bookUrl = '${first['bookUrl'] ?? ''}'.trim();
-    if (bookUrl.isEmpty) {
-      _addLog('≡详情页链接为空，无法继续', state: -1);
-      return;
-    }
-    await _debugBookInfo(bookUrl);
-  }
-
-  Future<void> _debugBookInfo(String bookUrl) async {
-    if (_debugCancelled) return;
-    final webBook = _webBook!;
-    _addLog('︾开始解析详情页');
-
-    final Book? book = await webBook.getBookInfo(bookUrl);
-    if (_debugCancelled) return;
-
-    final bookHtml = webBook.lastBookInfoHtml ?? '';
-    _addLog('≡获取成功', state: 20, sourceHtml: bookHtml);
-
-    if (book == null) {
-      _addLog('≡详情页解析失败', state: -1);
-      return;
-    }
-
-    // 逐字段输出详情信息（Legado格式：┌获取字段/└结果）
-    _addLog('┌获取书名');
-    _addLog('└${book.name}');
-    _addLog('┌获取作者');
-    _addLog('└${book.author}');
-    _addLog('┌获取分类');
-    final kind = '${book.kind ?? ''}'.trim();
-    _addLog(kind.isNotEmpty ? '└$kind' : '└<空>');
-    _addLog('┌获取字数');
-    final wordCount = '${book.wordCount ?? ''}'.trim();
-    _addLog(wordCount.isNotEmpty ? '└$wordCount' : '└<空>');
-    _addLog('┌获取最新章节');
-    final lastChapter = '${book.lastChapter ?? ''}'.trim();
-    _addLog(lastChapter.isNotEmpty ? '└$lastChapter' : '└<空>');
-    _addLog('┌获取简介');
-    final intro = book.intro.trim();
-    _addLog(intro.isNotEmpty ? '└${intro.length > 200 ? '${intro.substring(0, 200)}...' : intro}' : '└<空>');
-    _addLog('┌获取封面链接');
-    _addLog('└${book.coverUrl}');
-    _addLog('┌获取目录链接');
-    _addLog('└${book.tocUrl ?? ''}');
-
-    _addLog('︽详情页解析完成');
-
-    final tocUrl = book.tocUrl?.trim();
-    final effectiveTocUrl =
-        (tocUrl != null && tocUrl.isNotEmpty) ? tocUrl : bookUrl;
-
-    if (tocUrl != null && tocUrl.isNotEmpty) {
-      // 有目录链接，继续解析目录
-    } else {
-      _addLog('≡目录链接为空，使用详情页作为目录页');
-    }
-    await _debugToc(effectiveTocUrl, book: book);
-  }
-
-  Future<void> _debugToc(String tocUrl, {Book? book}) async {
-    if (_debugCancelled) return;
-    final webBook = _webBook!;
-    final realUrl = _extractRealUrl(tocUrl);
-    _addLog('︾开始解析目录页');
-
-    final List<Chapter> chapters = await webBook.getChapterList(realUrl, book: book);
-    if (_debugCancelled) return;
-
-    final tocHtml = webBook.lastTocHtml ?? '';
-    _addLog('≡获取成功', state: 30, sourceHtml: tocHtml);
-
-    _addLog('┌获取目录列表');
-    _addLog('└列表大小:${chapters.length}');
-
-    if (chapters.isEmpty) {
-      _addLog('≡没有正文章节', state: -1);
-      return;
-    }
-
-    _addLog('┌解析目录列表');
-    _addLog('└目录列表解析完成');
-
-    // 首章详细信息（Legado格式：◇章节名称/◇章节链接/◇是否VIP/◇是否购买）
-    final contentChapters = chapters
-        .where((chapter) => !chapter.isVolume)
-        .toList();
-    // 如果全部是卷名，则不过滤
-    final effectiveChapters = contentChapters.isNotEmpty ? contentChapters : chapters;
-    if (effectiveChapters.isEmpty) {
-      _addLog('≡没有正文章节', state: -1);
-      return;
-    }
-
-    final firstContent = effectiveChapters.first;
-    _addLog('≡首章信息');
-    _addLog('◇章节名称:${firstContent.title}');
-    _addLog('◇章节链接:${firstContent.url ?? ""}');
-    if (firstContent.wordCount != null) {
-      _addLog('◇章节信息:${firstContent.tag ?? ""} ${firstContent.wordCount}');
-      _addLog('⇒已识别到章节信息中的字数');
-    } else if (firstContent.tag != null && firstContent.tag!.isNotEmpty) {
-      _addLog('◇章节信息:${firstContent.tag}');
-    }
-    _addLog('◇是否VIP:${firstContent.isVip}');
-    _addLog('◇是否购买:${firstContent.isPay}');
-
-    _addLog('◇目录总数:${chapters.length}');
-    _addLog('︽目录页解析完成');
-
-    final chapterUrl = firstContent.url?.trim();
-    if (chapterUrl != null && chapterUrl.isNotEmpty) {
-      await _debugContent(chapterUrl, book: book, chapter: firstContent);
-    } else {
-      _addLog('≡首章链接为空，无法跳转正文', state: -1);
-    }
-  }
-
-  Future<void> _debugContent(String chapterUrl, {Book? book, Chapter? chapter}) async {
-    if (_debugCancelled) return;
-    final webBook = _webBook!;
-    final realUrl = _extractRealUrl(chapterUrl);
-    _addLog('︾开始解析正文页');
-
-    final String? content = await webBook.getContent(realUrl, book: book, chapter: chapter);
-    if (_debugCancelled) return;
-
-    final contentHtml = webBook.lastContentHtml ?? '';
-    _addLog('≡获取成功', state: 40, sourceHtml: contentHtml);
-
-    if (content == null) {
-      _addLog('≡正文解析失败: 返回null', state: -1);
-      return;
-    }
-
-    final trimmedContent = content.trim();
-    if (trimmedContent.isEmpty) {
-      _addLog('≡正文解析失败: 内容为空', state: -1);
-      return;
-    }
-
-    // Legado格式：┌获取章节名称/└结果/┌获取正文内容/└内容
-    _addLog('┌获取正文内容');
-    _addLog('└\n$trimmedContent');
-    _addLog('︽正文页解析完成');
-    _addLog('≡解析完成', state: 1000);
+  void _fillExample(String value) {
+    _searchController.text = value;
+    _searchController.selection = TextSelection.collapsed(offset: value.length);
   }
 
   /// 显示源码对话框
   void _showSourceDialog(String title, String source) {
     if (source.isEmpty) {
-      _addLog('≡源码为空，请检查：1)网络权限 2)URL是否正确 3)书源规则');
+      setState(() {
+        _debugLogs.add('≡源码为空，请检查：1)网络权限 2)URL是否正确 3)书源规则');
+      });
       return;
     }
 
-    // 检查是否是诊断信息（响应为空时保存的）
-    final isDiagnostic = source.startsWith('<!--') && source.contains('响应为空');
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = isDark ? Colors.grey[900] : Colors.white;
+    final textColor = isDark ? Colors.grey[200] : Colors.grey[800];
+    final appBarBgColor = isDark ? Colors.grey[850] : const Color(0xFFF5F5F5);
+    final appBarFgColor = isDark ? Colors.white : Colors.black87;
 
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
+        backgroundColor: bgColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
         child: Column(
           children: [
-            AppBar(
-              title: Text(title),
-              leading: IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => Navigator.pop(ctx),
+            // 自定义标题栏
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: appBarBgColor,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
               ),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.copy),
-                  tooltip: '复制',
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: source));
-                    Navigator.pop(ctx);
-                    _addLog('≡已复制源码');
-                  },
-                ),
-              ],
-            ),
-            Expanded(
-              child: Container(
-                color: isDiagnostic ? const Color(0xFFFFF8E1) : null,
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(12),
-                  child: SelectableText(
-                    source,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                      color: isDiagnostic ? const Color(0xFFE65100) : null,
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.close, color: appBarFgColor),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w500,
+                        color: appBarFgColor,
+                      ),
                     ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.copy, color: appBarFgColor),
+                    tooltip: '复制',
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: source));
+                      Navigator.pop(ctx);
+                      setState(() {
+                        _debugLogs.add('≡已复制源码');
+                      });
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            // 源码内容
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(12),
+                child: SelectableText(
+                  source,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    color: textColor,
                   ),
                 ),
               ),
@@ -763,30 +357,558 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     );
   }
 
-  void _onMenuSelected(_DebugMenuAction action) {
-    switch (action) {
-      case _DebugMenuAction.searchSource:
-        _showSourceDialog('搜索源码', _searchSrc);
-        break;
-      case _DebugMenuAction.bookSource:
-        _showSourceDialog('详情源码', _bookSrc);
-        break;
-      case _DebugMenuAction.tocSource:
-        _showSourceDialog('目录源码', _tocSrc);
-        break;
-      case _DebugMenuAction.contentSource:
-        _showSourceDialog('正文源码', _contentSrc);
-        break;
-      case _DebugMenuAction.refreshExploreKinds:
-        _refreshExploreKinds();
-        break;
-      case _DebugMenuAction.help:
-        _showHelpDialog();
-        break;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    
+    return Scaffold(
+      backgroundColor: isDark ? null : Colors.white,
+      appBar: _buildAppBar(context),
+      body: _currentTab == 0 ? _buildDebugBody() : _buildLogViewerBody(),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentTab,
+        onTap: (index) => setState(() => _currentTab = index),
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.bug_report_outlined),
+            activeIcon: Icon(Icons.bug_report),
+            label: '调试',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.article_outlined),
+            activeIcon: Icon(Icons.article),
+            label: '日志',
+          ),
+        ],
+        selectedItemColor: const Color(0xFF1976D2),
+        unselectedItemColor: Colors.grey,
+        type: BottomNavigationBarType.fixed,
+      ),
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final bgColor = isDark ? null : Colors.white;
+    final searchBgColor = isDark ? Colors.grey[800] : const Color(0xFFF1F1F1);
+    final hintColor = isDark ? Colors.grey[400] : Colors.black38;
+    
+    return AppBar(
+      backgroundColor: bgColor,
+      surfaceTintColor: bgColor,
+      elevation: 0,
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back_ios_new_rounded),
+        color: textColor,
+        onPressed: () => Navigator.of(context).maybePop(),
+      ),
+      titleSpacing: 0,
+      title: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: SizedBox(
+          height: 36,
+          child: TextField(
+            controller: _searchController,
+            focusNode: _searchFocusNode,
+            textInputAction: TextInputAction.search,
+            onTap: () {
+              if (mounted) {
+                setState(() {
+                  _showHelp = true;
+                });
+              }
+            },
+            onSubmitted: _submitDebug,
+            style: theme.textTheme.bodyMedium?.copyWith(color: textColor),
+            decoration: InputDecoration(
+              hintText: '搜索书名、作者',
+              hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                color: hintColor,
+              ),
+              prefixIcon: Icon(Icons.search, size: 18, color: textColor.withOpacity(0.6)),
+              suffixIcon: IconButton(
+                icon: Icon(Icons.chevron_right_rounded, size: 20, color: textColor.withOpacity(0.6)),
+                onPressed: () => _submitDebug(),
+              ),
+              filled: true,
+              fillColor: searchBgColor,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: BorderSide.none,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: BorderSide.none,
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: BorderSide(color: isDark ? Colors.blue[300]! : const Color(0xFFB8D5FF)),
+              ),
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        IconButton(
+          tooltip: '扫描二维码',
+          onPressed: _scanQrCode,
+          icon: const Icon(Icons.qr_code_scanner),
+          color: textColor,
+        ),
+        PopupMenuButton<String>(
+          icon: Icon(Icons.more_vert, color: textColor),
+          tooltip: '更多选项',
+          offset: const Offset(0, 48),
+          onSelected: (value) {
+            switch (value) {
+              case 'search_src':
+                _showSourceDialog('搜索源码', SourceDebugService.instance.searchSrc);
+                break;
+              case 'book_src':
+                _showSourceDialog('详情源码', SourceDebugService.instance.bookSrc);
+                break;
+              case 'toc_src':
+                _showSourceDialog('目录源码', SourceDebugService.instance.tocSrc);
+                break;
+              case 'content_src':
+                _showSourceDialog('正文源码', SourceDebugService.instance.contentSrc);
+                break;
+              case 'refresh_explore':
+                _exploreKinds = _parseExploreKinds(_source);
+                if (_exploreKinds.isNotEmpty) {
+                  _textFx = '${_exploreKinds.first.title}::${_exploreKinds.first.url}';
+                }
+                setState(() {});
+                break;
+              case 'help':
+                _showHelpDialog();
+                break;
+            }
+          },
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              value: 'search_src',
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Text('搜索源码', style: TextStyle(color: textColor)),
+            ),
+            PopupMenuItem(
+              value: 'book_src',
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Text('详情源码', style: TextStyle(color: textColor)),
+            ),
+            PopupMenuItem(
+              value: 'toc_src',
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Text('目录源码', style: TextStyle(color: textColor)),
+            ),
+            PopupMenuItem(
+              value: 'content_src',
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Text('正文源码', style: TextStyle(color: textColor)),
+            ),
+            PopupMenuItem(
+              value: 'refresh_explore',
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Text('刷新发现', style: TextStyle(color: textColor)),
+            ),
+            PopupMenuItem(
+              value: 'help',
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Text('帮助', style: TextStyle(color: textColor)),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDebugBody() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final hintColor = isDark ? Colors.grey[500] : const Color(0xFF9A9A9A);
+    
+    return Stack(
+      children: [
+        if (!_showHelp)
+          Scrollbar(
+            controller: _scrollController,
+            thumbVisibility: true,
+            child: ListView(
+              controller: _scrollController,
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 28),
+              children: _debugLogs.isEmpty
+                  ? [
+                      const SizedBox(height: 120),
+                      Text(
+                        '等待调试结果...',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: hintColor,
+                        ),
+                      ),
+                    ]
+                  : _debugLogs.map(_buildLogLine).toList(),
+            ),
+          )
+        else
+          SingleChildScrollView(
+            padding: const EdgeInsets.only(bottom: 28),
+            child: _buildHelpPanel(),
+          ),
+        if (_isLoading)
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 8),
+                width: 36,
+                height: 36,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: isDark ? Colors.lightBlue[300] : const Color(0xFF1976D2),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildHelpPanel() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final labelColor = isDark ? Colors.grey[400] : Colors.black54;
+    final labelStyle = TextStyle(
+      fontSize: 13,
+      color: labelColor,
+      height: 1.25,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('调试搜索>>输入关键字，如：', style: labelStyle),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              _buildExampleChip(
+                _textMy,
+                _textMy,
+                onTap: () {
+                  _searchController.text = _textMy;
+                  _submitDebug(_textMy);
+                },
+              ),
+              _buildExampleChip(
+                _textXt,
+                _textXt,
+                onTap: () {
+                  _searchController.text = _textXt;
+                  _submitDebug(_textXt);
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text('调试发现>>输入发现URL，如：', style: labelStyle),
+          const SizedBox(height: 8),
+          _buildExampleChip(
+            _textFx,
+            _textFx,
+            fullWidth: true,
+            onTap: () {
+              _searchController.text = _textFx;
+              _submitDebug(_textFx);
+            },
+          ),
+          const SizedBox(height: 14),
+          Text('调试详情页>>输入详情页URL，如：', style: labelStyle),
+          const SizedBox(height: 8),
+          _buildExampleChip(
+            _textInfo,
+            _textInfo,
+            fullWidth: true,
+            onTap: () {
+              final url = _searchController.text.trim().isNotEmpty
+                  ? _searchController.text.trim()
+                  : _textInfo;
+              _submitDebug(url);
+            },
+          ),
+          const SizedBox(height: 14),
+          Text('调试目录页>>输入目录页URL，如：', style: labelStyle),
+          const SizedBox(height: 8),
+          _buildExampleChip(
+            _textToc,
+            _textToc,
+            fullWidth: true,
+            onTap: () => _submitPrefixed('++'),
+          ),
+          const SizedBox(height: 14),
+          Text('调试正文页>>输入正文页URL，如：', style: labelStyle),
+          const SizedBox(height: 8),
+          _buildExampleChip(
+            _textContent,
+            _textContent,
+            fullWidth: true,
+            onTap: () => _submitPrefixed('--'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _submitPrefixed(String prefix) async {
+    final query = _searchController.text.trim();
+    if (query.isEmpty || query.length <= 2) {
+      _searchController.text = prefix;
+      _searchController.selection = TextSelection.collapsed(offset: prefix.length);
+      await _submitDebug(prefix);
+      return;
+    }
+
+    final next = query.startsWith(prefix) ? query : '$prefix$query';
+    _searchController.text = next;
+    _searchController.selection = TextSelection.collapsed(offset: next.length);
+    await _submitDebug(next);
+  }
+
+  Widget _buildExampleChip(
+    String label,
+    String value, {
+    bool fullWidth = false,
+    VoidCallback? onTap,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final chipBgColor = isDark ? Colors.grey[800] : const Color(0xFFD9D9D9);
+    final chipTextColor = isDark ? Colors.grey[200] : Colors.black87;
+    
+    final width = fullWidth ? double.infinity : null;
+    return GestureDetector(
+      onTap: onTap ?? () => _fillExample(value),
+      child: Container(
+        width: width,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: chipBgColor,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: chipTextColor,
+            fontSize: 13,
+            height: 1.15,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLogLine(String line) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    // 解析时间戳（格式: [00:00.000] 消息内容）
+    final match = RegExp(r'^\[(\d{2}:\d{2}\.\d{3})\]\s*(.*)$').firstMatch(line);
+    final stamp = match?.group(1);
+    final body = match?.group(2) ?? line;
+
+    // 默认颜色根据主题调整
+    Color bodyColor = isDark ? Colors.grey[300]! : const Color(0xFF444444);
+    FontWeight bodyWeight = FontWeight.w400;
+
+    // 根据特殊字符设置颜色（深色模式下使用更亮的颜色）
+    if (body.startsWith('︾')) {
+      bodyColor = isDark ? Colors.lightBlue[300]! : const Color(0xFF1976D2);
+      bodyWeight = FontWeight.w500;
+    } else if (body.startsWith('︽')) {
+      bodyColor = isDark ? Colors.green[300]! : const Color(0xFF2E7D32);
+      bodyWeight = FontWeight.w600;
+    } else if (body.startsWith('⇒')) {
+      bodyColor = isDark ? Colors.lightBlue[200]! : const Color(0xFF0277BD);
+      bodyWeight = FontWeight.w400;
+    } else if (body.startsWith('≡')) {
+      bodyColor = isDark ? Colors.grey[400]! : const Color(0xFF616161);
+      bodyWeight = FontWeight.w400;
+    } else if (body.startsWith('┌')) {
+      bodyColor = isDark ? Colors.blue[200]! : const Color(0xFF1565C0);
+      bodyWeight = FontWeight.w500;
+    } else if (body.startsWith('└') && !body.startsWith('└\n')) {
+      // 正文内容以 └\n 开头，使用默认颜色
+      bodyColor = isDark ? Colors.grey[300]! : const Color(0xFF333333);
+      bodyWeight = FontWeight.w400;
+    } else if (body.startsWith('◇')) {
+      bodyColor = isDark ? Colors.purple[200]! : const Color(0xFF6A1B9A);
+      bodyWeight = FontWeight.w500;
+    } else if (body.contains('错误') || body.contains('失败')) {
+      bodyColor = isDark ? Colors.red[300]! : const Color(0xFFD32F2F);
+      bodyWeight = FontWeight.w600;
+    } else if (body.contains('完成') || body.contains('成功')) {
+      bodyColor = isDark ? Colors.green[300]! : const Color(0xFF2E7D32);
+      bodyWeight = FontWeight.w500;
+    }
+
+    // URL 颜色
+    final urlColor = isDark ? Colors.lightBlue[200]! : const Color(0xFF1565C0);
+
+    // 解析 URL，用 WORD JOINER 阻止 URL 内断行
+    // 只匹配 URL 有效字符，排除中文标点和常见结束符
+    final urlPattern = RegExp(r'(https?://[a-zA-Z0-9\-._~:/?#\[\]@!$&()*+,;=%]+)');
+    final spans = <InlineSpan>[];
+    int lastEnd = 0;
+
+    for (final urlMatch in urlPattern.allMatches(body)) {
+      if (urlMatch.start > lastEnd) {
+        spans.add(
+          TextSpan(
+            text: body.substring(lastEnd, urlMatch.start),
+            style: TextStyle(color: bodyColor, fontWeight: bodyWeight),
+          ),
+        );
+      }
+      final url = urlMatch.group(0)!;
+      spans.add(
+        TextSpan(
+          text: _protectUrl(url),
+          style: TextStyle(
+            color: urlColor,
+            fontWeight: FontWeight.w500,
+            decoration: TextDecoration.underline,
+            decorationColor: urlColor,
+            decorationThickness: 1.5,
+          ),
+          recognizer: TapGestureRecognizer()..onTap = () => _onUrlTap(url),
+        ),
+      );
+      lastEnd = urlMatch.end;
+    }
+    if (lastEnd < body.length) {
+      spans.add(
+        TextSpan(
+          text: body.substring(lastEnd),
+          style: TextStyle(color: bodyColor, fontWeight: bodyWeight),
+        ),
+      );
+    }
+
+    // 时间戳颜色
+    final stampColor = isDark ? Colors.grey[500] : const Color(0xFFAAAAAA);
+    final defaultTextColor = isDark ? Colors.grey[300] : const Color(0xFF555555);
+
+    return GestureDetector(
+      onTap: () => _showDebugLogDetail(line, body),
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: SelectableText.rich(
+          TextSpan(
+            style: TextStyle(
+              fontSize: 14,
+              height: 1.35,
+              color: defaultTextColor,
+            ),
+            children: [
+              if (stamp != null)
+                TextSpan(
+                  text: '[$stamp] ',
+                  style: TextStyle(color: stampColor, fontSize: 13),
+                ),
+              ...spans,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _protectUrl(String url) {
+    // 在 URL 的 / . - : ? & = # 等字符与其后继字符之间插入 WORD JOINER (U+2060)
+    // 阻止 Flutter ICU 引擎在这些字符后断行
+    return url.replaceAllMapped(
+      RegExp(r'([/.\-:?&=#])(.)'),
+      (m) => '${m[1]}\u2060${m[2]}',
+    );
+  }
+
+  void _showDebugLogDetail(String fullLine, String body) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.grey[200] : Colors.grey[800];
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('日志详情'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SelectableText(
+                body,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontFamily: 'monospace',
+                  height: 1.5,
+                  color: textColor,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: body));
+              Navigator.pop(ctx);
+              setState(() {
+                _debugLogs.add('≡已复制日志内容');
+              });
+            },
+            child: const Text('复制'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _onUrlTap(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  /// 扫描二维码
+  void _scanQrCode() async {
+    final result = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (ctx) => const _QrScannerPage(),
+      ),
+    );
+    
+    if (result != null && result.isNotEmpty && mounted) {
+      // 将扫描结果填入搜索框
+      _searchController.text = result;
+      _searchController.selection = TextSelection.collapsed(offset: result.length);
+      setState(() {
+        _showHelp = true;
+      });
     }
   }
 
-  /// 显示帮助对话框
   void _showHelpDialog() {
     showDialog(
       context: context,
@@ -819,525 +941,14 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     );
   }
 
-  PreferredSizeWidget _buildDebugAppBar(BuildContext context) {
-    final theme = Theme.of(context);
-    return AppBar(
-      backgroundColor: Colors.white,
-      surfaceTintColor: Colors.white,
-      elevation: 0,
-      leading: IconButton(
-        icon: const Icon(Icons.arrow_back_ios_new_rounded),
-        color: Colors.black87,
-        onPressed: () => Navigator.of(context).maybePop(),
-      ),
-      titleSpacing: 0,
-      title: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        child: SizedBox(
-          height: 44,
-          child: TextField(
-            controller: _searchController,
-            focusNode: _searchFocusNode,
-            textInputAction: TextInputAction.search,
-            onTap: () {
-              if (mounted) {
-                setState(() {
-                  _showHelp = true;
-                });
-              }
-            },
-            onSubmitted: _submitDebug,
-            style: theme.textTheme.bodyLarge?.copyWith(
-              color: Colors.black87,
-            ),
-            decoration: InputDecoration(
-              hintText: '搜索书名、作者',
-              hintStyle: theme.textTheme.bodyLarge?.copyWith(
-                color: Colors.black38,
-              ),
-              prefixIcon: const Icon(Icons.search, size: 20),
-              suffixIcon: IconButton(
-                icon: const Icon(Icons.chevron_right_rounded),
-                onPressed: () => _submitDebug(),
-              ),
-              filled: true,
-              fillColor: const Color(0xFFF1F1F1),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(24),
-                borderSide: BorderSide.none,
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(24),
-                borderSide: BorderSide.none,
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(24),
-                borderSide: const BorderSide(color: Color(0xFFB8D5FF)),
-              ),
-            ),
-          ),
-        ),
-      ),
-      actions: [
-        IconButton(
-          tooltip: '清空输入',
-          onPressed: () {
-            _searchController.clear();
-          },
-          icon: const Icon(Icons.crop_free_rounded),
-          color: Colors.black87,
-        ),
-        PopupMenuButton<_DebugMenuAction>(
-          icon: const Icon(Icons.more_vert),
-          color: Colors.white,
-          onSelected: _onMenuSelected,
-          itemBuilder: (context) => const [
-            PopupMenuItem(
-              value: _DebugMenuAction.searchSource,
-              child: Text('搜索源码'),
-            ),
-            PopupMenuItem(
-              value: _DebugMenuAction.bookSource,
-              child: Text('详情源码'),
-            ),
-            PopupMenuItem(
-              value: _DebugMenuAction.tocSource,
-              child: Text('目录源码'),
-            ),
-            PopupMenuItem(
-              value: _DebugMenuAction.contentSource,
-              child: Text('正文源码'),
-            ),
-            PopupMenuItem(
-              value: _DebugMenuAction.refreshExploreKinds,
-              child: Text('刷新发现'),
-            ),
-            PopupMenuItem(
-              value: _DebugMenuAction.help,
-              child: Text('帮助'),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildExampleChip(String label, String value,
-      {bool fullWidth = false, VoidCallback? onTap}) {
-    final width = fullWidth ? double.infinity : null;
-    return GestureDetector(
-      onTap: onTap ?? () => _fillExample(value),
-      child: Container(
-        width: width,
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-        decoration: BoxDecoration(
-          color: const Color(0xFFD9D9D9),
-          borderRadius: BorderRadius.circular(22),
-        ),
-        child: Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            color: Colors.black87,
-            fontSize: 18,
-            height: 1.15,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHelpPanel() {
-    const labelStyle = TextStyle(
-      fontSize: 18,
-      color: Colors.black54,
-      height: 1.25,
-    );
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 18, 22, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('调试搜索>>输入关键字，如：', style: labelStyle),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 14,
-            runSpacing: 12,
-            children: [
-              _buildExampleChip(
-                _textMy,
-                _textMy,
-                onTap: () => _submitDebug(_textMy),
-              ),
-              _buildExampleChip(
-                _textXt,
-                _textXt,
-                onTap: () => _submitDebug(_textXt),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          const Text('调试发现>>输入发现URL，如：', style: labelStyle),
-          const SizedBox(height: 10),
-          _buildExampleChip(
-            _textFx,
-            _textFx,
-            fullWidth: true,
-            onTap: () => _submitDebug(_textFx),
-          ),
-          const SizedBox(height: 18),
-          const Text('调试详情页>>输入详情页URL，如：', style: labelStyle),
-          const SizedBox(height: 10),
-          _buildExampleChip(
-            _textInfo,
-            _textInfo,
-            fullWidth: true,
-            onTap: () => _submitDebug(
-              _searchController.text.trim().isNotEmpty
-                  ? _searchController.text.trim()
-                  : _textInfo,
-            ),
-          ),
-          const SizedBox(height: 18),
-          const Text('调试目录页>>输入目录页URL，如：', style: labelStyle),
-          const SizedBox(height: 10),
-          _buildExampleChip(
-            _textToc,
-            _textToc,
-            fullWidth: true,
-            onTap: () => _submitPrefixed('++'),
-          ),
-          const SizedBox(height: 18),
-          const Text('调试正文页>>输入正文页URL，如：', style: labelStyle),
-          const SizedBox(height: 10),
-          _buildExampleChip(
-            _textContent,
-            _textContent,
-            fullWidth: true,
-            onTap: () => _submitPrefixed('--'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 构建日志行，支持文本选择和URL点击
-  Widget _buildLogLine(String line) {
-    final match = RegExp(r'^\[(\d{2}:\d{2}\.\d{3})\]\s*(.*)$').firstMatch(line);
-    final stamp = match?.group(1) ?? '';
-    final body = match?.group(2) ?? line;
-
-    Color bodyColor = const Color(0xFF444444);
-    FontWeight bodyWeight = FontWeight.w400;
-
-    // 根据特殊字符和内容设置颜色（Legado符号体系）
-    if (body.startsWith('︾')) {
-      bodyColor = const Color(0xFF1976D2);
-      bodyWeight = FontWeight.w500;
-    } else if (body.startsWith('︽')) {
-      bodyColor = const Color(0xFF2E7D32);
-      bodyWeight = FontWeight.w600;
-    } else if (body.startsWith('⇒')) {
-      bodyColor = const Color(0xFF0277BD);
-      bodyWeight = FontWeight.w400;
-    } else if (body.startsWith('≡')) {
-      bodyColor = const Color(0xFF616161);
-      bodyWeight = FontWeight.w400;
-    } else if (body.startsWith('┌')) {
-      bodyColor = const Color(0xFF1565C0);
-      bodyWeight = FontWeight.w500;
-    } else if (body.startsWith('└')) {
-      bodyColor = const Color(0xFF333333);
-      bodyWeight = FontWeight.w400;
-    } else if (body.startsWith('◇')) {
-      bodyColor = const Color(0xFF6A1B9A);
-      bodyWeight = FontWeight.w500;
-    } else if (body.contains('错误') || body.contains('失败')) {
-      bodyColor = const Color(0xFFD32F2F);
-      bodyWeight = FontWeight.w600;
-    } else if (body.startsWith('http://') || body.startsWith('https://')) {
-      bodyColor = const Color(0xFF1565C0);
-      bodyWeight = FontWeight.w500;
-    } else if (body.contains('完成') || body.contains('成功')) {
-      bodyColor = const Color(0xFF2E7D32);
-      bodyWeight = FontWeight.w500;
-    }
-
-    // 解析URL，使其可点击
-    final urlPattern = RegExp(r'(https?://[^\s]+)');
-    final spans = <InlineSpan>[];
-    int lastEnd = 0;
-
-    for (final urlMatch in urlPattern.allMatches(body)) {
-      // 添加URL前的文本
-      if (urlMatch.start > lastEnd) {
-        spans.add(TextSpan(
-          text: body.substring(lastEnd, urlMatch.start),
-          style: TextStyle(color: bodyColor, fontWeight: bodyWeight),
-        ));
-      }
-      // 添加可点击的URL
-      spans.add(TextSpan(
-        text: urlMatch.group(0),
-        style: const TextStyle(
-          color: Color(0xFF1565C0),
-          fontWeight: FontWeight.w500,
-          decoration: TextDecoration.underline,
-        ),
-        recognizer: TapGestureRecognizer()
-          ..onTap = () => _onUrlTap(urlMatch.group(0)!),
-      ));
-      lastEnd = urlMatch.end;
-    }
-    // 添加剩余文本
-    if (lastEnd < body.length) {
-      spans.add(TextSpan(
-        text: body.substring(lastEnd),
-        style: TextStyle(color: bodyColor, fontWeight: bodyWeight),
-      ));
-    }
-
-    return GestureDetector(
-      onTap: () => _showDebugLogDetail(line, body),
-      child: Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: SelectableText.rich(
-        TextSpan(
-          style: const TextStyle(
-            fontSize: 14,
-            height: 1.35,
-            color: Color(0xFF555555),
-          ),
-          children: [
-            TextSpan(
-              text: '[$stamp] ',
-              style: const TextStyle(
-                color: Color(0xFF8F8F8F),
-                fontSize: 13,
-              ),
-            ),
-            ...spans,
-          ],
-        ),
-        contextMenuBuilder: (context, editableTextState) {
-          return AdaptiveTextSelectionToolbar.editableText(
-            editableTextState: editableTextState,
-          );
-        },
-      ),
-      ),
-    );
-  }
-
-  /// 显示调试日志详情对话框
-  void _showDebugLogDetail(String fullLine, String body) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('日志详情'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SelectableText(
-                body,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontFamily: 'monospace',
-                  height: 1.5,
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: body));
-              Navigator.pop(ctx);
-              _addLog('≡已复制日志内容');
-            },
-            child: const Text('复制'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('关闭'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 导出日志到文件并通过share_plus分享（无需任何存储权限）
-  Future<void> _exportLogs() async {
-    try {
-      final text = AppLogger.instance.exportLogs(
-        category: _logFilterCategory,
-        minLevel: _logFilterLevel,
-      );
-
-      // 写入应用临时目录（无需任何权限）
-      final dir = await getTemporaryDirectory();
-      final now = DateTime.now();
-      final fileName = 'APP_${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}.txt';
-      final file = File('${dir.path}/$fileName');
-      await file.writeAsString(text);
-
-      _addLog('≡正在导出日志...');
-      if (!mounted) return;
-      // 通过系统分享面板导出，用户可选择保存到任意位置
-      await Share.shareXFiles(
-        [XFile(file.path)],
-        subject: '导出调试日志',
-        text: '导出调试日志',
-      );
-
-      // 分享完成后清理临时文件
-      if (file.existsSync()) {
-        await file.delete();
-      }
-      _addLog('≡日志导出完成');
-    } catch (e) {
-      _addLog('≡导出日志失败: $e', state: -1);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('导出失败: $e')),
-        );
-      }
-    }
-  }
-
-  /// URL点击处理
-  void _onUrlTap(String url) async {
-    final uri = Uri.tryParse(url);
-    if (uri == null) return;
-
-    // 弹出选项：复制链接或用此URL调试
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.copy),
-              title: const Text('复制链接'),
-              onTap: () {
-                Clipboard.setData(ClipboardData(text: url));
-                Navigator.pop(ctx);
-                _addLog('≡已复制链接');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.play_arrow),
-              title: const Text('调试此URL'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _searchController.text = url;
-                _submitDebug(url);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.open_in_new),
-              title: const Text('在浏览器中打开'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                // 使用 url_launcher 或其他方式打开
-                _addLog('≡请在浏览器中打开: $url');
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCompactScaffold(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: _buildDebugAppBar(context),
-      body: _currentTab == 0 ? _buildDebugBody() : _buildLogViewerBody(),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentTab,
-        onTap: (index) => setState(() => _currentTab = index),
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.bug_report_outlined),
-            activeIcon: Icon(Icons.bug_report),
-            label: '调试',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.article_outlined),
-            activeIcon: Icon(Icons.article),
-            label: '日志',
-          ),
-        ],
-        selectedItemColor: const Color(0xFF1976D2),
-        unselectedItemColor: Colors.grey,
-        type: BottomNavigationBarType.fixed,
-      ),
-    );
-  }
-
-  /// 调试 Tab 内容
-  Widget _buildDebugBody() {
-    return Stack(
-      children: [
-        if (!_showHelp)
-          Scrollbar(
-            controller: _scrollController,
-            thumbVisibility: true,
-            child: ListView(
-              controller: _scrollController,
-              padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
-              children: _debugLogs.isEmpty
-                  ? [
-                      const SizedBox(height: 120),
-                      const Text(
-                        '等待调试结果...',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Color(0xFF9A9A9A),
-                        ),
-                      ),
-                    ]
-                  : _debugLogs.map(_buildLogLine).toList(),
-            ),
-          )
-        else
-          SingleChildScrollView(
-            padding: const EdgeInsets.only(bottom: 28),
-            child: _buildHelpPanel(),
-          ),
-        if (_isLoading)
-          Positioned(
-            left: 0,
-            right: 0,
-            top: 0,
-            child: Center(
-              child: Container(
-                margin: const EdgeInsets.only(top: 8),
-                width: 36,
-                height: 36,
-                child: const CircularProgressIndicator(
-                  strokeWidth: 2.5,
-                  color: Color(0xFF1976D2),
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  /// 日志查看器 Tab 内容
   final ScrollController _logScrollController = ScrollController();
 
   Widget _buildLogViewerBody() {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final filterBarColor = isDark ? Colors.grey[850] : const Color(0xFFF5F5F5);
+    final statsBarColor = isDark ? Colors.grey[900] : const Color(0xFFFAFAFA);
+    
     final filteredLogs = _appLogs.where((e) {
       if (e.level.index < _logFilterLevel.index) {
         return false;
@@ -1353,32 +964,27 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
         // 过滤器栏
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          color: const Color(0xFFF5F5F5),
+          color: filterBarColor,
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                // 级别过滤
                 _buildFilterChip('全部', _logFilterLevel == LogLevel.verbose, () {
                   setState(() => _logFilterLevel = LogLevel.verbose);
                 }),
-                _buildFilterChip('Debug', _logFilterLevel == LogLevel.debug,
-                    () {
+                _buildFilterChip('Debug', _logFilterLevel == LogLevel.debug, () {
                   setState(() => _logFilterLevel = LogLevel.debug);
                 }),
                 _buildFilterChip('Info', _logFilterLevel == LogLevel.info, () {
                   setState(() => _logFilterLevel = LogLevel.info);
                 }),
-                _buildFilterChip('Warn', _logFilterLevel == LogLevel.warning,
-                    () {
+                _buildFilterChip('Warn', _logFilterLevel == LogLevel.warning, () {
                   setState(() => _logFilterLevel = LogLevel.warning);
                 }),
-                _buildFilterChip('Error', _logFilterLevel == LogLevel.error,
-                    () {
+                _buildFilterChip('Error', _logFilterLevel == LogLevel.error, () {
                   setState(() => _logFilterLevel = LogLevel.error);
                 }),
                 const SizedBox(width: 8),
-                // 分类过滤
                 _buildFilterChip('全部类别', _logFilterCategory == null, () {
                   setState(() => _logFilterCategory = null);
                 }),
@@ -1393,19 +999,21 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
         // 日志统计
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          color: const Color(0xFFFAFAFA),
+          color: statsBarColor,
           child: Row(
             children: [
-              Text('共 ${filteredLogs.length} 条日志',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              Text(
+                '共 ${filteredLogs.length} 条日志',
+                style: TextStyle(fontSize: 12, color: isDark ? Colors.grey[400] : Colors.grey),
+              ),
               const Spacer(),
               IconButton(
-                icon: const Icon(Icons.file_download_outlined, size: 18),
+                icon: Icon(Icons.file_download_outlined, size: 18, color: isDark ? Colors.grey[400] : null),
                 tooltip: '导出日志',
                 onPressed: () => _exportLogs(),
               ),
               IconButton(
-                icon: const Icon(Icons.delete_outline, size: 18),
+                icon: Icon(Icons.delete_outline, size: 18, color: isDark ? Colors.grey[400] : null),
                 tooltip: '清空日志',
                 onPressed: () {
                   AppLogger.instance.clear();
@@ -1418,13 +1026,12 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
         // 日志列表
         Expanded(
           child: filteredLogs.isEmpty
-              ? const Center(
-                  child: Text('暂无日志', style: TextStyle(color: Colors.grey)),
+              ? Center(
+                  child: Text('暂无日志', style: TextStyle(color: isDark ? Colors.grey[500] : Colors.grey)),
                 )
               : ListView.builder(
                   controller: _logScrollController,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   itemCount: filteredLogs.length,
                   itemBuilder: (context, index) {
                     final entry = filteredLogs[index];
@@ -1437,23 +1044,25 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
   }
 
   Widget _buildFilterChip(String label, bool selected, VoidCallback onTap) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     return GestureDetector(
       onTap: onTap,
       child: Container(
         margin: const EdgeInsets.only(right: 6),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: selected ? const Color(0xFF1976D2) : Colors.white,
+          color: selected ? const Color(0xFF1976D2) : (isDark ? Colors.grey[800] : Colors.white),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: selected ? const Color(0xFF1976D2) : Colors.grey.shade300,
+            color: selected ? const Color(0xFF1976D2) : (isDark ? Colors.grey[700]! : Colors.grey.shade300),
           ),
         ),
         child: Text(
           label,
           style: TextStyle(
             fontSize: 11,
-            color: selected ? Colors.white : Colors.black54,
+            color: selected ? Colors.white : (isDark ? Colors.grey[400] : Colors.black54),
           ),
         ),
       ),
@@ -1461,87 +1070,100 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
   }
 
   Widget _buildAppLogEntry(LogEntry entry) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     Color bgColor;
     switch (entry.level) {
       case LogLevel.error:
-        bgColor = const Color(0xFFFFEBEE);
+        bgColor = isDark ? Colors.red[900]!.withOpacity(0.3) : const Color(0xFFFFEBEE);
         break;
       case LogLevel.warning:
-        bgColor = const Color(0xFFFFF8E1);
+        bgColor = isDark ? Colors.orange[900]!.withOpacity(0.3) : const Color(0xFFFFF8E1);
         break;
       case LogLevel.info:
-        bgColor = const Color(0xFFE8F5E9);
+        bgColor = isDark ? Colors.green[900]!.withOpacity(0.3) : const Color(0xFFE8F5E9);
         break;
       default:
         bgColor = Colors.transparent;
     }
 
+    final textColor = isDark ? Colors.grey[200] : const Color(0xFF333333);
+    final detailColor = isDark ? Colors.grey[400] : const Color(0xFF666666);
+    final timeColor = isDark ? Colors.grey[500] : Colors.grey;
+    final categoryBgColor = isDark ? Colors.grey[700] : const Color(0xFFE0E0E0);
+    final categoryTextColor = isDark ? Colors.grey[300] : Colors.black54;
+
     return GestureDetector(
       onTap: () => _showLogDetailDialog(entry),
       child: Container(
-      margin: const EdgeInsets.only(bottom: 2),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(entry.levelIcon, style: const TextStyle(fontSize: 12)),
-              const SizedBox(width: 4),
-              Text(
-                '${entry.time.hour.toString().padLeft(2, '0')}:${entry.time.minute.toString().padLeft(2, '0')}:${entry.time.second.toString().padLeft(2, '0')}',
-                style: const TextStyle(
-                    fontSize: 10, color: Colors.grey, fontFamily: 'monospace'),
-              ),
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE0E0E0),
-                  borderRadius: BorderRadius.circular(3),
+        margin: const EdgeInsets.only(bottom: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(entry.levelIcon, style: const TextStyle(fontSize: 12)),
+                const SizedBox(width: 4),
+                Text(
+                  '${entry.time.hour.toString().padLeft(2, '0')}:${entry.time.minute.toString().padLeft(2, '0')}:${entry.time.second.toString().padLeft(2, '0')}',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: timeColor,
+                    fontFamily: 'monospace',
+                  ),
                 ),
-                child: Text(
-                  entry.category.label,
-                  style: const TextStyle(fontSize: 9, color: Colors.black54),
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: categoryBgColor,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: Text(
+                    entry.category.label,
+                    style: TextStyle(fontSize: 9, color: categoryTextColor),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    entry.message,
+                    style: TextStyle(fontSize: 12, color: textColor),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            if (entry.detail != null && entry.detail!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(left: 24, top: 2),
                 child: Text(
-                  entry.message,
-                  style:
-                      const TextStyle(fontSize: 12, color: Color(0xFF333333)),
-                  maxLines: 1,
+                  entry.detail!,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: detailColor,
+                    fontFamily: 'monospace',
+                  ),
+                  maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-            ],
-          ),
-          if (entry.detail != null && entry.detail!.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(left: 24, top: 2),
-              child: Text(
-                entry.detail!,
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: Color(0xFF666666),
-                  fontFamily: 'monospace',
-                ),
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-        ],
-      ),
+          ],
+        ),
       ),
     );
   }
 
   void _showLogDetailDialog(LogEntry entry) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.grey[200] : null;
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1562,18 +1184,26 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
               Text('级别: ${entry.level.name}'),
               const SizedBox(height: 8),
               const Text('消息:', style: TextStyle(fontWeight: FontWeight.bold)),
-              SelectableText(entry.message, style: const TextStyle(fontFamily: 'monospace')),
+              SelectableText(
+                entry.message,
+                style: TextStyle(fontFamily: 'monospace', color: textColor),
+              ),
               if (entry.detail != null && entry.detail!.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 const Text('详情:', style: TextStyle(fontWeight: FontWeight.bold)),
-                SelectableText(entry.detail!, style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+                SelectableText(
+                  entry.detail!,
+                  style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: textColor),
+                ),
               ],
             ],
           ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Clipboard.setData(ClipboardData(text: '${entry.message}\n${entry.detail ?? ''}')),
+            onPressed: () => Clipboard.setData(
+              ClipboardData(text: '${entry.message}\n${entry.detail ?? ''}'),
+            ),
             child: const Text('复制'),
           ),
           TextButton(
@@ -1585,8 +1215,179 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage> {
     );
   }
 
+  Future<void> _exportLogs() async {
+    try {
+      final text = AppLogger.instance.exportLogs(
+        category: _logFilterCategory,
+        minLevel: _logFilterLevel,
+      );
+
+      final dir = await getTemporaryDirectory();
+      final now = DateTime.now();
+      final fileName =
+          'APP_${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}.txt';
+      final file = File('${dir.path}/$fileName');
+      await file.writeAsString(text);
+
+      setState(() {
+        _debugLogs.add('≡正在导出日志...');
+      });
+
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        subject: '导出调试日志',
+        text: '导出调试日志',
+      );
+
+      if (file.existsSync()) {
+        await file.delete();
+      }
+      setState(() {
+        _debugLogs.add('≡日志导出完成');
+      });
+    } catch (e) {
+      setState(() {
+        _debugLogs.add('≡导出日志失败: $e');
+      });
+    }
+  }
+}
+
+class _ExploreKindItem {
+  final String title;
+  final String url;
+
+  const _ExploreKindItem(this.title, this.url);
+}
+
+/// 二维码扫描页面
+class _QrScannerPage extends StatefulWidget {
+  const _QrScannerPage();
+
+  @override
+  State<_QrScannerPage> createState() => _QrScannerPageState();
+}
+
+class _QrScannerPageState extends State<_QrScannerPage> {
+  final MobileScannerController _controller = MobileScannerController(
+    detectionSpeed: DetectionSpeed.normal,
+    facing: CameraFacing.back,
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return _buildCompactScaffold(context);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text('扫描二维码', style: TextStyle(color: Colors.white)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.flash_off, color: Colors.white),
+            tooltip: '闪光灯',
+            onPressed: () => _controller.toggleTorch(),
+          ),
+          IconButton(
+            icon: const Icon(Icons.cameraswitch, color: Colors.white),
+            tooltip: '切换摄像头',
+            onPressed: () => _controller.switchCamera(),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          MobileScanner(
+            controller: _controller,
+            onDetect: (capture) {
+              final barcodes = capture.barcodes;
+              for (final barcode in barcodes) {
+                final value = barcode.rawValue;
+                if (value != null && value.isNotEmpty) {
+                  _controller.stop();
+                  Navigator.pop(context, value);
+                  return;
+                }
+              }
+            },
+          ),
+          // 扫描框
+          Center(
+            child: Container(
+              width: 250,
+              height: 250,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white54, width: 2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const CustomPaint(
+                painter: _ScanCornerPainter(),
+              ),
+            ),
+          ),
+          // 提示文字
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 100,
+            child: Text(
+              '将二维码放入框内自动扫描',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.8),
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
+}
+
+/// 扫描框四角装饰
+class _ScanCornerPainter extends CustomPainter {
+  const _ScanCornerPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFF1976D2)
+      ..strokeWidth = 3
+      ..style = PaintingStyle.stroke;
+
+    const cornerLength = 25.0;
+
+    // 左上角
+    canvas.drawLine(const Offset(0, cornerLength), Offset.zero, paint);
+    canvas.drawLine(Offset.zero, const Offset(cornerLength, 0), paint);
+
+    // 右上角
+    canvas.drawLine(Offset(size.width - cornerLength, 0), Offset(size.width, 0), paint);
+    canvas.drawLine(Offset(size.width, 0), Offset(size.width, cornerLength), paint);
+
+    // 左下角
+    canvas.drawLine(Offset(0, size.height - cornerLength), Offset(0, size.height), paint);
+    canvas.drawLine(Offset(0, size.height), Offset(cornerLength, size.height), paint);
+
+    // 右下角
+    canvas.drawLine(Offset(size.width - cornerLength, size.height), Offset(size.width, size.height), paint);
+    canvas.drawLine(Offset(size.width, size.height - cornerLength), Offset(size.width, size.height), paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

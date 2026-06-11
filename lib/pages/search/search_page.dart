@@ -19,6 +19,8 @@ class _SearchPageState extends State<SearchPage> {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
   bool _isGridView = false;
+  bool _precisionSearch = false;
+  bool _showSearchProgress = true;
 
   @override
   void initState() {
@@ -26,10 +28,9 @@ class _SearchPageState extends State<SearchPage> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<SearchProvider>();
-      provider.loadBookSources().then((_) {
-        if (!mounted || widget.initialKeyword == null) return;
-        _performSearch();
-      });
+      // 清空上次搜索结果
+      provider.clearResults();
+      provider.loadBookSources();
       provider.loadSearchHistory();
     });
 
@@ -48,99 +49,213 @@ class _SearchPageState extends State<SearchPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: TextField(
-          controller: _searchController,
-          focusNode: _focusNode,
-          decoration: InputDecoration(
-            hintText: '搜索书籍、漫画、视频...',
-            border: InputBorder.none,
-            suffixIcon: IconButton(
-              icon: const Icon(Icons.clear),
-              onPressed: () {
-                _searchController.clear();
-                context.read<SearchProvider>().clearResults();
-              },
-            ),
-          ),
-          onSubmitted: (_) => _performSearch(),
-        ),
-        actions: [
-          TextButton(
-            onPressed: _performSearch,
-            child: const Text('搜索'),
-          ),
-        ],
-      ),
       body: Consumer<SearchProvider>(
         builder: (context, provider, child) {
           return Column(
             children: [
-              _buildFilters(provider),
+              // TitleBar + 搜索框（参考原版）
+              Container(
+                padding: EdgeInsets.only(
+                  top: MediaQuery.of(context).padding.top,
+                ),
+                color: Theme.of(context).colorScheme.surface,
+                child: Column(
+                  children: [
+                    // 顶部栏：返回按钮 + 搜索框 + 搜索按钮
+                    SizedBox(
+                      height: 48,
+                      child: Row(
+                        children: [
+                          // 返回按钮
+                          IconButton(
+                            icon: const Icon(Icons.arrow_back),
+                            onPressed: () => Navigator.pop(context),
+                          ),
+                          // 搜索框（参考原版：高度30dp）
+                          Expanded(
+                            child: SizedBox(
+                              height: 32,
+                              child: TextField(
+                                controller: _searchController,
+                                focusNode: _focusNode,
+                                decoration: InputDecoration(
+                                  hintText: '搜索书籍、漫画、视频...',
+                                  hintStyle: const TextStyle(fontSize: 13),
+                                  prefixIcon: const Icon(Icons.search, size: 16),
+                                  suffixIcon: _searchController.text.isNotEmpty
+                                      ? IconButton(
+                                          icon: const Icon(Icons.clear, size: 16),
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints(),
+                                          onPressed: () {
+                                            _searchController.clear();
+                                            provider.clearResults();
+                                          },
+                                        )
+                                      : null,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                                  isDense: true,
+                                ),
+                                style: const TextStyle(fontSize: 13),
+                                onSubmitted: (_) => _performSearch(),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          // 更多菜单（参考原版）
+                          PopupMenuButton<String>(
+                            icon: const Icon(Icons.more_vert),
+                            tooltip: '更多选项',
+                            offset: const Offset(0, 48),
+                            onSelected: (value) => _handleMenuSelection(value, provider),
+                            itemBuilder: (context) => [
+                              PopupMenuItem(
+                                value: 'precision_search',
+                                height: 40,
+                                child: Row(
+                                  children: [
+                                    const Text('精准搜索'),
+                                    const Spacer(),
+                                    SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: Checkbox(
+                                        value: _precisionSearch,
+                                        onChanged: null,
+                                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'show_search_progress',
+                                height: 40,
+                                child: Row(
+                                  children: [
+                                    const Text('显示搜索进度'),
+                                    const Spacer(),
+                                    SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: Checkbox(
+                                        value: _showSearchProgress,
+                                        onChanged: null,
+                                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'grid_view',
+                                height: 40,
+                                child: Row(
+                                  children: [
+                                    const Text('网格视图'),
+                                    const Spacer(),
+                                    SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: Checkbox(
+                                        value: _isGridView,
+                                        onChanged: null,
+                                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const PopupMenuDivider(),
+                              const PopupMenuItem(
+                                value: 'source_manage',
+                                height: 40,
+                                child: Text('书源管理'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'search_scope',
+                                height: 40,
+                                child: Text('分组或书源'),
+                              ),
+                              const PopupMenuDivider(),
+                              const PopupMenuItem(
+                                value: 'log',
+                                height: 40,
+                                child: Text('日志'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // 搜索进度条
               if (provider.isLoading)
                 const LinearProgressIndicator(minHeight: 2),
+              // 搜索进度显示
+              if (_showSearchProgress && provider.searchResults.isNotEmpty && provider.isLoading)
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                    '结果 ${provider.searchResults.length}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              // 内容区域
               Expanded(
                 child: provider.error != null
                     ? _buildErrorState(provider)
                     : provider.searchResults.isNotEmpty
-                        ? _isGridView
-                            ? _buildGridView(provider)
-                            : _buildListView(provider)
+                        ? _buildResultsView(provider)
                         : provider.isLoading
-                            ? const Center(
-                                child: CircularProgressIndicator(),
-                              )
+                            ? const Center(child: CircularProgressIndicator())
                             : _buildEmptyState(provider),
               ),
             ],
           );
         },
       ),
+      // 停止搜索按钮（参考原版 FloatingActionButton）
+      floatingActionButton: Consumer<SearchProvider>(
+        builder: (context, provider, child) {
+          if (!provider.isLoading || provider.searchResults.isEmpty) {
+            return const SizedBox.shrink();
+          }
+          return FloatingActionButton.small(
+            onPressed: () => provider.stopSearch(),
+            child: const Icon(Icons.stop),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildResultsView(SearchProvider provider) {
+    return Column(
+      children: [
+        // 过滤器栏
+        _buildFilters(provider),
+        // 结果列表
+        Expanded(
+          child: _isGridView
+              ? _buildGridView(provider)
+              : _buildListView(provider),
+        ),
+      ],
     );
   }
 
   Widget _buildFilters(SearchProvider provider) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  ActionChip(
-                    label: Text('书源 (${provider.selectedSourceUrls.length})'),
-                    avatar: const Icon(Icons.source, size: 18),
-                    onPressed: () => _showSourceFilter(provider),
-                  ),
-                  const SizedBox(width: 8),
-                  if (provider.selectedSourceUrls.isNotEmpty)
-                    ActionChip(
-                      label: const Text('全选'),
-                      onPressed: () => provider.selectAllSources(),
-                    ),
-                  const SizedBox(width: 8),
-                  if (provider.selectedSourceUrls.isNotEmpty)
-                    ActionChip(
-                      label: const Text('取消全选'),
-                      onPressed: () => provider.deselectAllSources(),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          IconButton(
-            icon: Icon(_isGridView ? Icons.view_list : Icons.grid_view),
-            onPressed: () {
-              setState(() {
-                _isGridView = !_isGridView;
-              });
-            },
-          ),
-        ],
-      ),
-    );
+    // 过滤器栏已移除，功能整合到更多菜单
+    return const SizedBox.shrink();
   }
 
   Widget _buildErrorState(SearchProvider provider) {
@@ -257,28 +372,27 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildListResultItem(Map<String, dynamic> result) {
+    // 参考原版布局：封面 80x110，书名16sp，作者/最新/简介12sp
     final coverUrl = result['coverUrl']?.toString() ?? '';
     final intro = result['intro']?.toString().trim() ?? '';
     final lastChapter = result['lastChapter']?.toString().trim() ?? '';
-    final wordCount = result['wordCount']?.toString().trim() ?? '';
+    final author = result['author']?.toString().trim() ?? '未知作者';
     final sourceName = result['sourceName']?.toString().trim() ?? '';
     final tags = _resultTags(result);
-    final status = _resultStatus(result, tags);
-    final categoryTags =
-        tags.where((tag) => !_isStatusTag(tag) && tag != status).toList();
 
     return InkWell(
       onTap: () => _openDetail(result),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: const EdgeInsets.all(8),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 封面（参考原版：80x110）
             ClipRRect(
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(4),
               child: SizedBox(
-                width: 72,
-                height: 100,
+                width: 80,
+                height: 110,
                 child: coverUrl.isEmpty
                     ? _coverPlaceholder()
                     : CachedNetworkImage(
@@ -289,59 +403,60 @@ class _SearchPageState extends State<SearchPage> {
                       ),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 8),
+            // 右侧信息
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // 书名（参考原版：16sp）
                   Text(
                     result['name']?.toString() ?? '未知书名',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontSize: 16,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 3),
+                  // 作者（参考原版：12sp）
                   Text(
-                    result['author']?.toString().trim().isNotEmpty == true
-                        ? result['author'].toString()
-                        : '未知作者',
+                    '作者：$author',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 13,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    children: [
-                      _buildMetadataChip(
-                        wordCount.isEmpty ? '字数未知' : wordCount,
-                      ),
-                      if (status.isNotEmpty) _buildMetadataChip(status),
-                      ...categoryTags.take(3).map(_buildMetadataChip),
-                      if (sourceName.isNotEmpty) _buildMetadataChip(sourceName),
-                    ],
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    intro.isEmpty ? '暂无简介' : intro,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      height: 1.3,
                       fontSize: 12,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(height: 5),
+                  const SizedBox(height: 3),
+                  // 分类标签
+                  if (tags.isNotEmpty)
+                    Wrap(
+                      spacing: 4,
+                      runSpacing: 2,
+                      children: tags.take(3).map((tag) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                          child: Text(
+                            tag,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  if (tags.isNotEmpty) const SizedBox(height: 3),
+                  // 最新章节（参考原版：12sp）
                   Text(
-                    '最新：${lastChapter.isEmpty ? "暂无章节信息" : lastChapter}',
+                    lastChapter.isEmpty ? '暂无章节' : '最新：$lastChapter',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -349,6 +464,31 @@ class _SearchPageState extends State<SearchPage> {
                       color: Theme.of(context).colorScheme.primary,
                     ),
                   ),
+                  const SizedBox(height: 3),
+                  // 简介（参考原版：12sp）
+                  Text(
+                    intro.isEmpty ? '暂无简介' : intro,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.3,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  // 书源名称
+                  if (sourceName.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      sourceName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -376,27 +516,24 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildGridResultItem(Map<String, dynamic> result) {
+    // 参考原版布局优化
     final coverUrl = result['coverUrl']?.toString() ?? '';
-    final intro = result['intro']?.toString().trim() ?? '';
     final lastChapter = result['lastChapter']?.toString().trim() ?? '';
-    final wordCount = result['wordCount']?.toString().trim() ?? '';
+    final author = result['author']?.toString().trim() ?? '未知作者';
     final sourceName = result['sourceName']?.toString().trim() ?? '';
-    final tags = _resultTags(result);
-    final status = _resultStatus(result, tags);
-    final categoryTags =
-        tags.where((tag) => !_isStatusTag(tag) && tag != status).toList();
-    final metadata = [
-      wordCount.isEmpty ? '字数未知' : wordCount,
-      if (status.isNotEmpty) status,
-      ...categoryTags.take(2),
-    ];
+    
     return GestureDetector(
       onTap: () => _openDetail(result),
       child: Card(
         clipBehavior: Clip.antiAlias,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(4),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // 封面
             Expanded(
               child: coverUrl.isEmpty
                   ? _coverPlaceholder()
@@ -408,22 +545,24 @@ class _SearchPageState extends State<SearchPage> {
                     ),
             ),
             Padding(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(6),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // 书名
                   Text(
                     result['name'] ?? '未知书名',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w500,
                       fontSize: 12,
                     ),
                   ),
                   const SizedBox(height: 2),
+                  // 作者
                   Text(
-                    result['author'] ?? '未知作者',
+                    author,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -431,45 +570,27 @@ class _SearchPageState extends State<SearchPage> {
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    metadata.join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 9,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
                   const SizedBox(height: 2),
+                  // 最新章节
                   Text(
-                    intro.isEmpty ? '暂无简介' : intro,
+                    lastChapter.isEmpty ? '暂无章节' : lastChapter,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 9,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    lastChapter.isEmpty ? '暂无章节信息' : lastChapter,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 9,
+                      fontSize: 10,
                       color: Theme.of(context).colorScheme.primary,
                     ),
                   ),
+                  // 书源
                   if (sourceName.isNotEmpty) ...[
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 1),
                     Text(
                       sourceName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 9,
-                        color: Theme.of(context).colorScheme.secondary,
+                        color: Theme.of(context).colorScheme.outline,
                       ),
                     ),
                   ],
@@ -503,33 +624,6 @@ class _SearchPageState extends State<SearchPage> {
         .map((tag) => tag.trim())
         .where((tag) => tag.isNotEmpty)
         .toList();
-  }
-
-  String _resultStatus(
-    Map<String, dynamic> result,
-    List<String> tags,
-  ) {
-    final status = result['status']?.toString().trim() ?? '';
-    if (status.isNotEmpty) return status;
-    return tags.where(_isStatusTag).firstOrNull ?? '';
-  }
-
-  bool _isStatusTag(String tag) {
-    final normalized = tag.trim();
-    return RegExp(
-      r'^(连载|连载中|更新中|完结|已完结|完本|已完本|暂停|断更)$',
-    ).hasMatch(normalized);
-  }
-
-  Widget _buildMetadataChip(String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(text, style: const TextStyle(fontSize: 10)),
-    );
   }
 
   void _openDetail(Map<String, dynamic> result) {
@@ -571,7 +665,123 @@ class _SearchPageState extends State<SearchPage> {
   void _performSearch() {
     final keyword = _searchController.text.trim();
     if (keyword.isEmpty) return;
-    context.read<SearchProvider>().search(keyword);
+    context.read<SearchProvider>().search(keyword, precisionSearch: _precisionSearch);
+  }
+
+  void _handleMenuSelection(String value, SearchProvider provider) {
+    switch (value) {
+      case 'precision_search':
+        setState(() {
+          _precisionSearch = !_precisionSearch;
+        });
+        break;
+      case 'show_search_progress':
+        setState(() {
+          _showSearchProgress = !_showSearchProgress;
+        });
+        break;
+      case 'grid_view':
+        setState(() {
+          _isGridView = !_isGridView;
+        });
+        break;
+      case 'source_manage':
+        Navigator.pushNamed(context, AppRoutes.bookSourceManage);
+        break;
+      case 'search_scope':
+        _showSearchScopeDialog(provider);
+        break;
+      case 'log':
+        _showLogDialog();
+        break;
+    }
+  }
+
+  void _showSearchScopeDialog(SearchProvider provider) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('选择搜索范围'),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 300,
+            child: ListView(
+              children: [
+                ListTile(
+                  title: const Text('全部书源'),
+                  trailing: Radio<bool>(
+                    value: true,
+                    groupValue: provider.selectedSourceUrls.length == provider.bookSources.length,
+                    onChanged: (_) {
+                      provider.selectAllSources();
+                      Navigator.pop(context);
+                    },
+                  ),
+                  onTap: () {
+                    provider.selectAllSources();
+                    Navigator.pop(context);
+                  },
+                ),
+                const Divider(),
+                ...provider.bookSources.map((source) {
+                  final isSelected = provider.selectedSourceUrls.contains(source.bookSourceUrl);
+                  return ListTile(
+                    title: Text(source.bookSourceName),
+                    subtitle: Text(
+                      source.bookSourceGroup ?? '默认分组',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    trailing: Checkbox(
+                      value: isSelected,
+                      onChanged: (checked) {
+                        provider.toggleSourceSelection(source.bookSourceUrl);
+                      },
+                    ),
+                    onTap: () {
+                      provider.toggleSourceSelection(source.bookSourceUrl);
+                    },
+                  );
+                }),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('确定'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showLogDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('搜索日志'),
+          content: const SizedBox(
+            width: double.maxFinite,
+            height: 300,
+            child: Center(
+              child: Text('暂无日志'),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('关闭'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _showSourceFilter(SearchProvider provider) {

@@ -21,18 +21,28 @@ class _MainPageState extends State<MainPage> {
   int _currentIndex = 0;
   bool _isLoading = true;
   String? _error;
-  final List<Widget> _pages = [
-    const BookshelfPage(),
-    const DiscoveryPage(),
-    const MiniprogramPage(),
-    const ProfilePage(),
-  ];
-
+  late PageController _pageController;
+  
   @override
   void initState() {
     super.initState();
+    _pageController = PageController(initialPage: 0);
     _loadData();
     _requestPermissions();
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+  
+  void _navigateToDiscovery() {
+    _pageController.animateToPage(
+      1, // 发现页面的索引
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
   }
 
   /// 在首页请求运行时权限（必须在Activity存在时请求）
@@ -109,16 +119,32 @@ class _MainPageState extends State<MainPage> {
     }
 
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _pages,
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (index) {
+      body: PageView(
+        controller: _pageController,
+        onPageChanged: (index) {
           setState(() {
             _currentIndex = index;
           });
+        },
+        children: [
+          BookshelfPage(onSwipeToNext: _navigateToDiscovery),
+          const DiscoveryPage(),
+          const MiniprogramPage(),
+          const ProfilePage(),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _currentIndex,
+        height: 56, // 参考原版：最小高度50dp
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        surfaceTintColor: Theme.of(context).colorScheme.surfaceTint,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysHide, // 参考原版：只显示图标不显示文字
+        onDestinationSelected: (index) {
+          _pageController.animateToPage(
+            index,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          );
         },
         destinations: const [
           NavigationDestination(

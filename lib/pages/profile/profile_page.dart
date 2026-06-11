@@ -15,11 +15,8 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   String _nickname = '小蛋子';
-  final int _readingTime = 0;
   int _bookCount = 0;
   int _sourceCount = 0;
-  final int _miniprogramCount = 0;
-  final int _pluginCount = 0;
 
   @override
   void initState() {
@@ -30,7 +27,7 @@ class _ProfilePageState extends State<ProfilePage> {
   void _loadStats() {
     final bookshelfProvider = context.read<BookshelfProvider>();
     final discoveryProvider = context.read<DiscoveryProvider>();
-    
+
     setState(() {
       _bookCount = bookshelfProvider.books.length;
       _sourceCount = discoveryProvider.bookSources.length;
@@ -41,213 +38,228 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('我的'),
-      ),
       body: ListView(
+        padding: EdgeInsets.only(
+          top: MediaQuery.of(context).padding.top,
+        ),
         children: [
-          _buildProfileCard(),
-          const Divider(),
-          _buildManagementSection(),
-          const Divider(),
-          _buildSettingsSection(),
-          const Divider(),
-          _buildAboutSection(),
+          // 顶部标题栏
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                Text(
+                  '我的',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.help_outline),
+                  tooltip: '帮助',
+                  onPressed: () {
+                    _showHelpDialog();
+                  },
+                ),
+              ],
+            ),
+          ),
+          // 书源管理（无分类标题）
+          _buildSection([
+            _buildListItem(
+              icon: Icons.book,
+              title: '书源管理',
+              subtitle: '已导入 $_sourceCount 个书源',
+              onTap: () => _showBookSourceManagement(),
+            ),
+            _buildListItem(
+              icon: Icons.text_snippet,
+              title: 'TXT目录规则',
+              subtitle: '管理TXT文件目录解析规则',
+              onTap: () => Navigator.pushNamed(context, AppRoutes.txtTocRule),
+            ),
+            _buildListItem(
+              icon: Icons.find_replace,
+              title: '替换净化',
+              subtitle: '内容替换规则管理',
+              onTap: () => Navigator.pushNamed(context, AppRoutes.replaceRule),
+            ),
+            _buildListItem(
+              icon: Icons.translate,
+              title: '字典规则',
+              subtitle: '字典翻译规则管理',
+              onTap: () => Navigator.pushNamed(context, AppRoutes.dictRule),
+            ),
+            Consumer<AppProvider>(
+              builder: (context, provider, child) {
+                return _buildListItem(
+                  icon: Icons.palette,
+                  title: '主题模式',
+                  subtitle: _getThemeModeText(provider.themeMode),
+                  onTap: () => _showThemeDialog(provider),
+                );
+              },
+            ),
+            _buildSwitchItem(
+              icon: Icons.web,
+              title: 'Web服务',
+              subtitle: '开启后可通过浏览器访问',
+              value: false,
+              onChanged: (value) {},
+            ),
+          ]),
+
+          // 设置
+          _buildCategoryTitle('设置'),
+          _buildSection([
+            _buildListItem(
+              icon: Icons.backup,
+              title: '备份恢复',
+              subtitle: 'WebDAV备份与恢复',
+              onTap: () => Navigator.pushNamed(context, AppRoutes.backupRestore),
+            ),
+            _buildListItem(
+              icon: Icons.color_lens,
+              title: '主题设置',
+              subtitle: '自定义主题颜色和样式',
+              onTap: () {},
+            ),
+            _buildListItem(
+              icon: Icons.settings,
+              title: '其他设置',
+              subtitle: '阅读、界面等更多设置',
+              onTap: () => _showReaderSettings(),
+            ),
+          ]),
+
+          // 其他
+          _buildCategoryTitle('其他'),
+          _buildSection([
+            _buildListItem(
+              icon: Icons.bookmark,
+              title: '书签',
+              subtitle: '查看所有书签',
+              onTap: () => Navigator.pushNamed(context, AppRoutes.bookmark),
+            ),
+            _buildListItem(
+              icon: Icons.history,
+              title: '阅读记录',
+              subtitle: '查看阅读历史',
+              onTap: () => Navigator.pushNamed(context, AppRoutes.readRecord),
+            ),
+            _buildListItem(
+              icon: Icons.storage,
+              title: '存储管理',
+              subtitle: '管理本地存储的书籍',
+              onTap: () => Navigator.pushNamed(context, AppRoutes.storageManage),
+            ),
+            _buildListItem(
+              icon: Icons.info_outline,
+              title: '关于',
+              onTap: _showAboutDialog,
+            ),
+            _buildListItem(
+              icon: Icons.exit_to_app,
+              title: '退出',
+              onTap: () => _showExitConfirm(),
+            ),
+          ]),
+
+          const SizedBox(height: 24),
         ],
       ),
     );
   }
 
-  Widget _buildProfileCard() {
+  Widget _buildSection(List<Widget> children) {
     return Container(
-      margin: const EdgeInsets.all(16),
-      child: Card(
-        child: InkWell(
-          onTap: () => Navigator.pushNamed(context, AppRoutes.readRecord),
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 32,
-                  backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                  child: Icon(
-                    Icons.person,
-                    size: 32,
-                    color: Theme.of(context).colorScheme.onPrimaryContainer,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _nickname,
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          _buildStatItem('阅读', '${_readingTime}分钟'),
-                          const SizedBox(width: 16),
-                          _buildStatItem('书籍', '$_bookCount本'),
-                          const SizedBox(width: 16),
-                          _buildStatItem('应用', '${_miniprogramCount + _pluginCount}个'),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.edit),
-                  onPressed: _editNickname,
-                ),
-              ],
-            ),
-          ),
+      margin: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: _insertDividers(children),
+      ),
+    );
+  }
+
+  Widget _buildCategoryTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: Theme.of(context).colorScheme.primary,
         ),
       ),
     );
   }
 
-  Widget _buildStatItem(String label, String value) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 16,
-          ),
+  List<Widget> _insertDividers(List<Widget> children) {
+    final result = <Widget>[];
+    for (var i = 0; i < children.length; i++) {
+      result.add(children[i]);
+      if (i < children.length - 1) {
+        result.add(Divider(
+          height: 1,
+          indent: 56,
+          color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.5),
+        ));
+      }
+    }
+    return result;
+  }
+
+  Widget _buildListItem({
+    required IconData icon,
+    required String title,
+    String? subtitle,
+    VoidCallback? onTap,
+  }) {
+    return ListTile(
+      leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
+      title: Text(title),
+      subtitle: subtitle != null ? Text(
+        subtitle,
+        style: TextStyle(
+          fontSize: 12,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
+      ) : null,
+      trailing: Icon(
+        Icons.chevron_right,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+      onTap: onTap,
     );
   }
 
-  Widget _buildManagementSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text(
-            '管理',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
+  Widget _buildSwitchItem({
+    required IconData icon,
+    required String title,
+    String? subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return ListTile(
+      leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
+      title: Text(title),
+      subtitle: subtitle != null ? Text(
+        subtitle,
+        style: TextStyle(
+          fontSize: 12,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
-        ListTile(
-          leading: const Icon(Icons.book),
-          title: const Text('书源管理'),
-          subtitle: Text('已导入 $_sourceCount 个书源'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => _showBookSourceManagement(),
-        ),
-        ListTile(
-          leading: const Icon(Icons.apps),
-          title: const Text('小程序管理'),
-          subtitle: Text('已安装 $_miniprogramCount 个小程序'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => _showMiniprogramManagement(),
-        ),
-        ListTile(
-          leading: const Icon(Icons.extension),
-          title: const Text('插件管理'),
-          subtitle: Text('已安装 $_pluginCount 个插件'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => _showPluginManagement(),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSettingsSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text(
-            '设置',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-        ),
-        Consumer<AppProvider>(
-          builder: (context, provider, child) {
-            return ListTile(
-              leading: const Icon(Icons.palette),
-              title: const Text('主题设置'),
-              subtitle: Text(_getThemeModeText(provider.themeMode)),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _showThemeDialog(provider),
-            );
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.menu_book),
-          title: const Text('阅读设置'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => _showReaderSettings(),
-        ),
-        ListTile(
-          leading: const Icon(Icons.network_check),
-          title: const Text('网络与缓存'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => _showNetworkSettings(),
-        ),
-        Consumer<AppProvider>(
-          builder: (context, provider, child) {
-            return SwitchListTile(
-              secondary: const Icon(Icons.image_not_supported),
-              title: const Text('无图模式'),
-              subtitle: const Text('开启后封面仅显示文字'),
-              value: provider.isNoImageMode,
-              onChanged: (value) => provider.toggleNoImageMode(),
-            );
-          },
-        ),
-      ],
-    );
-  }
-
-  Widget _buildAboutSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text(
-            '关于',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-        ),
-        ListTile(
-          leading: const Icon(Icons.info),
-          title: const Text('关于蛋的神器'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: _showAboutDialog,
-        ),
-        ListTile(
-          leading: const Icon(Icons.help),
-          title: const Text('使用帮助'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () {},
-        ),
-        ListTile(
-          leading: const Icon(Icons.feedback),
-          title: const Text('反馈建议'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () {},
-        ),
-      ],
+      ) : null,
+      trailing: Switch(
+        value: value,
+        onChanged: onChanged,
+      ),
+      onTap: () => onChanged(!value),
     );
   }
 
@@ -262,40 +274,6 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  void _editNickname() {
-    final controller = TextEditingController(text: _nickname);
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('修改昵称'),
-          content: TextField(
-            controller: controller,
-            decoration: const InputDecoration(
-              hintText: '请输入昵称',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('取消'),
-            ),
-            TextButton(
-              onPressed: () {
-                setState(() {
-                  _nickname = controller.text;
-                });
-                context.read<AppProvider>().setNickname(controller.text);
-                Navigator.pop(context);
-              },
-              child: const Text('确定'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
   void _showBookSourceManagement() {
     Navigator.push(
       context,
@@ -305,53 +283,43 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  void _showMiniprogramManagement() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const MiniprogramManagementPage(),
-      ),
-    );
-  }
-
-  void _showPluginManagement() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const PluginManagementPage(),
-      ),
-    );
-  }
-
   void _showThemeDialog(AppProvider provider) {
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('主题设置'),
-          content: RadioGroup<ThemeMode>(
-            groupValue: provider.themeMode,
-            onChanged: (mode) {
-              provider.setThemeMode(mode!);
-              Navigator.pop(context);
-            },
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                RadioListTile<ThemeMode>(
-                  title: const Text('跟随系统'),
-                  value: ThemeMode.system,
-                ),
-                RadioListTile<ThemeMode>(
-                  title: const Text('浅色模式'),
-                  value: ThemeMode.light,
-                ),
-                RadioListTile<ThemeMode>(
-                  title: const Text('深色模式'),
-                  value: ThemeMode.dark,
-                ),
-              ],
-            ),
+          title: const Text('主题模式'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RadioListTile<ThemeMode>(
+                title: const Text('跟随系统'),
+                value: ThemeMode.system,
+                groupValue: provider.themeMode,
+                onChanged: (mode) {
+                  provider.setThemeMode(mode!);
+                  Navigator.pop(context);
+                },
+              ),
+              RadioListTile<ThemeMode>(
+                title: const Text('浅色模式'),
+                value: ThemeMode.light,
+                groupValue: provider.themeMode,
+                onChanged: (mode) {
+                  provider.setThemeMode(mode!);
+                  Navigator.pop(context);
+                },
+              ),
+              RadioListTile<ThemeMode>(
+                title: const Text('深色模式'),
+                value: ThemeMode.dark,
+                groupValue: provider.themeMode,
+                onChanged: (mode) {
+                  provider.setThemeMode(mode!);
+                  Navigator.pop(context);
+                },
+              ),
+            ],
           ),
         );
       },
@@ -364,15 +332,6 @@ class _ProfilePageState extends State<ProfilePage> {
       isScrollControlled: true,
       builder: (context) {
         return const ReaderSettingsSheet();
-      },
-    );
-  }
-
-  void _showNetworkSettings() {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) {
-        return const NetworkSettingsSheet();
       },
     );
   }
@@ -394,70 +353,69 @@ class _ProfilePageState extends State<ProfilePage> {
       },
     );
   }
-}
 
-class MiniprogramManagementPage extends StatelessWidget {
-  const MiniprogramManagementPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('小程序管理'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () {},
-          ),
-        ],
-      ),
-      body: ListView.builder(
-        itemCount: 3,
-        itemBuilder: (context, index) {
-          return ListTile(
-            leading: const CircleAvatar(child: Icon(Icons.apps)),
-            title: Text('小程序 ${index + 1}'),
-            subtitle: const Text('v1.0.0'),
-            trailing: Switch(
-              value: true,
-              onChanged: (value) {},
+  void _showExitConfirm() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('退出'),
+          content: const Text('确定要退出应用吗？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
             ),
-          );
-        },
-      ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                // 退出应用
+              },
+              child: const Text('确定'),
+            ),
+          ],
+        );
+      },
     );
   }
-}
 
-class PluginManagementPage extends StatelessWidget {
-  const PluginManagementPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('插件管理'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () {},
-          ),
-        ],
-      ),
-      body: ListView.builder(
-        itemCount: 2,
-        itemBuilder: (context, index) {
-          return ListTile(
-            leading: const CircleAvatar(child: Icon(Icons.extension)),
-            title: Text('插件 ${index + 1}'),
-            subtitle: const Text('功能增强'),
-            trailing: Switch(
-              value: true,
-              onChanged: (value) {},
+  void _showHelpDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('使用帮助'),
+          content: const SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('📖 书源管理', style: TextStyle(fontWeight: FontWeight.bold)),
+                SizedBox(height: 4),
+                Text('导入和管理书源，支持JSON格式导入'),
+                SizedBox(height: 12),
+                Text('🔍 发现', style: TextStyle(fontWeight: FontWeight.bold)),
+                SizedBox(height: 4),
+                Text('浏览书源提供的发现内容'),
+                SizedBox(height: 12),
+                Text('📱 小程序', style: TextStyle(fontWeight: FontWeight.bold)),
+                SizedBox(height: 4),
+                Text('安装和管理小程序扩展'),
+                SizedBox(height: 12),
+                Text('⚙️ 设置', style: TextStyle(fontWeight: FontWeight.bold)),
+                SizedBox(height: 4),
+                Text('自定义主题、阅读设置等'),
+              ],
             ),
-          );
-        },
-      ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('确定'),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -512,82 +470,6 @@ class ReaderSettingsSheet extends StatelessWidget {
             title: const Text('音量键翻页'),
             value: false,
             onChanged: (value) {},
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class NetworkSettingsSheet extends StatelessWidget {
-  const NetworkSettingsSheet({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '网络与缓存',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: 16),
-          ListTile(
-            title: const Text('同时搜索书源上限'),
-            subtitle: const Text('5个'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {},
-          ),
-          ListTile(
-            title: const Text('图片缓存过期时间'),
-            subtitle: const Text('7天'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {},
-          ),
-          ListTile(
-            title: const Text('视频/音频缓存目录'),
-            subtitle: const Text('/storage/emulated/0/Download'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {},
-          ),
-          SwitchListTile(
-            title: const Text('自动清除缓存'),
-            subtitle: const Text('每周自动清理过期缓存'),
-            value: true,
-            onChanged: (value) {},
-          ),
-          ListTile(
-            title: const Text('清除所有缓存'),
-            trailing: const Icon(Icons.delete),
-            onTap: () {
-              showDialog(
-                context: context,
-                builder: (context) {
-                  return AlertDialog(
-                    title: const Text('确认清除'),
-                    content: const Text('确定要清除所有缓存吗？'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('取消'),
-                      ),
-                      TextButton(
-                        onPressed: () {
-                          Navigator.pop(context);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('缓存已清除')),
-                          );
-                        },
-                        child: const Text('确定'),
-                      ),
-                    ],
-                  );
-                },
-              );
-            },
           ),
         ],
       ),

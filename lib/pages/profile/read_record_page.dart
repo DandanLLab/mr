@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../../providers/bookshelf_provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../services/read_record_service.dart';
+import '../../routes/app_routes.dart';
+import '../../widgets/swipe_action_container.dart';
 
-/// 阅读记录页面 - 参考 legados 的 ReadRecordActivity
+enum DisplayMode { aggregate, timeline, latest, readTime }
+enum HeatmapMode { count, time }
+
 class ReadRecordPage extends StatefulWidget {
   final String? bookUrl;
 
@@ -14,15 +19,51 @@ class ReadRecordPage extends StatefulWidget {
 
 class _ReadRecordPageState extends State<ReadRecordPage> {
   final TextEditingController _searchController = TextEditingController();
+  final _service = ReadRecordService.instance;
+  
   String _searchKeyword = '';
-  List<ReadRecord> _records = [];
-  List<ReadRecord> _filteredRecords = [];
+  List<ReadRecord> _allRecords = [];
+  List<ReadRecordSummary> _summaryRecords = [];
   bool _isLoading = true;
+  int _totalReadTime = 0;
+  int _todayReadTime = 0;
+  
+  bool _showSearch = false;
+  DisplayMode _displayMode = DisplayMode.aggregate;
+  bool _enableReadRecord = true;
+  bool _skipDeleteConfirm = false;
+  
+  // 日历相关
+  DateTime _currentMonth = DateTime.now();
+  DateTime? _selectedDate;
+  HeatmapMode _heatmapMode = HeatmapMode.time;
+  Map<DateTime, int> _dailyReadCounts = {};
+  Map<DateTime, int> _dailyReadTimes = {};
 
   @override
   void initState() {
     super.initState();
+    _loadSettings();
     _loadRecords();
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _enableReadRecord = prefs.getBool('enable_read_record') ?? true;
+      _skipDeleteConfirm = prefs.getBool('skip_delete_confirm') ?? false;
+      // 读取保存的显示模式
+      final displayModeIndex = prefs.getInt('read_record_display_mode') ?? 0;
+      _displayMode = DisplayMode.values[displayModeIndex.clamp(0, DisplayMode.values.length - 1)];
+    });
+  }
+
+  Future<void> _toggleReadRecord() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _enableReadRecord = !_enableReadRecord;
+    });
+    await prefs.setBool('enable_read_record', _enableReadRecord);
   }
 
   @override
@@ -32,75 +73,184 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
   }
 
   Future<void> _loadRecords() async {
-    // TODO: 从存储加载阅读记录
-    // 这里使用模拟数据
-    await Future.delayed(const Duration(milliseconds: 500));
+    setState(() => _isLoading = true);
     
-    final provider = context.read<BookshelfProvider>();
-    final records = <ReadRecord>[];
+    final allRecords = await _service.getAllRecords();
+    final summaryRecords = await _service.getSummaryRecords();
+    final totalReadTime = await _service.getTotalReadTime();
+    final todayReadTime = await _service.getTodayReadTime();
     
-    for (final book in provider.books) {
-      if (book.durChapterIndex > 0) {
-        records.add(ReadRecord(
-          bookUrl: book.bookUrl,
-          bookName: book.name,
-          author: book.author,
-          coverUrl: book.coverUrl,
-          totalReadTime: Duration(minutes: (book.durChapterIndex * 5)), // 模拟数据
-          firstReadTime: DateTime.now().subtract(const Duration(days: 7)),
-          lastReadTime: DateTime.now().subtract(const Duration(hours: 2)),
-          chapterCount: book.durChapterIndex,
-        ));
-      }
+    // 计算每日阅读次数和时长
+    final dailyCounts = <DateTime, int>{};
+    final dailyTimes = <DateTime, int>{};
+    for (final record in allRecords) {
+      final date = DateTime.fromMillisecondsSinceEpoch(record.startTime * 1000);
+      final dateKey = DateTime(date.year, date.month, date.day);
+      dailyCounts[dateKey] = (dailyCounts[dateKey] ?? 0) + 1;
+      dailyTimes[dateKey] = (dailyTimes[dateKey] ?? 0) + record.readTime;
     }
 
     setState(() {
-      _records = records;
-      _filteredRecords = records;
+      _allRecords = allRecords;
+      _summaryRecords = summaryRecords;
+      _totalReadTime = totalReadTime;
+      _todayReadTime = todayReadTime;
+      _dailyReadCounts = dailyCounts;
+      _dailyReadTimes = dailyTimes;
       _isLoading = false;
     });
   }
 
-  void _filterRecords(String keyword) {
+  Future<void> _toggleDisplayMode() async {
     setState(() {
-      _searchKeyword = keyword.trim().toLowerCase();
-      if (_searchKeyword.isEmpty) {
-        _filteredRecords = _records;
-      } else {
-        _filteredRecords = _records.where((r) {
-          return r.bookName.toLowerCase().contains(_searchKeyword) ||
-              r.author.toLowerCase().contains(_searchKeyword);
-        }).toList();
-      }
+      _displayMode = DisplayMode.values[(_displayMode.index + 1) % DisplayMode.values.length];
     });
+    // 保存显示模式
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('read_record_display_mode', _displayMode.index);
   }
 
-  Future<void> _clearRecord(ReadRecord record) async {
+  String _getDisplayModeName() {
+    switch (_displayMode) {
+      case DisplayMode.aggregate:
+        return '汇总视图';
+      case DisplayMode.timeline:
+        return '时间线视图';
+      case DisplayMode.latest:
+        return '最近阅读';
+      case DisplayMode.readTime:
+        return '阅读时长';
+    }
+  }
+
+  IconData _getDisplayModeIcon() {
+    switch (_displayMode) {
+      case DisplayMode.aggregate:
+        return Icons.timeline;
+      case DisplayMode.timeline:
+        return Icons.view_timeline;
+      case DisplayMode.latest:
+        return Icons.schedule;
+      case DisplayMode.readTime:
+        return Icons.auto_awesome;
+    }
+  }
+
+  Future<void> _deleteRecord(ReadRecordSummary record) async {
+    // 如果已设置跳过确认，直接删除
+    if (_skipDeleteConfirm) {
+      await _service.deleteRecordsByBook(record.bookName, record.bookAuthor);
+      _loadRecords();
+      return;
+    }
+
+    bool skipNextTime = false;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('清除确认'),
-        content: Text('确定要清除 "${record.bookName}" 的阅读记录吗？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('确认删除'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('确定要删除这条阅读记录吗？'),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Checkbox(
+                    value: skipNextTime,
+                    onChanged: (value) => setState(() => skipNextTime = value ?? false),
+                  ),
+                  const Text('不再提示'),
+                ],
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('清除'),
-          ),
-        ],
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () async {
+                if (skipNextTime) {
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setBool('skip_delete_confirm', true);
+                  _skipDeleteConfirm = true;
+                }
+                Navigator.pop(context, true);
+              },
+              style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error),
+              child: const Text('删除'),
+            ),
+          ],
+        ),
       ),
     );
 
     if (confirmed == true) {
-      setState(() {
-        _records.remove(record);
-        _filteredRecords.remove(record);
-      });
-      // TODO: 从存储中删除记录
+      await _service.deleteRecordsByBook(record.bookName, record.bookAuthor);
+      _loadRecords();
+    }
+  }
+
+  Future<void> _deleteSingleRecord(ReadRecord record) async {
+    // 如果已设置跳过确认，直接删除
+    if (_skipDeleteConfirm) {
+      await _service.deleteRecord(record.id);
+      _loadRecords();
+      return;
+    }
+
+    bool skipNextTime = false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('确认删除'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('确定要删除这条阅读记录吗？'),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Checkbox(
+                    value: skipNextTime,
+                    onChanged: (value) => setState(() => skipNextTime = value ?? false),
+                  ),
+                  const Text('不再提示'),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () async {
+                if (skipNextTime) {
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setBool('skip_delete_confirm', true);
+                  _skipDeleteConfirm = true;
+                }
+                Navigator.pop(context, true);
+              },
+              style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error),
+              child: const Text('删除'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed == true) {
+      await _service.deleteRecord(record.id);
+      _loadRecords();
     }
   }
 
@@ -125,48 +275,748 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     );
 
     if (confirmed == true) {
-      setState(() {
-        _records.clear();
-        _filteredRecords.clear();
-      });
-      // TODO: 从存储中删除所有记录
+      await _service.clearAllRecords();
+      _loadRecords();
     }
+  }
+
+  void _showCalendar() {
+    // 重置为当前月份
+    setState(() {
+      _currentMonth = DateTime.now();
+    });
+    
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          return DraggableScrollableSheet(
+            initialChildSize: 0.75,
+            minChildSize: 0.5,
+            maxChildSize: 0.85,
+            expand: false,
+            builder: (context, scrollController) => _buildCalendarSheet(
+              scrollController,
+              onDateSelected: (date) {
+                setState(() {
+                  _selectedDate = date;
+                });
+                Navigator.pop(sheetContext);
+              },
+              onModeChanged: (mode) {
+                setSheetState(() {
+                  _heatmapMode = mode;
+                });
+              },
+              onMonthChanged: (month) {
+                setSheetState(() {
+                  _currentMonth = month;
+                });
+              },
+            ),
+          );
+        },
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: TextField(
-          controller: _searchController,
-          decoration: InputDecoration(
-            hintText: '搜索阅读记录',
-            border: InputBorder.none,
-            suffixIcon: _searchKeyword.isNotEmpty
-                ? IconButton(
-                    icon: const Icon(Icons.clear),
-                    onPressed: () {
-                      _searchController.clear();
-                      _filterRecords('');
-                    },
-                  )
-                : null,
-          ),
-          onChanged: _filterRecords,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+          padding: EdgeInsets.zero,
+        ),
+        leadingWidth: 44,
+        centerTitle: false,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('阅读记录', style: TextStyle(fontSize: 18)),
+            Text(
+              _getDisplayModeName(),
+              style: TextStyle(
+                fontSize: 11,
+                height: 1.2,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.delete_sweep),
-            onPressed: _records.isEmpty ? null : _clearAllRecords,
-            tooltip: '清除全部',
+            icon: const Icon(Icons.search),
+            onPressed: () {
+              setState(() => _showSearch = !_showSearch);
+              if (!_showSearch) {
+                _searchController.clear();
+                setState(() => _searchKeyword = '');
+              }
+            },
+            tooltip: '搜索',
+          ),
+          IconButton(
+            icon: const Icon(Icons.calendar_month),
+            onPressed: _showCalendar,
+            tooltip: '阅读日历',
+          ),
+          IconButton(
+            icon: Icon(_getDisplayModeIcon()),
+            onPressed: _toggleDisplayMode,
+            tooltip: '切换视图',
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            tooltip: '更多',
+            offset: const Offset(0, 48),
+            onSelected: (value) {
+              if (value == 'toggle') {
+                _toggleReadRecord();
+              } else if (value == 'clear') {
+                _clearAllRecords();
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'toggle',
+                child: Row(
+                  children: [
+                    Icon(_enableReadRecord ? Icons.visibility_off : Icons.visibility),
+                    const SizedBox(width: 8),
+                    Text(_enableReadRecord ? '关闭阅读记录' : '开启阅读记录'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'clear',
+                child: Row(
+                  children: [
+                    Icon(Icons.delete, color: Theme.of(context).colorScheme.error),
+                    const SizedBox(width: 8),
+                    Text('清除全部记录', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : _filteredRecords.isEmpty
-              ? _buildEmptyState()
-              : _buildRecordList(),
+          : Column(
+              children: [
+                // 搜索框
+                if (_showSearch)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: TextField(
+                      controller: _searchController,
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        hintText: '搜索书籍',
+                        prefixIcon: const Icon(Icons.search),
+                        suffixIcon: _searchKeyword.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() => _searchKeyword = '');
+                                },
+                              )
+                            : null,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                      ),
+                      onChanged: (value) => setState(() => _searchKeyword = value.trim().toLowerCase()),
+                    ),
+                  ),
+                // 记录列表
+                Expanded(
+                  child: _buildContentByMode(),
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildContentByMode() {
+    // 根据选中日期过滤
+    List<ReadRecord> filteredRecords = _allRecords;
+    List<ReadRecordSummary> filteredSummaries = _summaryRecords;
+    
+    if (_selectedDate != null) {
+      filteredRecords = _allRecords.where((r) {
+        final date = DateTime.fromMillisecondsSinceEpoch(r.startTime * 1000);
+        final dateKey = DateTime(date.year, date.month, date.day);
+        return dateKey == _selectedDate;
+      }).toList();
+      
+      // 重新计算汇总
+      final summaryMap = <String, ReadRecordSummary>{};
+      for (final record in filteredRecords) {
+        final key = '${record.bookName}_${record.bookAuthor}';
+        if (summaryMap.containsKey(key)) {
+          final existing = summaryMap[key]!;
+          summaryMap[key] = ReadRecordSummary(
+            bookUrl: existing.bookUrl,
+            bookName: existing.bookName,
+            bookAuthor: existing.bookAuthor,
+            coverUrl: existing.coverUrl,
+            totalReadTime: existing.totalReadTime + record.readTime,
+            firstReadTime: record.startTime < existing.firstReadTime ? record.startTime : existing.firstReadTime,
+            lastReadTime: record.endTime > existing.lastReadTime ? record.endTime : existing.lastReadTime,
+            readCount: existing.readCount + 1,
+            lastChapterIndex: record.chapterIndex,
+            lastChapterTitle: record.chapterTitle,
+          );
+        } else {
+          summaryMap[key] = ReadRecordSummary(
+            bookUrl: record.bookUrl,
+            bookName: record.bookName,
+            bookAuthor: record.bookAuthor,
+            coverUrl: record.coverUrl,
+            totalReadTime: record.readTime,
+            firstReadTime: record.startTime,
+            lastReadTime: record.endTime,
+            readCount: 1,
+            lastChapterIndex: record.chapterIndex,
+            lastChapterTitle: record.chapterTitle,
+          );
+        }
+      }
+      filteredSummaries = summaryMap.values.toList();
+    }
+    
+    // 搜索过滤
+    if (_searchKeyword.isNotEmpty) {
+      filteredRecords = filteredRecords.where((r) {
+        return r.bookName.toLowerCase().contains(_searchKeyword) ||
+            r.bookAuthor.toLowerCase().contains(_searchKeyword);
+      }).toList();
+      filteredSummaries = filteredSummaries.where((r) {
+        return r.bookName.toLowerCase().contains(_searchKeyword) ||
+            r.bookAuthor.toLowerCase().contains(_searchKeyword);
+      }).toList();
+    }
+    
+    if (filteredSummaries.isEmpty && filteredRecords.isEmpty) {
+      return _buildEmptyState();
+    }
+    
+    switch (_displayMode) {
+      case DisplayMode.aggregate:
+        return _buildAggregateView(filteredSummaries);
+      case DisplayMode.timeline:
+        return _buildTimelineView(filteredRecords);
+      case DisplayMode.latest:
+        return _buildLatestView(filteredSummaries);
+      case DisplayMode.readTime:
+        return _buildReadTimeView(filteredSummaries);
+    }
+  }
+
+  Widget _buildSummaryCard() {
+    final hours = _totalReadTime ~/ 3600;
+    final minutes = (_totalReadTime % 3600) ~/ 60;
+    final timeString = hours > 0 ? '$hours小时$minutes分钟' : '$minutes分钟';
+    
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '阅读成就',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  RichText(
+                    text: TextSpan(
+                      children: [
+                        TextSpan(
+                          text: '已读 ',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                        ),
+                        TextSpan(
+                          text: '${_summaryRecords.length}',
+                          style: TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                        ),
+                        TextSpan(
+                          text: ' 本',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '累计阅读 $timeString',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (_summaryRecords.isNotEmpty) _buildBookStack(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBookStack() {
+    final displayRecords = _summaryRecords.take(3).toList();
+    const double coverWidth = 48;
+    const double coverHeight = 72;
+    const double offsetStep = 12;
+    final double stackWidth = coverWidth + offsetStep * (displayRecords.length - 1);
+    
+    return SizedBox(
+      width: stackWidth,
+      height: coverHeight,
+      child: Stack(
+        children: displayRecords.asMap().entries.map((entry) {
+          final index = entry.key;
+          final record = entry.value;
+          final isEven = index % 2 == 0;
+          
+          return Positioned(
+            left: offsetStep * index,
+            child: Transform.rotate(
+              angle: isEven ? 0.05 : -0.05,
+              child: Container(
+                width: coverWidth,
+                height: coverHeight,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(4),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.2),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: record.coverUrl.isNotEmpty
+                      ? CachedNetworkImage(
+                          imageUrl: record.coverUrl,
+                          fit: BoxFit.cover,
+                          cacheKey: record.coverUrl,
+                          memCacheWidth: 100,
+                          maxWidthDiskCache: 200,
+                          placeholder: (_, __) => _buildStackDefaultCover(),
+                          errorWidget: (_, __, ___) => _buildStackDefaultCover(),
+                        )
+                      : _buildStackDefaultCover(),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildStackDefaultCover() {
+    return Container(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Center(
+        child: Icon(
+          Icons.book,
+          size: 24,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+
+  // 聚合视图 - 按日期分组
+  Widget _buildAggregateView(List<ReadRecordSummary> records) {
+    // 按日期分组
+    final grouped = <String, List<ReadRecordSummary>>{};
+    for (final record in records) {
+      final date = _formatDate(record.lastReadTime);
+      grouped.putIfAbsent(date, () => []).add(record);
+    }
+    
+    final sortedDates = grouped.keys.toList()
+      ..sort((a, b) => b.compareTo(a));
+    
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: sortedDates.length + 1,
+      itemBuilder: (context, index) {
+        if (index == 0) return _buildSummaryCard();
+        
+        final dateIndex = index - 1;
+        final date = sortedDates[dateIndex];
+        final dateRecords = grouped[date]!..sort((a, b) => b.lastReadTime.compareTo(a.lastReadTime));
+        
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 日期头部
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    date,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                  Text(
+                    _formatDuration(dateRecords.fold(0, (sum, r) => sum + r.totalReadTime)),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // 记录列表
+            ...dateRecords.map((r) => _buildSummaryItem(r)),
+          ],
+        );
+      },
+    );
+  }
+
+  // 时间线视图 - 显示每次阅读会话
+  Widget _buildTimelineView(List<ReadRecord> records) {
+    // 按日期分组
+    final grouped = <String, List<ReadRecord>>{};
+    for (final record in records) {
+      final date = _formatDateOnly(record.startTime);
+      grouped.putIfAbsent(date, () => []).add(record);
+    }
+    
+    final sortedDates = grouped.keys.toList()
+      ..sort((a, b) => b.compareTo(a));
+    
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: sortedDates.length + 1,
+      itemBuilder: (context, index) {
+        if (index == 0) return _buildSummaryCard();
+        
+        final dateIndex = index - 1;
+        final date = sortedDates[dateIndex];
+        final dateRecords = grouped[date]!..sort((a, b) => b.startTime.compareTo(a.startTime));
+        
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 日期头部
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    date,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                  Text(
+                    _formatDuration(dateRecords.fold(0, (sum, r) => sum + r.readTime)),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // 时间线记录
+            ...dateRecords.asMap().entries.map((entry) {
+              final idx = entry.key;
+              final record = entry.value;
+              final isFirst = idx == 0;
+              final isLast = idx == dateRecords.length - 1;
+              return _buildTimelineItem(record, isFirst, isLast);
+            }),
+          ],
+        );
+      },
+    );
+  }
+
+  // 最近阅读视图
+  Widget _buildLatestView(List<ReadRecordSummary> records) {
+    records.sort((a, b) => b.lastReadTime.compareTo(a.lastReadTime));
+    
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: records.length + 1,
+      itemBuilder: (context, index) {
+        if (index == 0) return _buildSummaryCard();
+        return _buildLatestRecordItem(records[index - 1]);
+      },
+    );
+  }
+
+  Widget _buildLatestRecordItem(ReadRecordSummary record) {
+    final content = InkWell(
+      onTap: () {
+        Navigator.pushNamed(context, AppRoutes.detail, arguments: {
+          'bookUrl': record.bookUrl,
+        });
+      },
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Theme.of(context).brightness == Brightness.dark
+              ? Border.all(
+                  color: Theme.of(context).colorScheme.outline.withOpacity(0.42),
+                  width: 1,
+                )
+              : null,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: record.coverUrl.isNotEmpty
+                    ? CachedNetworkImage(
+                        imageUrl: record.coverUrl,
+                        width: 44,
+                        height: 60,
+                        fit: BoxFit.cover,
+                        cacheKey: record.coverUrl,
+                        memCacheWidth: 100,
+                        maxWidthDiskCache: 200,
+                        placeholder: (_, __) => _buildDefaultCover(),
+                        errorWidget: (_, __, ___) => _buildDefaultCover(),
+                      )
+                    : _buildDefaultCover(),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      record.bookName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      record.bookAuthor.isNotEmpty ? record.bookAuthor : '未知作者',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.schedule,
+                          size: 14,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _formatDuration(record.totalReadTime),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '·',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _formatDateTime(record.lastReadTime),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              // 三个点菜单
+              PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                onSelected: (value) {
+                  if (value == 'delete') {
+                    _deleteRecord(record);
+                  } else if (value == 'merge') {
+                    _showMergeDialog(record);
+                  }
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'merge',
+                    child: Row(
+                      children: [
+                        Icon(Icons.merge),
+                        SizedBox(width: 8),
+                        Text('合并同名书籍'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete, color: Theme.of(context).colorScheme.error),
+                        const SizedBox(width: 8),
+                        Text('删除', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    return SwipeActionContainer(
+      startActions: [createSwipeDeleteAction(context, () => _deleteRecord(record))],
+      child: content,
+    );
+  }
+
+  void _showMergeDialog(ReadRecordSummary record) {
+    // 查找同名书籍
+    final sameNameRecords = _summaryRecords.where((r) {
+      return r.bookName == record.bookName && r.bookAuthor != record.bookAuthor;
+    }).toList();
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('合并同名书籍'),
+        content: sameNameRecords.isEmpty
+            ? const Text('没有找到可合并的同名书籍')
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('将 "${record.bookName}" 与以下书籍合并：'),
+                  const SizedBox(height: 8),
+                  ...sameNameRecords.map((r) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text('· ${r.bookName} - ${r.bookAuthor.isNotEmpty ? r.bookAuthor : "未知作者"}'),
+                  )),
+                ],
+              ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          if (sameNameRecords.isNotEmpty)
+            TextButton(
+              onPressed: () async {
+                // 合并阅读记录
+                for (final r in sameNameRecords) {
+                  await _service.mergeRecords(
+                    sourceBookName: r.bookName,
+                    sourceBookAuthor: r.bookAuthor,
+                    targetBookName: record.bookName,
+                    targetBookAuthor: record.bookAuthor,
+                  );
+                }
+                Navigator.pop(context);
+                _loadRecords();
+              },
+              style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error),
+              child: const Text('合并'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // 阅读时长视图
+  Widget _buildReadTimeView(List<ReadRecordSummary> records) {
+    records.sort((a, b) => b.totalReadTime.compareTo(a.totalReadTime));
+    
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: records.length + 1,
+      itemBuilder: (context, index) {
+        if (index == 0) return _buildSummaryCard();
+        return _buildSummaryItem(records[index - 1], showReadTime: true);
+      },
     );
   }
 
@@ -176,7 +1026,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
-            Icons.history,
+            Icons.menu_book,
             size: 80,
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
@@ -193,29 +1043,225 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     );
   }
 
-  Widget _buildRecordList() {
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: _filteredRecords.length,
-      itemBuilder: (context, index) {
-        final record = _filteredRecords[index];
-        return _buildRecordItem(record);
+  Widget _buildSummaryItem(ReadRecordSummary record, {bool showReadTime = false}) {
+    final content = InkWell(
+      onTap: () {
+        Navigator.pushNamed(context, AppRoutes.detail, arguments: {
+          'bookUrl': record.bookUrl,
+        });
       },
+      onLongPress: () => _deleteRecord(record),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Theme.of(context).brightness == Brightness.dark
+              ? Border.all(
+                  color: Theme.of(context).colorScheme.outline.withOpacity(0.42),
+                  width: 1,
+                )
+              : null,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: record.coverUrl.isNotEmpty
+                    ? CachedNetworkImage(
+                        imageUrl: record.coverUrl,
+                        width: 44,
+                        height: 60,
+                        fit: BoxFit.cover,
+                        cacheKey: record.coverUrl,
+                        memCacheWidth: 100,
+                        maxWidthDiskCache: 200,
+                        placeholder: (_, __) => _buildDefaultCover(),
+                        errorWidget: (_, __, ___) => _buildDefaultCover(),
+                      )
+                    : _buildDefaultCover(),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      record.bookName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      record.bookAuthor.isNotEmpty ? record.bookAuthor : '未知作者',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.schedule,
+                          size: 14,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _formatDuration(record.totalReadTime),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '·',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _formatDateTime(record.lastReadTime),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              if (showReadTime)
+                Text(
+                  _formatDuration(record.totalReadTime),
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    return SwipeActionContainer(
+      startActions: [createSwipeDeleteAction(context, () => _deleteRecord(record))],
+      child: content,
     );
   }
 
-  Widget _buildRecordItem(ReadRecord record) {
-    return InkWell(
+  Widget _buildTimelineItem(ReadRecord record, bool isFirst, bool isLast) {
+    final timeFormat = '${record.startTime ~/ 3600 % 24}:${(record.startTime % 3600 ~/ 60).toString().padLeft(2, '0')}';
+    
+    final content = InkWell(
       onTap: () {
-        // 跳转到书籍详情
-        Navigator.pop(context, record.bookUrl);
+        Navigator.pushNamed(context, AppRoutes.detail, arguments: {
+          'bookUrl': record.bookUrl,
+        });
       },
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // 书名
+            // 时间线指示器
+            SizedBox(
+              width: 20,
+              child: Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.center,
+                children: [
+                  // 上半部分线
+                  if (!isFirst)
+                    Positioned(
+                      bottom: 7,
+                      child: Container(
+                        width: 2,
+                        height: 16,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
+                          borderRadius: BorderRadius.circular(1),
+                        ),
+                      ),
+                    ),
+                  // 下半部分线
+                  if (!isLast)
+                    Positioned(
+                      top: 7,
+                      child: Container(
+                        width: 2,
+                        height: 16,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
+                          borderRadius: BorderRadius.circular(1),
+                        ),
+                      ),
+                    ),
+                  // 圆点
+                  Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                          blurRadius: 4,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            // 时间
+            SizedBox(
+              width: 48,
+              child: Text(
+                timeFormat,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(width: 8),
+            // 封面
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: record.coverUrl.isNotEmpty
+                  ? CachedNetworkImage(
+                      imageUrl: record.coverUrl,
+                      width: 40,
+                      height: 54,
+                      fit: BoxFit.cover,
+                      cacheKey: record.coverUrl,
+                      memCacheWidth: 100,
+                      maxWidthDiskCache: 200,
+                      placeholder: (_, __) => _buildDefaultCover(size: 40),
+                      errorWidget: (_, __, ___) => _buildDefaultCover(size: 40),
+                    )
+                  : _buildDefaultCover(size: 40),
+            ),
+            const SizedBox(width: 12),
+            // 信息
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -225,80 +1271,373 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontSize: 16,
+                      fontSize: 15,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  // 累计阅读时间
-                  Row(
-                    children: [
-                      Text(
-                        '累计阅读: ',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      Text(
-                        _formatDuration(record.totalReadTime),
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: 2),
+                  Text(
+                    record.bookAuthor.isNotEmpty ? record.bookAuthor : '未知作者',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
-                  const SizedBox(height: 4),
-                  // 首次阅读时间
-                  Row(
-                    children: [
-                      Text(
-                        '首次阅读: ',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      Text(
-                        _formatDateTime(record.firstReadTime),
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  // 最后阅读时间
-                  Row(
-                    children: [
-                      Text(
-                        '最后阅读: ',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      Text(
-                        _formatDateTime(record.lastReadTime),
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: 2),
+                  Text(
+                    record.chapterTitle.isNotEmpty ? record.chapterTitle : '第${record.chapterIndex + 1}章',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
             ),
-            // 清除按钮
-            TextButton(
-              onPressed: () => _clearRecord(record),
-              style: TextButton.styleFrom(
-                foregroundColor: Theme.of(context).colorScheme.error,
+          ],
+        ),
+      ),
+    );
+
+    return SwipeActionContainer(
+      startActions: [createSwipeDeleteAction(context, () => _deleteSingleRecord(record))],
+      child: content,
+    );
+  }
+
+  Widget _buildDefaultCover({double size = 44}) {
+    return Container(
+      width: size,
+      height: size * 60 / 44,
+      color: Colors.grey[300],
+      child: Icon(Icons.book, size: size * 0.45),
+    );
+  }
+
+  // 日历底部弹窗
+  Widget _buildCalendarSheet(
+    ScrollController controller, {
+    required Function(DateTime?) onDateSelected,
+    required Function(HeatmapMode) onModeChanged,
+    required Function(DateTime) onMonthChanged,
+  }) {
+    return SingleChildScrollView(
+      controller: controller,
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 标题
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '阅读日历',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    '记录你的阅读轨迹',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
-              child: const Text('清除'),
+              // 模式切换
+              Row(
+                children: [
+                  _buildModeChip('次数', _heatmapMode == HeatmapMode.count, () {
+                    onModeChanged(HeatmapMode.count);
+                  }),
+                  const SizedBox(width: 4),
+                  _buildModeChip('时长', _heatmapMode == HeatmapMode.time, () {
+                    onModeChanged(HeatmapMode.time);
+                  }),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // 日历
+          _buildCalendar(onDateSelected, onMonthChanged),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCalendar(
+    Function(DateTime?) onDateSelected,
+    Function(DateTime) onMonthChanged,
+  ) {
+    final firstDayOfMonth = DateTime(_currentMonth.year, _currentMonth.month, 1);
+    final lastDayOfMonth = DateTime(_currentMonth.year, _currentMonth.month + 1, 0);
+    
+    // 计算第一天是星期几（0=周一，6=周日）
+    final firstWeekday = (firstDayOfMonth.weekday - 1) % 7;
+    
+    // 计算需要显示的天数
+    final daysInMonth = lastDayOfMonth.day;
+    final totalCells = ((firstWeekday + daysInMonth + 6) / 7).ceil() * 7;
+    
+    // 计算最大值用于热力图
+    int maxValue = 1;
+    for (final date in _dailyReadCounts.keys) {
+      if (date.year == _currentMonth.year && date.month == _currentMonth.month) {
+        final value = _heatmapMode == HeatmapMode.count
+            ? (_dailyReadCounts[date] ?? 0)
+            : ((_dailyReadTimes[date] ?? 0) ~/ 60);
+        if (value > maxValue) maxValue = value;
+      }
+    }
+    maxValue = maxValue.clamp(6, 120);
+    
+    // 计算月度统计
+    int monthReadCount = 0;
+    int monthReadTime = 0;
+    int activeDays = 0;
+    for (int day = 1; day <= daysInMonth; day++) {
+      final date = DateTime(_currentMonth.year, _currentMonth.month, day);
+      final count = _dailyReadCounts[date] ?? 0;
+      final time = _dailyReadTimes[date] ?? 0;
+      monthReadCount += count;
+      monthReadTime += time;
+      if (count > 0 || time > 0) activeDays++;
+    }
+    
+    return Column(
+      children: [
+        // 月份导航
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.chevron_left),
+                    onPressed: () {
+                      onMonthChanged(DateTime(_currentMonth.year, _currentMonth.month - 1));
+                    },
+                  ),
+                  Column(
+                    children: [
+                      Text(
+                        '${_currentMonth.year}年${_currentMonth.month}月',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        _heatmapMode == HeatmapMode.count ? '按阅读次数显示' : '按阅读时长显示',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.chevron_right),
+                    onPressed: () {
+                      onMonthChanged(DateTime(_currentMonth.year, _currentMonth.month + 1));
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              // 月度统计
+              Row(
+                children: [
+                  _buildStatPill('阅读', '$monthReadCount次'),
+                  const SizedBox(width: 8),
+                  _buildStatPill('时长', _formatDuration(monthReadTime)),
+                  const SizedBox(width: 8),
+                  _buildStatPill('天数', '$activeDays天'),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        // 星期标题
+        Row(
+          children: ['一', '二', '三', '四', '五', '六', '日'].map((day) {
+            return Expanded(
+              child: Text(
+                day,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 8),
+        // 日历网格
+        Wrap(
+          spacing: 4,
+          runSpacing: 4,
+          children: List.generate(totalCells, (index) {
+            final dayOffset = index - firstWeekday;
+            final isCurrentMonth = dayOffset >= 0 && dayOffset < daysInMonth;
+            
+            if (!isCurrentMonth) {
+              // 非当前月份的日期
+              DateTime date;
+              if (dayOffset < 0) {
+                // 上月末的日期
+                final prevMonth = DateTime(_currentMonth.year, _currentMonth.month, 0);
+                date = DateTime(prevMonth.year, prevMonth.month, prevMonth.day + dayOffset + 1);
+              } else {
+                // 下月初的日期
+                date = DateTime(_currentMonth.year, _currentMonth.month + 1, dayOffset - daysInMonth + 1);
+              }
+              return _buildDayCell(
+                date.day,
+                0,
+                maxValue,
+                false,
+                false,
+                () {},
+                isCurrentMonth: false,
+              );
+            }
+            
+            final day = dayOffset + 1;
+            final date = DateTime(_currentMonth.year, _currentMonth.month, day);
+            final today = DateTime.now();
+            final isToday = date.year == today.year && date.month == today.month && date.day == today.day;
+            final isSelected = _selectedDate != null &&
+                date.year == _selectedDate!.year &&
+                date.month == _selectedDate!.month &&
+                date.day == _selectedDate!.day;
+            
+            final value = _heatmapMode == HeatmapMode.count
+                ? (_dailyReadCounts[date] ?? 0)
+                : ((_dailyReadTimes[date] ?? 0) ~/ 60);
+            
+            return _buildDayCell(day, value, maxValue, isToday, isSelected, () {
+              onDateSelected(isSelected ? null : date);
+            });
+          }),
+        ),
+        const SizedBox(height: 12),
+        // 图例
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Text(
+              '少',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(width: 4),
+            ...List.generate(5, (index) {
+              final color = _getHeatmapColor(index, 4);
+              return Container(
+                width: 14,
+                height: 14,
+                margin: const EdgeInsets.symmetric(horizontal: 1),
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              );
+            }),
+            const SizedBox(width: 4),
+            Text(
+              '多',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+        // 选中日期信息
+        if (_selectedDate != null) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${_selectedDate!.month}月${_selectedDate!.day}日',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    Text(
+                      '${_dailyReadCounts[_selectedDate] ?? 0}次 · ${_formatDuration(_dailyReadTimes[_selectedDate] ?? 0)}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+                TextButton(
+                  onPressed: () {
+                    onDateSelected(null);
+                  },
+                  child: Row(
+                    children: [
+                      Icon(Icons.close, size: 16, color: Theme.of(context).colorScheme.error),
+                      const SizedBox(width: 4),
+                      Text('清除筛选', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildStatPill(String label, String value) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface.withOpacity(0.7),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            Text(
+              value,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             ),
           ],
         ),
@@ -306,73 +1645,169 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     );
   }
 
-  String _formatDuration(Duration duration) {
-    if (duration.inHours > 0) {
-      return '${duration.inHours}小时${duration.inMinutes % 60}分钟';
-    } else if (duration.inMinutes > 0) {
-      return '${duration.inMinutes}分钟';
+  Widget _buildEmptyCell() {
+    return SizedBox(
+      width: (MediaQuery.of(context).size.width - 48) / 7 - 4,
+      height: (MediaQuery.of(context).size.width - 48) / 7 - 4,
+    );
+  }
+
+  Widget _buildDayCell(
+    int day,
+    int value,
+    int maxValue,
+    bool isToday,
+    bool isSelected,
+    VoidCallback onTap, {
+    bool isCurrentMonth = true,
+  }) {
+    final cellSize = (MediaQuery.of(context).size.width - 48) / 7 - 4;
+    
+    Color bgColor;
+    Color textColor;
+    
+    if (isSelected) {
+      bgColor = Theme.of(context).colorScheme.primary;
+      textColor = Theme.of(context).colorScheme.onPrimary;
+    } else if (!isCurrentMonth) {
+      bgColor = Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.22);
+      textColor = Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.35);
+    } else if (value <= 0) {
+      bgColor = Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.38);
+      textColor = Theme.of(context).colorScheme.onSurfaceVariant;
     } else {
-      return '${duration.inSeconds}秒';
+      final ratio = (value / maxValue).clamp(0.0, 1.0);
+      final intensity = ratio * ratio;
+      bgColor = Color.lerp(
+        Theme.of(context).colorScheme.primaryContainer.withOpacity(0.42),
+        Theme.of(context).colorScheme.primary,
+        intensity,
+      )!;
+      textColor = ratio > 0.72
+          ? Theme.of(context).colorScheme.onPrimary
+          : Theme.of(context).colorScheme.onSurface;
+    }
+    
+    return GestureDetector(
+      onTap: isCurrentMonth ? onTap : null,
+      child: Container(
+        width: cellSize,
+        height: cellSize,
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(8),
+          border: isToday && !isSelected
+              ? Border.all(color: Theme.of(context).colorScheme.primary, width: 2)
+              : isSelected
+                  ? Border.all(color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.75), width: 2)
+                  : null,
+        ),
+        child: Center(
+          child: Text(
+            '$day',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: isToday || isSelected ? FontWeight.bold : FontWeight.normal,
+              color: textColor,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Color _getHeatmapColor(int index, int maxIndex) {
+    if (index == 0) {
+      return Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.4);
+    }
+    final ratio = index / maxIndex;
+    final intensity = ratio * ratio;
+    return Color.lerp(
+      Theme.of(context).colorScheme.primaryContainer.withOpacity(0.4),
+      Theme.of(context).colorScheme.primary,
+      intensity,
+    )!;
+  }
+
+  Widget _buildModeChip(String label, bool selected, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected
+              ? Theme.of(context).colorScheme.primaryContainer
+              : Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).colorScheme.outline,
+            width: 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            color: selected
+                ? Theme.of(context).colorScheme.onPrimaryContainer
+                : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _formatDuration(int seconds) {
+    if (seconds < 60) {
+      return '$seconds秒';
+    } else if (seconds < 3600) {
+      return '${seconds ~/ 60}分钟';
+    } else {
+      final hours = seconds ~/ 3600;
+      final minutes = (seconds % 3600) ~/ 60;
+      if (minutes == 0) {
+        return '$hours小时';
+      }
+      return '$hours小时$minutes分钟';
     }
   }
 
-  String _formatDateTime(DateTime time) {
+  String _formatDateTime(int timestamp) {
+    final time = DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
     final now = DateTime.now();
     final diff = now.difference(time);
     
     if (diff.inDays == 0) {
       return '今天 ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
     } else if (diff.inDays == 1) {
-      return '昨天 ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+      return '昨天';
     } else if (diff.inDays < 7) {
       return '${diff.inDays}天前';
+    } else {
+      return '${time.month}/${time.day}';
+    }
+  }
+
+  String _formatDate(int timestamp) {
+    final time = DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final recordDate = DateTime(time.year, time.month, time.day);
+    
+    if (recordDate == today) {
+      return '今天';
+    } else if (recordDate == yesterday) {
+      return '昨天';
     } else {
       return '${time.year}-${time.month.toString().padLeft(2, '0')}-${time.day.toString().padLeft(2, '0')}';
     }
   }
-}
 
-/// 阅读记录数据模型
-class ReadRecord {
-  final String bookUrl;
-  final String bookName;
-  final String author;
-  final String coverUrl;
-  final Duration totalReadTime;
-  final DateTime firstReadTime;
-  final DateTime lastReadTime;
-  final int chapterCount;
-
-  ReadRecord({
-    required this.bookUrl,
-    required this.bookName,
-    required this.author,
-    required this.coverUrl,
-    required this.totalReadTime,
-    required this.firstReadTime,
-    required this.lastReadTime,
-    required this.chapterCount,
-  });
-
-  Map<String, dynamic> toJson() => {
-    'bookUrl': bookUrl,
-    'bookName': bookName,
-    'author': author,
-    'coverUrl': coverUrl,
-    'totalReadTime': totalReadTime.inSeconds,
-    'firstReadTime': firstReadTime.toIso8601String(),
-    'lastReadTime': lastReadTime.toIso8601String(),
-    'chapterCount': chapterCount,
-  };
-
-  factory ReadRecord.fromJson(Map<String, dynamic> json) => ReadRecord(
-    bookUrl: json['bookUrl'],
-    bookName: json['bookName'],
-    author: json['author'] ?? '',
-    coverUrl: json['coverUrl'] ?? '',
-    totalReadTime: Duration(seconds: json['totalReadTime'] ?? 0),
-    firstReadTime: DateTime.parse(json['firstReadTime']),
-    lastReadTime: DateTime.parse(json['lastReadTime']),
-    chapterCount: json['chapterCount'] ?? 0,
-  );
+  String _formatDateOnly(int timestamp) {
+    final time = DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
+    return '${time.year}-${time.month.toString().padLeft(2, '0')}-${time.day.toString().padLeft(2, '0')}';
+  }
 }

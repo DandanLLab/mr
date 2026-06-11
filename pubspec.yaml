@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   
   cupertino_icons: ^1.0.6
   
@@ -53,6 +55,8 @@ dependencies:
   url_launcher: ^6.2.2
   share_plus: ^7.2.1
   flutter_markdown_plus: ^1.0.1
+  # 二维码扫描
+  mobile_scanner: ^6.0.2
 
   # Rust FFI 桥接 - 高性能原生计算（正则/解析/加密）
   flutter_rust_bridge: ^2.7.0
@@ -69,6 +73,8 @@ dependencies:
   json_annotation: ^4.9.0
   # TTS 文字转语音
   flutter_tts: ^3.8.5
+  # 屏幕常亮
+  wakelock_plus: ^1.2.8
 
 dev_dependencies:
   flutter_test:
