@@ -19,6 +19,12 @@ class AppProvider extends ChangeNotifier {
   Color _nightBackgroundColor = const Color(0xFF424242); // Grey 800
   Color _nightSurfaceColor = const Color(0xFF303030); // Grey 700
 
+  // 背景图片设置
+  String? _dayBackgroundImage;
+  String? _nightBackgroundImage;
+  int _dayBackgroundBlur = 0;
+  int _nightBackgroundBlur = 0;
+
   ThemeMode get themeMode => _themeMode;
   bool get isNoImageMode => _isNoImageMode;
   String? get nickname => _nickname;
@@ -33,8 +39,44 @@ class AppProvider extends ChangeNotifier {
   Color get nightBackgroundColor => _nightBackgroundColor;
   Color get nightSurfaceColor => _nightSurfaceColor;
 
+  // 背景图片 getter
+  String? get dayBackgroundImage => _dayBackgroundImage;
+  String? get nightBackgroundImage => _nightBackgroundImage;
+  int get dayBackgroundBlur => _dayBackgroundBlur;
+  int get nightBackgroundBlur => _nightBackgroundBlur;
+
+  // 获取当前主题的背景图片
+  String? get currentBackgroundImage {
+    if (_themeMode == ThemeMode.dark) {
+      return _nightBackgroundImage;
+    } else if (_themeMode == ThemeMode.light) {
+      return _dayBackgroundImage;
+    } else {
+      // 跟随系统
+      final brightness = WidgetsBinding.instance.platformDispatcher.platformBrightness;
+      return brightness == Brightness.dark ? _nightBackgroundImage : _dayBackgroundImage;
+    }
+  }
+
+  // 获取当前主题的背景模糊度
+  int get currentBackgroundBlur {
+    if (_themeMode == ThemeMode.dark) {
+      return _nightBackgroundBlur;
+    } else if (_themeMode == ThemeMode.light) {
+      return _dayBackgroundBlur;
+    } else {
+      final brightness = WidgetsBinding.instance.platformDispatcher.platformBrightness;
+      return brightness == Brightness.dark ? _nightBackgroundBlur : _dayBackgroundBlur;
+    }
+  }
+
   // 获取日间主题
   ThemeData get lightTheme {
+    // 如果有背景图片，Scaffold 背景色设置为透明，这样背景图片才能显示
+    final scaffoldBgColor = (_dayBackgroundImage != null && _dayBackgroundImage!.isNotEmpty)
+        ? Colors.transparent
+        : _dayBackgroundColor;
+
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.light,
@@ -50,7 +92,7 @@ class AppProvider extends ChangeNotifier {
         error: const Color(0xFFE53935),
         onError: Colors.white,
       ),
-      scaffoldBackgroundColor: _dayBackgroundColor,
+      scaffoldBackgroundColor: scaffoldBgColor,
       appBarTheme: AppBarTheme(
         backgroundColor: _dayPrimaryColor,
         foregroundColor: Colors.white,
@@ -78,6 +120,11 @@ class AppProvider extends ChangeNotifier {
 
   // 获取夜间主题
   ThemeData get darkTheme {
+    // 如果有背景图片，Scaffold 背景色设置为透明，这样背景图片才能显示
+    final scaffoldBgColor = (_nightBackgroundImage != null && _nightBackgroundImage!.isNotEmpty)
+        ? Colors.transparent
+        : _nightBackgroundColor;
+
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
@@ -93,7 +140,7 @@ class AppProvider extends ChangeNotifier {
         error: const Color(0xFFE53935),
         onError: Colors.white,
       ),
-      scaffoldBackgroundColor: _nightBackgroundColor,
+      scaffoldBackgroundColor: scaffoldBgColor,
       appBarTheme: AppBarTheme(
         backgroundColor: _nightSurfaceColor,
         foregroundColor: Colors.white,
@@ -133,6 +180,13 @@ class AppProvider extends ChangeNotifier {
     _nightAccentColor = Color(prefs.getInt('nightAccentColor') ?? 0xFFE0E0E0);
     _nightBackgroundColor = Color(prefs.getInt('nightBackgroundColor') ?? 0xFF424242);
     _nightSurfaceColor = Color(prefs.getInt('nightSurfaceColor') ?? 0xFF303030);
+
+    // 加载背景图片设置
+    _dayBackgroundImage = prefs.getString('dayBackgroundImage');
+    _nightBackgroundImage = prefs.getString('nightBackgroundImage');
+    _dayBackgroundBlur = prefs.getInt('dayBackgroundBlur') ?? 0;
+    _nightBackgroundBlur = prefs.getInt('nightBackgroundBlur') ?? 0;
+
     notifyListeners();
   }
 
@@ -141,17 +195,32 @@ class AppProvider extends ChangeNotifier {
     Color? accentColor,
     Color? backgroundColor,
     Color? surfaceColor,
+    String? backgroundImage,
+    int? backgroundBlur,
   }) async {
     if (primaryColor != null) _dayPrimaryColor = primaryColor;
     if (accentColor != null) _dayAccentColor = accentColor;
     if (backgroundColor != null) _dayBackgroundColor = backgroundColor;
     if (surfaceColor != null) _daySurfaceColor = surfaceColor;
+    if (backgroundImage != null) _dayBackgroundImage = backgroundImage.isEmpty ? null : backgroundImage;
+    if (backgroundBlur != null) _dayBackgroundBlur = backgroundBlur;
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('dayPrimaryColor', _dayPrimaryColor.value);
     await prefs.setInt('dayAccentColor', _dayAccentColor.value);
     await prefs.setInt('dayBackgroundColor', _dayBackgroundColor.value);
     await prefs.setInt('daySurfaceColor', _daySurfaceColor.value);
+    if (backgroundImage != null) {
+      if (backgroundImage.isEmpty) {
+        await prefs.remove('dayBackgroundImage');
+      } else {
+        await prefs.setString('dayBackgroundImage', backgroundImage);
+      }
+    }
+    if (backgroundBlur != null) {
+      await prefs.setInt('dayBackgroundBlur', backgroundBlur);
+    }
+
     notifyListeners();
   }
 
@@ -160,17 +229,32 @@ class AppProvider extends ChangeNotifier {
     Color? accentColor,
     Color? backgroundColor,
     Color? surfaceColor,
+    String? backgroundImage,
+    int? backgroundBlur,
   }) async {
     if (primaryColor != null) _nightPrimaryColor = primaryColor;
     if (accentColor != null) _nightAccentColor = accentColor;
     if (backgroundColor != null) _nightBackgroundColor = backgroundColor;
     if (surfaceColor != null) _nightSurfaceColor = surfaceColor;
+    if (backgroundImage != null) _nightBackgroundImage = backgroundImage.isEmpty ? null : backgroundImage;
+    if (backgroundBlur != null) _nightBackgroundBlur = backgroundBlur;
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('nightPrimaryColor', _nightPrimaryColor.value);
     await prefs.setInt('nightAccentColor', _nightAccentColor.value);
     await prefs.setInt('nightBackgroundColor', _nightBackgroundColor.value);
     await prefs.setInt('nightSurfaceColor', _nightSurfaceColor.value);
+    if (backgroundImage != null) {
+      if (backgroundImage.isEmpty) {
+        await prefs.remove('nightBackgroundImage');
+      } else {
+        await prefs.setString('nightBackgroundImage', backgroundImage);
+      }
+    }
+    if (backgroundBlur != null) {
+      await prefs.setInt('nightBackgroundBlur', backgroundBlur);
+    }
+
     notifyListeners();
   }
 

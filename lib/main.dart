@@ -14,6 +14,7 @@ import 'services/native/js_engine.dart';
 import 'services/native/engine_dispatcher.dart';
 import 'services/storage_service.dart';
 import 'services/source_engine/proxy_service.dart';
+import 'widgets/themed_background.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -86,6 +87,12 @@ class DanShenqiApp extends StatelessWidget {
             themeMode: appProvider.themeMode,
             initialRoute: AppRoutes.main,
             onGenerateRoute: AppRoutes.generateRoute,
+            // 应用全局背景图片
+            builder: (context, widget) {
+              return ThemedBackground(
+                child: widget ?? const SizedBox(),
+              );
+            },
           );
         },
       ),

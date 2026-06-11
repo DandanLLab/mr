@@ -11,6 +11,7 @@ import '../miniprogram/miniprogram_page.dart';
 import '../profile/profile_page.dart';
 import '../../providers/bookshelf_provider.dart';
 import '../../providers/discovery_provider.dart';
+import '../../providers/app_provider.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
