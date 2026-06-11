@@ -262,6 +262,30 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
     await prefs.setStringList('customThemes', customThemes);
   }
 
+  Future<void> _switchThemeMode(bool isNightTheme) async {
+    final prefs = await SharedPreferences.getInstance();
+    final nextActiveThemeId = prefs.getString(
+      isNightTheme ? 'activeNightThemeId' : 'activeDayThemeId',
+    );
+    final fallbackTheme = _themes
+        .where((t) => t.isNight == isNightTheme)
+        .toList()
+        .firstOrNull;
+
+    setState(() {
+      _isNightTheme = isNightTheme;
+      _activeThemeId = (nextActiveThemeId != null && nextActiveThemeId.isNotEmpty)
+          ? nextActiveThemeId
+          : fallbackTheme?.id;
+    });
+
+    await prefs.setBool('themeIsNight', _isNightTheme);
+    await prefs.setString(
+      _isNightTheme ? 'activeNightThemeId' : 'activeDayThemeId',
+      _activeThemeId ?? '',
+    );
+  }
+
   Future<void> _applyTheme(ThemeConfig theme) async {
     final provider = context.read<AppProvider>();
 
@@ -394,8 +418,7 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
                   child: GestureDetector(
                     onTap: () async {
                       if (_isNightTheme) {
-                        setState(() => _isNightTheme = false);
-                        await _saveThemes();
+                        await _switchThemeMode(false);
                       }
                     },
                     child: Container(
@@ -421,8 +444,7 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
                   child: GestureDetector(
                     onTap: () async {
                       if (!_isNightTheme) {
-                        setState(() => _isNightTheme = true);
-                        await _saveThemes();
+                        await _switchThemeMode(true);
                       }
                     },
                     child: Container(
