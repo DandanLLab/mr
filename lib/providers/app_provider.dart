@@ -211,10 +211,11 @@ class AppProvider extends ChangeNotifier with WidgetsBindingObserver {
       ),
       scaffoldBackgroundColor: scaffoldBgColor,
       appBarTheme: AppBarTheme(
+        toolbarHeight: 48,
         backgroundColor: _dayPrimaryColor,
-        foregroundColor: Colors.black, // 日间主题标题使用黑色（参考 legado-main ThemeOverlay.AppCompat.Light）
+        foregroundColor: _foregroundFor(_dayPrimaryColor), // 根据实际 primary 颜色明暗决定（参考 legado-main）
         titleTextStyle: TextStyle(
-          color: Colors.black,
+          color: _foregroundFor(_dayPrimaryColor),
           fontSize: 20,
           fontWeight: FontWeight.normal,
           fontFamily: _dayTitleFontFamily ?? _dayUiFontFamily,
@@ -312,10 +313,11 @@ class AppProvider extends ChangeNotifier with WidgetsBindingObserver {
       ),
       scaffoldBackgroundColor: scaffoldBgColor,
       appBarTheme: AppBarTheme(
+        toolbarHeight: 48,
         backgroundColor: _nightPrimaryColor,
-        foregroundColor: Colors.white, // 夜间主题标题使用白色（参考 legado-main ThemeOverlay.AppCompat.Dark）
+        foregroundColor: _foregroundFor(_nightPrimaryColor), // 根据实际 primary 颜色明暗决定（参考 legado-main）
         titleTextStyle: TextStyle(
-          color: Colors.white,
+          color: _foregroundFor(_nightPrimaryColor),
           fontSize: 20,
           fontWeight: FontWeight.normal,
           fontFamily: _nightTitleFontFamily ?? _nightUiFontFamily,

@@ -276,7 +276,7 @@ class _DetailPageState extends State<DetailPage> {
     final fg = Theme.of(context).colorScheme.onSurface;
 
     return SliverAppBar(
-      expandedHeight: 56,
+      expandedHeight: 48,
       pinned: true,
       backgroundColor: Colors.transparent,
       elevation: 0,
