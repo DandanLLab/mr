@@ -18,7 +18,10 @@ class ProfilePage extends StatefulWidget {
   State<ProfilePage> createState() => _ProfilePageState();
 }
 
-class _ProfilePageState extends State<ProfilePage> {
+class _ProfilePageState extends State<ProfilePage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   String _nickname = '小蛋子';
   int _bookCount = 0;
   int _sourceCount = 0;
@@ -42,6 +45,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final primaryColor = Theme.of(context).colorScheme.primary;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     // 参考 legado-main: 日间主题标题使用黑色，夜间主题标题使用白色

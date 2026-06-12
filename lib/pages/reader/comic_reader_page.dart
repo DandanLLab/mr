@@ -935,7 +935,9 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
           return _buildHorizontalChapterEdge('已读完 ${_chapter?.title ?? ''}');
         }
         final imageIndex = itemIndex - _horizontalLeadingCount;
-        return _buildImage(_images[imageIndex], fit: BoxFit.contain);
+        return RepaintBoundary(
+          child: _buildImage(_images[imageIndex], fit: BoxFit.contain),
+        );
       },
     );
   }

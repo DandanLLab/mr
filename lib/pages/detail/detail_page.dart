@@ -160,8 +160,10 @@ class _DetailPageState extends State<DetailPage> {
           if (hasCustomBackground)
             Positioned.fill(
               child: _buildBackgroundImage(bookInfoBackground),
-            )
-          else if (_book!.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover)
+            ),
+          if (!hasCustomBackground &&
+              _book!.coverUrl.isNotEmpty &&
+              !CoverConfigService.instance.useDefaultCover)
             Positioned.fill(
               child: CachedNetworkImage(
                 imageUrl: _book!.coverUrl,
@@ -172,16 +174,18 @@ class _DetailPageState extends State<DetailPage> {
               ),
             ),
           Positioned.fill(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: hasCustomBackground ? 0 : 20,
-                sigmaY: hasCustomBackground ? 0 : 20,
-              ),
+            child: RepaintBoundary(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(
+                  sigmaX: hasCustomBackground ? 0 : 10,
+                  sigmaY: hasCustomBackground ? 0 : 10,
+                ),
               child: Container(
                 color: Theme.of(context).colorScheme.surface.withValues(
                   alpha: hasCustomBackground ? 0.72 : 0.85,
                 ),
               ),
+            ),
             ),
           ),
           // 主内容

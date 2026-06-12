@@ -252,8 +252,8 @@ class _MainPageState extends State<MainPage> {
           borderRadius: BorderRadius.circular(cornerRadius),
           child: BackdropFilter(
             filter: ImageFilter.blur(
-              sigmaX: effectMode == 'frosted' ? 30 : 20, 
-              sigmaY: effectMode == 'frosted' ? 30 : 20
+              sigmaX: effectMode == 'frosted' ? 8 : 6,
+              sigmaY: effectMode == 'frosted' ? 8 : 6,
             ),
             child: Container(
               height: bottomBarHeight,

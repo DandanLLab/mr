@@ -11,7 +11,10 @@ class DiscoveryPage extends StatefulWidget {
   State<DiscoveryPage> createState() => _DiscoveryPageState();
 }
 
-class _DiscoveryPageState extends State<DiscoveryPage> {
+class _DiscoveryPageState extends State<DiscoveryPage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   final TextEditingController _searchController = TextEditingController();
   final Set<String> _expandedSources = {};
   String _searchQuery = '';
@@ -29,6 +32,7 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     // 参考 legado-main: 日间主题标题使用黑色，夜间主题标题使用白色
     final appBarForeground = isDark ? Colors.white : Colors.black;
@@ -286,6 +290,7 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
         return RefreshIndicator(
           onRefresh: provider.loadBookSources,
           child: ListView.builder(
+            cacheExtent: 500,
             padding: const EdgeInsets.symmetric(horizontal: 8),
             itemCount: sources.length,
             itemBuilder: (context, index) {

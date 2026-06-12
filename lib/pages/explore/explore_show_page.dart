@@ -84,6 +84,7 @@ class _ExploreShowPageState extends State<ExploreShowPage> {
               widget.exploreUrl,
             ),
             child: GridView.builder(
+              cacheExtent: 500,
               padding: const EdgeInsets.all(12),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 3,

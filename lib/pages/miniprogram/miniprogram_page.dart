@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/miniprogram.dart';
 
 class MiniprogramPage extends StatefulWidget {
@@ -8,7 +9,10 @@ class MiniprogramPage extends StatefulWidget {
   State<MiniprogramPage> createState() => _MiniprogramPageState();
 }
 
-class _MiniprogramPageState extends State<MiniprogramPage> {
+class _MiniprogramPageState extends State<MiniprogramPage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   final List<Miniprogram> _miniprograms = [];
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
@@ -21,6 +25,7 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     // 参考 legado-main: 日间主题标题使用黑色，夜间主题标题使用白色
     final appBarForeground = isDark ? Colors.white : Colors.black;
@@ -204,6 +209,7 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
 
   Widget _buildList() {
     return ListView.builder(
+      cacheExtent: 500,
       padding: const EdgeInsets.all(12),
       itemCount: _miniprograms.length,
       itemBuilder: (context, index) {
@@ -231,10 +237,11 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
           child: mp.icon != null
               ? ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: Image.network(
-                    mp.icon!,
+                  child: CachedNetworkImage(
+                    imageUrl: mp.icon!,
                     fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
+                    memCacheWidth: 96,
+                    errorWidget: (context, url, error) {
                       return Icon(
                         Icons.apps,
                         color: Theme.of(context).colorScheme.onPrimaryContainer,

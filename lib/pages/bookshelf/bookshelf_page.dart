@@ -53,7 +53,10 @@ class BookshelfPage extends StatefulWidget {
   State<BookshelfPage> createState() => _BookshelfPageState();
 }
 
-class _BookshelfPageState extends State<BookshelfPage> {
+class _BookshelfPageState extends State<BookshelfPage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   late PageController _pageController;
 
   // 书架配置
@@ -106,6 +109,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     // 参考 legado-main: 日间主题标题使用黑色，夜间主题标题使用白色
     final appBarForeground = isDark ? Colors.white : Colors.black;
@@ -960,6 +964,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   Widget _buildListViewWithBooks(List<Book> books, BookshelfProvider provider) {
     final listView = ListView.builder(
+      cacheExtent: 500,
       padding: EdgeInsets.all(_margin),
       itemCount: books.length,
       itemBuilder: (context, index) {
@@ -980,6 +985,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   Widget _buildGridViewWithBooks(List<Book> books, BookshelfProvider provider) {
     final gridView = GridView.builder(
+      cacheExtent: 500,
       padding: EdgeInsets.all(_margin),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: _gridColumnCount,
@@ -990,7 +996,9 @@ class _BookshelfPageState extends State<BookshelfPage> {
       itemCount: books.length,
       itemBuilder: (context, index) {
         final book = books[index];
-        return _buildGridBookCard(book, provider);
+        return RepaintBoundary(
+          child: _buildGridBookCard(book, provider),
+        );
       },
     );
 
@@ -1016,7 +1024,9 @@ class _BookshelfPageState extends State<BookshelfPage> {
       itemCount: provider.books.length,
       itemBuilder: (context, index) {
         final book = provider.books[index];
-        return _buildGridBookCard(book, provider);
+        return RepaintBoundary(
+          child: _buildGridBookCard(book, provider),
+        );
       },
     );
   }
@@ -1024,9 +1034,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
   Widget _buildGridBookCard(Book book, BookshelfProvider provider) {
     // 参考原版设计：简洁的网格卡片
     final coverConfig = CoverConfigService.instance;
-    final isDark = context.watch<AppProvider>().themeMode == ThemeMode.dark ||
-        (context.watch<AppProvider>().themeMode == ThemeMode.system &&
-            MediaQuery.of(context).platformBrightness == Brightness.dark);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final showCoverName = coverConfig.shouldShowName(isDark);
     final showCoverAuthor = coverConfig.shouldShowAuthor(isDark) && showCoverName;
     final useDefault = coverConfig.useDefaultCover;
@@ -1209,9 +1217,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
   Widget _buildListBookCard(Book book, BookshelfProvider provider) {
     final isCompact = _layout == BookshelfLayout.listCompact;
     final coverConfig = CoverConfigService.instance;
-    final isDark = context.watch<AppProvider>().themeMode == ThemeMode.dark ||
-        (context.watch<AppProvider>().themeMode == ThemeMode.system &&
-            MediaQuery.of(context).platformBrightness == Brightness.dark);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final useDefault = coverConfig.useDefaultCover;
 
     return InkWell(

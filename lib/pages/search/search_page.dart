@@ -400,7 +400,8 @@ class _SearchPageState extends State<SearchPage> {
     final sourceName = result['sourceName']?.toString().trim() ?? '';
     final tags = _resultTags(result);
 
-    return InkWell(
+    return RepaintBoundary(
+      child: InkWell(
       onTap: () => _openDetail(result),
       child: Padding(
         padding: const EdgeInsets.all(8),
@@ -512,6 +513,7 @@ class _SearchPageState extends State<SearchPage> {
           ],
         ),
       ),
+      ),
     );
   }
 
@@ -619,9 +621,7 @@ class _SearchPageState extends State<SearchPage> {
 
   Widget _coverPlaceholder({String? bookName, String? bookAuthor}) {
     final coverConfig = CoverConfigService.instance;
-    final isDark = context.watch<AppProvider>().themeMode == ThemeMode.dark ||
-        (context.watch<AppProvider>().themeMode == ThemeMode.system &&
-            MediaQuery.of(context).platformBrightness == Brightness.dark);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     if (bookName != null && bookName.isNotEmpty) {
       return coverConfig.buildDefaultCoverPlaceholder(
         bookName: bookName,
@@ -638,9 +638,7 @@ class _SearchPageState extends State<SearchPage> {
   /// 构建搜索结果封面 - 接入封面配置
   Widget _buildSearchCoverImage(String coverUrl, {String? bookName, String? bookAuthor}) {
     final coverConfig = CoverConfigService.instance;
-    final isDark = context.watch<AppProvider>().themeMode == ThemeMode.dark ||
-        (context.watch<AppProvider>().themeMode == ThemeMode.system &&
-            MediaQuery.of(context).platformBrightness == Brightness.dark);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     if (coverConfig.useDefaultCover) {
       return coverConfig.buildDefaultCoverPlaceholder(
