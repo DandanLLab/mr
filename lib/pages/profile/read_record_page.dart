@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/read_record_service.dart';
+import '../../services/cover_config_service.dart';
 import '../../routes/app_routes.dart';
 import '../../widgets/swipe_action_container.dart';
 
@@ -639,17 +640,17 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(4),
-                  child: record.coverUrl.isNotEmpty
+                  child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
                       ? CachedNetworkImage(
                           imageUrl: record.coverUrl,
                           fit: BoxFit.cover,
                           cacheKey: record.coverUrl,
                           memCacheWidth: 100,
                           maxWidthDiskCache: 200,
-                          placeholder: (_, __) => _buildStackDefaultCover(),
-                          errorWidget: (_, __, ___) => _buildStackDefaultCover(),
+                          placeholder: (_, __) => _buildStackDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
+                          errorWidget: (_, __, ___) => _buildStackDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
                         )
-                      : _buildStackDefaultCover(),
+                      : _buildStackDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
                 ),
               ),
             ),
@@ -659,7 +660,16 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     );
   }
 
-  Widget _buildStackDefaultCover() {
+  Widget _buildStackDefaultCover({String? bookName, String? bookAuthor}) {
+    final coverConfig = CoverConfigService.instance;
+    if (coverConfig.useDefaultCover && bookName != null && bookName.isNotEmpty) {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      return coverConfig.buildDefaultCoverPlaceholder(
+        bookName: bookName,
+        bookAuthor: bookAuthor,
+        isDark: isDark,
+      );
+    }
     return Container(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: Center(
@@ -835,7 +845,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(4),
-                child: record.coverUrl.isNotEmpty
+                child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
                     ? CachedNetworkImage(
                         imageUrl: record.coverUrl,
                         width: 44,
@@ -844,10 +854,10 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         cacheKey: record.coverUrl,
                         memCacheWidth: 100,
                         maxWidthDiskCache: 200,
-                        placeholder: (_, __) => _buildDefaultCover(),
-                        errorWidget: (_, __, ___) => _buildDefaultCover(),
+                        placeholder: (_, __) => _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
+                        errorWidget: (_, __, ___) => _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
                       )
-                    : _buildDefaultCover(),
+                    : _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1069,7 +1079,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(4),
-                child: record.coverUrl.isNotEmpty
+                child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
                     ? CachedNetworkImage(
                         imageUrl: record.coverUrl,
                         width: 44,
@@ -1078,10 +1088,10 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         cacheKey: record.coverUrl,
                         memCacheWidth: 100,
                         maxWidthDiskCache: 200,
-                        placeholder: (_, __) => _buildDefaultCover(),
-                        errorWidget: (_, __, ___) => _buildDefaultCover(),
+                        placeholder: (_, __) => _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
+                        errorWidget: (_, __, ___) => _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
                       )
-                    : _buildDefaultCover(),
+                    : _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1246,7 +1256,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
             // 封面
             ClipRRect(
               borderRadius: BorderRadius.circular(4),
-              child: record.coverUrl.isNotEmpty
+              child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
                   ? CachedNetworkImage(
                       imageUrl: record.coverUrl,
                       width: 40,
@@ -1255,10 +1265,10 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                       cacheKey: record.coverUrl,
                       memCacheWidth: 100,
                       maxWidthDiskCache: 200,
-                      placeholder: (_, __) => _buildDefaultCover(size: 40),
-                      errorWidget: (_, __, ___) => _buildDefaultCover(size: 40),
+                      placeholder: (_, __) => _buildDefaultCover(size: 40, bookName: record.bookName, bookAuthor: record.bookAuthor),
+                      errorWidget: (_, __, ___) => _buildDefaultCover(size: 40, bookName: record.bookName, bookAuthor: record.bookAuthor),
                     )
-                  : _buildDefaultCover(size: 40),
+                  : _buildDefaultCover(size: 40, bookName: record.bookName, bookAuthor: record.bookAuthor),
             ),
             const SizedBox(width: 12),
             // 信息
@@ -1309,7 +1319,20 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     );
   }
 
-  Widget _buildDefaultCover({double size = 44}) {
+  Widget _buildDefaultCover({double size = 44, String? bookName, String? bookAuthor}) {
+    final coverConfig = CoverConfigService.instance;
+    if (coverConfig.useDefaultCover && bookName != null && bookName.isNotEmpty) {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      return SizedBox(
+        width: size,
+        height: size * 60 / 44,
+        child: coverConfig.buildDefaultCoverPlaceholder(
+          bookName: bookName,
+          bookAuthor: bookAuthor,
+          isDark: isDark,
+        ),
+      );
+    }
     return Container(
       width: size,
       height: size * 60 / 44,

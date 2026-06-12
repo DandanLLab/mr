@@ -14,6 +14,7 @@ import 'services/native/js_engine.dart';
 import 'services/native/engine_dispatcher.dart';
 import 'services/storage_service.dart';
 import 'services/source_engine/proxy_service.dart';
+import 'services/cover_config_service.dart';
 import 'widgets/themed_background.dart';
 
 void main() async {
@@ -33,6 +34,13 @@ void main() async {
     await JsEngine.instance.init();
   } catch (e) {
     debugPrint('JsEngine init error: $e');
+  }
+
+  // 初始化封面配置服务
+  try {
+    await CoverConfigService.instance.init();
+  } catch (e) {
+    debugPrint('CoverConfigService init error: $e');
   }
 
   // 启动 CORS 代理服务（仅 Web 端需要，原生端 Dio 不受 CORS 限制）

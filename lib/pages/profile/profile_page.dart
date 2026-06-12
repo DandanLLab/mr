@@ -5,8 +5,10 @@ import 'package:provider/provider.dart';
 import '../../providers/app_provider.dart';
 import '../../providers/bookshelf_provider.dart';
 import '../../providers/discovery_provider.dart';
+import '../../widgets/android_switch.dart';
 import 'book_source_manage_page.dart';
 import '../settings/theme_settings_page.dart';
+import '../settings/ai_settings_page.dart';
 import '../../routes/app_routes.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -133,6 +135,26 @@ class _ProfilePageState extends State<ProfilePage> {
                     subtitle: '开启后可通过浏览器访问',
                     value: false,
                     onChanged: (value) {},
+                  ),
+                ]),
+
+                // 扩展与 AI
+                _buildCategoryTitle('扩展与 AI'),
+                _buildSection([
+                  _buildListItem(
+                    icon: Icons.extension_outlined,
+                    title: '扩展设置',
+                    subtitle: '管理插件和扩展功能',
+                    onTap: () {},
+                  ),
+                  _buildListItem(
+                    icon: Icons.psychology_outlined,
+                    title: 'AI 设置',
+                    subtitle: '配置 AI 相关功能',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const AiSettingsPage()),
+                    ),
                   ),
                 ]),
 
@@ -319,12 +341,13 @@ class _ProfilePageState extends State<ProfilePage> {
   }) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: () => onChanged(!value),
         splashColor: Colors.transparent,
-        highlightColor: theme.brightness == Brightness.dark
+        highlightColor: isDark
             ? const Color(0x634D4D4D)
             : const Color(0x63ACACAC),
         child: ConstrainedBox(
@@ -346,13 +369,11 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Switch(
+                AndroidSwitch(
                   value: value,
-                  activeThumbColor: colorScheme.secondary,
-                  activeTrackColor: colorScheme.secondary.withValues(
-                    alpha: 0.5,
-                  ),
                   onChanged: onChanged,
+                  accentColor: colorScheme.secondary,
+                  isDark: isDark,
                 ),
               ],
             ),

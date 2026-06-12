@@ -5,8 +5,10 @@ import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/book.dart';
 import '../../providers/bookshelf_provider.dart';
+import '../../providers/app_provider.dart';
 import '../../routes/app_routes.dart';
 import '../../services/local_book/local_book_service.dart';
+import '../../services/cover_config_service.dart';
 
 /// 书架布局类型
 enum BookshelfLayout {
@@ -92,6 +94,8 @@ class _BookshelfPageState extends State<BookshelfPage> {
       _margin = prefs.getDouble('bookshelf_margin') ?? 8.0;
       _gridColumnCount = _getGridColumnCount(_layout);
     });
+    // 加载封面配置
+    await CoverConfigService.instance.reload();
   }
 
   @override
@@ -1016,6 +1020,14 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   Widget _buildGridBookCard(Book book, BookshelfProvider provider) {
     // 参考原版设计：简洁的网格卡片
+    final coverConfig = CoverConfigService.instance;
+    final isDark = context.watch<AppProvider>().themeMode == ThemeMode.dark ||
+        (context.watch<AppProvider>().themeMode == ThemeMode.system &&
+            MediaQuery.of(context).platformBrightness == Brightness.dark);
+    final showCoverName = coverConfig.shouldShowName(isDark);
+    final showCoverAuthor = coverConfig.shouldShowAuthor(isDark) && showCoverName;
+    final useDefault = coverConfig.useDefaultCover;
+
     return GestureDetector(
       onTap: () => _openBook(book),
       onLongPress: () => _showBookOptions(book, provider),
@@ -1035,27 +1047,9 @@ class _BookshelfPageState extends State<BookshelfPage> {
                     fit: StackFit.expand,
                     children: [
                       // 封面
-                      book.coverUrl.isNotEmpty
-                          ? CachedNetworkImage(
-                              imageUrl: book.coverUrl,
-                              fit: BoxFit.cover,
-                              placeholder: (context, url) => Container(
-                                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                                child: const Center(
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                ),
-                              ),
-                              errorWidget: (context, url, error) => Container(
-                                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                                child: const Icon(Icons.book, size: 32),
-                              ),
-                            )
-                          : Container(
-                              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                              child: const Icon(Icons.book, size: 32),
-                            ),
-                      // 书名覆盖在封面上
-                      if (_bookNameDisplay == BookNameDisplay.overlay)
+                      _buildCoverImage(book, isDark, useDefault),
+                      // 书名覆盖在封面上（封面设置中的显示书名，且书架设置为overlay模式）
+                      if (_bookNameDisplay == BookNameDisplay.overlay && showCoverName)
                         Positioned(
                           bottom: 0,
                           left: 0,
@@ -1072,22 +1066,44 @@ class _BookshelfPageState extends State<BookshelfPage> {
                                 ],
                               ),
                             ),
-                            child: Text(
-                              book.name,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500,
-                                shadows: [
-                                  Shadow(
-                                    offset: Offset(0, 1),
-                                    blurRadius: 2,
-                                    color: Colors.black54,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  book.displayName,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                    shadows: [
+                                      Shadow(
+                                        offset: Offset(0, 1),
+                                        blurRadius: 2,
+                                        color: Colors.black54,
+                                      ),
+                                    ],
                                   ),
-                                ],
-                              ),
+                                ),
+                                if (showCoverAuthor && book.displayAuthor.isNotEmpty)
+                                  Text(
+                                    book.displayAuthor,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(alpha: 0.8),
+                                      fontSize: 9,
+                                      shadows: const [
+                                        Shadow(
+                                          offset: Offset(0, 1),
+                                          blurRadius: 2,
+                                          color: Colors.black54,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                         ),
@@ -1099,7 +1115,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(4, 6, 4, 4),
                     child: Text(
-                      book.name,
+                      book.displayName,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.center,
@@ -1189,6 +1205,11 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   Widget _buildListBookCard(Book book, BookshelfProvider provider) {
     final isCompact = _layout == BookshelfLayout.listCompact;
+    final coverConfig = CoverConfigService.instance;
+    final isDark = context.watch<AppProvider>().themeMode == ThemeMode.dark ||
+        (context.watch<AppProvider>().themeMode == ThemeMode.system &&
+            MediaQuery.of(context).platformBrightness == Brightness.dark);
+    final useDefault = coverConfig.useDefaultCover;
 
     return InkWell(
       onTap: () => _openBook(book),
@@ -1201,24 +1222,10 @@ class _BookshelfPageState extends State<BookshelfPage> {
             // 封面（参考原版：66x90dp，圆角4dp）
             ClipRRect(
               borderRadius: BorderRadius.circular(4),
-              child: Container(
+              child: SizedBox(
                 width: isCompact ? 48 : 66,
                 height: isCompact ? 64 : 90,
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: book.coverUrl.isNotEmpty
-                    ? CachedNetworkImage(
-                        imageUrl: book.coverUrl,
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        height: double.infinity,
-                        placeholder: (context, url) => Container(
-                          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                        ),
-                        errorWidget: (context, url, error) => const Center(
-                          child: Icon(Icons.book, size: 32),
-                        ),
-                      )
-                    : const Center(child: Icon(Icons.book, size: 32)),
+                child: _buildCoverImage(book, isDark, useDefault, isList: true),
               ),
             ),
             const SizedBox(width: 10), // 参考原版：10dp间距
@@ -1854,6 +1861,55 @@ class _BookshelfPageState extends State<BookshelfPage> {
           ),
         ],
       ),
+    );
+  }
+
+  /// 构建封面图片 - 接入封面配置（默认封面、WiFi限制、高清封面）
+  Widget _buildCoverImage(Book book, bool isDark, bool useDefault, {bool isList = false}) {
+    final coverConfig = CoverConfigService.instance;
+    final coverUrl = book.displayCoverUrl;
+
+    // 总是使用默认封面
+    if (useDefault) {
+      return coverConfig.buildDefaultCoverPlaceholder(
+        bookName: book.displayName,
+        bookAuthor: book.displayAuthor,
+        isDark: isDark,
+        borderRadius: isList ? null : BorderRadius.zero,
+      );
+    }
+
+    // 有网络封面
+    if (coverUrl.isNotEmpty) {
+      // 高清封面设置：非高清时使用缩略图缓存尺寸
+      final memCacheWidth = coverConfig.loadCoverHighQuality ? null : 240;
+      final maxWidthDiskCache = coverConfig.loadCoverHighQuality ? null : 320;
+
+      return CachedNetworkImage(
+        imageUrl: coverUrl,
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+        memCacheWidth: memCacheWidth,
+        maxWidthDiskCache: maxWidthDiskCache,
+        placeholder: (context, url) => coverConfig.buildDefaultCoverPlaceholder(
+          bookName: book.displayName,
+          bookAuthor: book.displayAuthor,
+          isDark: isDark,
+        ),
+        errorWidget: (context, url, error) => coverConfig.buildDefaultCoverPlaceholder(
+          bookName: book.displayName,
+          bookAuthor: book.displayAuthor,
+          isDark: isDark,
+        ),
+      );
+    }
+
+    // 无封面URL，显示默认封面占位
+    return coverConfig.buildDefaultCoverPlaceholder(
+      bookName: book.displayName,
+      bookAuthor: book.displayAuthor,
+      isDark: isDark,
     );
   }
 

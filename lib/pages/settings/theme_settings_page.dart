@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
@@ -8,6 +9,9 @@ import 'package:file_picker/file_picker.dart';
 import 'dart:io';
 import '../../providers/app_provider.dart';
 import '../../routes/app_routes.dart';
+import '../../services/cover_config_service.dart';
+import '../../widgets/android_switch.dart';
+import '../../widgets/common_widgets.dart';
 
 class ThemeSettingsPage extends StatefulWidget {
   const ThemeSettingsPage({super.key});
@@ -108,8 +112,8 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
           _buildCategoryTitle('其他设置'),
           _buildSection([
             _buildListItem(
-              title: '封面配置',
-              subtitle: '自定义封面显示样式',
+              title: '封面设置',
+              subtitle: '通用封面规则及默认封面样式',
               onTap: () => Navigator.push(context, AppPageRoute(builder: (_) => const CoverConfigPage())),
             ),
           ]),
@@ -144,20 +148,71 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
   }
 
   Widget _buildListItem({required String title, String? subtitle, VoidCallback? onTap}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // 参考 legado-main: 日间 primaryText=#de000000(87%黑), 夜间 primaryText=#ffffffff(100%白)
+    final primaryTextColor = isDark 
+        ? const Color(0xDEFFFFFF)  // 夜间：87%白
+        : const Color(0xDE000000); // 日间：87%黑
+    final secondaryTextColor = isDark 
+        ? const Color(0xB3FFFFFF)  // 夜间：70%白
+        : const Color(0x8A000000); // 日间：54%黑
     return ListTile(
-      title: Text(title),
-      subtitle: subtitle != null ? Text(subtitle, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)) : null,
-      trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
+      title: Text(title, style: TextStyle(color: primaryTextColor)),
+      subtitle: subtitle != null 
+          ? Text(subtitle, style: TextStyle(fontSize: 12, color: secondaryTextColor)) 
+          : null,
+      trailing: Icon(Icons.chevron_right, color: secondaryTextColor),
       onTap: onTap,
     );
   }
 
   Widget _buildSwitchItem({required String title, String? subtitle, required bool value, required ValueChanged<bool> onChanged}) {
-    return ListTile(
-      title: Text(title),
-      subtitle: subtitle != null ? Text(subtitle, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)) : null,
-      trailing: Switch(value: value, onChanged: onChanged),
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accentColor = Theme.of(context).colorScheme.primary;
+
+    return InkWell(
       onTap: () => onChanged(!value),
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 60),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: isDark ? Colors.white : const Color(0xFF212121),
+                    ),
+                  ),
+                  if (subtitle != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: isDark ? Colors.white70 : const Color(0xFF757575),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            AndroidSwitch(
+              value: value,
+              onChanged: onChanged,
+              accentColor: accentColor,
+              isDark: isDark,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -355,6 +410,7 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     
     return Scaffold(
       appBar: AppBar(
@@ -409,7 +465,9 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
             margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
             height: 42,
             decoration: BoxDecoration(
-              color: colorScheme.surface.withOpacity(0.18),
+              color: isDark 
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : Colors.black.withValues(alpha: 0.04),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
@@ -424,7 +482,9 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
                     child: Container(
                       margin: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
-                        color: !_isNightTheme ? colorScheme.surface.withOpacity(0.2) : null,
+                        color: !_isNightTheme 
+                            ? (isDark ? Colors.white.withValues(alpha: 0.12) : Colors.black.withValues(alpha: 0.06))
+                            : null,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Center(
@@ -433,7 +493,9 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
-                            color: !_isNightTheme ? colorScheme.primary : colorScheme.onSurface,
+                            color: !_isNightTheme 
+                                ? colorScheme.secondary // 使用强调色
+                                : (isDark ? const Color(0xDEFFFFFF) : const Color(0xDE000000)),
                           ),
                         ),
                       ),
@@ -450,7 +512,9 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
                     child: Container(
                       margin: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
-                        color: _isNightTheme ? colorScheme.surface.withOpacity(0.2) : null,
+                        color: _isNightTheme 
+                            ? (isDark ? Colors.white.withValues(alpha: 0.12) : Colors.black.withValues(alpha: 0.06))
+                            : null,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Center(
@@ -459,7 +523,9 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
-                            color: _isNightTheme ? colorScheme.primary : colorScheme.onSurface,
+                            color: _isNightTheme 
+                                ? colorScheme.secondary // 使用强调色
+                                : (isDark ? const Color(0xDEFFFFFF) : const Color(0xDE000000)),
                           ),
                         ),
                       ),
@@ -481,7 +547,9 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
                 : '点击应用按钮应用主题，点击编辑按钮编辑主题',
               style: TextStyle(
                 fontSize: 13,
-                color: colorScheme.onSurfaceVariant,
+                color: isDark 
+                    ? const Color(0xB3FFFFFF)  // 夜间：70%白
+                    : const Color(0x8A000000), // 日间：54%黑
               ),
             ),
           ),
@@ -507,10 +575,14 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
             width: double.infinity,
             height: 48,
             decoration: BoxDecoration(
-              color: colorScheme.surface.withOpacity(0.87), // 半透明背景，类似原版 book_info_frost
+              color: isDark 
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : Colors.black.withValues(alpha: 0.04),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: colorScheme.onSurface.withOpacity(0.4), // 类似原版 glass_stroke
+                color: isDark 
+                    ? Colors.white.withValues(alpha: 0.15)
+                    : Colors.black.withValues(alpha: 0.08),
                 width: 1,
               ),
             ),
@@ -523,7 +595,9 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.bold,
-                    color: colorScheme.onSurface,
+                    color: isDark 
+                        ? const Color(0xDEFFFFFF)  // 夜间：87%白
+                        : const Color(0xDE000000), // 日间：87%黑
                   ),
                 ),
               ),
@@ -572,6 +646,10 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
   }
   
   Widget _buildDialogItem(String text, VoidCallback onTap, {bool isDestructive = false}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryTextColor = isDark 
+        ? const Color(0xDEFFFFFF)  // 夜间：87%白
+        : const Color(0xDE000000); // 日间：87%黑
     return InkWell(
       onTap: onTap,
       child: Container(
@@ -581,7 +659,7 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
           text,
           style: TextStyle(
             fontSize: 16,
-            color: isDestructive ? Theme.of(context).colorScheme.error : null,
+            color: isDestructive ? Theme.of(context).colorScheme.error : primaryTextColor,
           ),
         ),
       ),
@@ -591,7 +669,16 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
   // 主题卡片 - 完全参考 legado-main 的 item_theme_package.xml
   Widget _buildThemeCard(ThemeConfig theme, bool isActive) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final dateFormat = '${theme.updatedAt.year}-${theme.updatedAt.month.toString().padLeft(2, '0')}-${theme.updatedAt.day.toString().padLeft(2, '0')}';
+    
+    // 参考 legado-main: 日间 primaryText=#de000000(87%黑), 夜间 primaryText=#ffffffff(100%白)
+    final primaryTextColor = isDark 
+        ? const Color(0xDEFFFFFF)  // 夜间：87%白
+        : const Color(0xDE000000); // 日间：87%黑
+    final secondaryTextColor = isDark 
+        ? const Color(0xB3FFFFFF)  // 夜间：70%白
+        : const Color(0x8A000000); // 日间：54%黑
     
     // 原版使用 bg_book_info_intro_panel 背景
     // 卡片背景是透明的，没有边框
@@ -642,7 +729,7 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: colorScheme.onSurface,
+                          color: primaryTextColor,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -654,14 +741,16 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         constraints: const BoxConstraints(maxWidth: 118),
                         decoration: BoxDecoration(
-                          color: colorScheme.surface.withOpacity(0.18),
+                          color: isDark 
+                              ? Colors.white.withValues(alpha: 0.12)
+                              : Colors.black.withValues(alpha: 0.05),
                           borderRadius: BorderRadius.circular(13),
                         ),
                         child: Text(
                           '内置',
                           style: TextStyle(
                             fontSize: 12,
-                            color: colorScheme.onSurface,
+                            color: primaryTextColor,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -677,7 +766,7 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
                     '${isActive ? "当前应用 · " : ""}${_isNightTheme ? "夜间" : "日间"} · $dateFormat',
                     style: TextStyle(
                       fontSize: 12,
-                      color: colorScheme.onSurfaceVariant,
+                      color: secondaryTextColor,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -696,18 +785,26 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
                         isActive ? '已应用' : '应用',
                         () => _applyTheme(theme),
                         textColor: isActive ? Colors.red : null,
+                        isDark: isDark,
+                        primaryTextColor: primaryTextColor,
                       ),
                       
                       const SizedBox(width: 8),
                       
                       // btn_edit - 编辑按钮
-                      _buildActionButton('编辑', () => _editTheme(theme)),
+                      _buildActionButton('编辑', () => _editTheme(theme), 
+                        isDark: isDark, 
+                        primaryTextColor: primaryTextColor,
+                      ),
                       
                       const SizedBox(width: 8),
                       
                       // btn_more - 更多按钮
                       if (!theme.isBuiltin)
-                        _buildActionButton('更多', () => _showMoreOptions(theme)),
+                        _buildActionButton('更多', () => _showMoreOptions(theme),
+                          isDark: isDark,
+                          primaryTextColor: primaryTextColor,
+                        ),
                     ],
                   ),
                 ),
@@ -723,8 +820,15 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
     String text,
     VoidCallback onTap, {
     Color? textColor,
+    bool isDark = false,
+    Color? primaryTextColor,
   }) {
-    final colorScheme = Theme.of(context).colorScheme;
+    // 参考 legado-main: 日间 background_menu=#F1F2F6, 夜间 background_menu=#252528
+    final bgColor = isDark 
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.black.withValues(alpha: 0.04);
+    final defaultTextColor = primaryTextColor ?? 
+        (isDark ? const Color(0xDEFFFFFF) : const Color(0xDE000000));
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -732,7 +836,7 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
         constraints: const BoxConstraints(minWidth: 56),
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
-          color: colorScheme.surface.withOpacity(0.18),
+          color: bgColor,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Center(
@@ -740,7 +844,7 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
             text,
             style: TextStyle(
               fontSize: 13,
-              color: textColor ?? colorScheme.onSurface,
+              color: textColor ?? defaultTextColor,
               fontWeight: textColor == null ? FontWeight.normal : FontWeight.w600,
             ),
           ),
@@ -2789,7 +2893,7 @@ class _NavigationBarManagePageState extends State<NavigationBarManagePage> {
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
-                            color: !_isNightMode ? colorScheme.primary : colorScheme.onSurface,
+                            color: !_isNightMode ? colorScheme.secondary : colorScheme.onSurface, // 使用强调色
                           ),
                         ),
                       ),
@@ -2817,7 +2921,7 @@ class _NavigationBarManagePageState extends State<NavigationBarManagePage> {
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
-                            color: _isNightMode ? colorScheme.primary : colorScheme.onSurface,
+                            color: _isNightMode ? colorScheme.secondary : colorScheme.onSurface, // 使用强调色
                           ),
                         ),
                       ),
@@ -2927,6 +3031,10 @@ class _NavigationBarManagePageState extends State<NavigationBarManagePage> {
   }
 
   Widget _buildDialogItem(String text, VoidCallback onTap, {bool isDestructive = false}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryTextColor = isDark 
+        ? const Color(0xDEFFFFFF)  // 夜间：87%白
+        : const Color(0xDE000000); // 日间：87%黑
     return InkWell(
       onTap: onTap,
       child: Container(
@@ -2936,7 +3044,7 @@ class _NavigationBarManagePageState extends State<NavigationBarManagePage> {
           text,
           style: TextStyle(
             fontSize: 16,
-            color: isDestructive ? Theme.of(context).colorScheme.error : null,
+            color: isDestructive ? Theme.of(context).colorScheme.error : primaryTextColor,
           ),
         ),
       ),
@@ -3668,6 +3776,10 @@ class _NavBarEditDialogState extends State<_NavBarEditDialog> {
   }
 
   Widget _buildDialogItem(String text, VoidCallback onTap, {bool isDestructive = false}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryTextColor = isDark 
+        ? const Color(0xDEFFFFFF)  // 夜间：87%白
+        : const Color(0xDE000000); // 日间：87%黑
     return InkWell(
       onTap: onTap,
       child: Container(
@@ -3677,7 +3789,7 @@ class _NavBarEditDialogState extends State<_NavBarEditDialog> {
           text,
           style: TextStyle(
             fontSize: 16,
-            color: isDestructive ? Theme.of(context).colorScheme.error : null,
+            color: isDestructive ? Theme.of(context).colorScheme.error : primaryTextColor,
           ),
         ),
       ),
@@ -4396,7 +4508,12 @@ class _BookInfoManagePageState extends State<BookInfoManagePage> {
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Switch(value: item.visible, onChanged: (v) => setState(() => item.visible = v)),
+              AndroidSwitch(
+                value: item.visible,
+                onChanged: (v) => setState(() => item.visible = v),
+                accentColor: Theme.of(context).colorScheme.primary,
+                isDark: Theme.of(context).brightness == Brightness.dark,
+              ),
               const Icon(Icons.drag_handle),
             ],
           ),
@@ -4534,7 +4651,7 @@ class _BubbleManagePageState extends State<BubbleManagePage> {
   }
 }
 
-// 封面配置页面
+// 封面设置页面 - 参考原版 legado CoverConfigFragment
 class CoverConfigPage extends StatefulWidget {
   const CoverConfigPage({super.key});
   @override
@@ -4542,10 +4659,28 @@ class CoverConfigPage extends StatefulWidget {
 }
 
 class _CoverConfigPageState extends State<CoverConfigPage> {
-  String _dayDefaultCover = '';
-  String _nightDefaultCover = '';
-  bool _showBookName = true;
-  bool _showAuthor = true;
+  // 通用设置
+  bool _loadCoverOnlyWifi = false;
+  bool _loadCoverHighQuality = false;
+  bool _useDefaultCover = false;
+  // 日间
+  String _coverCollectionDay = '';
+  String _coverCollectionModeDay = 'random';
+  bool _coverShowName = true;
+  bool _coverShowAuthor = true;
+  String _defaultCover = '';
+  // 夜间
+  String _coverCollectionNight = '';
+  String _coverCollectionModeNight = 'random';
+  bool _coverShowNameN = true;
+  bool _coverShowAuthorN = true;
+  String _defaultCoverDark = '';
+  // 显示作者的真实状态（用户手动设置的，不受显示书名影响）
+  bool _coverShowAuthorReal = true;
+  bool _coverShowAuthorNReal = true;
+  // 图集名称缓存
+  String _coverCollectionDayName = '';
+  String _coverCollectionNightName = '';
 
   @override
   void initState() {
@@ -4556,92 +4691,1424 @@ class _CoverConfigPageState extends State<CoverConfigPage> {
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _dayDefaultCover = prefs.getString('coverDayDefault') ?? '';
-      _nightDefaultCover = prefs.getString('coverNightDefault') ?? '';
-      _showBookName = prefs.getBool('coverShowBookName') ?? true;
-      _showAuthor = prefs.getBool('coverShowAuthor') ?? true;
+      _loadCoverOnlyWifi = prefs.getBool('loadCoverOnlyWifi') ?? false;
+      _loadCoverHighQuality = prefs.getBool('loadCoverHighQuality') ?? false;
+      _useDefaultCover = prefs.getBool('useDefaultCover') ?? false;
+      _coverCollectionDay = prefs.getString('coverCollectionDay') ?? '';
+      _coverCollectionModeDay = prefs.getString('coverCollectionModeDay') ?? 'random';
+      _coverShowName = prefs.getBool('coverShowName') ?? true;
+      // 读取真实状态
+      _coverShowAuthorReal = prefs.getBool('coverShowAuthorReal') ?? true;
+      // 如果显示书名关闭，显示作者强制关闭；否则恢复真实状态
+      _coverShowAuthor = _coverShowName ? _coverShowAuthorReal : false;
+      _defaultCover = prefs.getString('defaultCover') ?? '';
+      _coverCollectionNight = prefs.getString('coverCollectionNight') ?? '';
+      _coverCollectionModeNight = prefs.getString('coverCollectionModeNight') ?? 'random';
+      _coverShowNameN = prefs.getBool('coverShowNameN') ?? true;
+      // 读取真实状态
+      _coverShowAuthorNReal = prefs.getBool('coverShowAuthorNReal') ?? true;
+      // 如果显示书名关闭，显示作者强制关闭；否则恢复真实状态
+      _coverShowAuthorN = _coverShowNameN ? _coverShowAuthorNReal : false;
+      _defaultCoverDark = prefs.getString('defaultCoverDark') ?? '';
     });
+    // 加载图集名称
+    await _loadCollectionNames();
   }
 
-  Future<void> _saveSettings() async {
+  Future<void> _loadCollectionNames() async {
+    if (_coverCollectionDay.isNotEmpty) {
+      final dayCollections = await CoverCollectionManager.instance.getCollections(false);
+      final dayColl = dayCollections.where((c) => c.id == _coverCollectionDay).firstOrNull;
+      if (mounted && dayColl != null) {
+        setState(() => _coverCollectionDayName = dayColl.name);
+      }
+    }
+    if (_coverCollectionNight.isNotEmpty) {
+      final nightCollections = await CoverCollectionManager.instance.getCollections(true);
+      final nightColl = nightCollections.where((c) => c.id == _coverCollectionNight).firstOrNull;
+      if (mounted && nightColl != null) {
+        setState(() => _coverCollectionNightName = nightColl.name);
+      }
+    }
+  }
+
+  Future<void> _saveBool(String key, bool value) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('coverDayDefault', _dayDefaultCover);
-    await prefs.setString('coverNightDefault', _nightDefaultCover);
-    await prefs.setBool('coverShowBookName', _showBookName);
-    await prefs.setBool('coverShowAuthor', _showAuthor);
+    await prefs.setBool(key, value);
+    CoverConfigService.instance.reload();
+  }
+
+  Future<void> _saveString(String key, String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(key, value);
+    CoverConfigService.instance.reload();
+  }
+
+  Future<void> _removePref(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(key);
+    CoverConfigService.instance.reload();
+  }
+
+  String _getModeLabel(String mode) {
+    switch (mode) {
+      case 'random': return '随机';
+      case 'sequence': return '顺序';
+      case 'mixed': return '混合';
+      default: return '随机';
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('封面配置'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.save),
-            tooltip: '保存',
-            onPressed: () {
-              _saveSettings();
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('设置已保存')));
-            },
-          ),
-        ],
+        title: const Text('封面设置'),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
         children: [
-          ListTile(
-            title: const Text('日间默认封面'),
-            subtitle: Text(_dayDefaultCover.isEmpty ? '未设置' : _dayDefaultCover.split('/').last),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _selectCover('日间默认封面', (path) => setState(() => _dayDefaultCover = path ?? '')),
+          // 仅WiFi加载封面
+          _buildSwitchItem(
+            title: '仅WiFi加载',
+            subtitle: '仅WiFi网络下加载封面图片',
+            value: _loadCoverOnlyWifi,
+            onChanged: (v) {
+              setState(() => _loadCoverOnlyWifi = v);
+              _saveBool('loadCoverOnlyWifi', v);
+            },
           ),
-          ListTile(
-            title: const Text('夜间默认封面'),
-            subtitle: Text(_nightDefaultCover.isEmpty ? '未设置' : _nightDefaultCover.split('/').last),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _selectCover('夜间默认封面', (path) => setState(() => _nightDefaultCover = path ?? '')),
+
+          // 加载高清封面
+          _buildSwitchItem(
+            title: '加载高清封面',
+            subtitle: '开启后使用封面原图，关闭时优先加载缩略图',
+            value: _loadCoverHighQuality,
+            onChanged: (v) {
+              setState(() => _loadCoverHighQuality = v);
+              _saveBool('loadCoverHighQuality', v);
+            },
           ),
-          SwitchListTile(
-            title: const Text('显示书名'),
-            value: _showBookName,
-            onChanged: (v) => setState(() => _showBookName = v),
+
+          // 封面规则
+          _buildListItem(
+            title: '封面规则',
+            subtitle: '进入详情页时使用封面规则重新获取封面',
+            onTap: () => _showCoverRuleDialog(),
           ),
-          SwitchListTile(
-            title: const Text('显示作者'),
-            value: _showAuthor,
-            onChanged: (v) => setState(() => _showAuthor = v),
+
+          // 总是使用默认封面
+          _buildSwitchItem(
+            title: '总是使用默认封面',
+            subtitle: '总是显示默认封面（不显示网络封面）',
+            value: _useDefaultCover,
+            onChanged: (v) {
+              setState(() => _useDefaultCover = v);
+              _saveBool('useDefaultCover', v);
+            },
           ),
+
+          // 封面图集
+          _buildListItem(
+            title: '封面图集',
+            onTap: () => _navigateToCoverCollectionManage(),
+          ),
+
+          const SizedBox(height: 8),
+
+          // 日间主题
+          _buildCategoryHeader('日间主题'),
+
+          _buildListItem(
+            title: '选用图集',
+            subtitle: _coverCollectionDayName.isEmpty ? '无' : _coverCollectionDayName,
+            onTap: () => _selectCoverCollection(false),
+          ),
+
+          _buildListItem(
+            title: '封面模式',
+            subtitle: _getModeLabel(_coverCollectionModeDay),
+            onTap: () => _selectCoverMode(false),
+          ),
+
+          _buildSwitchItem(
+            title: '显示书名',
+            subtitle: '封面上显示书名',
+            value: _coverShowName,
+            onChanged: (v) {
+              setState(() {
+                _coverShowName = v;
+                // 显示书名关闭时，显示作者强制关闭
+                // 显示书名开启时，显示作者恢复真实状态
+                if (!v) {
+                  _coverShowAuthor = false;
+                } else {
+                  _coverShowAuthor = _coverShowAuthorReal;
+                }
+              });
+              _saveBool('coverShowName', v);
+              // 同步保存显示作者状态
+              _saveBool('coverShowAuthor', _coverShowAuthor);
+            },
+          ),
+
+          _buildSwitchItem(
+            title: '显示作者',
+            subtitle: '封面上显示作者',
+            value: _coverShowAuthor,
+            enabled: _coverShowName,
+            onChanged: (v) {
+              setState(() {
+                _coverShowAuthor = v;
+                _coverShowAuthorReal = v; // 保存真实状态
+              });
+              _saveBool('coverShowAuthor', v);
+              _saveBool('coverShowAuthorReal', v); // 保存真实状态
+            },
+          ),
+
+          _buildListItem(
+            title: '默认封面',
+            subtitle: _defaultCover.isEmpty ? '选择图片' : _defaultCover.split('/').last,
+            onTap: () => _selectDefaultCover(false),
+          ),
+
+          const SizedBox(height: 8),
+
+          // 夜间主题
+          _buildCategoryHeader('夜间主题'),
+
+          _buildListItem(
+            title: '选用图集',
+            subtitle: _coverCollectionNightName.isEmpty ? '无' : _coverCollectionNightName,
+            onTap: () => _selectCoverCollection(true),
+          ),
+
+          _buildListItem(
+            title: '封面模式',
+            subtitle: _getModeLabel(_coverCollectionModeNight),
+            onTap: () => _selectCoverMode(true),
+          ),
+
+          _buildSwitchItem(
+            title: '显示书名',
+            subtitle: '封面上显示书名',
+            value: _coverShowNameN,
+            onChanged: (v) {
+              setState(() {
+                _coverShowNameN = v;
+                // 显示书名关闭时，显示作者强制关闭
+                // 显示书名开启时，显示作者恢复真实状态
+                if (!v) {
+                  _coverShowAuthorN = false;
+                } else {
+                  _coverShowAuthorN = _coverShowAuthorNReal;
+                }
+              });
+              _saveBool('coverShowNameN', v);
+              // 同步保存显示作者状态
+              _saveBool('coverShowAuthorN', _coverShowAuthorN);
+            },
+          ),
+
+          _buildSwitchItem(
+            title: '显示作者',
+            subtitle: '封面上显示作者',
+            value: _coverShowAuthorN,
+            enabled: _coverShowNameN,
+            onChanged: (v) {
+              setState(() {
+                _coverShowAuthorN = v;
+                _coverShowAuthorNReal = v; // 保存真实状态
+              });
+              _saveBool('coverShowAuthorN', v);
+              _saveBool('coverShowAuthorNReal', v); // 保存真实状态
+            },
+          ),
+
+          _buildListItem(
+            title: '默认封面',
+            subtitle: _defaultCoverDark.isEmpty ? '选择图片' : _defaultCoverDark.split('/').last,
+            onTap: () => _selectDefaultCover(true),
+          ),
+
+          const SizedBox(height: 24),
         ],
       ),
     );
   }
 
-  void _selectCover(String title, ValueChanged<String?> onSelected) {
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+  /// 构建分类标题 - 参考原版 view_preference_category.xml
+  /// 使用强调色（accentColor）
+  Widget _buildCategoryHeader(String title) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+          color: colorScheme.secondary, // 使用强调色
+        ),
+      ),
+    );
+  }
+
+  /// 构建列表项 - 参考原版 view_preference.xml
+  /// 标题 16sp，副标题 14sp，高度 60dp，padding 10dp
+  Widget _buildListItem({
+    required String title,
+    String? subtitle,
+    VoidCallback? onTap,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 60),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
           children: [
-            ListTile(
-              title: const Text('选择图片'),
-              onTap: () {
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('图片选择功能开发中...')));
-              },
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: isDark ? Colors.white : const Color(0xFF212121),
+                    ),
+                  ),
+                  if (subtitle != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: isDark ? Colors.white70 : const Color(0xFF757575),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
-            ListTile(
-              title: const Text('清除', style: TextStyle(color: Colors.red)),
-              onTap: () {
-                Navigator.pop(ctx);
-                onSelected(null);
-              },
+            Icon(Icons.chevron_right,
+                color: isDark ? Colors.white54 : const Color(0xFFBDBDBD)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 构建开关项 - 参考原版 view_preference.xml + SwitchPreference
+  /// 标题 16sp，副标题 14sp，高度 60dp，padding 10dp
+  Widget _buildSwitchItem({
+    required String title,
+    String? subtitle,
+    required bool value,
+    bool enabled = true,
+    required ValueChanged<bool> onChanged,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // 使用强调色（secondary）而不是主色（primary），参考原版 SwitchPreference
+    final accentColor = Theme.of(context).colorScheme.secondary;
+
+    return InkWell(
+      onTap: enabled ? () => onChanged(!value) : null,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 60),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: enabled
+                          ? (isDark ? Colors.white : const Color(0xFF212121))
+                          : (isDark ? Colors.white38 : const Color(0xFFBDBDBD)),
+                    ),
+                  ),
+                  if (subtitle != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: enabled
+                              ? (isDark ? Colors.white70 : const Color(0xFF757575))
+                              : (isDark ? Colors.white24 : const Color(0xFFBDBDBD)),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            // 原版Android SwitchCompat风格 - 自定义绘制thumb和track
+            AndroidSwitch(
+              value: value,
+              onChanged: onChanged,
+              accentColor: accentColor,
+              isDark: isDark,
+              enabled: enabled,
             ),
           ],
         ),
       ),
     );
+  }
+
+  /// 封面规则配置对话框 - 参考原版 CoverRuleConfigDialog
+  void _showCoverRuleDialog() async {
+    final rule = CoverConfigService.instance.coverRule;
+    bool enable = rule.enable;
+    String searchUrl = rule.searchUrl;
+    String coverRule = rule.coverRule;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => Dialog(
+          insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+          backgroundColor: Theme.of(ctx).brightness == Brightness.dark
+              ? const Color(0xFF424242)
+              : Colors.white,
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 400),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 标题栏 - 与AlertDialog一致，无背景色
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+                  child: Text(
+                    '封面规则',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(ctx).brightness == Brightness.dark
+                          ? Colors.white
+                          : const Color(0xFF212121),
+                    ),
+                  ),
+                ),
+
+                // 内容区域
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // 启用开关
+                        Row(
+                          children: [
+                            Checkbox(
+                              value: enable,
+                              activeColor: Theme.of(ctx).colorScheme.primary,
+                              onChanged: (v) => setDialogState(() => enable = v ?? true),
+                            ),
+                            Text('启用',
+                                style: TextStyle(
+                                  color: Theme.of(ctx).brightness == Brightness.dark
+                                      ? Colors.white
+                                      : const Color(0xFF212121),
+                                )),
+                          ],
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // 搜索URL输入框
+                        TextField(
+                          controller: TextEditingController(text: searchUrl),
+                          style: TextStyle(
+                            color: Theme.of(ctx).brightness == Brightness.dark
+                                ? Colors.white
+                                : const Color(0xFF212121),
+                          ),
+                          decoration: InputDecoration(
+                            labelText: '搜索URL',
+                            border: const OutlineInputBorder(),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            labelStyle: TextStyle(
+                              color: Theme.of(ctx).brightness == Brightness.dark
+                                  ? Colors.white70
+                                  : const Color(0xFF757575),
+                            ),
+                          ),
+                          maxLines: 2,
+                          onChanged: (v) => searchUrl = v,
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // 封面规则输入框
+                        TextField(
+                          controller: TextEditingController(text: coverRule),
+                          style: TextStyle(
+                            color: Theme.of(ctx).brightness == Brightness.dark
+                                ? Colors.white
+                                : const Color(0xFF212121),
+                          ),
+                          decoration: InputDecoration(
+                            labelText: '封面规则',
+                            border: const OutlineInputBorder(),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            labelStyle: TextStyle(
+                              color: Theme.of(ctx).brightness == Brightness.dark
+                                  ? Colors.white70
+                                  : const Color(0xFF757575),
+                            ),
+                          ),
+                          maxLines: 8,
+                          onChanged: (v) => coverRule = v,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // 底部按钮区域
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      TextButton(
+                        onPressed: () async {
+                          // 恢复默认
+                          await CoverConfigService.instance.deleteCoverRule();
+                          Navigator.pop(ctx);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('已恢复默认封面规则')),
+                          );
+                        },
+                        child: Text(
+                          '默认',
+                          style: TextStyle(color: Theme.of(ctx).colorScheme.primary),
+                        ),
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: Text('取消',
+                                style: TextStyle(
+                                  color: Theme.of(ctx).brightness == Brightness.dark
+                                      ? Colors.white70
+                                      : const Color(0xFF757575),
+                                )),
+                          ),
+                          const SizedBox(width: 8),
+                          TextButton(
+                            onPressed: () async {
+                              if (searchUrl.isEmpty || coverRule.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('搜索URL和封面规则不能为空')),
+                                );
+                                return;
+                              }
+                              final newRule = CoverRule(
+                                enable: enable,
+                                searchUrl: searchUrl,
+                                coverRule: coverRule,
+                              );
+                              await CoverConfigService.instance.saveCoverRule(newRule);
+                              Navigator.pop(ctx);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('封面规则已保存')),
+                              );
+                            },
+                            child: Text(
+                              '确定',
+                              style: TextStyle(color: Theme.of(ctx).colorScheme.primary),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _selectCoverCollection(bool isNight) async {
+    final collections = await CoverCollectionManager.instance.getCollections(isNight);
+    final selectedId = isNight ? _coverCollectionNight : _coverCollectionDay;
+
+    if (!mounted) return;
+
+    final items = ['无'];
+    items.addAll(collections.map((c) => '${c.name} (${c.images.length}张)'));
+    int selectedIndex = selectedId.isEmpty ? 0 : collections.indexWhere((c) => c.id == selectedId) + 1;
+
+    final result = await CommonWidgets.showSelectorDialog(
+      context,
+      title: '选用图集',
+      items: items,
+      selectedIndex: selectedIndex,
+    );
+
+    if (result != null) {
+      final selected = result == 0 ? null : (result - 1 < collections.length ? collections[result - 1] : null);
+      await CoverCollectionManager.instance.setSelectedCollection(selected?.id, isNight);
+      setState(() {
+        if (isNight) {
+          _coverCollectionNight = selected?.id ?? '';
+          _coverCollectionNightName = selected?.name ?? '';
+        } else {
+          _coverCollectionDay = selected?.id ?? '';
+          _coverCollectionDayName = selected?.name ?? '';
+        }
+      });
+    }
+  }
+
+  /// 导航到封面图集管理页 - 使用流畅的页面过渡
+  void _navigateToCoverCollectionManage() {
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            const CoverCollectionManagePage(),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          // 使用淡入淡出过渡，更流畅
+          return FadeTransition(
+            opacity: animation,
+            child: child,
+          );
+        },
+        transitionDuration: const Duration(milliseconds: 200),
+      ),
+    ).then((_) {
+      // 返回后刷新图集名称
+      _loadCollectionNames();
+    });
+  }
+
+  void _selectCoverMode(bool isNight) {
+    final modes = ['随机', '顺序', '混合'];
+    final modeValues = ['random', 'sequence', 'mixed'];
+    final currentMode = isNight ? _coverCollectionModeNight : _coverCollectionModeDay;
+    int selectedIndex = modeValues.indexOf(currentMode);
+
+    CommonWidgets.showSelectorDialog(
+      context,
+      title: '封面模式',
+      items: modes,
+      selectedIndex: selectedIndex,
+    ).then((result) {
+      if (result != null) {
+        final mode = modeValues[result];
+        if (isNight) {
+          setState(() => _coverCollectionModeNight = mode);
+          _saveString('coverCollectionModeNight', mode);
+        } else {
+          setState(() => _coverCollectionModeDay = mode);
+          _saveString('coverCollectionModeDay', mode);
+        }
+      }
+    });
+  }
+
+  void _selectDefaultCover(bool isNight) {
+    final currentPath = isNight ? _defaultCoverDark : _defaultCover;
+
+    if (currentPath.isEmpty) {
+      _pickCoverImage(isNight);
+    } else {
+      showModalBottomSheet(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                title: const Text('删除'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  final key = isNight ? 'defaultCoverDark' : 'defaultCover';
+                  _removePref(key);
+                  setState(() {
+                    if (isNight) {
+                      _defaultCoverDark = '';
+                    } else {
+                      _defaultCover = '';
+                    }
+                  });
+                },
+              ),
+              ListTile(
+                title: const Text('选择图片'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickCoverImage(isNight);
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _pickCoverImage(bool isNight) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+      );
+      if (result != null && result.files.single.path != null) {
+        final path = result.files.single.path!;
+        final key = isNight ? 'defaultCoverDark' : 'defaultCover';
+        await _saveString(key, path);
+        setState(() {
+          if (isNight) {
+            _defaultCoverDark = path;
+          } else {
+            _defaultCover = path;
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('选择图片失败: $e')),
+        );
+      }
+    }
+  }
+}
+
+/// 封面图集管理页 - 完全参考原版 CoverCollectionManageActivity
+class CoverCollectionManagePage extends StatefulWidget {
+  const CoverCollectionManagePage({super.key});
+
+  @override
+  State<CoverCollectionManagePage> createState() => _CoverCollectionManagePageState();
+}
+
+class _CoverCollectionManagePageState extends State<CoverCollectionManagePage> {
+  bool _isNight = false;
+  List<CoverCollection> _dayCollections = [];
+  List<CoverCollection> _nightCollections = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    // 使用addPostFrameCallback延迟加载，让页面先完成渲染
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadCollections();
+    });
+  }
+
+  Future<void> _loadCollections() async {
+    final day = await CoverCollectionManager.instance.getCollections(false);
+    final night = await CoverCollectionManager.instance.getCollections(true);
+    if (mounted) {
+      setState(() {
+        _dayCollections = day;
+        _nightCollections = night;
+        _loading = false;
+      });
+    }
+  }
+
+  List<CoverCollection> get _currentCollections =>
+      _isNight ? _nightCollections : _dayCollections;
+
+  Future<void> _switchTab(bool isNight) async {
+    if (_isNight == isNight) return;
+    setState(() => _isNight = isNight);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('封面图集'),
+      ),
+      body: Column(
+        children: [
+          // TabBar - 完全参考原版 activity_cover_collection_manage.xml 的 tabBar
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            height: 42,
+            decoration: BoxDecoration(
+              color: colorScheme.surface.withOpacity(0.18),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => _switchTab(false),
+                    child: Container(
+                      margin: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: !_isNight ? colorScheme.surface.withOpacity(0.2) : null,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Center(
+                        child: Text(
+                          '日间',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: !_isNight ? colorScheme.secondary : colorScheme.onSurface, // 使用强调色
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => _switchTab(true),
+                    child: Container(
+                      margin: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: _isNight ? colorScheme.surface.withOpacity(0.2) : null,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Center(
+                        child: Text(
+                          '夜间',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: _isNight ? colorScheme.secondary : colorScheme.onSurface, // 使用强调色
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          const SizedBox(height: 8),
+          
+          // RecyclerView - 图集列表
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _buildList(),
+          ),
+          
+          // btn_add - 添加按钮 (参考原版 bg_book_info_action_secondary)
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            width: double.infinity,
+            height: 48,
+            decoration: BoxDecoration(
+              color: colorScheme.surface.withOpacity(0.87),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: colorScheme.onSurface.withOpacity(0.4),
+                width: 1,
+              ),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: _showAddActions,
+              child: Center(
+                child: Text(
+                  '添加图集',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAddActions() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('添加图集'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildDialogItem('创建图集', () {
+              Navigator.pop(ctx);
+              _createCollection();
+            }),
+            _buildDialogItem('导入ZIP', () {
+              Navigator.pop(ctx);
+              _importZip();
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDialogItem(String text, VoidCallback onTap, {bool isDestructive = false}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryTextColor = isDark 
+        ? const Color(0xDEFFFFFF)  // 夜间：87%白
+        : const Color(0xDE000000); // 日间：87%黑
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+        child: Text(
+          text,
+          style: TextStyle(
+            fontSize: 16,
+            color: isDestructive ? Theme.of(context).colorScheme.error : primaryTextColor,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildList() {
+    final collections = _currentCollections;
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    if (collections.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            '暂无${_isNight ? "夜间" : "日间"}图集，点击下方添加',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      itemCount: collections.length,
+      itemBuilder: (ctx, index) => _buildCollectionItem(collections[index]),
+    );
+  }
+
+  // 图集卡片 - 完全参考原版 item_cover_collection.xml
+  Widget _buildCollectionItem(CoverCollection collection) {
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surface.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: colorScheme.onSurface.withOpacity(0.04),
+          width: 1,
+        ),
+      ),
+      child: InkWell(
+        onTap: () => _navigateToDetail(collection),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // iv_preview - 预览图 (54dp x 72dp)
+            Container(
+              width: 54,
+              height: 72,
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: collection.images.isNotEmpty
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: Image.file(
+                        File(collection.images.first),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Icon(
+                          Icons.broken_image,
+                          size: 24,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    )
+                  : Icon(
+                      Icons.image,
+                      size: 24,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+            ),
+            
+            const SizedBox(width: 12),
+            
+            // lay_info - 信息区域
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // tv_name - 名称 (16sp, bold)
+                  Text(
+                    collection.name,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: colorScheme.onSurface,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  
+                  const SizedBox(height: 5),
+                  
+                  // tv_info - 信息 (13sp)
+                  Text(
+                    '${collection.images.length}张图片',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            
+            // btn_more - 更多按钮 (34dp高度, minWidth 56dp)
+            GestureDetector(
+              onTap: () => _showCollectionOptions(collection),
+              child: Container(
+                height: 34,
+                constraints: const BoxConstraints(minWidth: 56),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: colorScheme.surface.withOpacity(0.18),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Center(
+                  child: Text(
+                    '更多',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: colorScheme.onSurface,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _createCollection() async {
+    final colorScheme = Theme.of(context).colorScheme;
+    final nameController = TextEditingController();
+    
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('图集名称'),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(
+            hintText: '请输入图集名称',
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final name = nameController.text.trim();
+              if (name.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('请输入图集名称')),
+                );
+                return;
+              }
+              Navigator.pop(ctx);
+              try {
+                await CoverCollectionManager.instance.createCollection(
+                  name: name,
+                  isNight: _isNight,
+                );
+                _loadCollections();
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('创建失败: $e')),
+                );
+              }
+            },
+            child: Text('确定', style: TextStyle(color: colorScheme.primary)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _importZip() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['zip'],
+        allowCompression: false,
+      );
+      if (result != null && result.files.isNotEmpty) {
+        final path = result.files.first.path;
+        if (path != null) {
+          // TODO: 实现ZIP导入功能
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('选择文件: $path')),
+          );
+        }
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导入失败: $e')),
+      );
+    }
+  }
+
+  void _showCollectionOptions(CoverCollection collection) {
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(collection.name),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildDialogItem('重命名', () {
+              Navigator.pop(ctx);
+              _renameCollection(collection);
+            }),
+            _buildDialogItem('导出ZIP', () {
+              Navigator.pop(ctx);
+              _exportCollection(collection);
+            }),
+            _buildDialogItem('删除', () {
+              Navigator.pop(ctx);
+              _deleteCollection(collection);
+            }, isDestructive: true),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _renameCollection(CoverCollection collection) async {
+    final colorScheme = Theme.of(context).colorScheme;
+    final nameController = TextEditingController(text: collection.name);
+    
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('图集名称'),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(
+            hintText: '请输入图集名称',
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final name = nameController.text.trim();
+              if (name.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('请输入图集名称')),
+                );
+                return;
+              }
+              Navigator.pop(ctx);
+              try {
+                await CoverCollectionManager.instance.renameCollection(
+                  collection.id, name, collection.isNight,
+                );
+                _loadCollections();
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('重命名失败: $e')),
+                );
+              }
+            },
+            child: Text('确定', style: TextStyle(color: colorScheme.primary)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _exportCollection(CoverCollection collection) {
+    // TODO: 实现导出ZIP功能
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('导出功能待实现')),
+    );
+  }
+
+  void _deleteCollection(CoverCollection collection) async {
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('确认删除'),
+        content: Text('确定要删除图集 "${collection.name}" 吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('删除', style: TextStyle(color: colorScheme.error)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await CoverCollectionManager.instance.deleteCollection(
+          collection.id, collection.isNight,
+        );
+        _loadCollections();
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('删除失败: $e')),
+        );
+      }
+    }
+  }
+
+  void _navigateToDetail(CoverCollection collection) async {
+    await Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            CoverCollectionDetailPage(collection: collection),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          // 使用淡入淡出过渡，更流畅
+          return FadeTransition(
+            opacity: animation,
+            child: child,
+          );
+        },
+        transitionDuration: const Duration(milliseconds: 200),
+      ),
+    );
+    _loadCollections();
+  }
+}
+
+/// 图集详情页 - 完全参考原版 CoverCollectionDetailActivity
+class CoverCollectionDetailPage extends StatefulWidget {
+  final CoverCollection collection;
+
+  const CoverCollectionDetailPage({super.key, required this.collection});
+
+  @override
+  State<CoverCollectionDetailPage> createState() => _CoverCollectionDetailPageState();
+}
+
+class _CoverCollectionDetailPageState extends State<CoverCollectionDetailPage> {
+  late CoverCollection _collection;
+
+  @override
+  void initState() {
+    super.initState();
+    _collection = widget.collection;
+    // 使用addPostFrameCallback延迟加载，让页面先完成渲染
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _reloadCollection();
+    });
+  }
+
+  Future<void> _reloadCollection() async {
+    final collections = await CoverCollectionManager.instance.getCollections(_collection.isNight);
+    final updated = collections.where((c) => c.id == _collection.id).firstOrNull;
+    if (updated != null && mounted) {
+      setState(() => _collection = updated);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_collection.name),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.add_photo_alternate),
+            tooltip: '导入图片',
+            onPressed: _importImages,
+          ),
+        ],
+      ),
+      body: _collection.images.isEmpty
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  '暂无图片，点击右上角按钮导入',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            )
+          : GridView.builder(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+                childAspectRatio: 1.0, // 150dp高度，保持正方形
+              ),
+              itemCount: _collection.images.length,
+              itemBuilder: (ctx, index) => _buildImageItem(index),
+            ),
+    );
+  }
+
+  // 图片项 - 完全参考原版 item_cover_collection_image.xml
+  // FrameLayout: 150dp高度，5dp margin，4dp padding
+  Widget _buildImageItem(int index) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final imagePath = _collection.images[index];
+    
+    return GestureDetector(
+      onLongPress: () => _removeImage(index),
+      child: Container(
+        decoration: BoxDecoration(
+          color: colorScheme.surface.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: colorScheme.onSurface.withOpacity(0.04),
+            width: 1,
+          ),
+        ),
+        padding: const EdgeInsets.all(4),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.file(
+            File(imagePath),
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Center(
+              child: Icon(
+                Icons.broken_image,
+                size: 32,
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _importImages() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: true,
+      );
+      if (result != null && result.paths.isNotEmpty) {
+        final paths = result.paths.whereType<String>().toList();
+        await CoverCollectionManager.instance.importImages(
+          _collection.id, paths, _collection.isNight,
+        );
+        _reloadCollection();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已导入${paths.length}张图片')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('导入图片失败: $e')),
+        );
+      }
+    }
+  }
+
+  void _removeImage(int index) async {
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除图片'),
+        content: const Text('确定要删除这张图片吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('删除', style: TextStyle(color: colorScheme.error)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await CoverCollectionManager.instance.removeImage(
+          _collection.id, _collection.images[index], _collection.isNight,
+        );
+        _reloadCollection();
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('删除失败: $e')),
+        );
+      }
+    }
   }
 }
 

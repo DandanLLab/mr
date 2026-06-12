@@ -6,6 +6,7 @@ import '../../providers/app_provider.dart';
 import '../../models/book.dart';
 import '../../models/book_source.dart';
 import '../../routes/app_routes.dart';
+import '../../services/cover_config_service.dart';
 
 class SearchPage extends StatefulWidget {
   final String? initialKeyword;
@@ -412,14 +413,11 @@ class _SearchPageState extends State<SearchPage> {
               child: SizedBox(
                 width: 80,
                 height: 110,
-                child: coverUrl.isEmpty
-                    ? _coverPlaceholder()
-                    : CachedNetworkImage(
-                        imageUrl: coverUrl,
-                        fit: BoxFit.cover,
-                        placeholder: (_, __) => _coverPlaceholder(),
-                        errorWidget: (_, __, ___) => _coverPlaceholder(),
-                      ),
+                child: _buildSearchCoverImage(
+                  coverUrl,
+                  bookName: result['name']?.toString(),
+                  bookAuthor: author,
+                ),
               ),
             ),
             const SizedBox(width: 8),
@@ -554,14 +552,11 @@ class _SearchPageState extends State<SearchPage> {
           children: [
             // 封面
             Expanded(
-              child: coverUrl.isEmpty
-                  ? _coverPlaceholder()
-                  : CachedNetworkImage(
-                      imageUrl: coverUrl,
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) => _coverPlaceholder(),
-                      errorWidget: (_, __, ___) => _coverPlaceholder(),
-                    ),
+              child: _buildSearchCoverImage(
+                coverUrl,
+                bookName: result['name']?.toString(),
+                bookAuthor: author,
+              ),
             ),
             Padding(
               padding: const EdgeInsets.all(6),
@@ -622,11 +617,53 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  Widget _coverPlaceholder() {
+  Widget _coverPlaceholder({String? bookName, String? bookAuthor}) {
+    final coverConfig = CoverConfigService.instance;
+    final isDark = context.watch<AppProvider>().themeMode == ThemeMode.dark ||
+        (context.watch<AppProvider>().themeMode == ThemeMode.system &&
+            MediaQuery.of(context).platformBrightness == Brightness.dark);
+    if (bookName != null && bookName.isNotEmpty) {
+      return coverConfig.buildDefaultCoverPlaceholder(
+        bookName: bookName,
+        bookAuthor: bookAuthor,
+        isDark: isDark,
+      );
+    }
     return ColoredBox(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: const Center(child: Icon(Icons.book, size: 36)),
     );
+  }
+
+  /// 构建搜索结果封面 - 接入封面配置
+  Widget _buildSearchCoverImage(String coverUrl, {String? bookName, String? bookAuthor}) {
+    final coverConfig = CoverConfigService.instance;
+    final isDark = context.watch<AppProvider>().themeMode == ThemeMode.dark ||
+        (context.watch<AppProvider>().themeMode == ThemeMode.system &&
+            MediaQuery.of(context).platformBrightness == Brightness.dark);
+
+    if (coverConfig.useDefaultCover) {
+      return coverConfig.buildDefaultCoverPlaceholder(
+        bookName: bookName ?? '',
+        bookAuthor: bookAuthor,
+        isDark: isDark,
+      );
+    }
+
+    if (coverUrl.isNotEmpty) {
+      final memCacheWidth = coverConfig.loadCoverHighQuality ? null : 240;
+      final maxWidthDiskCache = coverConfig.loadCoverHighQuality ? null : 320;
+      return CachedNetworkImage(
+        imageUrl: coverUrl,
+        fit: BoxFit.cover,
+        memCacheWidth: memCacheWidth,
+        maxWidthDiskCache: maxWidthDiskCache,
+        placeholder: (_, __) => _coverPlaceholder(bookName: bookName, bookAuthor: bookAuthor),
+        errorWidget: (_, __, ___) => _coverPlaceholder(bookName: bookName, bookAuthor: bookAuthor),
+      );
+    }
+
+    return _coverPlaceholder(bookName: bookName, bookAuthor: bookAuthor);
   }
 
   List<String> _resultTags(Map<String, dynamic> result) {

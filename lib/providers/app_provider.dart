@@ -203,8 +203,9 @@ class AppProvider extends ChangeNotifier with WidgetsBindingObserver {
         background: _dayBackgroundColor,
         onPrimary: _foregroundFor(_dayPrimaryColor),
         onSecondary: _foregroundFor(_dayAccentColor),
-        onSurface: Colors.black87, // surface 色上的文字颜色
-        onBackground: Colors.black87, // background 色上的文字颜色
+        onSurface: const Color(0xDE000000), // surface 色上的文字颜色 (87%黑)
+        onSurfaceVariant: const Color(0x8A000000), // 次要文字颜色 (54%黑)
+        onBackground: const Color(0xDE000000), // background 色上的文字颜色 (87%黑)
         error: const Color(0xFFE53935),
         onError: Colors.white,
       ),
@@ -270,12 +271,12 @@ class AppProvider extends ChangeNotifier with WidgetsBindingObserver {
       ),
       // 确保文字主题正确
       textTheme: const TextTheme(
-        bodyLarge: TextStyle(color: Colors.black87),
-        bodyMedium: TextStyle(color: Colors.black87),
-        bodySmall: TextStyle(color: Colors.black54),
-        titleLarge: TextStyle(color: Colors.black87),
-        titleMedium: TextStyle(color: Colors.black87),
-        titleSmall: TextStyle(color: Colors.black87),
+        bodyLarge: TextStyle(color: Color(0xDE000000)), // 87%黑
+        bodyMedium: TextStyle(color: Color(0xDE000000)), // 87%黑
+        bodySmall: TextStyle(color: Color(0x8A000000)), // 54%黑
+        titleLarge: TextStyle(color: Color(0xDE000000)), // 87%黑
+        titleMedium: TextStyle(color: Color(0xDE000000)), // 87%黑
+        titleSmall: TextStyle(color: Color(0xDE000000)), // 87%黑
       ),
     );
   }
@@ -303,8 +304,9 @@ class AppProvider extends ChangeNotifier with WidgetsBindingObserver {
         background: _nightBackgroundColor,
         onPrimary: _foregroundFor(_nightPrimaryColor),
         onSecondary: _foregroundFor(_nightAccentColor),
-        onSurface: Colors.white70, // surface 色上的文字颜色
-        onBackground: Colors.white70, // background 色上的文字颜色
+        onSurface: const Color(0xDEFFFFFF), // surface 色上的文字颜色 (87%白)
+        onSurfaceVariant: const Color(0xB3FFFFFF), // 次要文字颜色 (70%白)
+        onBackground: const Color(0xDEFFFFFF), // background 色上的文字颜色 (87%白)
         error: const Color(0xFFE53935),
         onError: Colors.white,
       ),
@@ -370,12 +372,12 @@ class AppProvider extends ChangeNotifier with WidgetsBindingObserver {
       ),
       // 确保文字主题正确
       textTheme: const TextTheme(
-        bodyLarge: TextStyle(color: Colors.white70),
-        bodyMedium: TextStyle(color: Colors.white70),
-        bodySmall: TextStyle(color: Colors.white54),
-        titleLarge: TextStyle(color: Colors.white),
-        titleMedium: TextStyle(color: Colors.white),
-        titleSmall: TextStyle(color: Colors.white70),
+        bodyLarge: TextStyle(color: Color(0xDEFFFFFF)), // 87%白
+        bodyMedium: TextStyle(color: Color(0xDEFFFFFF)), // 87%白
+        bodySmall: TextStyle(color: Color(0xB3FFFFFF)), // 70%白
+        titleLarge: TextStyle(color: Color(0xFFFFFFFF)), // 100%白
+        titleMedium: TextStyle(color: Color(0xDEFFFFFF)), // 87%白
+        titleSmall: TextStyle(color: Color(0xDEFFFFFF)), // 87%白
       ),
     );
   }

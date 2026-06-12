@@ -17,6 +17,7 @@ import '../../services/storage_service.dart';
 import '../../services/book_data_provider.dart';
 import '../../services/chapter_cache_service.dart';
 import '../../services/source_engine/web_book.dart';
+import '../../services/cover_config_service.dart';
 import '../../widgets/book_edit_sheet.dart';
 
 class DetailPage extends StatefulWidget {
@@ -160,7 +161,7 @@ class _DetailPageState extends State<DetailPage> {
             Positioned.fill(
               child: _buildBackgroundImage(bookInfoBackground),
             )
-          else if (_book!.coverUrl.isNotEmpty)
+          else if (_book!.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover)
             Positioned.fill(
               child: CachedNetworkImage(
                 imageUrl: _book!.coverUrl,
@@ -217,6 +218,51 @@ class _DetailPageState extends State<DetailPage> {
       File(path),
       fit: BoxFit.cover,
       errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+    );
+  }
+
+  /// 构建详情页封面 - 接入封面配置
+  Widget _buildDetailCover() {
+    final coverConfig = CoverConfigService.instance;
+    final isDark = context.watch<AppProvider>().themeMode == ThemeMode.dark ||
+        (context.watch<AppProvider>().themeMode == ThemeMode.system &&
+            MediaQuery.of(context).platformBrightness == Brightness.dark);
+    final useDefault = coverConfig.useDefaultCover;
+    final coverUrl = _book!.displayCoverUrl;
+
+    if (useDefault) {
+      return coverConfig.buildDefaultCoverPlaceholder(
+        bookName: _book!.displayName,
+        bookAuthor: _book!.displayAuthor,
+        isDark: isDark,
+      );
+    }
+
+    if (coverUrl.isNotEmpty) {
+      final memCacheWidth = coverConfig.loadCoverHighQuality ? null : 240;
+      final maxWidthDiskCache = coverConfig.loadCoverHighQuality ? null : 320;
+      return CachedNetworkImage(
+        imageUrl: coverUrl,
+        fit: BoxFit.cover,
+        memCacheWidth: memCacheWidth,
+        maxWidthDiskCache: maxWidthDiskCache,
+        placeholder: (_, __) => coverConfig.buildDefaultCoverPlaceholder(
+          bookName: _book!.displayName,
+          bookAuthor: _book!.displayAuthor,
+          isDark: isDark,
+        ),
+        errorWidget: (_, __, ___) => coverConfig.buildDefaultCoverPlaceholder(
+          bookName: _book!.displayName,
+          bookAuthor: _book!.displayAuthor,
+          isDark: isDark,
+        ),
+      );
+    }
+
+    return coverConfig.buildDefaultCoverPlaceholder(
+      bookName: _book!.displayName,
+      bookAuthor: _book!.displayAuthor,
+      isDark: isDark,
     );
   }
 
@@ -445,18 +491,7 @@ class _DetailPageState extends State<DetailPage> {
                       height: 160,
                       color:
                           Theme.of(context).colorScheme.surfaceContainerHighest,
-                      child: _book!.displayCoverUrl.isNotEmpty
-                          ? CachedNetworkImage(
-                              imageUrl: _book!.displayCoverUrl,
-                              fit: BoxFit.cover,
-                              placeholder: (_, __) => const Center(
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              ),
-                              errorWidget: (_, __, ___) =>
-                                  const Icon(Icons.book, size: 48),
-                            )
-                          : const Icon(Icons.book, size: 48),
+                      child: _buildDetailCover(),
                     ),
                   ),
                 ),

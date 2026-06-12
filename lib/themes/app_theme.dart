@@ -15,6 +15,7 @@ class AppTheme {
     appBarTheme: const AppBarTheme(
       centerTitle: true,
       elevation: 0,
+      foregroundColor: Color(0xFF212121), // 亮色主题标题黑色
     ),
     cardTheme: CardThemeData(
       elevation: 2,
@@ -43,6 +44,7 @@ class AppTheme {
     appBarTheme: const AppBarTheme(
       centerTitle: true,
       elevation: 0,
+      foregroundColor: Colors.white, // 暗色主题标题白色
     ),
     cardTheme: CardThemeData(
       elevation: 2,
