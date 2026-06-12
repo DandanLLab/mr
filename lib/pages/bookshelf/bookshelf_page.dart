@@ -220,91 +220,91 @@ class _BookshelfPageState extends State<BookshelfPage>
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'import_url',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.link, size: 20),
-                                SizedBox(width: 16),
-                                Text('添加网址'),
+                                Icon(Icons.link, size: 20, color: appBarForeground),
+                                const SizedBox(width: 16),
+                                Text('添加网址', style: TextStyle(color: appBarForeground)),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'bookshelf_manage',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.sort, size: 20),
-                                SizedBox(width: 16),
-                                Text('书架管理'),
+                                Icon(Icons.sort, size: 20, color: appBarForeground),
+                                const SizedBox(width: 16),
+                                Text('书架管理', style: TextStyle(color: appBarForeground)),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'download',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.download, size: 20),
-                                SizedBox(width: 16),
-                                Text('缓存/导出'),
+                                Icon(Icons.download, size: 20, color: appBarForeground),
+                                const SizedBox(width: 16),
+                                Text('缓存/导出', style: TextStyle(color: appBarForeground)),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'group_manage',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.folder, size: 20),
-                                SizedBox(width: 16),
-                                Text('分组管理'),
+                                Icon(Icons.folder, size: 20, color: appBarForeground),
+                                const SizedBox(width: 16),
+                                Text('分组管理', style: TextStyle(color: appBarForeground)),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'layout',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.view_quilt, size: 20),
-                                SizedBox(width: 16),
-                                Text('书架布局'),
+                                Icon(Icons.view_quilt, size: 20, color: appBarForeground),
+                                const SizedBox(width: 16),
+                                Text('书架布局', style: TextStyle(color: appBarForeground)),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'export_bookshelf',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.upload, size: 20),
-                                SizedBox(width: 16),
-                                Text('导出书单'),
+                                Icon(Icons.upload, size: 20, color: appBarForeground),
+                                const SizedBox(width: 16),
+                                Text('导出书单', style: TextStyle(color: appBarForeground)),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'import_bookshelf',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.download, size: 20),
-                                SizedBox(width: 16),
-                                Text('导入书单'),
+                                Icon(Icons.download, size: 20, color: appBarForeground),
+                                const SizedBox(width: 16),
+                                Text('导入书单', style: TextStyle(color: appBarForeground)),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'log',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.article, size: 20),
-                                SizedBox(width: 16),
-                                Text('日志'),
+                                Icon(Icons.article, size: 20, color: appBarForeground),
+                                const SizedBox(width: 16),
+                                Text('日志', style: TextStyle(color: appBarForeground)),
                               ],
                             ),
                           ),
@@ -1047,21 +1047,20 @@ class _BookshelfPageState extends State<BookshelfPage>
       onLongPress: () => _showBookOptions(book, provider),
       child: Stack(
         children: [
-          Card(
-            clipBehavior: Clip.antiAlias,
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(4),
-            ),
+          // 参考原版：不包 Card，扁平化布局
+          Padding(
+            padding: const EdgeInsets.all(4),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Expanded(
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      // 封面
-                      _buildCoverImage(book, isDark, useDefault),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        // 封面
+                        _buildCoverImage(book, isDark, useDefault),
                       // 书名覆盖在封面上（封面设置中的显示书名，且书架设置为overlay模式）
                       if (_bookNameDisplay == BookNameDisplay.overlay && showCoverName)
                         Positioned(
@@ -1124,6 +1123,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                     ],
                   ),
                 ),
+              ),
                 // 书名显示在下方（参考原版：12sp，2行）
                 if (_bookNameDisplay == BookNameDisplay.show)
                   Padding(
