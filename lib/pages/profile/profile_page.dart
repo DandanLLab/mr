@@ -137,9 +137,9 @@ class _ProfilePageState extends State<ProfilePage>
                           ),
                           child: Text(
                             _getThemeModeText(provider.themeMode),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 14,
-                              color: Color(0xDE000000),
+                              color: primaryForeground,
                             ),
                           ),
                         ),

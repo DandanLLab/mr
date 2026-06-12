@@ -326,6 +326,10 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
 
   @override
   Widget build(BuildContext context) {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final appBarFg = ThemeData.estimateBrightnessForColor(primaryColor) == Brightness.dark
+        ? Colors.white
+        : Colors.black;
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -345,7 +349,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
               style: TextStyle(
                 fontSize: 11,
                 height: 1.2,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                color: appBarFg.withValues(alpha: 0.6),
               ),
             ),
           ],
@@ -574,7 +578,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                           style: TextStyle(
                             fontSize: 28,
                             fontWeight: FontWeight.bold,
-                            color: Theme.of(context).colorScheme.primary,
+                            color: Theme.of(context).colorScheme.secondary,
                           ),
                         ),
                         TextSpan(
@@ -720,7 +724,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.primary,
+                      color: Theme.of(context).colorScheme.secondary,
                     ),
                   ),
                   Text(
@@ -779,7 +783,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.primary,
+                      color: Theme.of(context).colorScheme.secondary,
                     ),
                   ),
                   Text(
@@ -1203,7 +1207,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         width: 2,
                         height: 16,
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
+                          color: Theme.of(context).colorScheme.secondary.withOpacity(0.5),
                           borderRadius: BorderRadius.circular(1),
                         ),
                       ),
@@ -1216,7 +1220,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         width: 2,
                         height: 16,
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
+                          color: Theme.of(context).colorScheme.secondary.withOpacity(0.5),
                           borderRadius: BorderRadius.circular(1),
                         ),
                       ),
@@ -1226,11 +1230,11 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                     width: 12,
                     height: 12,
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary,
+                      color: Theme.of(context).colorScheme.secondary,
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                          color: Theme.of(context).colorScheme.secondary.withOpacity(0.3),
                           blurRadius: 4,
                         ),
                       ],
@@ -1599,7 +1603,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+              color: Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.3),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
@@ -1690,8 +1694,8 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     Color textColor;
     
     if (isSelected) {
-      bgColor = Theme.of(context).colorScheme.primary;
-      textColor = Theme.of(context).colorScheme.onPrimary;
+      bgColor = Theme.of(context).colorScheme.secondary;
+      textColor = Theme.of(context).colorScheme.onSecondary;
     } else if (!isCurrentMonth) {
       bgColor = Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.22);
       textColor = Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.35);
@@ -1702,12 +1706,12 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
       final ratio = (value / maxValue).clamp(0.0, 1.0);
       final intensity = ratio * ratio;
       bgColor = Color.lerp(
-        Theme.of(context).colorScheme.primaryContainer.withOpacity(0.42),
-        Theme.of(context).colorScheme.primary,
+        Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.42),
+        Theme.of(context).colorScheme.secondary,
         intensity,
       )!;
       textColor = ratio > 0.72
-          ? Theme.of(context).colorScheme.onPrimary
+          ? Theme.of(context).colorScheme.onSecondary
           : Theme.of(context).colorScheme.onSurface;
     }
     
@@ -1720,9 +1724,9 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
           color: bgColor,
           borderRadius: BorderRadius.circular(8),
           border: isToday && !isSelected
-              ? Border.all(color: Theme.of(context).colorScheme.primary, width: 2)
+              ? Border.all(color: Theme.of(context).colorScheme.secondary, width: 2)
               : isSelected
-                  ? Border.all(color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.75), width: 2)
+                  ? Border.all(color: Theme.of(context).colorScheme.onSecondary.withOpacity(0.75), width: 2)
                   : null,
         ),
         child: Center(
@@ -1746,8 +1750,8 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     final ratio = index / maxIndex;
     final intensity = ratio * ratio;
     return Color.lerp(
-      Theme.of(context).colorScheme.primaryContainer.withOpacity(0.4),
-      Theme.of(context).colorScheme.primary,
+      Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.4),
+      Theme.of(context).colorScheme.secondary,
       intensity,
     )!;
   }
@@ -1759,12 +1763,12 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: selected
-              ? Theme.of(context).colorScheme.primaryContainer
+              ? Theme.of(context).colorScheme.secondaryContainer
               : Theme.of(context).colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: selected
-                ? Theme.of(context).colorScheme.primary
+                ? Theme.of(context).colorScheme.secondary
                 : Theme.of(context).colorScheme.outline,
             width: 1,
           ),
@@ -1774,7 +1778,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
           style: TextStyle(
             fontSize: 13,
             color: selected
-                ? Theme.of(context).colorScheme.onPrimaryContainer
+                ? Theme.of(context).colorScheme.onSecondaryContainer
                 : Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
