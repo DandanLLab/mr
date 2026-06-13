@@ -1186,71 +1186,69 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                SizedBox(
-                  height: 56,
-                  child: Row(
-                    children: [
-                      IconButton(
-                        onPressed: () => Navigator.pop(context),
-                        icon: Icon(Icons.arrow_back, color: _menuForeground),
-                        tooltip: '返回',
-                      ),
-                      Expanded(
-                        child: InkWell(
-                          onTap: _openBookDetail,
-                          borderRadius: BorderRadius.circular(4),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 4,
-                              vertical: 8,
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    _book?.displayName ?? '',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w600,
-                                    ).copyWith(color: _menuForeground),
+                Row(
+                  children: [
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: Icon(Icons.arrow_back, color: _menuForeground),
+                      tooltip: '返回',
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: InkWell(
+                        onTap: _openBookDetail,
+                        borderRadius: BorderRadius.circular(4),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  _book?.displayName ?? '',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w500,
+                                    color: _menuForeground,
                                   ),
                                 ),
-                                const SizedBox(width: 4),
-                                Icon(
-                                  Icons.chevron_right,
-                                  color: _menuForeground.withValues(
-                                    alpha: 0.54,
-                                  ),
-                                  size: 20,
-                                ),
-                              ],
-                            ),
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(
+                                Icons.chevron_right,
+                                color: _menuForeground.withValues(alpha: 0.54),
+                                size: 20,
+                              ),
+                            ],
                           ),
                         ),
                       ),
+                    ),
+                    if (_book?.originType == BookOriginType.online)
                       IconButton(
-                        onPressed: _downloadCurrentChapter,
-                        icon: Icon(Icons.download, color: _menuForeground),
-                        tooltip: '下载',
+                        onPressed: _showChangeSourceDialog,
+                        icon: Icon(Icons.swap_horiz, color: _menuForeground),
+                        tooltip: '换源',
                       ),
-                      IconButton(
-                        onPressed: _loadChapter,
-                        icon: Icon(Icons.refresh, color: _menuForeground),
-                        tooltip: '刷新',
-                      ),
-                      if (_book?.originType == BookOriginType.online)
-                        IconButton(
-                          onPressed: _showChangeSourceDialog,
-                          icon: Icon(Icons.swap_horiz, color: _menuForeground),
-                          tooltip: '换源',
-                        ),
-                      PopupMenuButton<String>(
-                        icon: Icon(Icons.more_vert, color: _menuForeground),
-                        tooltip: '更多',
-                        offset: const Offset(0, 48),
-                        onSelected: (value) {
+                    IconButton(
+                      onPressed: _loadChapter,
+                      icon: Icon(Icons.refresh, color: _menuForeground),
+                      tooltip: '刷新',
+                    ),
+                    IconButton(
+                      onPressed: _downloadCurrentChapter,
+                      icon: Icon(Icons.download, color: _menuForeground),
+                      tooltip: '缓存',
+                    ),
+                    PopupMenuButton<String>(
+                      icon: Icon(Icons.more_vert, color: _menuForeground, size: 24),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      tooltip: '更多选项',
+                      offset: const Offset(0, 48),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                      onSelected: (value) {
                           switch (value) {
                             case 'footer':
                               _showFooterConfig();
@@ -1347,9 +1345,8 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                       ),
                     ],
                   ),
-                ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 2, 4, 8),
+                  padding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
@@ -1358,7 +1355,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                           onTap: _openChapterUrl,
                           borderRadius: BorderRadius.circular(4),
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 5),
+                            padding: const EdgeInsets.symmetric(vertical: 2),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -1385,7 +1382,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                                     ),
                                   ],
                                 ),
-                                const SizedBox(height: 2),
+                                const SizedBox(height: 1),
                                 Text(
                                   _chapter?.url ?? '',
                                   maxLines: 1,
@@ -1412,57 +1409,67 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                         tooltip: '书源操作',
                         offset: const Offset(0, 48),
                         onSelected: _handleSourceAction,
-                        itemBuilder: (context) => const [
+                        itemBuilder: (context) => [
                           PopupMenuItem(
                             value: 'edit',
-                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            child: ListTile(
-                              leading: Icon(Icons.edit_outlined),
-                              title: Text('编辑书源'),
-                              contentPadding: EdgeInsets.zero,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: Row(
+                              children: [
+                                Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                const SizedBox(width: 8),
+                                const Text('编辑书源'),
+                              ],
                             ),
                           ),
                           PopupMenuItem(
                             value: 'disable',
-                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            child: ListTile(
-                              leading: Icon(Icons.block),
-                              title: Text('禁用书源'),
-                              contentPadding: EdgeInsets.zero,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: Row(
+                              children: [
+                                Icon(Icons.block, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                const SizedBox(width: 8),
+                                const Text('禁用书源'),
+                              ],
                             ),
                           ),
                         ],
                         child: Container(
-                          constraints: const BoxConstraints(maxWidth: 132),
+                          constraints: const BoxConstraints(maxWidth: 120, minHeight: 30),
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 9,
-                            vertical: 7,
+                            horizontal: 5,
+                            vertical: 3,
                           ),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.primary,
-                            borderRadius: BorderRadius.circular(4),
+                            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+                              width: 1,
+                            ),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
+                              Icon(Icons.source, size: 11, color: Theme.of(context).colorScheme.primary),
+                              const SizedBox(width: 2),
                               Flexible(
                                 child: Text(
                                   _sourceName.isEmpty ? '未知书源' : _sourceName,
-                                  maxLines: 1,
+                                  maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onPrimary,
-                                    fontSize: 11,
+                                    color: Theme.of(context).colorScheme.primary,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w500,
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 3),
+                              const SizedBox(width: 1),
                               Icon(
                                 Icons.arrow_drop_down,
-                                color: Theme.of(context).colorScheme.onPrimary,
-                                size: 16,
+                                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+                                size: 12,
                               ),
                             ],
                           ),
