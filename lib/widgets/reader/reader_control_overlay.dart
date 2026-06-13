@@ -7,7 +7,9 @@ import 'package:flutter/services.dart';
 class ReaderControlOverlay extends StatefulWidget {
   final String bookName;
   final String chapterTitle;
+  final String? chapterUrl;
   final String sourceName;
+  final bool hasBookSource;
   final int currentChapter;
   final int totalChapters;
   final bool hasBookmark;
@@ -31,6 +33,10 @@ class ReaderControlOverlay extends StatefulWidget {
   final VoidCallback onShowDirectory;
   final VoidCallback onStartTts;
   final VoidCallback onShowSettings;
+  final VoidCallback? onOpenDetail;
+  final VoidCallback? onOpenChapterUrl;
+  final VoidCallback? onEditSource;
+  final VoidCallback? onDisableSource;
   final ValueChanged<double> onSliderChanged;
   final ValueChanged<int> onSliderChangeEnd;
   final VoidCallback? onSliderChangeStart;
@@ -39,7 +45,9 @@ class ReaderControlOverlay extends StatefulWidget {
     super.key,
     required this.bookName,
     required this.chapterTitle,
+    this.chapterUrl,
     required this.sourceName,
+    this.hasBookSource = false,
     required this.currentChapter,
     required this.totalChapters,
     required this.hasBookmark,
@@ -66,6 +74,10 @@ class ReaderControlOverlay extends StatefulWidget {
     required this.onSliderChanged,
     required this.onSliderChangeEnd,
     this.onSliderChangeStart,
+    this.onOpenDetail,
+    this.onOpenChapterUrl,
+    this.onEditSource,
+    this.onDisableSource,
   });
 
   @override
@@ -123,12 +135,11 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
       child: Material(
         color: cs.surface,
         child: Padding(
-          padding: EdgeInsets.fromLTRB(8, topPad + 4, 4, 4),
+          padding: EdgeInsets.fromLTRB(8, topPad, 4, 0),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               _buildHeaderRow1(context, cs),
-              const SizedBox(height: 4),
               _buildHeaderRow2(cs),
             ],
           ),
@@ -144,14 +155,34 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
         _buildIconBtn(Icons.arrow_back, cs, tooltip: '返回', onTap: widget.onBack),
         const SizedBox(width: 8),
         Expanded(
-          child: Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-              color: cs.onSurface,
+          child: InkWell(
+            onTap: widget.onOpenDetail,
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  if (widget.onOpenDetail != null)
+                    Icon(
+                      Icons.chevron_right,
+                      color: cs.onSurface.withValues(alpha: 0.54),
+                      size: 20,
+                    ),
+                ],
+              ),
             ),
           ),
         ),
@@ -188,41 +219,135 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
 
   Widget _buildHeaderRow2(ColorScheme cs) {
     final label = widget.sourceName.isNotEmpty ? widget.sourceName : '书源';
+    final hasUrl = widget.chapterUrl != null && widget.chapterUrl!.isNotEmpty;
+    
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (widget.chapterTitle.isNotEmpty)
-                  Text(
-                    widget.chapterTitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
-                  ),
-              ],
+            child: InkWell(
+              onTap: hasUrl ? widget.onOpenChapterUrl : null,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            widget.chapterTitle.isNotEmpty ? widget.chapterTitle : '章节',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
+                          ),
+                        ),
+                        if (hasUrl)
+                          Icon(
+                            Icons.open_in_new,
+                            color: cs.onSurfaceVariant.withValues(alpha: 0.54),
+                            size: 14,
+                          ),
+                      ],
+                    ),
+                    if (hasUrl)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Text(
+                          widget.chapterUrl!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: cs.onSurfaceVariant.withValues(alpha: 0.6),
+                            fontSize: 11,
+                            decoration: TextDecoration.underline,
+                            decorationColor: cs.onSurfaceVariant.withValues(alpha: 0.38),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
           ),
           const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-            decoration: BoxDecoration(
-              color: cs.primary,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: cs.onPrimary,
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
+          PopupMenuButton<String>(
+            enabled: widget.hasBookSource,
+            tooltip: '书源操作',
+            offset: const Offset(0, 48),
+            onSelected: (value) {
+              switch (value) {
+                case 'edit':
+                  widget.onEditSource?.call();
+                  break;
+                case 'disable':
+                  widget.onDisableSource?.call();
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'edit',
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  children: [
+                    Icon(Icons.edit_outlined, size: 20, color: cs.onSurfaceVariant),
+                    const SizedBox(width: 8),
+                    const Text('编辑书源'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'disable',
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  children: [
+                    Icon(Icons.block, size: 20, color: cs.onSurfaceVariant),
+                    const SizedBox(width: 8),
+                    const Text('禁用书源'),
+                  ],
+                ),
+              ),
+            ],
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 120, minHeight: 30),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+              decoration: BoxDecoration(
+                color: cs.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: cs.primary.withValues(alpha: 0.3),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(Icons.source, size: 11, color: cs.primary),
+                  const SizedBox(width: 2),
+                  Flexible(
+                    child: Text(
+                      label,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: cs.primary,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  if (widget.hasBookSource)
+                    Icon(
+                      Icons.arrow_drop_down,
+                      size: 12,
+                      color: cs.primary.withValues(alpha: 0.7),
+                    ),
+                ],
               ),
             ),
           ),

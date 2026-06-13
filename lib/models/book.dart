@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 enum MediaType { novel, comic, video, audio }
 
 enum BookOriginType { local, online }
@@ -184,6 +186,25 @@ class Book {
   }
 
   factory Book.fromJson(Map<String, dynamic> json) {
+    // 安全解析 tags 字段
+    List<String>? tags;
+    final tagsValue = json['tags'];
+    if (tagsValue != null) {
+      if (tagsValue is List) {
+        tags = tagsValue.map((e) => e.toString()).toList();
+      } else if (tagsValue is String && tagsValue.isNotEmpty) {
+        // 如果 tags 是字符串，尝试解析为 JSON
+        try {
+          final decoded = jsonDecode(tagsValue);
+          if (decoded is List) {
+            tags = decoded.map((e) => e.toString()).toList();
+          }
+        } catch (_) {
+          // 解析失败，忽略
+        }
+      }
+    }
+
     return Book(
       bookUrl: json['bookUrl'] as String? ?? json['id'] as String? ?? '',
       name: json['name'] as String? ?? json['title'] as String? ?? '',
@@ -212,7 +233,7 @@ class Book {
       durChapterTimeMillisecond: json['durChapterTimeMillisecond'] as int? ?? 0,
       isTop: json['isTop'] as bool? ?? false,
       groupId: json['groupId'] as String?,
-      tags: (json['tags'] as List<dynamic>?)?.cast<String>(),
+      tags: tags,
       tocUrl: json['tocUrl'] as String?,
       wordCount: json['wordCount'] as String?,
       canUpdate: json['canUpdate'] as bool? ?? true,

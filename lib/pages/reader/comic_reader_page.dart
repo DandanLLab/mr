@@ -7,12 +7,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:html/parser.dart' as html_parser;
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../models/book.dart';
 import '../../models/book_source.dart';
 import '../../models/chapter.dart';
+import '../../providers/bookshelf_provider.dart';
 import '../../routes/app_routes.dart';
 import '../../services/book_data_provider.dart';
 import '../../services/chapter_cache_service.dart';
@@ -21,6 +23,7 @@ import '../../services/reader_bookmark_service.dart';
 import '../../services/source_engine/analyze_url.dart';
 import '../../services/storage_service.dart';
 import '../../services/read_record_service.dart';
+import '../../widgets/change_source_sheet.dart';
 
 enum MangaReadMode { scroll, horizontal, japanese }
 
@@ -1183,65 +1186,69 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                SizedBox(
-                  height: 56,
-                  child: Row(
-                    children: [
-                      IconButton(
-                        onPressed: () => Navigator.pop(context),
-                        icon: Icon(Icons.arrow_back, color: _menuForeground),
-                        tooltip: '返回',
-                      ),
-                      Expanded(
-                        child: InkWell(
-                          onTap: _openBookDetail,
-                          borderRadius: BorderRadius.circular(4),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 4,
-                              vertical: 8,
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    _book?.displayName ?? '',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w600,
-                                    ).copyWith(color: _menuForeground),
+                Row(
+                  children: [
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: Icon(Icons.arrow_back, color: _menuForeground),
+                      tooltip: '返回',
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: InkWell(
+                        onTap: _openBookDetail,
+                        borderRadius: BorderRadius.circular(4),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  _book?.displayName ?? '',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w500,
+                                    color: _menuForeground,
                                   ),
                                 ),
-                                const SizedBox(width: 4),
-                                Icon(
-                                  Icons.chevron_right,
-                                  color: _menuForeground.withValues(
-                                    alpha: 0.54,
-                                  ),
-                                  size: 20,
-                                ),
-                              ],
-                            ),
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(
+                                Icons.chevron_right,
+                                color: _menuForeground.withValues(alpha: 0.54),
+                                size: 20,
+                              ),
+                            ],
                           ),
                         ),
                       ),
+                    ),
+                    if (_book?.originType == BookOriginType.online)
                       IconButton(
-                        onPressed: _downloadCurrentChapter,
-                        icon: Icon(Icons.download, color: _menuForeground),
-                        tooltip: '下载',
+                        onPressed: _showChangeSourceDialog,
+                        icon: Icon(Icons.swap_horiz, color: _menuForeground),
+                        tooltip: '换源',
                       ),
-                      IconButton(
-                        onPressed: _loadChapter,
-                        icon: Icon(Icons.refresh, color: _menuForeground),
-                        tooltip: '刷新',
-                      ),
-                      PopupMenuButton<String>(
-                        icon: Icon(Icons.more_vert, color: _menuForeground),
-                        tooltip: '更多',
-                        offset: const Offset(0, 48),
-                        onSelected: (value) {
+                    IconButton(
+                      onPressed: _loadChapter,
+                      icon: Icon(Icons.refresh, color: _menuForeground),
+                      tooltip: '刷新',
+                    ),
+                    IconButton(
+                      onPressed: _downloadCurrentChapter,
+                      icon: Icon(Icons.download, color: _menuForeground),
+                      tooltip: '缓存',
+                    ),
+                    PopupMenuButton<String>(
+                      icon: Icon(Icons.more_vert, color: _menuForeground, size: 24),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      tooltip: '更多选项',
+                      offset: const Offset(0, 48),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                      onSelected: (value) {
                           switch (value) {
                             case 'footer':
                               _showFooterConfig();
@@ -1338,9 +1345,8 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                       ),
                     ],
                   ),
-                ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 2, 4, 8),
+                  padding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
@@ -1349,7 +1355,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                           onTap: _openChapterUrl,
                           borderRadius: BorderRadius.circular(4),
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 5),
+                            padding: const EdgeInsets.symmetric(vertical: 2),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -1376,7 +1382,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                                     ),
                                   ],
                                 ),
-                                const SizedBox(height: 2),
+                                const SizedBox(height: 1),
                                 Text(
                                   _chapter?.url ?? '',
                                   maxLines: 1,
@@ -1403,57 +1409,67 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                         tooltip: '书源操作',
                         offset: const Offset(0, 48),
                         onSelected: _handleSourceAction,
-                        itemBuilder: (context) => const [
+                        itemBuilder: (context) => [
                           PopupMenuItem(
                             value: 'edit',
-                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            child: ListTile(
-                              leading: Icon(Icons.edit_outlined),
-                              title: Text('编辑书源'),
-                              contentPadding: EdgeInsets.zero,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: Row(
+                              children: [
+                                Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                const SizedBox(width: 8),
+                                const Text('编辑书源'),
+                              ],
                             ),
                           ),
                           PopupMenuItem(
                             value: 'disable',
-                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            child: ListTile(
-                              leading: Icon(Icons.block),
-                              title: Text('禁用书源'),
-                              contentPadding: EdgeInsets.zero,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: Row(
+                              children: [
+                                Icon(Icons.block, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                const SizedBox(width: 8),
+                                const Text('禁用书源'),
+                              ],
                             ),
                           ),
                         ],
                         child: Container(
-                          constraints: const BoxConstraints(maxWidth: 132),
+                          constraints: const BoxConstraints(maxWidth: 120, minHeight: 30),
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 9,
-                            vertical: 7,
+                            horizontal: 5,
+                            vertical: 3,
                           ),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.primary,
-                            borderRadius: BorderRadius.circular(4),
+                            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+                              width: 1,
+                            ),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
+                              Icon(Icons.source, size: 11, color: Theme.of(context).colorScheme.primary),
+                              const SizedBox(width: 2),
                               Flexible(
                                 child: Text(
                                   _sourceName.isEmpty ? '未知书源' : _sourceName,
-                                  maxLines: 1,
+                                  maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onPrimary,
-                                    fontSize: 11,
+                                    color: Theme.of(context).colorScheme.primary,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w500,
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 3),
+                              const SizedBox(width: 1),
                               Icon(
                                 Icons.arrow_drop_down,
-                                color: Theme.of(context).colorScheme.onPrimary,
-                                size: 16,
+                                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+                                size: 12,
                               ),
                             ],
                           ),
@@ -1643,6 +1659,75 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       context,
       AppRoutes.detail,
       arguments: {'bookUrl': book.bookUrl, 'bookData': book},
+    );
+  }
+
+  void _showChangeSourceDialog() {
+    _disableAutoPaging();
+    setState(() => _showMenu = false);
+    
+    if (_book == null || _book!.originType != BookOriginType.online) {
+      _showMessage('本地书籍不支持换源');
+      return;
+    }
+    
+    ChangeSourceSheet.show(
+      context: context,
+      bookName: _book!.displayName,
+      bookAuthor: _book!.displayAuthor,
+      currentSourceUrl: _book!.sourceUrl,
+      currentSourceName: _book!.sourceName,
+      onSourceSelected: (sourceUrl, sourceName, bookData) async {
+        if (_book == null) return;
+        
+        try {
+          _showMessage('正在切换书源...');
+          
+          // 创建新的书籍对象
+          final newBook = _book!.copyWith(
+            sourceUrl: sourceUrl,
+            sourceName: sourceName,
+            bookUrl: bookData['bookUrl'] ?? _book!.bookUrl,
+            name: bookData['name'] ?? _book!.name,
+            author: bookData['author'] ?? _book!.author,
+            coverUrl: bookData['coverUrl'] ?? _book!.coverUrl,
+            intro: bookData['intro'] ?? _book!.intro,
+            lastChapter: bookData['lastChapter'] ?? _book!.lastChapter,
+          );
+          
+          // 获取新书源的目录
+          _dataProvider = createBookDataProvider(newBook);
+          final chapters = await _dataProvider!.getChapterList(newBook);
+          
+          // 更新书籍
+          final updatedBook = newBook.copyWith(
+            totalChapterNum: chapters.length,
+          );
+          
+          // 保存到书架
+          StorageService.instance.addToBookshelf(updatedBook.toJson());
+          context.read<BookshelfProvider>().loadBooks();
+          
+          // 更新状态并重新加载
+          setState(() {
+            _book = updatedBook;
+            _chapters = chapters;
+            _currentChapterIndex = 0;
+            _currentPageIndex = 0;
+            _currentGlobalIndex = 0;
+          });
+          
+          _loadChapter();
+          
+          if (mounted) {
+            _showMessage('已切换到 $sourceName');
+          }
+        } catch (e) {
+          if (mounted) {
+            _showMessage('换源失败: $e');
+          }
+        }
+      },
     );
   }
 
