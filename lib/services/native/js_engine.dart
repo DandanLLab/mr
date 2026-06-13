@@ -2452,7 +2452,7 @@ class JsEngine {
   // ===== 书源规则执行（分流核心）=====
 
   /// 处理 JS 书源规则（异步）
-  Future<String?> processJsRule(String content, String jsCode, {String? baseUrl, JsEngineType? sourceEngine, Map<String, dynamic>? env}) async {
+  Future<String?> processJsRule(String content, String jsCode, {String? baseUrl, JsEngineType? sourceEngine, Map<String, dynamic>? env, dynamic dynamicContent}) async {
     if (!_initialized || _jsRuntime == null) {
       await init();
       if (!_initialized || _jsRuntime == null) return null;
@@ -2476,8 +2476,12 @@ class JsEngine {
       if (!mergedEnv.containsKey('baseUrl')) mergedEnv['baseUrl'] = baseUrl ?? '';
     }
 
+    // 优先使用 dynamicContent（保留原始类型：List/Map 等）
+    // 否则用 content（String 类型，会被 jsonEncode 加引号）
+    final actualResult = dynamicContent ?? content;
+
     if (resolved.engine == JsEngineType.rhino) {
-      return _executeRhinoRule(resolved.code, result: content, env: mergedEnv);
+      return _executeRhinoRule(resolved.code, result: actualResult?.toString() ?? content, env: mergedEnv);
     }
 
     // 借鉴 legado 的 preCache 机制：在执行 JS 前，预缓存 java.ajax/get/post 的结果
@@ -2487,7 +2491,7 @@ class JsEngine {
       AppLogger.instance.warn(LogCategory.js, '预缓存桥接调用失败，继续执行JS', detail: e.toString());
     }
 
-    return _executeQuickJSRule(resolved.code, result: content, env: mergedEnv, variables: _extractVariables(mergedEnv));
+    return _executeQuickJSRule(resolved.code, result: actualResult, env: mergedEnv, variables: _extractVariables(mergedEnv));
   }
 
   /// 处理带书籍上下文的 JS 规则
@@ -2613,7 +2617,7 @@ class JsEngine {
   }
 
   Future<String?> _executeQuickJSRule(String jsCode, {
-    String? result,
+    dynamic result,
     Map<String, dynamic>? env,
     Map<String, dynamic>? variables,
     String? ruleStep,
@@ -2679,9 +2683,20 @@ class JsEngine {
       // 借鉴 legado：evalJS 时 bindings.prototype = sharedScope
       // QuickJS 等价：jsLib 函数在 globalThis 上，IIFE 内部自动可访问
 
+      // 正确序列化 result：List/Map 直接 jsonEncode 生成 JS 数组/对象，
+      // String 需要 jsonEncode 加引号转义，其他类型转字符串
+      String resultStr;
+      if (result is List || result is Map) {
+        resultStr = jsonEncode(result);
+      } else if (result is String) {
+        resultStr = jsonEncode(result);
+      } else {
+        resultStr = jsonEncode(result?.toString() ?? '');
+      }
+
       final wrappedScript = '''
         (function() {
-          var result = ${jsonEncode(result ?? '')};
+          var result = $resultStr;
           var baseUrl = ${jsonEncode(env?['baseUrl'] ?? '')};
           var book = ${jsonEncode(env?['book'] ?? {})};
           var chapter = ${jsonEncode(env?['chapter'] ?? {})};
@@ -2739,8 +2754,8 @@ class JsEngine {
       _flushConsoleLogs();
 
       // 断点3：记录执行结果
-      final resultStr = evalResult.stringResult;
-      final resultShort = resultStr.length > 200 ? '${resultStr.substring(0, 200)}...' : resultStr;
+      final evalResultStr = evalResult.stringResult;
+      final resultShort = evalResultStr.length > 200 ? '${evalResultStr.substring(0, 200)}...' : evalResultStr;
       AppLogger.instance.debug(LogCategory.js, '[QuickJS] 异步执行完成',
         detail: 'isError=${evalResult.isError}, result=$resultShort');
 

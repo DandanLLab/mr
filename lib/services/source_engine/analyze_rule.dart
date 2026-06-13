@@ -270,7 +270,9 @@ class AnalyzeRule {
       if (result != null) return result;
     }
 
-    return getStringList(ruleStr, isUrl: isUrl);
+    // 含 JS 的规则走异步路径
+    final ruleList = _splitSourceRuleCacheString(ruleStr);
+    return _getStringListAsync(ruleList, isUrl: isUrl);
   }
 
   /// 异步获取元素列表（返回 outerHtml 字符串列表，兼容后续二次解析）
@@ -290,7 +292,9 @@ class AnalyzeRule {
       if (result != null) return result;
     }
 
-    return getElements(ruleStr);
+    // 含 JS 的规则走异步路径
+    final ruleList = _splitSourceRuleCacheString(ruleStr);
+    return _getElementsAsync(ruleList);
   }
 
   /// 检测规则是否包含 JS 部分（@js: / <js>...</js>）
@@ -599,10 +603,20 @@ class AnalyzeRule {
       if (_chapterInfo != null) env['chapter'] = _chapterInfo;
       env['cookie'] = <String, String>{};
 
-      final contentStr = content?.toString() ?? '';
+      // 正确序列化 content：List/Map 用 jsonEncode，String 直接传
+      // 对齐 _executeQuickJSSync 的序列化逻辑
+      String contentStr;
+      if (content is List || content is Map) {
+        contentStr = jsonEncode(content);
+      } else if (content is String) {
+        contentStr = content;
+      } else {
+        contentStr = content?.toString() ?? '';
+      }
+
       final codePreview = jsCode.length > 200 ? '${jsCode.substring(0, 200)}...' : jsCode;
       AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] 异步JS执行',
-        detail: 'content=${contentStr.length}chars, code=$codePreview');
+        detail: 'content=${contentStr.length}chars, contentType=${content?.runtimeType}, code=$codePreview');
 
       // 追踪树：创建节点
       JsTraceNode? traceNode;
@@ -619,12 +633,15 @@ class AnalyzeRule {
         tracer.push(traceNode);
       }
 
+      // 传递原始 content（dynamic 类型）给 processJsRule，
+      // 让 _executeQuickJSRule 根据类型正确序列化
       final result = await JsEngine.instance.processJsRule(
         contentStr,
         jsCode,
         baseUrl: _baseUrl,
         sourceEngine: _sourceEngine,
         env: env,
+        dynamicContent: content,  // 保留原始类型：List/Map/String
       );
 
       // 追踪树：记录输出
@@ -700,6 +717,82 @@ class AnalyzeRule {
     return resultList;
   }
 
+  /// 异步版 _getStringList：JS 步骤走异步路径（含预缓存）
+  Future<List<String>> _getStringListAsync(List<_SourceRule> ruleList,
+      {bool isUrl = false}) async {
+    dynamic result = _content;
+
+    // 追踪树：开始规则链追踪
+    JsTracer.instance.clear();
+
+    for (var i = 0; i < ruleList.length; i++) {
+      final rule = ruleList[i];
+      if (result == null) continue;
+
+      _executePutRule(rule.putMap);
+      final appliedRule = _applyVariables(rule, result);
+
+      final stepDesc = '步骤${i + 1}/${ruleList.length} mode=${appliedRule.mode} (list)';
+      final rulePreview = appliedRule.rule.length > 60
+          ? '${appliedRule.rule.substring(0, 60)}...' : appliedRule.rule;
+      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc (async)',
+        detail: 'rule=$rulePreview, inputLen=${result?.toString().length ?? 0}');
+
+      // JS 步骤走异步，非 JS 走同步
+      if (appliedRule.mode == RuleMode.js || appliedRule.mode == RuleMode.webJs) {
+        final jsCode = appliedRule.mode == RuleMode.webJs
+            ? appliedRule.rule.substring(7) : appliedRule.rule;
+        result = await _applyJsAsync(result, jsCode, ruleStep: stepDesc);
+      } else if (appliedRule.mode == RuleMode.default_) {
+        result = _jsoupGetStringList(result, appliedRule.rule);
+      } else {
+        result = _applyRule(result, appliedRule, listMode: true, ruleStep: stepDesc);
+      }
+
+      final resultType = result?.runtimeType;
+      final resultLen = result is List ? result.length : result?.toString().length ?? 0;
+      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc 完成 (async)',
+        detail: 'resultType=$resultType, resultLen=$resultLen');
+
+      if (result != null && rule.replaceRegex.isNotEmpty) {
+        if (result is List) {
+          result = result.map((e) => _applyReplaceRegex(e.toString(), rule)).toList();
+        } else {
+          result = _applyReplaceRegex(result.toString(), rule);
+        }
+      }
+    }
+
+    // 输出完整 JS 执行树
+    final treeStr = JsTracer.instance.getTreeString();
+    if (treeStr.isNotEmpty && treeStr != '(no trace)') {
+      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] JS执行树',
+        detail: treeStr);
+    }
+
+    if (result == null) return [];
+
+    List<String> resultList;
+    if (result is List) {
+      resultList = result
+          .map((e) => _toString(e) ?? '')
+          .where((e) => e.isNotEmpty)
+          .toList();
+    } else {
+      final str = _toString(result);
+      resultList = str != null && str.isNotEmpty ? [str] : [];
+    }
+
+    if (isUrl) {
+      return resultList
+          .map((url) => _getAbsoluteUrl(url))
+          .where((e) => e.isNotEmpty)
+          .toList();
+    }
+
+    return resultList;
+  }
+
   // ================== 元素获取 ==================
 
   List<dynamic> _getElements(List<_SourceRule> ruleList) {
@@ -747,6 +840,74 @@ class AnalyzeRule {
   dynamic _getElement(List<_SourceRule> ruleList) {
     final elements = _getElements(ruleList);
     return elements.isNotEmpty ? elements.first : null;
+  }
+
+  /// 异步版 _getElements：JS 步骤走异步路径（含预缓存）
+  Future<List<dynamic>> _getElementsAsync(List<_SourceRule> ruleList) async {
+    dynamic result = _content;
+
+    // 追踪树：开始规则链追踪
+    JsTracer.instance.clear();
+
+    for (var i = 0; i < ruleList.length; i++) {
+      final rule = ruleList[i];
+      if (result == null) continue;
+
+      _executePutRule(rule.putMap);
+      final appliedRule = _applyVariables(rule, result);
+
+      final stepDesc = '步骤${i + 1}/${ruleList.length} mode=${appliedRule.mode} (elements)';
+      final rulePreview = appliedRule.rule.length > 60
+          ? '${appliedRule.rule.substring(0, 60)}...' : appliedRule.rule;
+      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc (async)',
+        detail: 'rule=$rulePreview, inputLen=${result?.toString().length ?? 0}');
+
+      // JS 步骤走异步
+      if (appliedRule.mode == RuleMode.js || appliedRule.mode == RuleMode.webJs) {
+        final jsCode = appliedRule.mode == RuleMode.webJs
+            ? appliedRule.rule.substring(7) : appliedRule.rule;
+        result = await _applyJsAsync(result, jsCode, ruleStep: stepDesc);
+      } else if (result is List && appliedRule.mode == RuleMode.default_) {
+        // 借鉴 legado：多步规则中，如果上一步返回元素列表，
+        // 需要对每个元素分别执行规则，然后合并结果
+        final merged = <dynamic>[];
+        for (final item in result) {
+          final itemResult = _applyRule(item, appliedRule, listMode: true, ruleStep: stepDesc);
+          if (itemResult is List) {
+            merged.addAll(itemResult);
+          } else if (itemResult != null) {
+            merged.add(itemResult);
+          }
+        }
+        result = merged;
+      } else {
+        result = _applyRule(result, appliedRule, listMode: true, ruleStep: stepDesc);
+      }
+
+      final resultType = result?.runtimeType;
+      final resultLen = result is List ? result.length : result?.toString().length ?? 0;
+      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc 完成 (async)',
+        detail: 'resultType=$resultType, resultLen=$resultLen');
+
+      if (result != null && rule.replaceRegex.isNotEmpty) {
+        if (result is List) {
+          result = result.map((e) => _applyReplaceRegex(e.toString(), rule)).toList();
+        } else {
+          result = _applyReplaceRegex(result.toString(), rule);
+        }
+      }
+    }
+
+    // 输出完整 JS 执行树
+    final treeStr = JsTracer.instance.getTreeString();
+    if (treeStr.isNotEmpty && treeStr != '(no trace)') {
+      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] JS执行树',
+        detail: treeStr);
+    }
+
+    if (result == null) return [];
+    if (result is List) return result;
+    return [result];
   }
 
   // ================== 规则应用 ==================
@@ -2400,6 +2561,42 @@ class _ElementSelector {
     }
 
     // 非 legado 关键字格式（CSS 选择器等），不解析索引
+    // 但借鉴 legado：CSS 类选择器（以.开头）末尾的负数索引需要解析
+    // .page-item.-2 → CSS选择器 .page-item，索引 -2
+    if (rule.startsWith('.') && rule.length > 1) {
+      final lastDotIdx = rule.lastIndexOf('.');
+      if (lastDotIdx > 0) {
+        final lastSegment = rule.substring(lastDotIdx + 1);
+        // 检查最后一段是否是索引（纯数字或负数）
+        final isNegativeIndex = RegExp(r'^-\d+$').hasMatch(lastSegment);
+        final isPositiveIndex = RegExp(r'^!?\d+$').hasMatch(lastSegment);
+        final isRange = RegExp(r'^-?\d+:-?\d+$').hasMatch(lastSegment);
+        if (isNegativeIndex) {
+          // .page-item.-2 → beforeRule=.page-item, index=-2
+          final idx = int.tryParse(lastSegment);
+          if (idx != null) {
+            rule = rule.substring(0, lastDotIdx);
+            indexes.add(idx);
+            return _ElementSelector(rule, indexes, exclude);
+          }
+        } else if (isPositiveIndex) {
+          // .page-item.0 → beforeRule=.page-item, index=0
+          final excludeIdx = lastSegment.startsWith('!');
+          final numStr = excludeIdx ? lastSegment.substring(1) : lastSegment;
+          final idx = int.tryParse(numStr);
+          if (idx != null) {
+            rule = rule.substring(0, lastDotIdx);
+            exclude = excludeIdx;
+            indexes.add(idx);
+            return _ElementSelector(rule, indexes, exclude);
+          }
+        } else if (isRange) {
+          rule = rule.substring(0, lastDotIdx);
+          return _ElementSelector(rule, indexes, exclude, rangeExpression: lastSegment);
+        }
+      }
+    }
+
     return _ElementSelector(rule, indexes, exclude);
   }
 
