@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/miniprogram.dart';
 
 class MiniprogramPage extends StatefulWidget {
@@ -8,7 +9,10 @@ class MiniprogramPage extends StatefulWidget {
   State<MiniprogramPage> createState() => _MiniprogramPageState();
 }
 
-class _MiniprogramPageState extends State<MiniprogramPage> {
+class _MiniprogramPageState extends State<MiniprogramPage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   final List<Miniprogram> _miniprograms = [];
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
@@ -21,6 +25,12 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+    // 参考 legado-main: 根据实际 primary 颜色明暗决定标题文字颜色
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final appBarForeground = ThemeData.estimateBrightnessForColor(primaryColor) == Brightness.dark
+        ? Colors.white
+        : Colors.black;
     return Scaffold(
       body: Column(
         children: [
@@ -29,7 +39,7 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
             padding: EdgeInsets.only(
               top: MediaQuery.of(context).padding.top,
             ),
-            color: Theme.of(context).colorScheme.surface,
+            color: Theme.of(context).colorScheme.primary,
             child: Column(
               children: [
                 // Toolbar + 搜索框在同一行（不显示标题文字）
@@ -45,12 +55,12 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
                           child: TextField(
                             controller: _searchController,
                             decoration: InputDecoration(
-                              hintText: '搜索小程序',
-                              hintStyle: const TextStyle(fontSize: 13),
-                              prefixIcon: const Icon(Icons.search, size: 16),
+                              hintText: '搜索订阅',
+                              hintStyle: TextStyle(fontSize: 13, color: appBarForeground.withValues(alpha: 0.7)),
+                              prefixIcon: Icon(Icons.search, size: 16, color: appBarForeground.withValues(alpha: 0.7)),
                               suffixIcon: _searchQuery.isNotEmpty
                                   ? IconButton(
-                                      icon: const Icon(Icons.clear, size: 16),
+                                      icon: Icon(Icons.clear, size: 16, color: appBarForeground.withValues(alpha: 0.7)),
                                       padding: EdgeInsets.zero,
                                       constraints: const BoxConstraints(),
                                       onPressed: () {
@@ -67,7 +77,7 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
                               contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                               isDense: true,
                             ),
-                            style: const TextStyle(fontSize: 13),
+                            style: TextStyle(fontSize: 13, color: appBarForeground),
                             onChanged: (value) {
                               setState(() {
                                 _searchQuery = value;
@@ -79,25 +89,25 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
                       const SizedBox(width: 4),
                       // 历史记录
                       IconButton(
-                        icon: const Icon(Icons.history, size: 20),
+                        icon: Icon(Icons.history, size: 20, color: appBarForeground),
                         tooltip: '历史记录',
                         onPressed: () {},
                       ),
                       // 收藏分组
                       IconButton(
-                        icon: const Icon(Icons.folder_outlined, size: 20),
+                        icon: Icon(Icons.folder_outlined, size: 20, color: appBarForeground),
                         tooltip: '收藏分组',
                         onPressed: () {},
                       ),
                       // 设置
                       IconButton(
-                        icon: const Icon(Icons.settings, size: 20),
+                        icon: Icon(Icons.settings, size: 20, color: appBarForeground),
                         tooltip: '设置',
                         onPressed: () {},
                       ),
                       // 更多菜单
                       PopupMenuButton<String>(
-                        icon: const Icon(Icons.more_vert, size: 20),
+                        icon: Icon(Icons.more_vert, size: 20, color: appBarForeground),
                         tooltip: '更多',
                         offset: const Offset(0, 48),
                         onSelected: (value) {
@@ -106,9 +116,9 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
                           }
                         },
                         itemBuilder: (context) => [
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'add',
-                            child: Text('添加小程序'),
+                            child: Text('添加小程序', style: TextStyle(color: appBarForeground)),
                           ),
                         ],
                       ),
@@ -201,6 +211,7 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
 
   Widget _buildList() {
     return ListView.builder(
+      cacheExtent: 500,
       padding: const EdgeInsets.all(12),
       itemCount: _miniprograms.length,
       itemBuilder: (context, index) {
@@ -228,10 +239,11 @@ class _MiniprogramPageState extends State<MiniprogramPage> {
           child: mp.icon != null
               ? ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: Image.network(
-                    mp.icon!,
+                  child: CachedNetworkImage(
+                    imageUrl: mp.icon!,
                     fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
+                    memCacheWidth: 96,
+                    errorWidget: (context, url, error) {
                       return Icon(
                         Icons.apps,
                         color: Theme.of(context).colorScheme.onPrimaryContainer,

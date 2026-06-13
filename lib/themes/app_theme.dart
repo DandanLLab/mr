@@ -13,8 +13,10 @@ class AppTheme {
       brightness: Brightness.light,
     ),
     appBarTheme: const AppBarTheme(
+      toolbarHeight: 48,
       centerTitle: true,
       elevation: 0,
+      foregroundColor: Color(0xFF212121), // 亮色主题标题黑色
     ),
     cardTheme: CardThemeData(
       elevation: 2,
@@ -41,8 +43,10 @@ class AppTheme {
       brightness: Brightness.dark,
     ),
     appBarTheme: const AppBarTheme(
+      toolbarHeight: 48,
       centerTitle: true,
       elevation: 0,
+      foregroundColor: Colors.white, // 暗色主题标题白色
     ),
     cardTheme: CardThemeData(
       elevation: 2,

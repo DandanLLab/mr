@@ -14,6 +14,8 @@ import 'services/native/js_engine.dart';
 import 'services/native/engine_dispatcher.dart';
 import 'services/storage_service.dart';
 import 'services/source_engine/proxy_service.dart';
+import 'services/cover_config_service.dart';
+import 'widgets/themed_background.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,6 +34,13 @@ void main() async {
     await JsEngine.instance.init();
   } catch (e) {
     debugPrint('JsEngine init error: $e');
+  }
+
+  // 初始化封面配置服务
+  try {
+    await CoverConfigService.instance.init();
+  } catch (e) {
+    debugPrint('CoverConfigService init error: $e');
   }
 
   // 启动 CORS 代理服务（仅 Web 端需要，原生端 Dio 不受 CORS 限制）
@@ -81,11 +90,25 @@ class DanShenqiApp extends StatelessWidget {
               Locale('en', 'US'),
             ],
             locale: const Locale('zh', 'CN'),
-            theme: AppTheme.lightTheme,
-            darkTheme: AppTheme.darkTheme,
+            theme: appProvider.lightTheme,
+            darkTheme: appProvider.darkTheme,
             themeMode: appProvider.themeMode,
             initialRoute: AppRoutes.main,
             onGenerateRoute: AppRoutes.generateRoute,
+            // 应用全局背景图片
+            builder: (context, widget) {
+              final mediaQuery = MediaQuery.of(context);
+              return ThemedBackground(
+                child: MediaQuery(
+                  data: mediaQuery.copyWith(
+                    textScaler: TextScaler.linear(
+                      appProvider.currentFontScale / 10,
+                    ),
+                  ),
+                  child: widget ?? const SizedBox(),
+                ),
+              );
+            },
           );
         },
       ),

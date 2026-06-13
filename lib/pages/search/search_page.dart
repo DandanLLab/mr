@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import '../../providers/search_provider.dart';
+import '../../providers/app_provider.dart';
 import '../../models/book.dart';
 import '../../models/book_source.dart';
 import '../../routes/app_routes.dart';
+import '../../services/cover_config_service.dart';
 
 class SearchPage extends StatefulWidget {
   final String? initialKeyword;
@@ -48,6 +50,10 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   Widget build(BuildContext context) {
+    final appProvider = context.watch<AppProvider>();
+    final searchRadius = appProvider.currentSearchFollow
+        ? 10 * appProvider.currentCornerScale
+        : 16.0;
     return Scaffold(
       body: Consumer<SearchProvider>(
         builder: (context, provider, child) {
@@ -93,9 +99,23 @@ class _SearchPageState extends State<SearchPage> {
                                           },
                                         )
                                       : null,
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
+                                   border: OutlineInputBorder(
+                                     borderRadius: BorderRadius.circular(
+                                       searchRadius,
+                                     ),
+                                   ),
+                                   filled: appProvider.currentSearchFollow,
+                                   fillColor: appProvider.currentSearchFollow
+                                       ? Theme.of(context)
+                                             .colorScheme
+                                             .surface
+                                             .withValues(
+                                               alpha:
+                                                   appProvider
+                                                       .currentLayoutAlpha /
+                                                   100,
+                                             )
+                                       : null,
                                   contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                                   isDense: true,
                                 ),
@@ -380,7 +400,8 @@ class _SearchPageState extends State<SearchPage> {
     final sourceName = result['sourceName']?.toString().trim() ?? '';
     final tags = _resultTags(result);
 
-    return InkWell(
+    return RepaintBoundary(
+      child: InkWell(
       onTap: () => _openDetail(result),
       child: Padding(
         padding: const EdgeInsets.all(8),
@@ -393,14 +414,11 @@ class _SearchPageState extends State<SearchPage> {
               child: SizedBox(
                 width: 80,
                 height: 110,
-                child: coverUrl.isEmpty
-                    ? _coverPlaceholder()
-                    : CachedNetworkImage(
-                        imageUrl: coverUrl,
-                        fit: BoxFit.cover,
-                        placeholder: (_, __) => _coverPlaceholder(),
-                        errorWidget: (_, __, ___) => _coverPlaceholder(),
-                      ),
+                child: _buildSearchCoverImage(
+                  coverUrl,
+                  bookName: result['name']?.toString(),
+                  bookAuthor: author,
+                ),
               ),
             ),
             const SizedBox(width: 8),
@@ -495,6 +513,7 @@ class _SearchPageState extends State<SearchPage> {
           ],
         ),
       ),
+      ),
     );
   }
 
@@ -535,14 +554,11 @@ class _SearchPageState extends State<SearchPage> {
           children: [
             // 封面
             Expanded(
-              child: coverUrl.isEmpty
-                  ? _coverPlaceholder()
-                  : CachedNetworkImage(
-                      imageUrl: coverUrl,
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) => _coverPlaceholder(),
-                      errorWidget: (_, __, ___) => _coverPlaceholder(),
-                    ),
+              child: _buildSearchCoverImage(
+                coverUrl,
+                bookName: result['name']?.toString(),
+                bookAuthor: author,
+              ),
             ),
             Padding(
               padding: const EdgeInsets.all(6),
@@ -603,11 +619,49 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  Widget _coverPlaceholder() {
+  Widget _coverPlaceholder({String? bookName, String? bookAuthor}) {
+    final coverConfig = CoverConfigService.instance;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    if (bookName != null && bookName.isNotEmpty) {
+      return coverConfig.buildDefaultCoverPlaceholder(
+        bookName: bookName,
+        bookAuthor: bookAuthor,
+        isDark: isDark,
+      );
+    }
     return ColoredBox(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: const Center(child: Icon(Icons.book, size: 36)),
     );
+  }
+
+  /// 构建搜索结果封面 - 接入封面配置
+  Widget _buildSearchCoverImage(String coverUrl, {String? bookName, String? bookAuthor}) {
+    final coverConfig = CoverConfigService.instance;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    if (coverConfig.useDefaultCover) {
+      return coverConfig.buildDefaultCoverPlaceholder(
+        bookName: bookName ?? '',
+        bookAuthor: bookAuthor,
+        isDark: isDark,
+      );
+    }
+
+    if (coverUrl.isNotEmpty) {
+      final memCacheWidth = coverConfig.loadCoverHighQuality ? null : 240;
+      final maxWidthDiskCache = coverConfig.loadCoverHighQuality ? null : 320;
+      return CachedNetworkImage(
+        imageUrl: coverUrl,
+        fit: BoxFit.cover,
+        memCacheWidth: memCacheWidth,
+        maxWidthDiskCache: maxWidthDiskCache,
+        placeholder: (_, __) => _coverPlaceholder(bookName: bookName, bookAuthor: bookAuthor),
+        errorWidget: (_, __, ___) => _coverPlaceholder(bookName: bookName, bookAuthor: bookAuthor),
+      );
+    }
+
+    return _coverPlaceholder(bookName: bookName, bookAuthor: bookAuthor);
   }
 
   List<String> _resultTags(Map<String, dynamic> result) {

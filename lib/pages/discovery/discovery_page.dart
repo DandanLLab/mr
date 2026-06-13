@@ -11,7 +11,10 @@ class DiscoveryPage extends StatefulWidget {
   State<DiscoveryPage> createState() => _DiscoveryPageState();
 }
 
-class _DiscoveryPageState extends State<DiscoveryPage> {
+class _DiscoveryPageState extends State<DiscoveryPage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   final TextEditingController _searchController = TextEditingController();
   final Set<String> _expandedSources = {};
   String _searchQuery = '';
@@ -29,6 +32,12 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+    // 参考 legado-main: 根据实际 primary 颜色明暗决定标题文字颜色
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final appBarForeground = ThemeData.estimateBrightnessForColor(primaryColor) == Brightness.dark
+        ? Colors.white
+        : Colors.black;
     return Scaffold(
       body: Column(
         children: [
@@ -37,7 +46,7 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
             padding: EdgeInsets.only(
               top: MediaQuery.of(context).padding.top,
             ),
-            color: Theme.of(context).colorScheme.surface,
+            color: Theme.of(context).colorScheme.primary,
             child: Column(
               children: [
                 // Toolbar + 搜索框在同一行（不显示标题文字）
@@ -55,10 +64,10 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
                             decoration: InputDecoration(
                               hintText: '搜索书源',
                               hintStyle: const TextStyle(fontSize: 13),
-                              prefixIcon: const Icon(Icons.search, size: 16),
+                              prefixIcon: Icon(Icons.search, size: 16, color: appBarForeground.withValues(alpha: 0.7)),
                               suffixIcon: _searchQuery.isNotEmpty
                                   ? IconButton(
-                                      icon: const Icon(Icons.clear, size: 16),
+                                      icon: Icon(Icons.clear, size: 16, color: appBarForeground.withValues(alpha: 0.7)),
                                       padding: EdgeInsets.zero,
                                       constraints: const BoxConstraints(),
                                       onPressed: () {
@@ -75,7 +84,7 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
                               contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                               isDense: true,
                             ),
-                            style: const TextStyle(fontSize: 13),
+                            style: TextStyle(fontSize: 13, color: appBarForeground),
                             onChanged: (value) {
                               setState(() {
                                 _searchQuery = value;
@@ -87,36 +96,36 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
                       const SizedBox(width: 4),
                       // 收藏分组
                       IconButton(
-                        icon: const Icon(Icons.folder_outlined, size: 20),
+                        icon: Icon(Icons.folder_outlined, size: 20, color: appBarForeground),
                         tooltip: '收藏分组',
                         onPressed: () {},
                       ),
                       // 排序按钮
                       PopupMenuButton<String>(
-                        icon: const Icon(Icons.sort, size: 20),
+                        icon: Icon(Icons.sort, size: 20, color: appBarForeground),
                         tooltip: '排序',
                         offset: const Offset(0, 48),
                         onSelected: (value) {},
                         itemBuilder: (context) => [
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'manual',
-                            child: Text('手动排序'),
+                            child: Text('手动排序', style: TextStyle(color: appBarForeground)),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'name',
-                            child: Text('按名称'),
+                            child: Text('按名称', style: TextStyle(color: appBarForeground)),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'url',
-                            child: Text('按URL'),
+                            child: Text('按URL', style: TextStyle(color: appBarForeground)),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'time',
-                            child: Text('按更新时间'),
+                            child: Text('按更新时间', style: TextStyle(color: appBarForeground)),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'respond',
-                            child: Text('按响应时间'),
+                            child: Text('按响应时间', style: TextStyle(color: appBarForeground)),
                           ),
                         ],
                       ),
@@ -283,6 +292,7 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
         return RefreshIndicator(
           onRefresh: provider.loadBookSources,
           child: ListView.builder(
+            cacheExtent: 500,
             padding: const EdgeInsets.symmetric(horizontal: 8),
             itemCount: sources.length,
             itemBuilder: (context, index) {

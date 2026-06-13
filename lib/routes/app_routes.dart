@@ -26,6 +26,34 @@ import '../pages/debug/book_source_debug_page.dart';
 import '../pages/detail/chapter_list_page.dart';
 import '../pages/web/internal_browser_page.dart';
 
+class AppPageRoute<T> extends PageRouteBuilder<T> {
+  AppPageRoute({
+    required WidgetBuilder builder,
+    RouteSettings? settings,
+    bool maintainState = true,
+    bool fullscreenDialog = false,
+  }) : super(
+         settings: settings,
+         maintainState: maintainState,
+         fullscreenDialog: fullscreenDialog,
+         allowSnapshotting: false,
+         transitionDuration: Duration.zero,
+         reverseTransitionDuration: Duration.zero,
+         pageBuilder: (context, animation, secondaryAnimation) =>
+             builder(context),
+       );
+
+  @override
+  Widget buildTransitions(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    return child;
+  }
+}
+
 class AppRoutes {
   static const String main = '/';
   static const String bookshelf = '/bookshelf';
@@ -55,45 +83,45 @@ class AppRoutes {
   static Route<dynamic> generateRoute(RouteSettings settings) {
     switch (settings.name) {
       case main:
-        return MaterialPageRoute(builder: (_) => const MainPage());
+        return AppPageRoute(builder: (_) => const MainPage());
       case bookshelf:
-        return MaterialPageRoute(builder: (_) => const BookshelfPage());
+        return AppPageRoute(builder: (_) => const BookshelfPage());
       case discovery:
-        return MaterialPageRoute(builder: (_) => const DiscoveryPage());
+        return AppPageRoute(builder: (_) => const DiscoveryPage());
       case miniprogram:
-        return MaterialPageRoute(builder: (_) => const MiniprogramPage());
+        return AppPageRoute(builder: (_) => const MiniprogramPage());
       case profile:
-        return MaterialPageRoute(builder: (_) => const ProfilePage());
+        return AppPageRoute(builder: (_) => const ProfilePage());
       case bookSourceManage:
-        return MaterialPageRoute(builder: (_) => const BookSourceManagePage());
+        return AppPageRoute(builder: (_) => const BookSourceManagePage());
       case bookSourceEdit:
         final args = settings.arguments as Map<String, dynamic>?;
-        return MaterialPageRoute(
+        return AppPageRoute(
           builder: (_) => BookSourceEditPage(sourceUrl: args?['sourceUrl']),
         );
       case readRecord:
         final args = settings.arguments as Map<String, dynamic>?;
-        return MaterialPageRoute(
+        return AppPageRoute(
           builder: (_) => ReadRecordPage(bookUrl: args?['bookUrl']),
         );
       case bookmark:
-        return MaterialPageRoute(builder: (_) => const BookmarkPage());
+        return AppPageRoute(builder: (_) => const BookmarkPage());
       case storageManage:
-        return MaterialPageRoute(builder: (_) => const StorageManagePage());
+        return AppPageRoute(builder: (_) => const StorageManagePage());
       case backupRestore:
-        return MaterialPageRoute(builder: (_) => const BackupRestorePage());
+        return AppPageRoute(builder: (_) => const BackupRestorePage());
       case replaceRule:
-        return MaterialPageRoute(builder: (_) => const ReplaceRulePage());
+        return AppPageRoute(builder: (_) => const ReplaceRulePage());
       case dictRule:
-        return MaterialPageRoute(builder: (_) => const DictRulePage());
+        return AppPageRoute(builder: (_) => const DictRulePage());
       case txtTocRule:
-        return MaterialPageRoute(builder: (_) => const TxtTocRulePage());
+        return AppPageRoute(builder: (_) => const TxtTocRulePage());
       case search:
-        return MaterialPageRoute(builder: (_) => const SearchPage());
+        return AppPageRoute(builder: (_) => const SearchPage());
       case detail:
         final args = settings.arguments as Map<String, dynamic>?;
         final bookData = args?['bookData'];
-        return MaterialPageRoute(
+        return AppPageRoute(
           builder: (_) => DetailPage(
             bookUrl: args?['bookUrl'] ?? args?['bookId'] ?? '',
             initialBook: bookData is Book
@@ -106,7 +134,7 @@ class AppRoutes {
       case novelReader:
         final args = settings.arguments as Map<String, dynamic>?;
         final bookData = args?['bookData'];
-        return MaterialPageRoute(
+        return AppPageRoute(
           builder: (_) => NovelReaderPage(
             bookUrl: args?['bookUrl'] ?? args?['bookId'] ?? '',
             chapterIndex: args?['chapterIndex'] ?? 0,
@@ -120,7 +148,7 @@ class AppRoutes {
       case comicReader:
         final args = settings.arguments as Map<String, dynamic>?;
         final initialBook = args?['initialBook'];
-        return MaterialPageRoute(
+        return AppPageRoute(
           builder: (_) => ComicReaderPage(
             bookUrl: args?['bookUrl'] ?? '',
             chapterIndex: args?['chapterIndex'] ?? 0,
@@ -129,7 +157,7 @@ class AppRoutes {
         );
       case videoPlayer:
         final args = settings.arguments as Map<String, dynamic>?;
-        return MaterialPageRoute(
+        return AppPageRoute(
           builder: (_) => VideoPlayerPage(
             bookId: args?['bookId'] ?? '',
             episodeId: args?['episodeId'] ?? '',
@@ -137,7 +165,7 @@ class AppRoutes {
         );
       case audioPlayer:
         final args = settings.arguments as Map<String, dynamic>?;
-        return MaterialPageRoute(
+        return AppPageRoute(
           builder: (_) => AudioPlayerPage(
             bookId: args?['bookId'] ?? '',
             trackId: args?['trackId'] ?? '',
@@ -145,7 +173,7 @@ class AppRoutes {
         );
       case exploreShow:
         final args = settings.arguments as Map<String, dynamic>?;
-        return MaterialPageRoute(
+        return AppPageRoute(
           builder: (_) => ExploreShowPage(
             sourceUrl: args?['sourceUrl'] ?? '',
             sourceName: args?['sourceName'] ?? '',
@@ -156,7 +184,7 @@ class AppRoutes {
       case bookSourceDebug:
         final debugArgs = settings.arguments as Map<String, dynamic>?;
         final sourceObj = debugArgs?['source'];
-        return MaterialPageRoute(
+        return AppPageRoute(
           builder: (_) => BookSourceDebugPage(
             sourceUrl: debugArgs?['sourceUrl'],
             source: sourceObj is BookSource ? sourceObj : null,
@@ -165,7 +193,7 @@ class AppRoutes {
       case chapterList:
         final args = settings.arguments as Map<String, dynamic>?;
         final bookData = args?['bookData'];
-        return MaterialPageRoute(
+        return AppPageRoute(
           builder: (_) => ChapterListPage(
             bookUrl: args?['bookUrl'] ?? '',
             currentChapterIndex: args?['currentChapterIndex'] ?? 0,
@@ -179,7 +207,7 @@ class AppRoutes {
       case internalBrowser:
         final args = settings.arguments as Map<String, dynamic>?;
         final rawHeaders = args?['headers'];
-        return MaterialPageRoute(
+        return AppPageRoute(
           builder: (_) => InternalBrowserPage(
             url: args?['url'] ?? '',
             title: args?['title'] ?? '',
@@ -193,7 +221,7 @@ class AppRoutes {
           ),
         );
       default:
-        return MaterialPageRoute(
+        return AppPageRoute(
           builder: (_) =>
               Scaffold(body: Center(child: Text('未找到路由: ${settings.name}'))),
         );

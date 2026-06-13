@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/read_record_service.dart';
+import '../../services/cover_config_service.dart';
 import '../../routes/app_routes.dart';
 import '../../widgets/swipe_action_container.dart';
 
@@ -325,6 +326,10 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
 
   @override
   Widget build(BuildContext context) {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final appBarFg = ThemeData.estimateBrightnessForColor(primaryColor) == Brightness.dark
+        ? Colors.white
+        : Colors.black;
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -344,7 +349,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
               style: TextStyle(
                 fontSize: 11,
                 height: 1.2,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                color: appBarFg.withValues(alpha: 0.6),
               ),
             ),
           ],
@@ -452,8 +457,16 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     List<ReadRecord> filteredRecords = _allRecords;
     List<ReadRecordSummary> filteredSummaries = _summaryRecords;
     
+    if (widget.bookUrl?.isNotEmpty == true) {
+      filteredRecords =
+          filteredRecords.where((r) => r.bookUrl == widget.bookUrl).toList();
+      filteredSummaries = filteredSummaries
+          .where((r) => r.bookUrl == widget.bookUrl)
+          .toList();
+    }
+    
     if (_selectedDate != null) {
-      filteredRecords = _allRecords.where((r) {
+      filteredRecords = filteredRecords.where((r) {
         final date = DateTime.fromMillisecondsSinceEpoch(r.startTime * 1000);
         final dateKey = DateTime(date.year, date.month, date.day);
         return dateKey == _selectedDate;
@@ -524,8 +537,16 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
   }
 
   Widget _buildSummaryCard() {
-    final hours = _totalReadTime ~/ 3600;
-    final minutes = (_totalReadTime % 3600) ~/ 60;
+    final summaryRecords = widget.bookUrl?.isNotEmpty == true
+        ? _summaryRecords.where((r) => r.bookUrl == widget.bookUrl).toList()
+        : _summaryRecords;
+    final totalReadTime = widget.bookUrl?.isNotEmpty == true
+        ? _allRecords
+            .where((r) => r.bookUrl == widget.bookUrl)
+            .fold<int>(0, (sum, record) => sum + record.readTime)
+        : _totalReadTime;
+    final hours = totalReadTime ~/ 3600;
+    final minutes = (totalReadTime % 3600) ~/ 60;
     final timeString = hours > 0 ? '$hours小时$minutes分钟' : '$minutes分钟';
     
     return Container(
@@ -533,13 +554,6 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -569,11 +583,11 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                           ),
                         ),
                         TextSpan(
-                          text: '${_summaryRecords.length}',
+                          text: '${summaryRecords.length}',
                           style: TextStyle(
                             fontSize: 28,
                             fontWeight: FontWeight.bold,
-                            color: Theme.of(context).colorScheme.primary,
+                            color: Theme.of(context).colorScheme.secondary,
                           ),
                         ),
                         TextSpan(
@@ -597,15 +611,15 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                 ],
               ),
             ),
-            if (_summaryRecords.isNotEmpty) _buildBookStack(),
+            if (summaryRecords.isNotEmpty) _buildBookStack(summaryRecords),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildBookStack() {
-    final displayRecords = _summaryRecords.take(3).toList();
+  Widget _buildBookStack(List<ReadRecordSummary> records) {
+    final displayRecords = records.take(3).toList();
     const double coverWidth = 48;
     const double coverHeight = 72;
     const double offsetStep = 12;
@@ -631,25 +645,25 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                   borderRadius: BorderRadius.circular(4),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 2,
+                      offset: const Offset(0, 1),
                     ),
                   ],
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(4),
-                  child: record.coverUrl.isNotEmpty
+                  child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
                       ? CachedNetworkImage(
                           imageUrl: record.coverUrl,
                           fit: BoxFit.cover,
                           cacheKey: record.coverUrl,
                           memCacheWidth: 100,
                           maxWidthDiskCache: 200,
-                          placeholder: (_, __) => _buildStackDefaultCover(),
-                          errorWidget: (_, __, ___) => _buildStackDefaultCover(),
+                          placeholder: (_, __) => _buildStackDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
+                          errorWidget: (_, __, ___) => _buildStackDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
                         )
-                      : _buildStackDefaultCover(),
+                      : _buildStackDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
                 ),
               ),
             ),
@@ -659,7 +673,16 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     );
   }
 
-  Widget _buildStackDefaultCover() {
+  Widget _buildStackDefaultCover({String? bookName, String? bookAuthor}) {
+    final coverConfig = CoverConfigService.instance;
+    if (coverConfig.useDefaultCover && bookName != null && bookName.isNotEmpty) {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      return coverConfig.buildDefaultCoverPlaceholder(
+        bookName: bookName,
+        bookAuthor: bookAuthor,
+        isDark: isDark,
+      );
+    }
     return Container(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: Center(
@@ -710,7 +733,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.primary,
+                      color: Theme.of(context).colorScheme.secondary,
                     ),
                   ),
                   Text(
@@ -769,7 +792,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.primary,
+                      color: Theme.of(context).colorScheme.secondary,
                     ),
                   ),
                   Text(
@@ -817,25 +840,13 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
           'bookUrl': record.bookUrl,
         });
       },
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Theme.of(context).brightness == Brightness.dark
-              ? Border.all(
-                  color: Theme.of(context).colorScheme.outline.withOpacity(0.42),
-                  width: 1,
-                )
-              : null,
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(4),
-                child: record.coverUrl.isNotEmpty
+                child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
                     ? CachedNetworkImage(
                         imageUrl: record.coverUrl,
                         width: 44,
@@ -844,10 +855,10 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         cacheKey: record.coverUrl,
                         memCacheWidth: 100,
                         maxWidthDiskCache: 200,
-                        placeholder: (_, __) => _buildDefaultCover(),
-                        errorWidget: (_, __, ___) => _buildDefaultCover(),
+                        placeholder: (_, __) => _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
+                        errorWidget: (_, __, ___) => _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
                       )
-                    : _buildDefaultCover(),
+                    : _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -910,11 +921,13 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                 ),
               ),
               // 三个点菜单
-              PopupMenuButton<String>(
-                icon: Icon(Icons.more_vert, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                onSelected: (value) {
-                  if (value == 'delete') {
-                    _deleteRecord(record);
+            PopupMenuButton<String>(
+              icon: Icon(Icons.more_vert, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              position: PopupMenuPosition.under,
+              offset: const Offset(-8, 4),
+              onSelected: (value) {
+                if (value == 'delete') {
+                  _deleteRecord(record);
                   } else if (value == 'merge') {
                     _showMergeDialog(record);
                   }
@@ -944,7 +957,6 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
               ),
             ],
           ),
-        ),
       ),
     );
 
@@ -1051,25 +1063,13 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
         });
       },
       onLongPress: () => _deleteRecord(record),
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Theme.of(context).brightness == Brightness.dark
-              ? Border.all(
-                  color: Theme.of(context).colorScheme.outline.withOpacity(0.42),
-                  width: 1,
-                )
-              : null,
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(4),
-                child: record.coverUrl.isNotEmpty
+                child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
                     ? CachedNetworkImage(
                         imageUrl: record.coverUrl,
                         width: 44,
@@ -1078,10 +1078,10 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         cacheKey: record.coverUrl,
                         memCacheWidth: 100,
                         maxWidthDiskCache: 200,
-                        placeholder: (_, __) => _buildDefaultCover(),
-                        errorWidget: (_, __, ___) => _buildDefaultCover(),
+                        placeholder: (_, __) => _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
+                        errorWidget: (_, __, ___) => _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
                       )
-                    : _buildDefaultCover(),
+                    : _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1154,7 +1154,6 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                 ),
             ],
           ),
-        ),
       ),
     );
 
@@ -1193,7 +1192,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         width: 2,
                         height: 16,
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
+                          color: Theme.of(context).colorScheme.secondary.withOpacity(0.5),
                           borderRadius: BorderRadius.circular(1),
                         ),
                       ),
@@ -1206,7 +1205,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         width: 2,
                         height: 16,
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
+                          color: Theme.of(context).colorScheme.secondary.withOpacity(0.5),
                           borderRadius: BorderRadius.circular(1),
                         ),
                       ),
@@ -1216,11 +1215,11 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                     width: 12,
                     height: 12,
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary,
+                      color: Theme.of(context).colorScheme.secondary,
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                          color: Theme.of(context).colorScheme.secondary.withOpacity(0.3),
                           blurRadius: 4,
                         ),
                       ],
@@ -1246,7 +1245,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
             // 封面
             ClipRRect(
               borderRadius: BorderRadius.circular(4),
-              child: record.coverUrl.isNotEmpty
+              child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
                   ? CachedNetworkImage(
                       imageUrl: record.coverUrl,
                       width: 40,
@@ -1255,10 +1254,10 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                       cacheKey: record.coverUrl,
                       memCacheWidth: 100,
                       maxWidthDiskCache: 200,
-                      placeholder: (_, __) => _buildDefaultCover(size: 40),
-                      errorWidget: (_, __, ___) => _buildDefaultCover(size: 40),
+                      placeholder: (_, __) => _buildDefaultCover(size: 40, bookName: record.bookName, bookAuthor: record.bookAuthor),
+                      errorWidget: (_, __, ___) => _buildDefaultCover(size: 40, bookName: record.bookName, bookAuthor: record.bookAuthor),
                     )
-                  : _buildDefaultCover(size: 40),
+                  : _buildDefaultCover(size: 40, bookName: record.bookName, bookAuthor: record.bookAuthor),
             ),
             const SizedBox(width: 12),
             // 信息
@@ -1309,7 +1308,20 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     );
   }
 
-  Widget _buildDefaultCover({double size = 44}) {
+  Widget _buildDefaultCover({double size = 44, String? bookName, String? bookAuthor}) {
+    final coverConfig = CoverConfigService.instance;
+    if (coverConfig.useDefaultCover && bookName != null && bookName.isNotEmpty) {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      return SizedBox(
+        width: size,
+        height: size * 60 / 44,
+        child: coverConfig.buildDefaultCoverPlaceholder(
+          bookName: bookName,
+          bookAuthor: bookAuthor,
+          isDark: isDark,
+        ),
+      );
+    }
     return Container(
       width: size,
       height: size * 60 / 44,
@@ -1576,7 +1588,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+              color: Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.3),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
@@ -1667,8 +1679,8 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     Color textColor;
     
     if (isSelected) {
-      bgColor = Theme.of(context).colorScheme.primary;
-      textColor = Theme.of(context).colorScheme.onPrimary;
+      bgColor = Theme.of(context).colorScheme.secondary;
+      textColor = Theme.of(context).colorScheme.onSecondary;
     } else if (!isCurrentMonth) {
       bgColor = Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.22);
       textColor = Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.35);
@@ -1679,12 +1691,12 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
       final ratio = (value / maxValue).clamp(0.0, 1.0);
       final intensity = ratio * ratio;
       bgColor = Color.lerp(
-        Theme.of(context).colorScheme.primaryContainer.withOpacity(0.42),
-        Theme.of(context).colorScheme.primary,
+        Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.42),
+        Theme.of(context).colorScheme.secondary,
         intensity,
       )!;
       textColor = ratio > 0.72
-          ? Theme.of(context).colorScheme.onPrimary
+          ? Theme.of(context).colorScheme.onSecondary
           : Theme.of(context).colorScheme.onSurface;
     }
     
@@ -1697,9 +1709,9 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
           color: bgColor,
           borderRadius: BorderRadius.circular(8),
           border: isToday && !isSelected
-              ? Border.all(color: Theme.of(context).colorScheme.primary, width: 2)
+              ? Border.all(color: Theme.of(context).colorScheme.secondary, width: 2)
               : isSelected
-                  ? Border.all(color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.75), width: 2)
+                  ? Border.all(color: Theme.of(context).colorScheme.onSecondary.withOpacity(0.75), width: 2)
                   : null,
         ),
         child: Center(
@@ -1723,8 +1735,8 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     final ratio = index / maxIndex;
     final intensity = ratio * ratio;
     return Color.lerp(
-      Theme.of(context).colorScheme.primaryContainer.withOpacity(0.4),
-      Theme.of(context).colorScheme.primary,
+      Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.4),
+      Theme.of(context).colorScheme.secondary,
       intensity,
     )!;
   }
@@ -1736,12 +1748,12 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: selected
-              ? Theme.of(context).colorScheme.primaryContainer
+              ? Theme.of(context).colorScheme.secondaryContainer
               : Theme.of(context).colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: selected
-                ? Theme.of(context).colorScheme.primary
+                ? Theme.of(context).colorScheme.secondary
                 : Theme.of(context).colorScheme.outline,
             width: 1,
           ),
@@ -1751,7 +1763,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
           style: TextStyle(
             fontSize: 13,
             color: selected
-                ? Theme.of(context).colorScheme.onPrimaryContainer
+                ? Theme.of(context).colorScheme.onSecondaryContainer
                 : Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),

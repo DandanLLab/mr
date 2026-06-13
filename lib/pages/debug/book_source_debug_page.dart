@@ -289,7 +289,9 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
     final bgColor = isDark ? Colors.grey[900] : Colors.white;
     final textColor = isDark ? Colors.grey[200] : Colors.grey[800];
     final appBarBgColor = isDark ? Colors.grey[850] : const Color(0xFFF5F5F5);
-    final appBarFgColor = isDark ? Colors.white : Colors.black87;
+    final appBarFgColor = ThemeData.estimateBrightnessForColor(appBarBgColor!) == Brightness.dark
+        ? Colors.white
+        : Colors.black87;
 
     showDialog(
       context: context,

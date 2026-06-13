@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -6,15 +7,18 @@ import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/book.dart';
 import '../../models/book_source.dart';
 import '../../models/chapter.dart';
 import '../../providers/bookshelf_provider.dart';
+import '../../providers/app_provider.dart';
 import '../../routes/app_routes.dart';
 import '../../services/storage_service.dart';
 import '../../services/book_data_provider.dart';
 import '../../services/chapter_cache_service.dart';
 import '../../services/source_engine/web_book.dart';
+import '../../services/cover_config_service.dart';
 import '../../widgets/book_edit_sheet.dart';
 
 class DetailPage extends StatefulWidget {
@@ -46,7 +50,16 @@ class _DetailPageState extends State<DetailPage> {
   @override
   void initState() {
     super.initState();
+    _loadDisplayPrefs();
     _loadData();
+  }
+
+  Future<void> _loadDisplayPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _showReadRecord = prefs.getBool('bookInfoShowReadRecord') ?? true;
+    });
   }
 
   Future<void> _loadData() async {
@@ -147,11 +160,20 @@ class _DetailPageState extends State<DetailPage> {
       );
     }
 
+    final bookInfoBackground =
+        context.watch<AppProvider>().currentBookInfoBackgroundImage;
+    final hasCustomBackground =
+        bookInfoBackground != null && bookInfoBackground.isNotEmpty;
     return Scaffold(
       body: Stack(
         children: [
-          // 背景模糊图片
-          if (_book!.coverUrl.isNotEmpty)
+          if (hasCustomBackground)
+            Positioned.fill(
+              child: _buildBackgroundImage(bookInfoBackground),
+            ),
+          if (!hasCustomBackground &&
+              _book!.coverUrl.isNotEmpty &&
+              !CoverConfigService.instance.useDefaultCover)
             Positioned.fill(
               child: CachedNetworkImage(
                 imageUrl: _book!.coverUrl,
@@ -162,11 +184,18 @@ class _DetailPageState extends State<DetailPage> {
               ),
             ),
           Positioned.fill(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+            child: RepaintBoundary(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(
+                  sigmaX: hasCustomBackground ? 0 : 10,
+                  sigmaY: hasCustomBackground ? 0 : 10,
+                ),
               child: Container(
-                color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.85),
+                color: Theme.of(context).colorScheme.surface.withValues(
+                  alpha: hasCustomBackground ? 0.72 : 0.85,
+                ),
               ),
+            ),
             ),
           ),
           // 主内容
@@ -191,13 +220,73 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
+  Widget _buildBackgroundImage(String path) {
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return CachedNetworkImage(
+        imageUrl: path,
+        fit: BoxFit.cover,
+        errorWidget: (_, __, ___) => const SizedBox.shrink(),
+      );
+    }
+    return Image.file(
+      File(path),
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+    );
+  }
+
+  /// 构建详情页封面 - 接入封面配置
+  Widget _buildDetailCover() {
+    final coverConfig = CoverConfigService.instance;
+    final isDark = context.watch<AppProvider>().themeMode == ThemeMode.dark ||
+        (context.watch<AppProvider>().themeMode == ThemeMode.system &&
+            MediaQuery.of(context).platformBrightness == Brightness.dark);
+    final useDefault = coverConfig.useDefaultCover;
+    final coverUrl = _book!.displayCoverUrl;
+
+    if (useDefault) {
+      return coverConfig.buildDefaultCoverPlaceholder(
+        bookName: _book!.displayName,
+        bookAuthor: _book!.displayAuthor,
+        isDark: isDark,
+      );
+    }
+
+    if (coverUrl.isNotEmpty) {
+      final memCacheWidth = coverConfig.loadCoverHighQuality ? null : 240;
+      final maxWidthDiskCache = coverConfig.loadCoverHighQuality ? null : 320;
+      return CachedNetworkImage(
+        imageUrl: coverUrl,
+        fit: BoxFit.cover,
+        memCacheWidth: memCacheWidth,
+        maxWidthDiskCache: maxWidthDiskCache,
+        placeholder: (_, __) => coverConfig.buildDefaultCoverPlaceholder(
+          bookName: _book!.displayName,
+          bookAuthor: _book!.displayAuthor,
+          isDark: isDark,
+        ),
+        errorWidget: (_, __, ___) => coverConfig.buildDefaultCoverPlaceholder(
+          bookName: _book!.displayName,
+          bookAuthor: _book!.displayAuthor,
+          isDark: isDark,
+        ),
+      );
+    }
+
+    return coverConfig.buildDefaultCoverPlaceholder(
+      bookName: _book!.displayName,
+      bookAuthor: _book!.displayAuthor,
+      isDark: isDark,
+    );
+  }
+
   Widget _buildAppBar() {
     final isOnline = _book!.originType == BookOriginType.online;
     final isLocal = _book!.originType == BookOriginType.local;
     final fg = Theme.of(context).colorScheme.onSurface;
 
     return SliverAppBar(
-      expandedHeight: 56,
+      expandedHeight: 48,
       pinned: true,
       backgroundColor: Colors.transparent,
       elevation: 0,
@@ -416,18 +505,7 @@ class _DetailPageState extends State<DetailPage> {
                       height: 160,
                       color:
                           Theme.of(context).colorScheme.surfaceContainerHighest,
-                      child: _book!.displayCoverUrl.isNotEmpty
-                          ? CachedNetworkImage(
-                              imageUrl: _book!.displayCoverUrl,
-                              fit: BoxFit.cover,
-                              placeholder: (_, __) => const Center(
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              ),
-                              errorWidget: (_, __, ___) =>
-                                  const Icon(Icons.book, size: 48),
-                            )
-                          : const Icon(Icons.book, size: 48),
+                      child: _buildDetailCover(),
                     ),
                   ),
                 ),
@@ -550,7 +628,7 @@ class _DetailPageState extends State<DetailPage> {
             ),
           if (_book!.latestChapterTitle.isNotEmpty) const SizedBox(height: 8),
           // 阅读记录
-          if (_book!.durChapterIndex > 0)
+          if (_showReadRecord && _book!.durChapterIndex > 0)
             _buildInfoRow(
               icon: Icons.history,
               label: '进度',
@@ -899,6 +977,13 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _showReadRecordDialog() {
+    if (_book == null) return;
+    Navigator.pushNamed(
+      context,
+      AppRoutes.readRecord,
+      arguments: {'bookUrl': _book!.bookUrl},
+    );
+    return;
     showModalBottomSheet(
       context: context,
       builder: (context) => Container(
@@ -1328,10 +1413,30 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
-  void _toggleBookshelf() {
+  Future<void> _toggleBookshelf() async {
     if (_book == null) return;
     final provider = context.read<BookshelfProvider>();
     if (_isInBookshelf) {
+      if (_book!.deleteAlert ?? false) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('确认移除'),
+            content: Text('确定从书架移除《${_book!.displayName}》吗？'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('取消'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('确定'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true) return;
+      }
       provider.removeFromBookshelf(_book!.bookUrl);
     } else {
       provider.addToBookshelf(_book!);
@@ -1393,9 +1498,12 @@ class _DetailPageState extends State<DetailPage> {
 
   void _openChapter(Chapter chapter) {
     if (chapter.isVolume) return;
+    final routeName = _book?.mediaType == MediaType.comic
+        ? AppRoutes.comicReader
+        : AppRoutes.novelReader;
     Navigator.pushNamed(
       context,
-      AppRoutes.novelReader,
+      routeName,
       arguments: {
         'bookUrl': widget.bookUrl,
         'chapterIndex': chapter.index,
@@ -1610,10 +1718,12 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
-  void _toggleShowReadRecord() {
+  Future<void> _toggleShowReadRecord() async {
+    final prefs = await SharedPreferences.getInstance();
     setState(() {
       _showReadRecord = !_showReadRecord;
     });
+    await prefs.setBool('bookInfoShowReadRecord', _showReadRecord);
   }
 
   void _showCustomButton() async {

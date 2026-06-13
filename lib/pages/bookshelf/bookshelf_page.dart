@@ -5,8 +5,10 @@ import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/book.dart';
 import '../../providers/bookshelf_provider.dart';
+import '../../providers/app_provider.dart';
 import '../../routes/app_routes.dart';
 import '../../services/local_book/local_book_service.dart';
+import '../../services/cover_config_service.dart';
 
 /// 书架布局类型
 enum BookshelfLayout {
@@ -51,7 +53,10 @@ class BookshelfPage extends StatefulWidget {
   State<BookshelfPage> createState() => _BookshelfPageState();
 }
 
-class _BookshelfPageState extends State<BookshelfPage> {
+class _BookshelfPageState extends State<BookshelfPage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   late PageController _pageController;
 
   // 书架配置
@@ -92,6 +97,8 @@ class _BookshelfPageState extends State<BookshelfPage> {
       _margin = prefs.getDouble('bookshelf_margin') ?? 8.0;
       _gridColumnCount = _getGridColumnCount(_layout);
     });
+    // 加载封面配置
+    await CoverConfigService.instance.reload();
   }
 
   @override
@@ -102,6 +109,13 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // 参考 legado-main: 根据实际 primary 颜色明暗决定标题文字颜色
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final appBarForeground = ThemeData.estimateBrightnessForColor(primaryColor) == Brightness.dark
+        ? Colors.white
+        : Colors.black;
     return Scaffold(
       body: Consumer<BookshelfProvider>(
         builder: (context, provider, child) {
@@ -117,7 +131,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
                 padding: EdgeInsets.only(
                   top: MediaQuery.of(context).padding.top,
                 ),
-                color: Theme.of(context).colorScheme.surface,
+                color: Theme.of(context).colorScheme.primary,
                 child: SizedBox(
                   height: 48,
                   child: Row(
@@ -141,26 +155,26 @@ class _BookshelfPageState extends State<BookshelfPage> {
                                 );
                               },
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 16),
-                                alignment: Alignment.center,
-                                child: Text(
-                                  groups[index],
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
-                                    color: isSelected
-                                        ? Theme.of(context).colorScheme.primary
-                                        : Theme.of(context).colorScheme.onSurface,
-                                  ),
-                                ),
-                              ),
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          alignment: Alignment.center,
+                          child: Text(
+                            groups[index],
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
+                              color: isSelected
+                                  ? appBarForeground
+                                  : appBarForeground.withValues(alpha: 0.7),
+                            ),
+                          ),
+                        ),
                             );
                           },
                         ),
                       ),
                       // 搜索按钮
                       IconButton(
-                        icon: const Icon(Icons.search),
+                        icon: Icon(Icons.search, color: appBarForeground),
                         tooltip: '搜索',
                         onPressed: () {
                           Navigator.pushNamed(context, AppRoutes.search);
@@ -168,133 +182,141 @@ class _BookshelfPageState extends State<BookshelfPage> {
                       ),
                       // 更多菜单
                       PopupMenuButton<String>(
-                        icon: const Icon(Icons.more_vert),
+                        icon: Icon(Icons.more_vert, color: appBarForeground),
                         tooltip: '更多选项',
+                        color: Theme.of(context).colorScheme.surface,
+                        elevation: 8,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                         offset: const Offset(0, 48),
                         onSelected: (value) => _handleMenuSelection(value),
-                        itemBuilder: (context) => [
-                          const PopupMenuItem(
+                        itemBuilder: (context) {
+                          final onSurface = Theme.of(context).colorScheme.onSurface;
+                          return [
+                          PopupMenuItem(
                             value: 'refresh',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.refresh, size: 20),
-                                SizedBox(width: 16),
-                                Text('更新目录'),
+                                Icon(Icons.refresh, size: 24, color: onSurface),
+                                const SizedBox(width: 16),
+                                Text('更新目录', style: TextStyle(color: onSurface)),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'import_local',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.add, size: 20),
-                                SizedBox(width: 16),
-                                Text('添加本地'),
+                                Icon(Icons.add, size: 24, color: onSurface),
+                                const SizedBox(width: 16),
+                                Text('添加本地', style: TextStyle(color: onSurface)),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'import_remote',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.add, size: 20),
-                                SizedBox(width: 16),
-                                Text('远程书籍'),
+                                Icon(Icons.add, size: 24, color: onSurface),
+                                const SizedBox(width: 16),
+                                Text('远程书籍', style: TextStyle(color: onSurface)),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'import_url',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.link, size: 20),
-                                SizedBox(width: 16),
-                                Text('添加网址'),
+                                Icon(Icons.language, size: 24, color: onSurface),
+                                const SizedBox(width: 16),
+                                Text('添加网址', style: TextStyle(color: onSurface)),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'bookshelf_manage',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.sort, size: 20),
-                                SizedBox(width: 16),
-                                Text('书架管理'),
+                                Icon(Icons.reorder, size: 24, color: onSurface),
+                                const SizedBox(width: 16),
+                                Text('书架管理', style: TextStyle(color: onSurface)),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'download',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.download, size: 20),
-                                SizedBox(width: 16),
-                                Text('缓存/导出'),
+                                Icon(Icons.download_outlined, size: 24, color: onSurface),
+                                const SizedBox(width: 16),
+                                Text('缓存/导出', style: TextStyle(color: onSurface)),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'group_manage',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.folder, size: 20),
-                                SizedBox(width: 16),
-                                Text('分组管理'),
+                                Icon(Icons.folder_copy, size: 24, color: onSurface),
+                                const SizedBox(width: 16),
+                                Text('分组管理', style: TextStyle(color: onSurface)),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'layout',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.view_quilt, size: 20),
-                                SizedBox(width: 16),
-                                Text('书架布局'),
+                                Icon(Icons.view_quilt, size: 24, color: onSurface),
+                                const SizedBox(width: 16),
+                                Text('书架布局', style: TextStyle(color: onSurface)),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'export_bookshelf',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.upload, size: 20),
-                                SizedBox(width: 16),
-                                Text('导出书单'),
+                                Icon(Icons.ios_share, size: 24, color: onSurface),
+                                const SizedBox(width: 16),
+                                Text('导出书单', style: TextStyle(color: onSurface)),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'import_bookshelf',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.download, size: 20),
-                                SizedBox(width: 16),
-                                Text('导入书单'),
+                                Icon(Icons.file_download, size: 24, color: onSurface),
+                                const SizedBox(width: 16),
+                                Text('导入书单', style: TextStyle(color: onSurface)),
                               ],
                             ),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'log',
                             height: 48,
                             child: Row(
                               children: [
-                                Icon(Icons.article, size: 20),
-                                SizedBox(width: 16),
-                                Text('日志'),
+                                Icon(Icons.info_outline, size: 24, color: onSurface),
+                                const SizedBox(width: 16),
+                                Text('日志', style: TextStyle(color: onSurface)),
                               ],
                             ),
                           ),
-                        ],
+                        ];
+                      },
                       ),
                     ],
                   ),
@@ -953,6 +975,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   Widget _buildListViewWithBooks(List<Book> books, BookshelfProvider provider) {
     final listView = ListView.builder(
+      cacheExtent: 500,
       padding: EdgeInsets.all(_margin),
       itemCount: books.length,
       itemBuilder: (context, index) {
@@ -973,6 +996,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   Widget _buildGridViewWithBooks(List<Book> books, BookshelfProvider provider) {
     final gridView = GridView.builder(
+      cacheExtent: 500,
       padding: EdgeInsets.all(_margin),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: _gridColumnCount,
@@ -983,7 +1007,9 @@ class _BookshelfPageState extends State<BookshelfPage> {
       itemCount: books.length,
       itemBuilder: (context, index) {
         final book = books[index];
-        return _buildGridBookCard(book, provider);
+        return RepaintBoundary(
+          child: _buildGridBookCard(book, provider),
+        );
       },
     );
 
@@ -1009,53 +1035,42 @@ class _BookshelfPageState extends State<BookshelfPage> {
       itemCount: provider.books.length,
       itemBuilder: (context, index) {
         final book = provider.books[index];
-        return _buildGridBookCard(book, provider);
+        return RepaintBoundary(
+          child: _buildGridBookCard(book, provider),
+        );
       },
     );
   }
 
   Widget _buildGridBookCard(Book book, BookshelfProvider provider) {
     // 参考原版设计：简洁的网格卡片
+    final coverConfig = CoverConfigService.instance;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final showCoverName = coverConfig.shouldShowName(isDark);
+    final showCoverAuthor = coverConfig.shouldShowAuthor(isDark) && showCoverName;
+    final useDefault = coverConfig.useDefaultCover;
+
     return GestureDetector(
       onTap: () => _openBook(book),
       onLongPress: () => _showBookOptions(book, provider),
       child: Stack(
         children: [
-          Card(
-            clipBehavior: Clip.antiAlias,
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(4),
-            ),
+          // 参考原版：不包 Card，扁平化布局
+          Padding(
+            padding: const EdgeInsets.all(4),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Expanded(
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      // 封面
-                      book.coverUrl.isNotEmpty
-                          ? CachedNetworkImage(
-                              imageUrl: book.coverUrl,
-                              fit: BoxFit.cover,
-                              placeholder: (context, url) => Container(
-                                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                                child: const Center(
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                ),
-                              ),
-                              errorWidget: (context, url, error) => Container(
-                                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                                child: const Icon(Icons.book, size: 32),
-                              ),
-                            )
-                          : Container(
-                              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                              child: const Icon(Icons.book, size: 32),
-                            ),
-                      // 书名覆盖在封面上
-                      if (_bookNameDisplay == BookNameDisplay.overlay)
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        // 封面
+                        _buildCoverImage(book, isDark, useDefault),
+                      // 书名覆盖在封面上（封面设置中的显示书名，且书架设置为overlay模式）
+                      if (_bookNameDisplay == BookNameDisplay.overlay && showCoverName)
                         Positioned(
                           bottom: 0,
                           left: 0,
@@ -1072,34 +1087,57 @@ class _BookshelfPageState extends State<BookshelfPage> {
                                 ],
                               ),
                             ),
-                            child: Text(
-                              book.name,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500,
-                                shadows: [
-                                  Shadow(
-                                    offset: Offset(0, 1),
-                                    blurRadius: 2,
-                                    color: Colors.black54,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  book.displayName,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                    shadows: [
+                                      Shadow(
+                                        offset: Offset(0, 1),
+                                        blurRadius: 2,
+                                        color: Colors.black54,
+                                      ),
+                                    ],
                                   ),
-                                ],
-                              ),
+                                ),
+                                if (showCoverAuthor && book.displayAuthor.isNotEmpty)
+                                  Text(
+                                    book.displayAuthor,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(alpha: 0.8),
+                                      fontSize: 9,
+                                      shadows: const [
+                                        Shadow(
+                                          offset: Offset(0, 1),
+                                          blurRadius: 2,
+                                          color: Colors.black54,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                         ),
                     ],
                   ),
                 ),
+              ),
                 // 书名显示在下方（参考原版：12sp，2行）
                 if (_bookNameDisplay == BookNameDisplay.show)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(4, 6, 4, 4),
                     child: Text(
-                      book.name,
+                      book.displayName,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.center,
@@ -1120,7 +1158,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primary,
+                  color: Theme.of(context).colorScheme.secondary,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
@@ -1141,8 +1179,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(3),
+                  color: Theme.of(context).colorScheme.secondaryContainer,
                 ),
                 child: Text(
                   '本地',
@@ -1189,6 +1226,9 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   Widget _buildListBookCard(Book book, BookshelfProvider provider) {
     final isCompact = _layout == BookshelfLayout.listCompact;
+    final coverConfig = CoverConfigService.instance;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final useDefault = coverConfig.useDefaultCover;
 
     return InkWell(
       onTap: () => _openBook(book),
@@ -1201,35 +1241,21 @@ class _BookshelfPageState extends State<BookshelfPage> {
             // 封面（参考原版：66x90dp，圆角4dp）
             ClipRRect(
               borderRadius: BorderRadius.circular(4),
-              child: Container(
+              child: SizedBox(
                 width: isCompact ? 48 : 66,
                 height: isCompact ? 64 : 90,
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: book.coverUrl.isNotEmpty
-                    ? CachedNetworkImage(
-                        imageUrl: book.coverUrl,
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        height: double.infinity,
-                        placeholder: (context, url) => Container(
-                          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                        ),
-                        errorWidget: (context, url, error) => const Center(
-                          child: Icon(Icons.book, size: 32),
-                        ),
-                      )
-                    : const Center(child: Icon(Icons.book, size: 32)),
+                child: _buildCoverImage(book, isDark, useDefault, isList: true),
               ),
             ),
             const SizedBox(width: 10), // 参考原版：10dp间距
-            // 书籍信息
+            // 书籍信息（参考 legado-main 布局）
             Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.only(left: 2, bottom: 4), // 参考原版
+                  padding: const EdgeInsets.only(left: 2, bottom: 4),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // 书名行（参考原版：16sp，单行，未读徽章在右边）
+                      // 第1行：书名（参考原版：16sp，primaryText）
                       Row(
                         children: [
                           if (book.isTop)
@@ -1238,7 +1264,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
                               child: Icon(
                                 Icons.push_pin,
                                 size: 14,
-                                color: Theme.of(context).colorScheme.primary,
+                                color: Theme.of(context).colorScheme.secondary,
                               ),
                             ),
                           Expanded(
@@ -1252,13 +1278,13 @@ class _BookshelfPageState extends State<BookshelfPage> {
                               ),
                             ),
                           ),
-                          // 未读数徽章（在书名右边）
+                          // 未读数徽章
                           if (_showUnread && book.unreadCount > 0)
                             Container(
                               margin: const EdgeInsets.only(left: 8),
                               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                               decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.primary,
+                                color: Theme.of(context).colorScheme.secondary,
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text(
@@ -1272,20 +1298,70 @@ class _BookshelfPageState extends State<BookshelfPage> {
                             ),
                         ],
                       ),
-                      if (!isCompact) ...[
-                        const SizedBox(height: 4),
-                        // 作者行（参考原版：13sp，后面跟着更新时间）
+                      const SizedBox(height: 4),
+                      if (isCompact) ...[
+                        // 紧凑模式第2行：作者 · 进度 | 更新时间（同一行）
                         Row(
                           children: [
-                            Icon(
-                              Icons.person_outline,
-                              size: 14,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            Icon(Icons.person_outline, size: 14,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: RichText(
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                text: TextSpan(
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                                  children: [
+                                    TextSpan(text: book.author.isNotEmpty ? book.author : '未知作者'),
+                                    if (book.durChapterTitle.isNotEmpty) ...[
+                                      const TextSpan(text: ' · ', style: TextStyle(fontSize: 11)),
+                                      TextSpan(text: book.durChapterTitle),
+                                    ],
+                                  ],
+                                ),
+                              ),
                             ),
+                            if (_showLastUpdateTime && book.lastCheckTime != null)
+                              Text(
+                                _formatUpdateTime(book.lastCheckTime!),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        // 紧凑模式第3行：最新章节
+                        if (book.latestChapterTitle.isNotEmpty)
+                          Row(
+                            children: [
+                              Icon(Icons.auto_stories, size: 14,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(book.latestChapterTitle,
+                                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(fontSize: 13,
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                ),
+                              ),
+                            ],
+                          ),
+                      ] else ...[
+                        // 标准模式第2行：作者 | 更新时间
+                        Row(
+                          children: [
+                            Icon(Icons.person_outline, size: 14,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant),
                             const SizedBox(width: 4),
                             Expanded(
                               child: Text(
-                                book.author,
+                                book.author.isNotEmpty ? book.author : '未知作者',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -1294,67 +1370,46 @@ class _BookshelfPageState extends State<BookshelfPage> {
                                 ),
                               ),
                             ),
-                            // 更新时间（在作者后面）
                             if (_showLastUpdateTime && book.lastCheckTime != null)
-                              Padding(
-                                padding: const EdgeInsets.only(left: 6),
-                                child: Text(
-                                  _formatUpdateTime(book.lastCheckTime!),
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                  ),
+                              Text(
+                                _formatUpdateTime(book.lastCheckTime!),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                                 ),
                               ),
                           ],
                         ),
-                      ],
-                      const SizedBox(height: 4),
-                      // 阅读进度行（参考原版：13sp，带图标）
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.history,
-                            size: 14,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              book.durChapterTitle.isNotEmpty
-                                  ? book.durChapterTitle
-                                  : '未开始阅读',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        const SizedBox(height: 4),
+                        // 标准模式第3行：阅读进度
+                        Row(
+                          children: [
+                            Icon(Icons.history, size: 14,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                book.durChapterTitle.isNotEmpty ? book.durChapterTitle : '未开始阅读',
+                                maxLines: 1, overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 13,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                      if (!isCompact) ...[
+                          ],
+                        ),
                         const SizedBox(height: 4),
-                        // 最新章节行（参考原版：13sp，带图标）
+                        // 标准模式第4行：最新章节
                         if (book.latestChapterTitle.isNotEmpty)
                           Row(
                             children: [
-                              Icon(
-                                Icons.new_releases_outlined,
-                                size: 14,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
+                              Icon(Icons.auto_stories, size: 14,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant),
                               const SizedBox(width: 4),
                               Expanded(
-                                child: Text(
-                                  '最新: ${book.latestChapterTitle}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                  ),
+                                child: Text(book.latestChapterTitle,
+                                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(fontSize: 13,
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant),
                                 ),
                               ),
                             ],
@@ -1854,6 +1909,55 @@ class _BookshelfPageState extends State<BookshelfPage> {
           ),
         ],
       ),
+    );
+  }
+
+  /// 构建封面图片 - 接入封面配置（默认封面、WiFi限制、高清封面）
+  Widget _buildCoverImage(Book book, bool isDark, bool useDefault, {bool isList = false}) {
+    final coverConfig = CoverConfigService.instance;
+    final coverUrl = book.displayCoverUrl;
+
+    // 总是使用默认封面
+    if (useDefault) {
+      return coverConfig.buildDefaultCoverPlaceholder(
+        bookName: book.displayName,
+        bookAuthor: book.displayAuthor,
+        isDark: isDark,
+        borderRadius: isList ? null : BorderRadius.zero,
+      );
+    }
+
+    // 有网络封面
+    if (coverUrl.isNotEmpty) {
+      // 高清封面设置：非高清时使用缩略图缓存尺寸
+      final memCacheWidth = coverConfig.loadCoverHighQuality ? null : 240;
+      final maxWidthDiskCache = coverConfig.loadCoverHighQuality ? null : 320;
+
+      return CachedNetworkImage(
+        imageUrl: coverUrl,
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+        memCacheWidth: memCacheWidth,
+        maxWidthDiskCache: maxWidthDiskCache,
+        placeholder: (context, url) => coverConfig.buildDefaultCoverPlaceholder(
+          bookName: book.displayName,
+          bookAuthor: book.displayAuthor,
+          isDark: isDark,
+        ),
+        errorWidget: (context, url, error) => coverConfig.buildDefaultCoverPlaceholder(
+          bookName: book.displayName,
+          bookAuthor: book.displayAuthor,
+          isDark: isDark,
+        ),
+      );
+    }
+
+    // 无封面URL，显示默认封面占位
+    return coverConfig.buildDefaultCoverPlaceholder(
+      bookName: book.displayName,
+      bookAuthor: book.displayAuthor,
+      isDark: isDark,
     );
   }
 

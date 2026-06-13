@@ -10,6 +10,7 @@ import '../../models/book_source.dart';
 import '../../providers/discovery_provider.dart';
 import '../../services/book_source_import_service.dart';
 import '../../services/storage_service.dart';
+import '../../widgets/android_switch.dart';
 import 'book_source_edit_page.dart';
 import 'js_source_edit_page.dart';
 
@@ -1587,9 +1588,11 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
           ),
         ],
       ),
-      trailing: Switch(
+      trailing: AndroidSwitch(
         value: source.enabled,
         onChanged: (value) => _toggleSourceEnabled(source),
+        accentColor: Theme.of(context).colorScheme.secondary,
+        isDark: Theme.of(context).brightness == Brightness.dark,
       ),
       onTap: () => _showSourceDetail(source),
       onLongPress: () {
