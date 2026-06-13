@@ -213,7 +213,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
       arguments: {
         'bookUrl': widget.bookUrl,
         'chapterIndex': chapter.index,
-        'initialBook': _book,
+        'bookData': _book,
       },
     );
   }
@@ -587,7 +587,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
       arguments: {
         'bookUrl': widget.bookUrl,
         'chapterIndex': chapterIndex,
-        'initialBook': _book,
+        'bookData': _book,
       },
     );
   }

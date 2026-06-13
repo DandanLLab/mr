@@ -31,6 +31,7 @@ class ReaderControlOverlay extends StatefulWidget {
   final VoidCallback onShowDirectory;
   final VoidCallback onStartTts;
   final VoidCallback onShowSettings;
+  final VoidCallback? onOpenDetail;
   final ValueChanged<double> onSliderChanged;
   final ValueChanged<int> onSliderChangeEnd;
   final VoidCallback? onSliderChangeStart;
@@ -66,6 +67,7 @@ class ReaderControlOverlay extends StatefulWidget {
     required this.onSliderChanged,
     required this.onSliderChangeEnd,
     this.onSliderChangeStart,
+    this.onOpenDetail,
   });
 
   @override
@@ -144,14 +146,34 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
         _buildIconBtn(Icons.arrow_back, cs, tooltip: '返回', onTap: widget.onBack),
         const SizedBox(width: 8),
         Expanded(
-          child: Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-              color: cs.onSurface,
+          child: InkWell(
+            onTap: widget.onOpenDetail,
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  if (widget.onOpenDetail != null)
+                    Icon(
+                      Icons.chevron_right,
+                      color: cs.onSurface.withValues(alpha: 0.54),
+                      size: 20,
+                    ),
+                ],
+              ),
             ),
           ),
         ),

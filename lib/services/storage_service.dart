@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -187,7 +188,8 @@ class StorageService {
       return [];
     }
     return _bookshelfBox!.values
-        .map((e) => Map<String, dynamic>.from(e))
+        .where((e) => e is Map)
+        .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
   }
 
@@ -199,7 +201,15 @@ class StorageService {
     }
     final data = _bookshelfBox!.get(bookUrl);
     if (data == null) return null;
-    return Map<String, dynamic>.from(data);
+    if (data is Map) return Map<String, dynamic>.from(data);
+    if (data is String) {
+      try {
+        final decoded = jsonDecode(data);
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    }
+    debugPrint('⚠️ StorageService: bookshelf 数据类型异常: ${data.runtimeType}');
+    return null;
   }
 
   Future<void> updateBookProgress(String bookUrl, int durChapterIndex,
@@ -276,7 +286,8 @@ class StorageService {
       return [];
     }
     return _bookSourceBox!.values
-        .map((e) => Map<String, dynamic>.from(e))
+        .where((e) => e is Map)
+        .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
   }
 
@@ -288,7 +299,15 @@ class StorageService {
     }
     final data = _bookSourceBox!.get(sourceUrl);
     if (data == null) return null;
-    return Map<String, dynamic>.from(data);
+    if (data is Map) return Map<String, dynamic>.from(data);
+    if (data is String) {
+      try {
+        final decoded = jsonDecode(data);
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    }
+    debugPrint('⚠️ StorageService: bookSource 数据类型异常: ${data.runtimeType}');
+    return null;
   }
 
   Future<void> deleteBookSource(String sourceUrl) async {
@@ -336,7 +355,15 @@ class StorageService {
     }
     final data = _settingsBox!.get('readerConfig');
     if (data == null) return null;
-    return Map<String, dynamic>.from(data);
+    if (data is Map) return Map<String, dynamic>.from(data);
+    if (data is String) {
+      try {
+        final decoded = jsonDecode(data);
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    }
+    debugPrint('⚠️ StorageService: readerConfig 数据类型异常: ${data.runtimeType}');
+    return null;
   }
 
   Future<void> saveLegadoUrl(String url) async {
@@ -372,10 +399,9 @@ class StorageService {
     }
     return _cacheBox!.values
         .where((e) {
-          final map = e as Map?;
-          if (map == null) return false;
-          return map['bookUrl'] == bookUrl &&
-              map['chapterIndex'] == chapterIndex;
+          if (e is! Map) return false;
+          return e['bookUrl'] == bookUrl &&
+              e['chapterIndex'] == chapterIndex;
         })
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
@@ -388,9 +414,8 @@ class StorageService {
     }
     return _cacheBox!.values
         .where((e) {
-          final map = e as Map?;
-          if (map == null) return false;
-          return map['bookUrl'] == bookUrl;
+          if (e is! Map) return false;
+          return e['bookUrl'] == bookUrl;
         })
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
@@ -411,8 +436,8 @@ class StorageService {
     if (_settingsBox == null) return [];
     return _settingsBox!.values
         .where((e) {
-          final key = e as Map?;
-          return key != null && key.containsKey('pattern');
+          if (e is! Map) return false;
+          return e.containsKey('pattern');
         })
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();

@@ -7,12 +7,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:html/parser.dart' as html_parser;
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../models/book.dart';
 import '../../models/book_source.dart';
 import '../../models/chapter.dart';
+import '../../providers/bookshelf_provider.dart';
 import '../../routes/app_routes.dart';
 import '../../services/book_data_provider.dart';
 import '../../services/chapter_cache_service.dart';
@@ -21,6 +23,7 @@ import '../../services/reader_bookmark_service.dart';
 import '../../services/source_engine/analyze_url.dart';
 import '../../services/storage_service.dart';
 import '../../services/read_record_service.dart';
+import '../../widgets/change_source_sheet.dart';
 
 enum MangaReadMode { scroll, horizontal, japanese }
 
@@ -1237,6 +1240,12 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                         icon: Icon(Icons.refresh, color: _menuForeground),
                         tooltip: '刷新',
                       ),
+                      if (_book?.originType == BookOriginType.online)
+                        IconButton(
+                          onPressed: _showChangeSourceDialog,
+                          icon: Icon(Icons.swap_horiz, color: _menuForeground),
+                          tooltip: '换源',
+                        ),
                       PopupMenuButton<String>(
                         icon: Icon(Icons.more_vert, color: _menuForeground),
                         tooltip: '更多',
@@ -1643,6 +1652,75 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       context,
       AppRoutes.detail,
       arguments: {'bookUrl': book.bookUrl, 'bookData': book},
+    );
+  }
+
+  void _showChangeSourceDialog() {
+    _disableAutoPaging();
+    setState(() => _showMenu = false);
+    
+    if (_book == null || _book!.originType != BookOriginType.online) {
+      _showMessage('本地书籍不支持换源');
+      return;
+    }
+    
+    ChangeSourceSheet.show(
+      context: context,
+      bookName: _book!.displayName,
+      bookAuthor: _book!.displayAuthor,
+      currentSourceUrl: _book!.sourceUrl,
+      currentSourceName: _book!.sourceName,
+      onSourceSelected: (sourceUrl, sourceName, bookData) async {
+        if (_book == null) return;
+        
+        try {
+          _showMessage('正在切换书源...');
+          
+          // 创建新的书籍对象
+          final newBook = _book!.copyWith(
+            sourceUrl: sourceUrl,
+            sourceName: sourceName,
+            bookUrl: bookData['bookUrl'] ?? _book!.bookUrl,
+            name: bookData['name'] ?? _book!.name,
+            author: bookData['author'] ?? _book!.author,
+            coverUrl: bookData['coverUrl'] ?? _book!.coverUrl,
+            intro: bookData['intro'] ?? _book!.intro,
+            lastChapter: bookData['lastChapter'] ?? _book!.lastChapter,
+          );
+          
+          // 获取新书源的目录
+          _dataProvider = createBookDataProvider(newBook);
+          final chapters = await _dataProvider!.getChapterList(newBook);
+          
+          // 更新书籍
+          final updatedBook = newBook.copyWith(
+            totalChapterNum: chapters.length,
+          );
+          
+          // 保存到书架
+          StorageService.instance.addToBookshelf(updatedBook.toJson());
+          context.read<BookshelfProvider>().loadBooks();
+          
+          // 更新状态并重新加载
+          setState(() {
+            _book = updatedBook;
+            _chapters = chapters;
+            _currentChapterIndex = 0;
+            _currentPageIndex = 0;
+            _currentGlobalIndex = 0;
+          });
+          
+          _loadChapter();
+          
+          if (mounted) {
+            _showMessage('已切换到 $sourceName');
+          }
+        } catch (e) {
+          if (mounted) {
+            _showMessage('换源失败: $e');
+          }
+        }
+      },
     );
   }
 

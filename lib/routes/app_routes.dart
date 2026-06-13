@@ -119,30 +119,54 @@ class AppRoutes {
       case search:
         return AppPageRoute(builder: (_) => const SearchPage());
       case detail:
-        final args = settings.arguments as Map<String, dynamic>?;
-        final bookData = args?['bookData'];
+        final args = settings.arguments;
+        Map<String, dynamic>? argsMap;
+        if (args is Map<String, dynamic>) {
+          argsMap = args;
+        } else if (args is Map) {
+          argsMap = Map<String, dynamic>.from(args);
+        }
+        final bookData = argsMap?['bookData'];
+        Book? initialBook;
+        if (bookData is Book) {
+          initialBook = bookData;
+        } else if (bookData is Map) {
+          try {
+            initialBook = Book.fromJson(Map<String, dynamic>.from(bookData));
+          } catch (e) {
+            debugPrint('Book.fromJson error: $e');
+          }
+        }
         return AppPageRoute(
           builder: (_) => DetailPage(
-            bookUrl: args?['bookUrl'] ?? args?['bookId'] ?? '',
-            initialBook: bookData is Book
-                ? bookData
-                : bookData is Map
-                ? Book.fromJson(Map<String, dynamic>.from(bookData))
-                : null,
+            bookUrl: argsMap?['bookUrl'] ?? argsMap?['bookId'] ?? '',
+            initialBook: initialBook,
           ),
         );
       case novelReader:
-        final args = settings.arguments as Map<String, dynamic>?;
-        final bookData = args?['bookData'];
+        final args = settings.arguments;
+        Map<String, dynamic>? argsMap;
+        if (args is Map<String, dynamic>) {
+          argsMap = args;
+        } else if (args is Map) {
+          argsMap = Map<String, dynamic>.from(args);
+        }
+        final bookData = argsMap?['bookData'];
+        Book? initialBook;
+        if (bookData is Book) {
+          initialBook = bookData;
+        } else if (bookData is Map) {
+          try {
+            initialBook = Book.fromJson(Map<String, dynamic>.from(bookData));
+          } catch (e) {
+            debugPrint('Book.fromJson error: $e');
+          }
+        }
         return AppPageRoute(
           builder: (_) => NovelReaderPage(
-            bookUrl: args?['bookUrl'] ?? args?['bookId'] ?? '',
-            chapterIndex: args?['chapterIndex'] ?? 0,
-            initialBook: bookData is Book
-                ? bookData
-                : bookData is Map
-                ? Book.fromJson(Map<String, dynamic>.from(bookData))
-                : null,
+            bookUrl: argsMap?['bookUrl'] ?? argsMap?['bookId'] ?? '',
+            chapterIndex: argsMap?['chapterIndex'] ?? 0,
+            initialBook: initialBook,
           ),
         );
       case comicReader:
@@ -191,17 +215,29 @@ class AppRoutes {
           ),
         );
       case chapterList:
-        final args = settings.arguments as Map<String, dynamic>?;
-        final bookData = args?['bookData'];
+        final args = settings.arguments;
+        Map<String, dynamic>? argsMap;
+        if (args is Map<String, dynamic>) {
+          argsMap = args;
+        } else if (args is Map) {
+          argsMap = Map<String, dynamic>.from(args);
+        }
+        final bookData = argsMap?['bookData'];
+        Book? initialBook;
+        if (bookData is Book) {
+          initialBook = bookData;
+        } else if (bookData is Map) {
+          try {
+            initialBook = Book.fromJson(Map<String, dynamic>.from(bookData));
+          } catch (e) {
+            debugPrint('Book.fromJson error: $e');
+          }
+        }
         return AppPageRoute(
           builder: (_) => ChapterListPage(
-            bookUrl: args?['bookUrl'] ?? '',
-            currentChapterIndex: args?['currentChapterIndex'] ?? 0,
-            initialBook: bookData is Book
-                ? bookData
-                : bookData is Map
-                ? Book.fromJson(Map<String, dynamic>.from(bookData))
-                : null,
+            bookUrl: argsMap?['bookUrl'] ?? '',
+            currentChapterIndex: argsMap?['currentChapterIndex'] ?? 0,
+            initialBook: initialBook,
           ),
         );
       case internalBrowser:

@@ -19,6 +19,8 @@ import '../../services/read_record_service.dart';
 import '../../widgets/reader/reader_control_overlay.dart';
 import '../../widgets/reader/reader_settings_sheet.dart';
 import '../../widgets/reader/reader_tts_bar.dart';
+import '../../widgets/change_source_sheet.dart';
+import '../../routes/app_routes.dart';
 
 class NovelReaderPage extends StatefulWidget {
   final String bookUrl;
@@ -583,7 +585,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               ReaderControlOverlay(
                 bookName: _book?.name ?? '',
                 chapterTitle: _chapterTitle,
-                sourceName: '', // 暂时为空
+                sourceName: _book?.sourceName ?? (_book?.originType == BookOriginType.local ? '本地书籍' : ''),
                 currentChapter: _currentChapterIndex,
                 totalChapters: _totalChapters,
                 hasBookmark: _hasBookmark,
@@ -593,7 +595,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                 isNightMode: provider.isNightMode,
                 sliderValue: _sliderValue,
                 onBack: () => Navigator.pop(context),
-                onChangeSource: () {},
+                onChangeSource: _showChangeSourceDialog,
+                onOpenDetail: _openBookDetail,
                 onRefresh: () {
                   _loadChapterContent();
                 },
@@ -800,9 +803,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   Widget _buildChapterContent(
       ReaderProvider provider, String content, String title) {
+    final sourceName = _book?.sourceName ?? (_book?.originType == BookOriginType.local ? '本地书籍' : '');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // 章节标题
         Text(
           title,
           style: TextStyle(
@@ -814,8 +819,59 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                 provider.fontFamily.isNotEmpty ? provider.fontFamily : null,
           ),
         ),
+        // 书源信息（仅在在线书籍时显示）
+        if (_book?.originType == BookOriginType.online && sourceName.isNotEmpty)
+          Padding(
+            padding: EdgeInsets.only(top: provider.paragraphSpacing * 0.5),
+            child: Text(
+              '来源: $sourceName',
+              style: TextStyle(
+                fontSize: provider.fontSize - 2,
+                color: provider.textColor.withValues(alpha: 0.6),
+                height: provider.lineHeight,
+                fontFamily:
+                    provider.fontFamily.isNotEmpty ? provider.fontFamily : null,
+              ),
+            ),
+          ),
         SizedBox(height: provider.paragraphSpacing),
         _buildRichContent(provider, content),
+        // 正文末尾书源信息
+        if (_book?.originType == BookOriginType.online && sourceName.isNotEmpty)
+          Padding(
+            padding: EdgeInsets.only(top: provider.paragraphSpacing * 2),
+            child: Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 8,
+              ),
+              decoration: BoxDecoration(
+                color: provider.textColor.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.source_outlined,
+                    size: 14,
+                    color: provider.textColor.withValues(alpha: 0.6),
+                  ),
+                  SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      '本书来自「$sourceName」',
+                      style: TextStyle(
+                        fontSize: provider.fontSize - 3,
+                        color: provider.textColor.withValues(alpha: 0.6),
+                        height: provider.lineHeight,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -1184,14 +1240,16 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   Widget _buildPageContent(ReaderProvider provider, String pageText) {
+    final sourceName = _book?.sourceName ?? (_book?.originType == BookOriginType.local ? '本地书籍' : '');
+    final isOnline = _book?.originType == BookOriginType.online;
     return Container(
       color: provider.backgroundColor,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: provider.paragraphSpacing),
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Chapter title on first page
+            // 章节标题
             Text(
               _chapterTitle,
               style: TextStyle(
@@ -1203,8 +1261,56 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                     provider.fontFamily.isNotEmpty ? provider.fontFamily : null,
               ),
             ),
+            // 书源信息（仅在在线书籍时显示）
+            if (isOnline && sourceName.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.only(top: provider.paragraphSpacing * 0.5),
+                child: Text(
+                  '来源: $sourceName',
+                  style: TextStyle(
+                    fontSize: provider.fontSize - 2,
+                    color: provider.textColor.withValues(alpha: 0.6),
+                    height: provider.lineHeight,
+                    fontFamily:
+                        provider.fontFamily.isNotEmpty ? provider.fontFamily : null,
+                  ),
+                ),
+              ),
             SizedBox(height: provider.paragraphSpacing),
             _buildRichContent(provider, pageText),
+            // 正文末尾书源信息（仅在最后一页显示）
+            if (isOnline && sourceName.isNotEmpty && _currentPage == _pages.length - 1)
+              Padding(
+                padding: EdgeInsets.only(top: provider.paragraphSpacing * 2),
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: provider.textColor.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.source_outlined,
+                        size: 14,
+                        color: provider.textColor.withValues(alpha: 0.6),
+                      ),
+                      SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          '本书来自「$sourceName」',
+                          style: TextStyle(
+                            fontSize: provider.fontSize - 3,
+                            color: provider.textColor.withValues(alpha: 0.6),
+                            height: provider.lineHeight,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -1740,6 +1846,90 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   // ==================== Dialogs ====================
+
+  void _showChangeSourceDialog() {
+    _hideMenu();
+    if (_book == null || _book!.originType != BookOriginType.online) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('本地书籍不支持换源')),
+      );
+      return;
+    }
+    
+    ChangeSourceSheet.show(
+      context: context,
+      bookName: _book!.displayName,
+      bookAuthor: _book!.displayAuthor,
+      currentSourceUrl: _book!.sourceUrl,
+      currentSourceName: _book!.sourceName,
+      onSourceSelected: (sourceUrl, sourceName, bookData) async {
+        if (_book == null) return;
+        
+        try {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('正在切换书源...')),
+          );
+          
+          // 创建新的书籍对象
+          final newBook = _book!.copyWith(
+            sourceUrl: sourceUrl,
+            sourceName: sourceName,
+            bookUrl: bookData['bookUrl'] ?? _book!.bookUrl,
+            name: bookData['name'] ?? _book!.name,
+            author: bookData['author'] ?? _book!.author,
+            coverUrl: bookData['coverUrl'] ?? _book!.coverUrl,
+            intro: bookData['intro'] ?? _book!.intro,
+            lastChapter: bookData['lastChapter'] ?? _book!.lastChapter,
+          );
+          
+          // 获取新书源的目录
+          _dataProvider = createBookDataProvider(newBook);
+          final chapters = await _dataProvider!.getChapterList(newBook);
+          
+          // 更新书籍
+          final updatedBook = newBook.copyWith(
+            totalChapterNum: chapters.length,
+          );
+          
+          // 保存到书架
+          StorageService.instance.addToBookshelf(updatedBook.toJson());
+          context.read<BookshelfProvider>().loadBooks();
+          
+          // 更新状态并重新加载内容
+          setState(() {
+            _book = updatedBook;
+            _chapters = chapters;
+            _totalChapters = chapters.length;
+            _currentChapterIndex = 0; // 切换书源后从第一章开始
+          });
+          
+          _loadChapterContent();
+          
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('已切换到 $sourceName')),
+            );
+          }
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('换源失败: $e')),
+            );
+          }
+        }
+      },
+    );
+  }
+
+  void _openBookDetail() {
+    if (_book == null) return;
+    _hideMenu();
+    Navigator.pushNamed(
+      context,
+      AppRoutes.detail,
+      arguments: {'bookUrl': _book!.bookUrl, 'bookData': _book},
+    );
+  }
 
   void _showChapterList() {
     _hideMenu();
