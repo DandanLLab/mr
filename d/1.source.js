@@ -152,13 +152,15 @@ function toc(result) {
 function nextTocUrl(result) {
   var html = result;
 
-  // 优先: option 的 value 属性（空选择器=从根元素取属性）
+  // 优先: option 的 value 属性
   var options = select(html, "option");
   var urls = [];
   for (var i = 0; i < options.length; i++) {
     var val = getAttr(options[i], "", "value") || "";
     if (val && urls.indexOf(val) < 0) urls.push(val);
   }
+  // 排除当前页URL（第一页通常是 /book/xxx/ 格式，不含 _2 _3 等后缀）
+  urls = urls.filter(function(u) { return !u.match(/\/\d+\/$/); });
   if (urls.length > 0) return urls;
 
   // 备选: 文本含"下一页"的链接

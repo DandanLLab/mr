@@ -190,8 +190,33 @@ function content(result) {
 
   /// 提取 // @key value 格式的元数据
   static String? _extractMeta(String code, String key) {
-    final m = RegExp('//\\s*@' + key + r'\s+(.+)$', multiLine: true).firstMatch(code);
-    return m?.group(1)?.trim();
+    final lines = code.split('\n');
+    final buffer = StringBuffer();
+    bool collecting = false;
+
+    for (final line in lines) {
+      final trimmed = line.trim();
+      if (!collecting) {
+        final m = RegExp('^//\\s*@' + key + r'\s+(.*)$').firstMatch(trimmed);
+        if (m != null) {
+          collecting = true;
+          final rest = m.group(1)?.trim() ?? '';
+          if (rest.isNotEmpty) buffer.write(rest);
+        }
+      } else {
+        if (trimmed.startsWith('//')) {
+          final content = trimmed.substring(2).trim();
+          if (RegExp(r'^@\w+').hasMatch(content)) break;
+          buffer.writeln();
+          buffer.write(content);
+        } else {
+          break;
+        }
+      }
+    }
+
+    final result = buffer.toString().trim();
+    return result.isEmpty ? null : result;
   }
 
   Future<void> _loadExistingSource() async {

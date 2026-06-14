@@ -5,6 +5,8 @@ import 'package:dio/dio.dart';
 
 import '../models/book_source.dart';
 import '../models/rules/book_info_rule.dart';
+import '../models/rules/search_rule.dart';
+import '../models/rules/explore_rule.dart';
 import '../models/rules/toc_rule.dart';
 import '../models/rules/content_rule.dart';
 import 'storage_service.dart';
@@ -102,6 +104,13 @@ class BookSourceImportService {
     final hasBookInfo = RegExp(r'function\s+bookInfo\s*\(').hasMatch(jsCodeTrimmed);
     final hasToc = RegExp(r'function\s+toc\s*\(').hasMatch(jsCodeTrimmed);
     final hasContent = RegExp(r'function\s+content\s*\(').hasMatch(jsCodeTrimmed);
+    final hasNextTocUrl = RegExp(r'function\s+nextTocUrl\s*\(').hasMatch(jsCodeTrimmed);
+    final hasNextContentUrl = RegExp(r'function\s+nextContentUrl\s*\(').hasMatch(jsCodeTrimmed);
+
+    // 提取元数据注释
+    final searchUrlMeta = _extractMeta(jsCodeTrimmed, 'searchUrl');
+    final exploreUrlMeta = _extractMeta(jsCodeTrimmed, 'exploreUrl');
+    final headerMeta = _extractMeta(jsCodeTrimmed, 'header');
 
     final source = BookSource(
       bookSourceUrl: url,
@@ -110,11 +119,51 @@ class BookSourceImportService {
       jsLib: jsCodeTrimmed,
       engine: 'quickjs',
       sourceFormat: 'js',
-      searchUrl: hasSearch ? '<js>search(result)</js>' : null,
-      exploreUrl: hasExplore ? '<js>explore(result)</js>' : null,
-      ruleBookInfo: hasBookInfo ? BookInfoRule(init: '<js>bookInfo(result)</js>') : null,
-      ruleToc: hasToc ? TocRule(chapterList: '<js>toc(result)</js>') : null,
-      ruleContent: hasContent ? ContentRule(content: '<js>content(result)</js>') : null,
+      header: headerMeta,
+      searchUrl: searchUrlMeta ?? '',
+      exploreUrl: exploreUrlMeta ?? '',
+      ruleSearch: hasSearch ? SearchRule(
+        bookList: '<js>search(key, page, result)</js>',
+        name: '\$.name',
+        author: '\$.author',
+        bookUrl: '\$.bookUrl',
+        coverUrl: '\$.coverUrl',
+        kind: '\$.kind',
+        lastChapter: '\$.lastChapter',
+        intro: '\$.intro',
+      ) : null,
+      ruleExplore: hasExplore ? ExploreRule(
+        bookList: '<js>explore(baseUrl, result)</js>',
+        name: '\$.name',
+        author: '\$.author',
+        bookUrl: '\$.bookUrl',
+        coverUrl: '\$.coverUrl',
+        kind: '\$.kind',
+        lastChapter: '\$.lastChapter',
+        intro: '\$.intro',
+      ) : null,
+      ruleBookInfo: hasBookInfo ? BookInfoRule(
+        init: '<js>bookInfo(result)</js>',
+        name: '\$.name',
+        author: '\$.author',
+        coverUrl: '\$.coverUrl',
+        intro: '\$.intro',
+        kind: '\$.kind',
+        lastChapter: '\$.lastChapter',
+        tocUrl: '\$.tocUrl',
+        wordCount: '\$.wordCount',
+      ) : null,
+      ruleToc: hasToc ? TocRule(
+        chapterList: '<js>toc(result)</js>',
+        chapterName: '\$.name',
+        chapterUrl: '\$.url',
+        isVolume: '\$.isVolume',
+        nextTocUrl: hasNextTocUrl ? '<js>nextTocUrl(result)</js>' : null,
+      ) : null,
+      ruleContent: hasContent ? ContentRule(
+        content: '<js>content(result)</js>',
+        nextContentUrl: hasNextContentUrl ? '<js>nextContentUrl(result)</js>' : null,
+      ) : null,
     );
 
     var added = 0;
@@ -233,5 +282,40 @@ class BookSourceImportService {
       ),
     );
     return response.data ?? '';
+  }
+
+  /// 从 JS 书源代码中提取 @key 元数据注释
+  /// 支持多行：从 @key 行开始，收集后续以 // 开头的连续注释行
+  static String? _extractMeta(String code, String key) {
+    final lines = code.split('\n');
+    final buffer = StringBuffer();
+    bool collecting = false;
+
+    for (final line in lines) {
+      final trimmed = line.trim();
+      if (!collecting) {
+        final m = RegExp('^//\\s*@' + key + r'\s+(.*)$').firstMatch(trimmed);
+        if (m != null) {
+          collecting = true;
+          final rest = m.group(1)?.trim() ?? '';
+          if (rest.isNotEmpty) buffer.write(rest);
+        }
+      } else {
+        // 继续收集以 // 开头的连续注释行
+        if (trimmed.startsWith('//')) {
+          final content = trimmed.substring(2).trim();
+          // 遇到新的 @key 标记则停止
+          if (RegExp(r'^@\w+').hasMatch(content)) break;
+          buffer.writeln();
+          buffer.write(content);
+        } else {
+          // 非注释行，停止收集
+          break;
+        }
+      }
+    }
+
+    final result = buffer.toString().trim();
+    return result.isEmpty ? null : result;
   }
 }
