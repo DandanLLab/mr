@@ -1475,28 +1475,67 @@ class _ContentEditPage extends StatefulWidget {
 
 class _ContentEditPageState extends State<_ContentEditPage> {
   late TextEditingController _controller;
+  final ScrollController _scrollController = ScrollController();
+  final ScrollController _lineNumberController = ScrollController();
   String _searchKeyword = '';
+  String _replaceKeyword = '';
   int _currentIndex = -1;
   final List<int> _matchPositions = [];
   String _originalContent = '';
   bool _showSearchPanel = false;
+  bool _showReplace = false;
+  int _lineCount = 1;
+  int _cursorLine = 1;
+  int _cursorCol = 1;
 
   @override
   void initState() {
     super.initState();
     _originalContent = widget.content;
     _controller = TextEditingController(text: widget.content);
+    _controller.addListener(_updateCursorInfo);
+    _updateLineCount();
   }
 
   @override
   void dispose() {
+    _controller.removeListener(_updateCursorInfo);
     _controller.dispose();
+    _scrollController.dispose();
+    _lineNumberController.dispose();
     super.dispose();
+  }
+
+  void _updateCursorInfo() {
+    final text = _controller.text;
+    final offset = _controller.selection.baseOffset;
+    if (offset < 0) return;
+    final beforeCursor = text.substring(0, offset);
+    final line = '\n'.allMatches(beforeCursor).length + 1;
+    final lastNewline = beforeCursor.lastIndexOf('\n');
+    final col = offset - lastNewline;
+    if (_cursorLine != line || _cursorCol != col) {
+      setState(() {
+        _cursorLine = line;
+        _cursorCol = col;
+      });
+    }
+    _updateLineCount();
+  }
+
+  void _updateLineCount() {
+    final count = '\n'.allMatches(_controller.text).length + 1;
+    if (_lineCount != count) {
+      setState(() {
+        _lineCount = count;
+      });
+    }
   }
 
   void _toggleSearchPanel() {
     setState(() {
       _showSearchPanel = !_showSearchPanel;
+      _showReplace = false;
       if (!_showSearchPanel) {
         _clearSearchHighlight();
       }
@@ -1545,8 +1584,22 @@ class _ContentEditPageState extends State<_ContentEditPage> {
   void _scrollToMatch(int index) {
     if (index < 0 || index >= _matchPositions.length) return;
     final pos = _matchPositions[index];
-    // 简单滚动到位置
     _controller.selection = TextSelection.collapsed(offset: pos);
+  }
+
+  void _replaceCurrent() {
+    if (_matchPositions.isEmpty || _currentIndex < 0 || _replaceKeyword.isEmpty) return;
+    final pos = _matchPositions[_currentIndex];
+    final text = _controller.text;
+    _controller.text = text.substring(0, pos) + _replaceKeyword + text.substring(pos + _searchKeyword.length);
+    _performSearch(_searchKeyword);
+  }
+
+  void _replaceAll() {
+    if (_searchKeyword.isEmpty || _replaceKeyword.isEmpty) return;
+    final text = _controller.text;
+    _controller.text = text.replaceAll(_searchKeyword, _replaceKeyword);
+    _performSearch(_searchKeyword);
   }
 
   void _save() {
@@ -1573,8 +1626,60 @@ class _ContentEditPageState extends State<_ContentEditPage> {
     );
   }
 
+  void _formatJson() {
+    try {
+      final decoded = jsonDecode(_controller.text);
+      final formatted = const JsonEncoder.withIndent('  ').convert(decoded);
+      _controller.text = formatted;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('格式化成功')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('格式化失败: $e')),
+      );
+    }
+  }
+
+  /// 构建行号
+  Widget _buildLineNumbers() {
+    final lineHeight = 18.0;
+    return Container(
+      width: 48,
+      color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+      child: ListView.builder(
+        controller: _lineNumberController,
+        itemCount: _lineCount,
+        itemBuilder: (context, index) {
+          final lineNum = index + 1;
+          final isCurrentLine = lineNum == _cursorLine;
+          return Container(
+            height: lineHeight,
+            alignment: Alignment.centerRight,
+            padding: const EdgeInsets.only(right: 8),
+            child: Text(
+              '$lineNum',
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 11,
+                color: isCurrentLine
+                    ? Theme.of(context).colorScheme.primary
+                    : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
+                fontWeight: isCurrentLine ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final editorBg = isDark ? const Color(0xFF1E1E1E) : const Color(0xFFFAFAFA);
+    final gutterBorder = isDark ? const Color(0xFF333333) : const Color(0xFFE0E0E0);
+
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.title),
@@ -1583,7 +1688,13 @@ class _ContentEditPageState extends State<_ContentEditPage> {
           IconButton(
             icon: const Icon(Icons.search),
             onPressed: _toggleSearchPanel,
-            tooltip: '搜索',
+            tooltip: '搜索/替换',
+          ),
+          // 格式化
+          IconButton(
+            icon: const Icon(Icons.format_align_left),
+            onPressed: _formatJson,
+            tooltip: '格式化JSON',
           ),
           // 保存
           IconButton(
@@ -1599,10 +1710,8 @@ class _ContentEditPageState extends State<_ContentEditPage> {
               switch (value) {
                 case 'reset':
                   _reset();
-                  break;
                 case 'copy_all':
                   _copyAll();
-                  break;
               }
             },
             itemBuilder: (context) => [
@@ -1622,37 +1731,17 @@ class _ContentEditPageState extends State<_ContentEditPage> {
       ),
       body: Column(
         children: [
-          // 搜索面板
+          // 搜索/替换面板
           if (_showSearchPanel)
             Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: Theme.of(context).cardColor,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 4,
-                  ),
-                ],
+                border: Border(bottom: BorderSide(color: gutterBorder)),
               ),
               child: Column(
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          _matchPositions.isEmpty
-                              ? (_searchKeyword.isEmpty ? '' : '未找到')
-                              : '${_currentIndex + 1}/${_matchPositions.length}',
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: _toggleSearchPanel,
-                        iconSize: 20,
-                      ),
-                    ],
-                  ),
+                  // 搜索行
                   Row(
                     children: [
                       Expanded(
@@ -1661,35 +1750,181 @@ class _ContentEditPageState extends State<_ContentEditPage> {
                             hintText: '搜索',
                             isDense: true,
                             border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.search, size: 18),
                           ),
                           onSubmitted: _performSearch,
                           onChanged: _performSearch,
                         ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.arrow_upward),
-                        onPressed: () => _navigateToMatch(-1),
+                      const SizedBox(width: 4),
+                      Text(
+                        _matchPositions.isEmpty
+                            ? (_searchKeyword.isEmpty ? '' : '无匹配')
+                            : '${_currentIndex + 1}/${_matchPositions.length}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                        ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.arrow_downward),
+                        icon: const Icon(Icons.keyboard_arrow_up),
+                        onPressed: () => _navigateToMatch(-1),
+                        iconSize: 20,
+                        tooltip: '上一个',
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.keyboard_arrow_down),
                         onPressed: () => _navigateToMatch(1),
+                        iconSize: 20,
+                        tooltip: '下一个',
+                      ),
+                      IconButton(
+                        icon: Icon(_showReplace ? Icons.expand_less : Icons.expand_more),
+                        onPressed: () => setState(() => _showReplace = !_showReplace),
+                        iconSize: 20,
+                        tooltip: '替换',
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: _toggleSearchPanel,
+                        iconSize: 20,
                       ),
                     ],
+                  ),
+                  // 替换行
+                  if (_showReplace) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            decoration: const InputDecoration(
+                              hintText: '替换为',
+                              isDense: true,
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.find_replace, size: 18),
+                            ),
+                            onChanged: (v) => _replaceKeyword = v,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        TextButton(
+                          onPressed: _replaceCurrent,
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            minimumSize: const Size(40, 32),
+                          ),
+                          child: const Text('替换'),
+                        ),
+                        TextButton(
+                          onPressed: _replaceAll,
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            minimumSize: const Size(40, 32),
+                          ),
+                          child: const Text('全部'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          // 编辑区域（行号 + 编辑器）
+          Expanded(
+            child: Container(
+              color: editorBg,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 行号
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border(right: BorderSide(color: gutterBorder)),
+                    ),
+                    child: _buildLineNumbers(),
+                  ),
+                  // 编辑器
+                  Expanded(
+                    child: TextField(
+                      controller: _controller,
+                      scrollController: _scrollController,
+                      maxLines: null,
+                      expands: true,
+                      decoration: InputDecoration(
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.only(left: 8, right: 12, top: 2, bottom: 24),
+                      ),
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 13,
+                        height: 18 / 13,
+                        color: isDark ? const Color(0xFFD4D4D4) : const Color(0xFF1E1E1E),
+                      ),
+                    ),
                   ),
                 ],
               ),
             ),
-          // 编辑区域
-          Expanded(
-            child: TextField(
-              controller: _controller,
-              maxLines: null,
-              expands: true,
-              decoration: const InputDecoration(
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.all(12),
-              ),
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+          ),
+          // 状态栏
+          Container(
+            height: 24,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+              border: Border(top: BorderSide(color: gutterBorder)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.code, size: 12, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5)),
+                const SizedBox(width: 4),
+                Text(
+                  '行 $_cursorLine, 列 $_cursorCol',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Text(
+                  '$_lineCount 行',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Text(
+                  '${_controller.text.length} 字符',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                  ),
+                ),
+                const Spacer(),
+                if (_matchPositions.isNotEmpty)
+                  Text(
+                    '${_matchPositions.length} 个匹配',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                const SizedBox(width: 8),
+                Text(
+                  'UTF-8',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
