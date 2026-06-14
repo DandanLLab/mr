@@ -1,0 +1,52 @@
+{
+  "bookSourceUrl": "https://m.00shu.la/",
+  "bookSourceName": "00小说网",
+  "bookSourceGroup": "写源",
+  "bookSourceType": 0,
+  "customOrder": 0,
+  "enabled": true,
+  "enabledExplore": true,
+  "enabledCookieJar": true,
+  "header": "@js:\nJSON.stringify({\n  'User-Agent': java.getWebViewUA(),\n  'sec-ch-ua-platform': \"\\\"Android\\\"\",\n  'origin': baseUrl,\n  'x-requested-with': \"cn.mujiankeji.mbrowser\",\n  'Referer': baseUrl,\n  'Accept-language': \"zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7\"\n})",
+  "bookSourceComment": "//2025.1.14 by.◎辞晨◎",
+  "lastUpdateTime": 0,
+  "respondTime": 180000,
+  "weight": 0,
+  "searchUrl": "/s.php,{\n \"body\": \"searchkey={{key}}&type=articlename\",\n \"charset\": \"utf-8\", \n \"method\": \"POST\"\n}",
+  "exploreUrl": "@js:\nsort=[];\npush=(title,url,type1,type2)=>sort.push({\n\t\ttitle: title,\n\t\turl: url,\n\t\tstyle: {\n\t\t\t\tlayout_flexGrow: type1,\n\t\t\t\tlayout_flexBasisPercent: type2\n\t\t\t}\n\t});\npush(\"全部🌊分类\",null,1,1)\npush(\"全本🌊小说\",`/full/{{page}}/`,1,0.35)\npush(\"最新🌊入库\",`/top/postdate_{{page}}/`,1,0.35)\n\tarList=[\"玄幻奇幻\",\"武侠仙侠\",\"都市言情\",\"历史军事\",\"游戏竞技\",\"科幻灵异\",\"其他类型\"]\n\tarList.map((tag,index)=>{\n\t\turl=`/sort/${index+1}_{{page}}/`;\n\t\tpush(tag, url, 1, 0.25);\n\t\t});\n//java.log(JSON.stringify(sort))\nJSON.stringify(sort)",
+  "ruleSearch": {
+    "bookList": ".sone",
+    "name": "a.0@text ",
+    "author": "a.1@text",
+    "bookUrl": "a.0@href",
+    "coverUrl": "a.0@href##\\/(\\d+)\\/$##$1###\n@js:\nbid = parseInt(result);\naid = parseInt(bid / 1000);\nresult = `/image/${aid}/${bid}/${bid}s.jpg`;\n"
+  },
+  "ruleExplore": {
+    "bookList": ".article&&.full_content",
+    "name": "h6@a.0@text&&a.0@text",
+    "author": ".author@text&&.p3@text",
+    "intro": ".simple@text",
+    "kind": ".p1@text",
+    "bookUrl": "a.0@href",
+    "coverUrl": "img@src"
+  },
+  "ruleBookInfo": {
+    "name": "[property=\"og:novel:book_name\"]@content",
+    "author": "[property=\"og:novel:author\"]@content",
+    "intro": "[property=\"og:description\"]@content##\\s",
+    "kind": "[property~=status|update_time]@content",
+    "lastChapter": "[property~=las?test_chapter_name]@content",
+    "coverUrl": "[property=\"og:image\"]@content"
+  },
+  "ruleToc": {
+    "chapterList": ".list_xm!0@li",
+    "chapterName": "a@text",
+    "chapterUrl": "a@href",
+    "nextTocUrl": "option@value||text.下一页@href"
+  },
+  "ruleContent": {
+    "content": "#novelcontent@html",
+    "nextContentUrl": "text.下一页@href",
+    "replaceRegex": "##.*最新网址.*|.*第\\d+\\/\\d+.*|上一章|下一章|返回目录|加入书签|下一页|上一页|.*本章未完.*"
+  }
+}

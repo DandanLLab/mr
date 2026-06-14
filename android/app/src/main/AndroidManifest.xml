@@ -55,7 +55,7 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
 
     <application
-        android:label="单书器"
+        android:label="mr"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true"

@@ -209,7 +209,7 @@ class EngineDispatcher {
     const candidates = [
       'tools/cors-proxy.js',
       '../tools/cors-proxy.js',
-      '/data/data/com.example.dan_shenqi/tools/cors-proxy.js',
+      '/data/data/com.mr.app/tools/cors-proxy.js',
     ];
     for (final candidate in candidates) {
       if (await File(candidate).exists()) return candidate;

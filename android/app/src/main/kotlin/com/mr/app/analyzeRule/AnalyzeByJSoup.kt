@@ -1,4 +1,4 @@
-package com.example.dan_shenqi.analyzeRule
+package com.mr.app.analyzeRule
 
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element

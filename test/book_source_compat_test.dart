@@ -1,9 +1,9 @@
-import 'package:dan_shenqi/models/book_source.dart';
-import 'package:dan_shenqi/models/book.dart';
-import 'package:dan_shenqi/services/book_data_provider.dart';
-import 'package:dan_shenqi/services/book_source_import_service.dart';
-import 'package:dan_shenqi/services/book_source_locator.dart';
-import 'package:dan_shenqi/services/source_engine/analyze_url.dart';
+import 'package:mr/models/book_source.dart';
+import 'package:mr/models/book.dart';
+import 'package:mr/services/book_data_provider.dart';
+import 'package:mr/services/book_source_import_service.dart';
+import 'package:mr/services/book_source_locator.dart';
+import 'package:mr/services/source_engine/analyze_url.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

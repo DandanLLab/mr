@@ -1195,6 +1195,8 @@ class JsEngine {
     final jsoupLiteCode = r"""
       var _JsoupLite = {
         _voidElements: ['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr'],
+        // 自动关闭：遇到同标签时自动关闭前一个（HTML5 隐式关闭规则）
+        _autoCloseTags: ['option','optgroup','li','tr','td','th','dt','dd','p','rt','rp'],
         _debug: false,
         _log: function(msg) { if (_JsoupLite._debug) console.log('[JsoupLite] ' + msg); },
         _hashStr: function(s) {
@@ -1262,6 +1264,21 @@ class JsEngine {
                 nodes.push(node);
               }
             } else {
+              // HTML5 隐式关闭：遇到同类标签时自动关闭前一个
+              // 例如：<option>A<option>B → <option>A</option><option>B
+              if (_JsoupLite._autoCloseTags.indexOf(tagName) >= 0) {
+                for (var si = stack.length - 1; si >= 0; si--) {
+                  if (stack[si].tag === tagName) {
+                    var closed = stack.splice(si)[0];
+                    if (si > 0 && stack.length > 0) {
+                      stack[si - 1].childNodes.push(closed);
+                    } else {
+                      nodes.push(closed);
+                    }
+                    break;
+                  }
+                }
+              }
               stack.push(node);
             }
           }

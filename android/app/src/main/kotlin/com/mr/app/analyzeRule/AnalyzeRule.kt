@@ -1,4 +1,4 @@
-package com.example.dan_shenqi.analyzeRule
+package com.mr.app.analyzeRule
 
 import android.util.Log
 import org.jsoup.nodes.Element

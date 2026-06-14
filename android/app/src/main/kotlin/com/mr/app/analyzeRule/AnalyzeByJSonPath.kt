@@ -1,4 +1,4 @@
-package com.example.dan_shenqi.analyzeRule
+package com.mr.app.analyzeRule
 
 import com.jayway.jsonpath.JsonPath
 import com.jayway.jsonpath.ReadContext

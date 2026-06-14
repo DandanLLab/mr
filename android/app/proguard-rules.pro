@@ -29,7 +29,7 @@
 -keepclassmembers class org.jsoup.** { *; }
 
 # Keep model classes for JSON serialization
--keep class com.example.dan_shenqi.models.** { *; }
+-keep class com.mr.app.models.** { *; }
 
 # Keep all serialization-related methods
 -keepclassmembers class * {

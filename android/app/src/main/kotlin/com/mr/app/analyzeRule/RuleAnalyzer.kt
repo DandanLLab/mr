@@ -1,4 +1,4 @@
-package com.example.dan_shenqi.analyzeRule
+package com.mr.app.analyzeRule
 
 /**
  * 通用的规则切分处理

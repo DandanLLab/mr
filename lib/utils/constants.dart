@@ -3,7 +3,7 @@ class Constants {
   static const String appSubtitle = '多媒体阅读器';
   static const String nojsVersion = '1.0.0';
   
-  static const String defaultCacheDir = 'dan_shenqi_cache';
+  static const String defaultCacheDir = 'mr_cache';
   static const int defaultConcurrentSearch = 5;
   static const int defaultCacheExpireDays = 7;
   

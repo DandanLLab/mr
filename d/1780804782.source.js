@@ -197,9 +197,9 @@ function nextContentUrl(result) {
   var html = result;
   var links = select(html, "a");
   for (var i = 0; i < links.length; i++) {
-    var text = selectFirst(links[i], "a") || "";
+    var text = selectFirst(links[i], "") || "";
     if (text.indexOf("下一") >= 0) {
-      return getAttr(links[i], "a", "href") || "";
+      return getAttr(links[i], "", "href") || "";
     }
   }
   return "";

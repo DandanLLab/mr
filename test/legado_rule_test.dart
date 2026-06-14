@@ -1,4 +1,4 @@
-import 'package:dan_shenqi/services/source_engine/analyze_rule.dart';
+import 'package:mr/services/source_engine/analyze_rule.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

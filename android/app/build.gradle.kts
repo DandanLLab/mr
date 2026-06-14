@@ -21,7 +21,7 @@ val nodeDownloadUrls = mapOf(
 )
 
 android {
-    namespace = "com.example.dan_shenqi"
+    namespace = "com.mr.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -38,7 +38,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.dan_shenqi"
+        applicationId = "com.mr.app"
         minSdk = 29
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

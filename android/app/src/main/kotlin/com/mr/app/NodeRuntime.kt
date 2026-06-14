@@ -1,4 +1,4 @@
-package com.example.dan_shenqi
+package com.mr.app
 
 import android.content.Context
 import android.util.Log
@@ -41,7 +41,7 @@ class NodeRuntime(private val context: Context) {
      * 获取 Node.js 可执行文件路径
      *
      * Android 安装 APK 时自动将 jniLibs/arm64-v8a/libnode.so
-     * 解压到 /data/data/com.example.dan_shenqi/lib/arm64/libnode.so
+     * 解压到 /data/data/com.mr.app/lib/arm64/libnode.so
      * 并设置可执行权限，直接使用即可
      */
     fun getNodePath(): String? {

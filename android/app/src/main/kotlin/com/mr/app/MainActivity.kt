@@ -1,4 +1,4 @@
-package com.example.dan_shenqi
+package com.mr.app
 
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine

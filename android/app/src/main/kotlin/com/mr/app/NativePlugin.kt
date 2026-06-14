@@ -1,4 +1,4 @@
-package com.example.dan_shenqi
+package com.mr.app
 
 import android.app.Activity
 import android.content.Context
@@ -39,7 +39,7 @@ import javax.crypto.spec.SecretKeySpec
 class NativePlugin(private val context: Context) {
 
     companion object {
-        private const val CHANNEL = "com.example.dan_shenqi/native"
+        private const val CHANNEL = "com.mr.app/native"
         private const val TAG = "NativePlugin"
         private const val PREFS_NAME = "native_plugin_data"
 
@@ -546,7 +546,7 @@ class NativePlugin(private val context: Context) {
                 }
                 if (rule.isEmpty()) return content
                 try {
-                    val analyzeRule = com.example.dan_shenqi.analyzeRule.AnalyzeRule(
+                    val analyzeRule = com.mr.app.analyzeRule.AnalyzeRule(
                         content = content,
                         baseUrl = baseUrl
                     )
@@ -596,7 +596,7 @@ class NativePlugin(private val context: Context) {
                 }
                 if (rule.isEmpty()) return content
                 try {
-                    val analyzeRule = com.example.dan_shenqi.analyzeRule.AnalyzeRule(
+                    val analyzeRule = com.mr.app.analyzeRule.AnalyzeRule(
                         content = content,
                         baseUrl = baseUrl
                     )
@@ -646,7 +646,7 @@ class NativePlugin(private val context: Context) {
                 }
                 if (rule.isEmpty()) return cx.newArray(scope, 0)
                 try {
-                    val analyzeRule = com.example.dan_shenqi.analyzeRule.AnalyzeRule(
+                    val analyzeRule = com.mr.app.analyzeRule.AnalyzeRule(
                         content = content,
                         baseUrl = baseUrl
                     )
@@ -1557,8 +1557,8 @@ class NativePlugin(private val context: Context) {
         bookInfo: Map<String, Any?>? = null,
         chapterInfo: Map<String, Any?>? = null,
         nextChapterUrl: String? = null,
-    ): com.example.dan_shenqi.analyzeRule.AnalyzeRule {
-        val rule = com.example.dan_shenqi.analyzeRule.AnalyzeRule(content = content, baseUrl = baseUrl)
+    ): com.mr.app.analyzeRule.AnalyzeRule {
+        val rule = com.mr.app.analyzeRule.AnalyzeRule(content = content, baseUrl = baseUrl)
         // 对齐 legado：setRedirectUrl 设置 HTTP 重定向后的实际 URL，
         // 用于 getAbsoluteURL 拼接相对路径时作为基准。
         if (!redirectUrl.isNullOrEmpty()) {

@@ -10,7 +10,7 @@ class NativeChannel {
   NativeChannel._();
 
   static const MethodChannel _channel = MethodChannel(
-    'com.example.dan_shenqi/native',
+    'com.mr.app/native',
   );
 
   Future<double> getScreenBrightness() async {
