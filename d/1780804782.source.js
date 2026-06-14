@@ -144,6 +144,33 @@ function toc(result) {
   return chapters;
 }
 
+// ===== 目录下一页 =====
+// 原始规则: .page-item.4@a@href → 提取最大页码 → 生成所有分页URL
+function nextTocUrl(result) {
+  var html = result;
+  var maxPage = 1;
+
+  // 从分页链接中找最大页码
+  var pageLinks = select(html, ".page-item a");
+  for (var i = 0; i < pageLinks.length; i++) {
+    var href = getAttr(pageLinks[i], "a", "href") || "";
+    var match = href.match(/index_(\d+)\.html/);
+    if (match) {
+      var n = parseInt(match[1], 10);
+      if (n > maxPage) maxPage = n;
+    }
+  }
+
+  if (maxPage <= 1) return [];
+
+  // 生成第2页到最后一页的URL
+  var list = [];
+  for (var i = 2; i <= maxPage; i++) {
+    list.push("index_" + i + ".html");
+  }
+  return list;
+}
+
 // ===== 正文内容 =====
 function content(result) {
   var html = result;
@@ -162,4 +189,18 @@ function content(result) {
   }
 
   return text || "";
+}
+
+// ===== 正文下一页 =====
+// 原始规则: text.下一@href
+function nextContentUrl(result) {
+  var html = result;
+  var links = select(html, "a");
+  for (var i = 0; i < links.length; i++) {
+    var text = selectFirst(links[i], "a") || "";
+    if (text.indexOf("下一") >= 0) {
+      return getAttr(links[i], "a", "href") || "";
+    }
+  }
+  return "";
 }
