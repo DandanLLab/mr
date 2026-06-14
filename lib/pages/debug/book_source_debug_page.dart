@@ -881,10 +881,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
   String _protectUrl(String url) {
     // 在 URL 的 / . - : ? & = # 等字符与其后继字符之间插入 WORD JOINER (U+2060)
     // 阻止 Flutter ICU 引擎在这些字符后断行
-    return url.replaceAllMapped(
-      RegExp(r'([/.\-:?&=#])(.)'),
-      (m) => '${m[1]}\u2060${m[2]}',
-    );
+    return url;
   }
 
   void _showDebugLogDetail(String fullLine, String body) {
