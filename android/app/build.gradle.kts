@@ -4,21 +4,20 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// ===== Node.js 内置运行时配置 =====
+// ===== Node.js 内置运行时配置（已禁用 — 减少包体积）=====
+// 如需恢复，取消注释并运行 ./gradlew :app:assembleNodeRuntime
+/*
 val nodeVersion = "v25.9.0"
 val nodeBuildDir = layout.buildDirectory.dir("node-runtime").get().asFile
 val jniLibsDir = file("src/main/jniLibs")
 val assetsNodeDir = file("src/main/assets/node")
 val projectRoot = file("../..")
 
-// Node.js for Android 预编译二进制下载地址
-// 优先使用 unofficial-builds 的 musl 版本（静态链接，Android 兼容性更好）
-// 官方 linux-arm64 依赖 glibc，Android 上可能缺库；musl 版本无此问题
-// armeabi-v7a (32位ARM) 官方和非官方均不提供，旧设备不支持
 val nodeDownloadUrls = mapOf(
     "arm64-v8a" to "https://unofficial-builds.nodejs.org/download/release/${nodeVersion}/node-${nodeVersion}-linux-arm64-musl.tar.xz",
     "x86_64" to "https://unofficial-builds.nodejs.org/download/release/${nodeVersion}/node-${nodeVersion}-linux-x64-musl.tar.xz",
 )
+*/
 
 android {
     namespace = "com.mr.app"
@@ -57,10 +56,10 @@ android {
         }
     }
 
-    // 确保 jniLibs 中的 Node.js 二进制不被压缩
-    aaptOptions {
-        noCompress.add("so")
-    }
+    // Node.js 已禁用，不再需要 noCompress
+    // aaptOptions {
+    //     noCompress.add("so")
+    // }
 }
 
 dependencies {
@@ -86,24 +85,20 @@ flutter {
     source = "../.."
 }
 
-// ===== Node.js 硬编构建任务（手动运行） =====
-// 注意：不自动依赖 preBuild，避免无 tar/7z 时阻塞构建
-// 手动运行: ./gradlew :app:assembleNodeRuntime
-// 核心思路：将 Node.js 二进制重命名为 libnode.so 放入 jniLibs/
-// Android 安装 APK 时自动解压 native libs 到 /data/data/.../lib/
-// 并设置可执行权限，运行时直接启动，无需额外解压
+// ===== Node.js 构建任务（已禁用 — 减少包体积）=====
+// 如需恢复，取消注释并运行 ./gradlew :app:assembleNodeRuntime
+/*
+tasks.register("downloadNodeBinaries") { ... }
+tasks.register("copyNodeScripts") { ... }
+tasks.register("assembleNodeRuntime") { ... }
+*/
 
-/**
- * 下载 Node.js 预编译二进制，重命名为 libnode.so 放入 jniLibs
- *
- * 跨平台兼容：Windows/macOS/Linux 均可
- * 不阻塞构建：下载/解压失败只警告，不抛异常
- */
+// 保留原始任务定义供恢复参考（已注释）
+/*
 tasks.register("downloadNodeBinaries") {
     group = "node-runtime"
     description = "下载 Node.js 二进制到 jniLibs（伪装为 libnode.so）"
-    // 只在上游任务要求或有明确输出路径依赖时运行
-    outputs.upToDateWhen { true }  // 默认认为已是最新，不自动执行
+    outputs.upToDateWhen { true }
 
     doLast {
         val targetAbis = listOf("arm64-v8a")
@@ -114,7 +109,6 @@ tasks.register("downloadNodeBinaries") {
             val libNode = File(abiDir, "libnode.so")
             val versionFile = File(abiDir, ".node_version")
 
-            // 本地目录已有 libnode.so 就直接跳过下载
             if (libNode.exists() && libNode.length() > 0) {
                 logger.lifecycle("[Node.js] ${abi} 本地已存在 libnode.so (${libNode.length() / 1024 / 1024}MB)，跳过下载")
                 if (!versionFile.exists()) {
@@ -128,12 +122,10 @@ tasks.register("downloadNodeBinaries") {
             try {
                 val tarFile = File(abiDir, "node.tar.xz")
 
-                // 本地已有 node.tar.xz 就跳过下载，直接解压
                 if (tarFile.exists() && tarFile.length() > 0) {
                     logger.lifecycle("[Node.js] ${abi} 本地已存在 node.tar.xz (${tarFile.length() / 1024 / 1024}MB)，跳过下载，直接解压")
                 } else {
                     logger.lifecycle("[Node.js] 下载 ${abi}: ${url}")
-                    // 下载
                     ant.withGroovyBuilder {
                         "get"("src" to url, "dest" to tarFile, "verbose" to true)
                     }
@@ -144,13 +136,11 @@ tasks.register("downloadNodeBinaries") {
                     continue
                 }
 
-                // 解压（跨平台：优先用系统 tar，失败则用 7z/PowerShell）
                 logger.lifecycle("[Node.js] 解压 ${abi}...")
                 val muslSuffix = if (abi == "arm64-v8a") "arm64-musl" else "x64-musl"
                 val innerPath = "node-${nodeVersion}-linux-${muslSuffix}/bin/node"
                 var extracted = false
 
-                // 方法1：系统 tar（Linux/macOS/Git Bash）
                 if (!extracted) {
                     try {
                         val proc = ProcessBuilder(
@@ -169,10 +159,8 @@ tasks.register("downloadNodeBinaries") {
                     }
                 }
 
-                // 方法2：7z（Windows 常见）
                 if (!extracted) {
                     try {
-                        // 先全量解压
                         val proc = ProcessBuilder("7z", "x", tarFile.absolutePath, "-o${abiDir.absolutePath}", "-y")
                             .redirectErrorStream(true)
                             .start()
@@ -184,27 +172,20 @@ tasks.register("downloadNodeBinaries") {
                     }
                 }
 
-                // 方法3：PowerShell Expand-Archive（Windows，但只支持 zip）
-                // xz 格式不支持，跳过
-
-                // 清理 tar
                 tarFile.delete()
 
                 if (!extracted) {
-                    // 检查是否有部分解压的文件
                     val foundNode = abiDir.walk().find { it.name == "node" && it.isFile && it.length() > 1000000 }
                     if (foundNode != null) {
                         extracted = true
                     }
                 }
 
-                // 找到解压出来的 node 二进制，重命名为 libnode.so
                 val directNode = File(abiDir, "node")
                 if (directNode.exists() && directNode.isFile) {
                     directNode.renameTo(libNode)
                     logger.lifecycle("[Node.js] 重命名 node → libnode.so")
                 } else {
-                    // 在子目录中查找
                     abiDir.walk().find { it.name == "node" && it.isFile && it.length() > 1000000 }?.let { found ->
                         found.copyTo(libNode, overwrite = true)
                         found.delete()
@@ -216,14 +197,11 @@ tasks.register("downloadNodeBinaries") {
                     logger.warn("[Node.js] ${abi} 二进制未找到，Node.js 功能将不可用")
                     logger.warn("[Node.js] 请手动下载 ${url}")
                     logger.warn("[Node.js] 解压后提取 bin/node 重命名为 libnode.so 放入 ${abiDir.absolutePath}")
-                    // 不抛异常，不阻塞构建
                     continue
                 }
 
-                // 写入版本标记
                 versionFile.writeText(nodeVersion)
 
-                // 清理多余文件
                 abiDir.walk().filter { it.isFile && it.name != "libnode.so" && it.name != ".node_version" }.forEach {
                     it.delete()
                 }
@@ -235,15 +213,11 @@ tasks.register("downloadNodeBinaries") {
             } catch (e: Exception) {
                 logger.warn("[Node.js] ${abi} 处理失败: ${e.message}")
                 logger.warn("[Node.js] Node.js 功能将不可用，不影响其他功能")
-                // 不抛异常，不阻塞构建
             }
         }
     }
 }
 
-/**
- * 复制 JS 脚本到 assets（首次运行时解压到内部存储并缓存）
- */
 tasks.register("copyNodeScripts") {
     group = "node-runtime"
     description = "复制 JS 脚本到 Android assets 目录"
@@ -280,9 +254,6 @@ tasks.register("copyNodeScripts") {
     }
 }
 
-/**
- * 组装 Node.js 运行时
- */
 tasks.register("assembleNodeRuntime") {
     group = "node-runtime"
     description = "组装 Node.js 运行时（二进制→jniLibs + 脚本→assets）"
@@ -296,8 +267,7 @@ tasks.register("assembleNodeRuntime") {
     }
 }
 
-// 不自动依赖 preBuild，手动执行: ./gradlew :app:assembleNodeRuntime
-// 已注释，避免阻塞正常构建
 // tasks.named("preBuild") {
 //     dependsOn("assembleNodeRuntime")
 // }
+*/

@@ -48,15 +48,15 @@ void main() async {
     await ProxyService.instance.start();
   }
 
-  // 启动四引擎调度器（含 Node.js 进程，仅原生端）
-  if (!kIsWeb) {
-    try {
-      await EngineDispatcher.instance.startNodeProxy();
-      debugPrint('[四引擎] 状态:\n${EngineDispatcher.instance.statusSummary}');
-    } catch (e) {
-      debugPrint('[四引擎] Node.js 启动失败: $e');
-    }
-  }
+  // 启动四引擎调度器（Node.js 已禁用 — 减少包体积）
+  // if (!kIsWeb) {
+  //   try {
+  //     await EngineDispatcher.instance.startNodeProxy();
+  //     debugPrint('[四引擎] 状态:\n${EngineDispatcher.instance.statusSummary}');
+  //   } catch (e) {
+  //     debugPrint('[四引擎] Node.js 启动失败: $e');
+  //   }
+  // }
 
   runApp(const DanShenqiApp());
 }

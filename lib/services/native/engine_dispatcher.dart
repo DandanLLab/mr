@@ -94,14 +94,14 @@ class EngineDispatcher {
     ),
   ];
 
-  // ===== Node.js 进程启动 =====
+  // ===== Node.js 进程启动（已禁用 — 减少包体积）=====
 
+  /*
   /// 启动 Node.js 代理服务进程（优先使用内置 Node.js）
   Future<bool> startNodeProxy() async {
     if (kIsWeb || _nodeRunning) return _nodeRunning;
 
     try {
-      // 优先使用内置 Node.js（通过 NativeChannel，无需解压二进制）
       if (!kIsWeb) {
         debugPrint('[EngineDispatcher] 启动内置 Node.js...');
         final result = await NativeChannel.instance.nodeStartProxy();
@@ -119,7 +119,6 @@ class EngineDispatcher {
         debugPrint('[EngineDispatcher] 内置 Node.js 启动失败，尝试系统 Node.js...');
       }
 
-      // 降级：尝试系统安装的 Node.js
       final nodePath = await _findNodeExecutable();
       if (nodePath == null) {
         debugPrint('[EngineDispatcher] Node.js 不可用（内置和系统均未找到）');
@@ -166,7 +165,6 @@ class EngineDispatcher {
     }
   }
 
-  /// 停止 Node.js 进程
   void stopNodeProxy() {
     _nodeProcess?.kill();
     _nodeProcess = null;
@@ -175,9 +173,7 @@ class EngineDispatcher {
     _nodeApiPort = 0;
   }
 
-  /// 解析 Node.js 输出的端口信息
   void _parseNodeOutput(String data) {
-    // 格式: PROXY_PORT:12345 或 API_PORT:12346
     for (final line in data.split('\n')) {
       final trimmed = line.trim();
       if (trimmed.startsWith('PROXY_PORT:')) {
@@ -190,9 +186,7 @@ class EngineDispatcher {
     }
   }
 
-  /// 查找 Node.js 可执行文件
   Future<String?> _findNodeExecutable() async {
-    // Android 上 Node.js 不太可能存在，但可以检查
     const candidates = ['node', '/usr/local/bin/node', '/usr/bin/node'];
     for (final candidate in candidates) {
       try {
@@ -203,9 +197,7 @@ class EngineDispatcher {
     return null;
   }
 
-  /// 查找 cors-proxy.js 脚本
   Future<String?> _findCorsProxyScript() async {
-    // 尝试多个可能的路径
     const candidates = [
       'tools/cors-proxy.js',
       '../tools/cors-proxy.js',
@@ -216,6 +208,7 @@ class EngineDispatcher {
     }
     return null;
   }
+  */
 
   // ===== 统一调度 API =====
 

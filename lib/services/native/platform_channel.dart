@@ -538,10 +538,10 @@ class NativeChannel {
     }
   }
 
-  // ===== 内置 Node.js 运行时 =====
+  // ===== 内置 Node.js 运行时（已禁用 — 减少包体积）=====
 
+  /*
   /// 初始化内置 Node.js（解压二进制 + 脚本）
-  /// 返回 Node.js 可执行文件路径
   Future<String?> nodeSetup() async {
     try {
       return await _channel.invokeMethod<String>('nodeSetup');
@@ -550,8 +550,7 @@ class NativeChannel {
     }
   }
 
-  /// 启动内置 Node.js 代理服务（直接启动，无需解压）
-  /// 返回 { proxyPort, apiPort, running }
+  /// 启动内置 Node.js 代理服务
   Future<Map<String, dynamic>?> nodeStartProxy() async {
     try {
       final result = await _channel.invokeMethod<Map>('nodeStartProxy');
@@ -582,4 +581,5 @@ class NativeChannel {
       return null;
     }
   }
+  */
 }
