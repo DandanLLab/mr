@@ -630,6 +630,9 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
               _searchController.text = _textFx;
               _submitDebug(_textFx);
             },
+            onLongPress: _exploreKinds.length > 1
+                ? () => _showExploreKindSelector()
+                : null,
           ),
           const SizedBox(height: 14),
           Text('调试详情页>>输入详情页URL，如：', style: labelStyle),
@@ -688,6 +691,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
     String value, {
     bool fullWidth = false,
     VoidCallback? onTap,
+    VoidCallback? onLongPress,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final chipBgColor = isDark ? Colors.grey[800] : const Color(0xFFD9D9D9);
@@ -696,6 +700,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
     final width = fullWidth ? double.infinity : null;
     return GestureDetector(
       onTap: onTap ?? () => _fillExample(value),
+      onLongPress: onLongPress,
       child: Container(
         width: width,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -717,6 +722,47 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
     );
   }
 
+  /// 显示发现分类选择器
+  void _showExploreKindSelector() {
+    if (_exploreKinds.isEmpty) return;
+
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                '选择发现分类',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            const Divider(height: 1),
+            ..._exploreKinds.map((kind) => ListTile(
+              title: Text(kind.title),
+              subtitle: Text(
+                kind.url,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                setState(() {
+                  _textFx = '${kind.title}::${kind.url}';
+                });
+                _searchController.text = _textFx;
+                _submitDebug(_textFx);
+              },
+            )),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildLogLine(String line) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     
@@ -724,6 +770,10 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
     final match = RegExp(r'^\[(\d{2}:\d{2}\.\d{3})\]\s*(.*)$').firstMatch(line);
     final stamp = match?.group(1);
     final body = match?.group(2) ?? line;
+
+    if (body.startsWith('└\n')) {
+      return _buildContentLogLine(line, stamp, body.substring(2));
+    }
 
     // 默认颜色根据主题调整
     Color bodyColor = isDark ? Colors.grey[300]! : const Color(0xFF444444);
@@ -832,13 +882,59 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
     );
   }
 
+  Widget _buildContentLogLine(String line, String? stamp, String content) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final stampColor = isDark ? Colors.grey[500] : const Color(0xFFAAAAAA);
+    final textColor = isDark ? Colors.grey[200] : const Color(0xFF333333);
+    final bgColor = isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF7F7F7);
+    final borderColor = isDark ? Colors.grey[800]! : const Color(0xFFE0E0E0);
+
+    return GestureDetector(
+      onTap: () => _showDebugLogDetail(line, content),
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: borderColor),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (stamp != null) ...[
+                Text(
+                  '[$stamp] 正文内容',
+                  style: TextStyle(
+                    color: stampColor,
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                const SizedBox(height: 6),
+              ],
+              SelectableText(
+                content,
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.5,
+                  color: textColor,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   String _protectUrl(String url) {
     // 在 URL 的 / . - : ? & = # 等字符与其后继字符之间插入 WORD JOINER (U+2060)
     // 阻止 Flutter ICU 引擎在这些字符后断行
-    return url.replaceAllMapped(
-      RegExp(r'([/.\-:?&=#])(.)'),
-      (m) => '${m[1]}\u2060${m[2]}',
-    );
+    return url;
   }
 
   void _showDebugLogDetail(String fullLine, String body) {

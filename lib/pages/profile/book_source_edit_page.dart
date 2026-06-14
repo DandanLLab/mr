@@ -13,6 +13,7 @@ import '../../models/rules/content_rule.dart';
 import '../../services/storage_service.dart';
 import '../../services/cookie_service.dart';
 import '../../routes/app_routes.dart';
+import '../../widgets/keyboard_assist_toolbar.dart';
 
 /// 编辑字段实体
 class EditEntity {
@@ -39,7 +40,7 @@ class BookSourceEditPage extends StatefulWidget {
 }
 
 class _BookSourceEditPageState extends State<BookSourceEditPage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, KeyboardAssistCallback {
   late TabController _tabController;
 
   // 书源数据
@@ -71,6 +72,10 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
 
   // 缓存 TextEditingController
   final Map<String, TextEditingController> _controllers = {};
+
+  // 当前焦点的输入框
+  TextEditingController? _focusedController;
+  String? _focusedFieldKey;
 
   @override
   void initState() {
@@ -674,6 +679,9 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
     return WillPopScope(
       onWillPop: _onWillPop,
       child: Scaffold(
+        // 设置为 false，让键盘覆盖内容
+        // 辅助按键工具栏使用 Positioned 定位在键盘上方
+        resizeToAvoidBottomInset: false,
         appBar: AppBar(
           title: const Text('编辑书源', overflow: TextOverflow.visible, style: TextStyle(fontWeight: FontWeight.w500)),
           actions: [
@@ -828,39 +836,61 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
             ),
           ],
         ),
-        body: Column(
+        body: Stack(
           children: [
-            // 第一行选项：类型、启用、发现、自动保存Cookie
-            _buildOptionsRow1(),
-            // 第二行选项：事件监听器、自定义按钮、下一页懒加载
-            _buildOptionsRow2(),
-            // Tab标签栏
-            TabBar(
-              controller: _tabController,
-              isScrollable: false,
-              labelPadding: EdgeInsets.zero,
-              labelStyle: const TextStyle(fontSize: 13),
-              tabs: const [
-                Tab(text: '基本'),
-                Tab(text: '搜索'),
-                Tab(text: '发现'),
-                Tab(text: '详情'),
-                Tab(text: '目录'),
-                Tab(text: '正文'),
+            // 主内容
+            Column(
+              children: [
+                // 第一行选项：类型、启用、发现、自动保存Cookie
+                _buildOptionsRow1(),
+                // 第二行选项：事件监听器、自定义按钮、下一页懒加载
+                _buildOptionsRow2(),
+                // Tab标签栏
+                TabBar(
+                  controller: _tabController,
+                  isScrollable: false,
+                  labelPadding: EdgeInsets.zero,
+                  labelStyle: const TextStyle(fontSize: 13),
+                  tabs: const [
+                    Tab(text: '基本'),
+                    Tab(text: '搜索'),
+                    Tab(text: '发现'),
+                    Tab(text: '详情'),
+                    Tab(text: '目录'),
+                    Tab(text: '正文'),
+                  ],
+                ),
+                // Tab内容
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      _buildEditList(_baseEntities, 'base'),
+                      _buildEditList(_searchEntities, 'search'),
+                      _buildEditList(_exploreEntities, 'explore'),
+                      _buildEditList(_infoEntities, 'info'),
+                      _buildEditList(_tocEntities, 'toc'),
+                      _buildEditList(_contentEntities, 'content'),
+                    ],
+                  ),
+                ),
               ],
             ),
-            // Tab内容
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                children: [
-                  _buildEditList(_baseEntities, 'base'),
-                  _buildEditList(_searchEntities, 'search'),
-                  _buildEditList(_exploreEntities, 'explore'),
-                  _buildEditList(_infoEntities, 'info'),
-                  _buildEditList(_tocEntities, 'toc'),
-                  _buildEditList(_contentEntities, 'content'),
-                ],
+            // 辅助按键工具栏 - 显示在键盘上方
+            // 与原版 legados 逻辑一致：键盘高度超过屏幕五分之一时显示
+            // 使用 Positioned 定位，bottom = 键盘高度
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: MediaQuery.of(context).viewInsets.bottom,
+              child: Material(
+                color: Colors.transparent,
+                child: KeyboardAssistToolbar(
+                  callback: this,
+                  assistItems: DefaultKeyboardAssists.defaultItems,
+                  showUndoRedo: false,
+                  keyboardHeight: MediaQuery.of(context).viewInsets.bottom,
+                ),
               ),
             ),
           ],
@@ -1091,7 +1121,7 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
         final entity = entities[index];
         final controllerKey = '${tabPrefix}_${entity.key}';
         final controller = _getControllerByKey(controllerKey, entity.value);
-        
+
         return TextFormField(
           controller: controller,
           decoration: InputDecoration(
@@ -1106,6 +1136,11 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
           onChanged: (value) {
             entity.value = value;
             _hasChanges = true;
+          },
+          onTap: () {
+            // 记录当前焦点的输入框
+            _focusedController = controller;
+            _focusedFieldKey = entity.key;
           },
         );
       },
@@ -1163,6 +1198,252 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
         _controllers[key]!.text = entity.value;
       }
     }
+  }
+
+  /// KeyboardAssistCallback 实现 - 获取帮助操作列表
+  @override
+  List<PopupMenuItem<String>> helpActions(BuildContext context) {
+    return [
+      const PopupMenuItem(
+        value: 'urlOption',
+        height: 48,
+        child: Row(children: [Icon(Icons.link, size: 18), SizedBox(width: 12), Text('插入URL参数')]),
+      ),
+      const PopupMenuItem(
+        value: 'ruleHelp',
+        height: 48,
+        child: Row(children: [Icon(Icons.menu_book, size: 18), SizedBox(width: 12), Text('书源教程')]),
+      ),
+      const PopupMenuItem(
+        value: 'jsHelp',
+        height: 48,
+        child: Row(children: [Icon(Icons.javascript, size: 18), SizedBox(width: 12), Text('JS教程')]),
+      ),
+      const PopupMenuItem(
+        value: 'regexHelp',
+        height: 48,
+        child: Row(children: [Icon(Icons.code, size: 18), SizedBox(width: 12), Text('正则教程')]),
+      ),
+    ];
+  }
+
+  /// KeyboardAssistCallback 实现 - 处理帮助操作选择
+  @override
+  void onHelpActionSelect(String action) {
+    switch (action) {
+      case 'urlOption':
+        _showUrlOptionDialog();
+        break;
+      case 'ruleHelp':
+        _showHelp();
+        break;
+      case 'jsHelp':
+        _showJsHelp();
+        break;
+      case 'regexHelp':
+        _showRegexHelp();
+        break;
+    }
+  }
+
+  /// KeyboardAssistCallback 实现 - 发送文本到当前焦点输入框
+  @override
+  void sendText(String text) {
+    final controller = _focusedController;
+    if (controller == null) return;
+
+    final currentText = controller.text;
+    final selection = controller.selection;
+    final start = selection.start;
+    final end = selection.end;
+
+    // 确保 start <= end
+    final actualStart = start < end ? start : end;
+    final actualEnd = start < end ? end : start;
+
+    // 在光标位置插入文本
+    if (actualStart < 0 || actualStart >= currentText.length) {
+      controller.text = currentText + text;
+      controller.selection = TextSelection.collapsed(offset: currentText.length + text.length);
+    } else {
+      final newText = currentText.replaceRange(actualStart, actualEnd, text);
+      controller.text = newText;
+      controller.selection = TextSelection.collapsed(offset: actualStart + text.length);
+    }
+
+    // 更新对应的 EditEntity
+    _updateEntityFromController(controller, controller.text);
+    _hasChanges = true;
+  }
+
+  /// KeyboardAssistCallback 实现 - 撤销操作
+  @override
+  void onUndoClicked() {
+    // Flutter 的 TextField 不直接支持撤销，需要通过 TextEditingController 实现
+    // 这里暂时不做实现，因为 Flutter 的 TextField 已经内置了撤销功能
+  }
+
+  /// KeyboardAssistCallback 实现 - 重做操作
+  @override
+  void onRedoClicked() {
+    // Flutter 的 TextField 不直接支持重做，需要通过 TextEditingController 实现
+    // 这里暂时不做实现，因为 Flutter 的 TextField 已经内置了重做功能
+  }
+
+  /// 更新对应的 EditEntity 值
+  void _updateEntityFromController(TextEditingController controller, String value) {
+    // 根据 controller 找到对应的 EditEntity 并更新
+    final tabPosition = _tabController.index;
+    List<EditEntity> entities;
+    switch (tabPosition) {
+      case 1:
+        entities = _searchEntities;
+        break;
+      case 2:
+        entities = _exploreEntities;
+        break;
+      case 3:
+        entities = _infoEntities;
+        break;
+      case 4:
+        entities = _tocEntities;
+        break;
+      case 5:
+        entities = _contentEntities;
+        break;
+      default:
+        entities = _baseEntities;
+    }
+
+    // 找到对应的 entity 并更新
+    for (final entity in entities) {
+      final key = '${_getTabKey(tabPosition)}_${entity.key}';
+      if (_controllers[key] == controller) {
+        entity.value = value;
+        break;
+      }
+    }
+  }
+
+  /// 获取 Tab 的 key
+  String _getTabKey(int position) {
+    switch (position) {
+      case 1:
+        return 'search';
+      case 2:
+        return 'explore';
+      case 3:
+        return 'info';
+      case 4:
+        return 'toc';
+      case 5:
+        return 'content';
+      default:
+        return 'base';
+    }
+  }
+
+  /// 显示 URL 参数对话框
+  void _showUrlOptionDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('插入URL参数'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: const Text('{{key}}'),
+              subtitle: const Text('搜索关键字'),
+              onTap: () {
+                Navigator.pop(context);
+                sendText('{{key}}');
+              },
+            ),
+            ListTile(
+              title: const Text('{{page}}'),
+              subtitle: const Text('页码'),
+              onTap: () {
+                Navigator.pop(context);
+                sendText('{{page}}');
+              },
+            ),
+            ListTile(
+              title: const Text('{{size}}'),
+              subtitle: const Text('每页数量'),
+              onTap: () {
+                Navigator.pop(context);
+                sendText('{{size}}');
+              },
+            ),
+            ListTile(
+              title: const Text('{{total}}'),
+              subtitle: const Text('总页数'),
+              onTap: () {
+                Navigator.pop(context);
+                sendText('{{total}}');
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 显示 JS 帮助
+  void _showJsHelp() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const _SourceHelpPage(initialTab: 1),
+      ),
+    );
+  }
+
+  /// 显示正则帮助
+  void _showRegexHelp() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('正则表达式帮助'),
+        content: const SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('常用正则符号：'),
+              SizedBox(height: 8),
+              Text('• . 匹配任意字符'),
+              Text('• * 匹配前一个字符0次或多次'),
+              Text('• + 匹配前一个字符1次或多次'),
+              Text('• ? 匹配前一个字符0次或1次'),
+              Text('• \\d 匹配数字'),
+              Text('• \\w 匹配字母、数字、下划线'),
+              Text('• \\s 匹配空白字符'),
+              Text('• [] 匹配括号内的任意字符'),
+              Text('• () 分组捕获'),
+              Text('• | 或运算'),
+              SizedBox(height: 16),
+              Text('示例：'),
+              Text('• ##\\n.* 匹配换行后的内容'),
+              Text('• ##<p>(.*?)</p> 匹配p标签内容'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showHelp() {
@@ -1448,7 +1729,9 @@ class UnderlineWidget extends StatelessWidget {
 
 /// 书源帮助文档页面（加载 Markdown 文件渲染，支持切换文档）
 class _SourceHelpPage extends StatefulWidget {
-  const _SourceHelpPage();
+  final int initialTab;
+
+  const _SourceHelpPage({this.initialTab = 0});
 
   @override
   State<_SourceHelpPage> createState() => _SourceHelpPageState();
@@ -1463,7 +1746,7 @@ class _SourceHelpPageState extends State<_SourceHelpPage> with SingleTickerProvi
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 2, vsync: this, initialIndex: widget.initialTab);
     _loadMarkdown();
   }
 

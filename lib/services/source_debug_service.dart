@@ -348,7 +348,7 @@ class SourceDebugService {
       log('┌获取简介');
       final intro = book.intro.trim();
       log(intro.isNotEmpty
-          ? '└${intro.length > 200 ? '${intro.substring(0, 200)}...' : intro}'
+          ? '└$intro'
           : '└<空>');
       log('┌获取封面链接');
       log('└${book.coverUrl}');
@@ -489,15 +489,45 @@ class SourceDebugService {
         return;
       }
 
+      final displayContent = _formatContentForDebugDisplay(trimmedContent);
+
       log('┌获取章节名称');
       log('└${chapter?.title ?? ""}');
       log('┌获取正文内容');
-      log('└\n$trimmedContent');
+      log('└\n$displayContent');
       log('︽正文页解析完成');
       log('≡解析完成', state: DebugState.success.code);
     } catch (e) {
       log('⇒正文页解析失败: $e', state: DebugState.error.code);
     }
+  }
+
+  String _formatContentForDebugDisplay(String content) {
+    final lines = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n');
+    final formatted = <String>[];
+    var previousEmpty = false;
+
+    for (final rawLine in lines) {
+      final line = rawLine.trim();
+      if (line.isEmpty) {
+        if (!previousEmpty && formatted.isNotEmpty) {
+          formatted.add('');
+        }
+        previousEmpty = true;
+        continue;
+      }
+
+      previousEmpty = false;
+      if (line.startsWith('<img')) {
+        formatted.add(line);
+      } else if (line.startsWith('\u3000\u3000')) {
+        formatted.add(line);
+      } else {
+        formatted.add('\u3000\u3000$line');
+      }
+    }
+
+    return formatted.join('\n');
   }
 
   /// 输出书籍项信息
@@ -518,7 +548,7 @@ class SourceDebugService {
     log('┌获取简介');
     final intro = '${item['intro'] ?? ''}'.trim();
     log(intro.isNotEmpty
-        ? '└${intro.length > 100 ? '${intro.substring(0, 100)}...' : intro}'
+        ? '└$intro'
         : '└<空>');
     log('┌获取封面链接');
     log('└${item['coverUrl'] ?? ''}');
