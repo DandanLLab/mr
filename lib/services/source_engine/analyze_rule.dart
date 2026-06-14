@@ -42,11 +42,41 @@ class AnalyzeRule {
   static final Map<String, RegExp?> _regexCache = {};
   static const int _maxCacheSize = 64; // 稍微加大缓存上限
 
+  // ===== 热路径 RegExp 常量（避免重复编译）=====
+
+  // 规则拆分正则
+  static final _jsPatternRegex = RegExp(
+      r'@(?:webjs|js|rhino|quickjs|java|ts):([\s\S]*?)(?=@(?:webjs|js|rhino|quickjs|java|ts):|$)',
+      caseSensitive: false);
+  static final _jsTagPatternRegex = RegExp(r'<js>([\s\S]*?)</js>', caseSensitive: false);
+
+  // 变量替换正则
+  static final _expressionOnlyRegex = RegExp(
+      r'^(?:\{\{[\s\S]*\}\}|@get:\{[^}]+\}|\$\d{1,2})$',
+      caseSensitive: false);
+  static final _dollarIndexRegex = RegExp(r'\$(\d{1,2})');
+  static final _getVariableRegex = RegExp(r'@get:\{([^}]+)\}', caseSensitive: false);
+  static final _templateRegex = RegExp(r'\{\{([\s\S]*?)\}\}');
+
+  // SourceRule 解析正则
+  static final _putRuleRegex = RegExp(r'@put:\s*(\{[^}]+?\})', caseSensitive: false);
+
+  // JSON 路径正则
+  static final _jsonPathVarRegex = RegExp(r'\{(\$\.[^{}]+)\}');
+
+  // CSS 选择器相关正则
+  static final _nthChildRegex = RegExp(r':nth-child\(([^)]+)\)');
+  static final _trailingSpaceRegex = RegExp(r'\s+$');
+  static final _anPlusBRegex = RegExp(r'^(-?\d*)n\s*([+-]\s*\d+)?$');
+  static final _attributeRegex = RegExp(r'\[([^\]]+)\]');
+
+  // 反向引用展开正则
+  static final _backrefRegex = RegExp(r'\$(\d+)');
+
   /// 清除所有规则缓存，确保调试时使用最新解析逻辑
   static void clearCache() {
     _stringRuleCache.clear();
     _regexCache.clear();
-    debugPrint('♻️ AnalyzeRule 缓存已清空');
   }
 
   AnalyzeRule setContent(dynamic content, {String? baseUrl}) {
@@ -192,7 +222,6 @@ class AnalyzeRule {
     if (ruleStr == null || ruleStr.trim().isEmpty) return null;
 
     final ruleList = _splitSourceRuleCacheString(ruleStr);
-    debugPrint('📝 getString: 规则="$ruleStr", 拆分为${ruleList.length}段');
     return _getString(ruleList,
         mContent: content, isUrl: isUrl, unescape: unescape);
   }
@@ -297,9 +326,9 @@ class AnalyzeRule {
     return _getElementsAsync(ruleList);
   }
 
-  /// 检测规则是否包含 JS 部分（@js: / <js>...</js>）
-  /// 含 JS 的规则走 Dart 端 QuickJS，不含 JS 的走 Native JSoup
-  static final _jsPattern = RegExp(r'@js:|<js>', caseSensitive: false);
+  /// 检测规则是否包含 JS 部分（@js: / <js>...</js>）或模板表达式（{{}}）
+  /// 含 JS 或模板的规则走 Dart 端，不含的走 Native JSoup
+  static final _jsPattern = RegExp(r'@js:|<js>|\{\{', caseSensitive: false);
   bool _containsJsRule(String ruleStr) => _jsPattern.hasMatch(ruleStr);
 
   /// 将 content 转为字符串（Element → outerHtml，其他 → toString）
@@ -357,14 +386,9 @@ class AnalyzeRule {
     }
 
     // 解析 @js: / @rhino: / @quickjs: / @java: / @ts: 和 <js></js> 规则
-    final jsPattern = RegExp(
-        r'@(?:webjs|js|rhino|quickjs|java|ts):([\s\S]*?)(?=@(?:webjs|js|rhino|quickjs|java|ts):|$)',
-        caseSensitive: false);
-    final jsTagPattern = RegExp(r'<js>([\s\S]*?)</js>', caseSensitive: false);
-
     // 先处理 <js></js> 标签 → 替换为 @js:
     String processedRule = ruleStr;
-    final jsTagMatches = jsTagPattern.allMatches(processedRule).toList();
+    final jsTagMatches = _jsTagPatternRegex.allMatches(processedRule).toList();
 
     if (jsTagMatches.isNotEmpty) {
       for (final match in jsTagMatches.reversed) {
@@ -374,7 +398,7 @@ class AnalyzeRule {
     }
 
     // 处理带前缀的 JS 规则
-    final jsMatches = jsPattern.allMatches(processedRule).toList();
+    final jsMatches = _jsPatternRegex.allMatches(processedRule).toList();
 
     if (jsMatches.isNotEmpty) {
       var lastEnd = start;
@@ -434,28 +458,32 @@ class AnalyzeRule {
       // 执行 @put 规则
       _executePutRule(rule.putMap);
 
-      // 应用变量替换
+      // 应用变量替换（同步版）
       final appliedRule = _applyVariables(rule, result);
 
       // 构建步骤描述
       final stepDesc = '步骤${i + 1}/${ruleList.length} mode=${appliedRule.mode}';
-      final rulePreview = appliedRule.rule.length > 60
-          ? '${appliedRule.rule.substring(0, 60)}...'
-          : appliedRule.rule;
-      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc',
-        detail: 'rule=$rulePreview, inputLen=${result?.toString().length ?? 0}');
+      if (kDebugMode) {
+        final rulePreview = appliedRule.rule.length > 60
+            ? '${appliedRule.rule.substring(0, 60)}...'
+            : appliedRule.rule;
+        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc',
+          detail: 'rule=$rulePreview, inputLen=${result?.toString().length ?? 0}');
+      }
 
       // 执行规则（传递 stepDesc 给追踪器）
       result = _applyRule(result, appliedRule, listMode: false, ruleStep: stepDesc);
 
       // 记录步骤输出
-      final resultType = result?.runtimeType;
-      final resultLen = result?.toString().length ?? 0;
-      final resultPreview = result?.toString();
-      final resultShort = resultPreview != null && resultPreview.length > 100
-          ? '${resultPreview.substring(0, 100)}...' : resultPreview;
-      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc 完成',
-        detail: 'resultType=$resultType, resultLen=$resultLen, preview=$resultShort');
+      if (kDebugMode) {
+        final resultType = result?.runtimeType;
+        final resultLen = result?.toString().length ?? 0;
+        final resultPreview = result?.toString();
+        final resultShort = resultPreview != null && resultPreview.length > 100
+            ? '${resultPreview.substring(0, 100)}...' : resultPreview;
+        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc 完成',
+          detail: 'resultType=$resultType, resultLen=$resultLen, preview=$resultShort');
+      }
 
       // 应用正则替换
       if (result != null && rule.replaceRegex.isNotEmpty) {
@@ -464,10 +492,12 @@ class AnalyzeRule {
     }
 
     // 输出完整 JS 执行树
-    final treeStr = JsTracer.instance.getTreeString();
-    if (treeStr.isNotEmpty && treeStr != '(no trace)') {
-      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] JS执行树',
-        detail: treeStr);
+    if (kDebugMode) {
+      final treeStr = JsTracer.instance.getTreeString();
+      if (treeStr.isNotEmpty && treeStr != '(no trace)') {
+        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] JS执行树',
+          detail: treeStr);
+      }
     }
 
     if (result == null) return null;
@@ -510,15 +540,17 @@ class AnalyzeRule {
       _executePutRule(rule.putMap);
 
       // 应用变量替换
-      final appliedRule = _applyVariables(rule, result);
+      final appliedRule = await _applyVariablesAsync(rule, result);
 
       // 构建步骤描述
       final stepDesc = '步骤${i + 1}/${ruleList.length} mode=${appliedRule.mode}';
-      final rulePreview = appliedRule.rule.length > 60
-          ? '${appliedRule.rule.substring(0, 60)}...'
-          : appliedRule.rule;
-      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc (async)',
-        detail: 'rule=$rulePreview, inputLen=${result?.toString().length ?? 0}');
+      if (kDebugMode) {
+        final rulePreview = appliedRule.rule.length > 60
+            ? '${appliedRule.rule.substring(0, 60)}...'
+            : appliedRule.rule;
+        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc (async)',
+          detail: 'rule=$rulePreview, inputLen=${result?.toString().length ?? 0}');
+      }
 
       // JS 步骤走异步路径，非 JS 步骤走同步路径
       if (appliedRule.mode == RuleMode.js || appliedRule.mode == RuleMode.webJs) {
@@ -532,13 +564,15 @@ class AnalyzeRule {
       }
 
       // 记录步骤输出
-      final resultType = result?.runtimeType;
-      final resultLen = result?.toString().length ?? 0;
-      final resultPreview = result?.toString();
-      final resultShort = resultPreview != null && resultPreview.length > 100
-          ? '${resultPreview.substring(0, 100)}...' : resultPreview;
-      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc 完成 (async)',
-        detail: 'resultType=$resultType, resultLen=$resultLen, preview=$resultShort');
+      if (kDebugMode) {
+        final resultType = result?.runtimeType;
+        final resultLen = result?.toString().length ?? 0;
+        final resultPreview = result?.toString();
+        final resultShort = resultPreview != null && resultPreview.length > 100
+            ? '${resultPreview.substring(0, 100)}...' : resultPreview;
+        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc 完成 (async)',
+          detail: 'resultType=$resultType, resultLen=$resultLen, preview=$resultShort');
+      }
 
       // 应用正则替换
       if (result != null && rule.replaceRegex.isNotEmpty) {
@@ -547,10 +581,12 @@ class AnalyzeRule {
     }
 
     // 输出完整 JS 执行树
-    final treeStr = JsTracer.instance.getTreeString();
-    if (treeStr.isNotEmpty && treeStr != '(no trace)') {
-      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] JS执行树',
-        detail: treeStr);
+    if (kDebugMode) {
+      final treeStr = JsTracer.instance.getTreeString();
+      if (treeStr.isNotEmpty && treeStr != '(no trace)') {
+        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] JS执行树',
+          detail: treeStr);
+      }
     }
 
     if (result == null) return null;
@@ -578,13 +614,9 @@ class AnalyzeRule {
   Future<dynamic> _applyJsAsync(dynamic content, String jsCode, {String? ruleStep}) async {
     try {
       // 收集上下文变量
-      final env = <String, dynamic>{
-        'baseUrl': _baseUrl ?? '',
-      };
-      env.addAll(_variableMap);
-      env.addAll(_variables);
+      final env = _collectVariables();
+      env['baseUrl'] = _baseUrl ?? '';
       if (_sourceInfo != null) {
-        env['source'] = _sourceInfo;
         final sourceVars = _sourceInfo!['variable'];
         if (sourceVars is Map) {
           env['sourceVars'] = sourceVars;
@@ -599,24 +631,16 @@ class AnalyzeRule {
           } catch (_) {}
         }
       }
-      if (_bookInfo != null) env['book'] = _bookInfo;
-      if (_chapterInfo != null) env['chapter'] = _chapterInfo;
-      env['cookie'] = <String, String>{};
 
       // 正确序列化 content：List/Map 用 jsonEncode，String 直接传
       // 对齐 _executeQuickJSSync 的序列化逻辑
-      String contentStr;
-      if (content is List || content is Map) {
-        contentStr = jsonEncode(content);
-      } else if (content is String) {
-        contentStr = content;
-      } else {
-        contentStr = content?.toString() ?? '';
-      }
-
+      final contentStr = _serializeContent(content);
       final codePreview = jsCode.length > 200 ? '${jsCode.substring(0, 200)}...' : jsCode;
-      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] 异步JS执行',
-        detail: 'content=${contentStr.length}chars, contentType=${content?.runtimeType}, code=$codePreview');
+
+      if (kDebugMode) {
+        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] 异步JS执行',
+          detail: 'content=${contentStr.length}chars, contentType=${content?.runtimeType}, code=$codePreview');
+      }
 
       // 追踪树：创建节点
       JsTraceNode? traceNode;
@@ -730,13 +754,15 @@ class AnalyzeRule {
       if (result == null) continue;
 
       _executePutRule(rule.putMap);
-      final appliedRule = _applyVariables(rule, result);
+      final appliedRule = await _applyVariablesAsync(rule, result);
 
       final stepDesc = '步骤${i + 1}/${ruleList.length} mode=${appliedRule.mode} (list)';
-      final rulePreview = appliedRule.rule.length > 60
-          ? '${appliedRule.rule.substring(0, 60)}...' : appliedRule.rule;
-      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc (async)',
-        detail: 'rule=$rulePreview, inputLen=${result?.toString().length ?? 0}');
+      if (kDebugMode) {
+        final rulePreview = appliedRule.rule.length > 60
+            ? '${appliedRule.rule.substring(0, 60)}...' : appliedRule.rule;
+        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc (async)',
+          detail: 'rule=$rulePreview, inputLen=${result?.toString().length ?? 0}');
+      }
 
       // JS 步骤走异步，非 JS 走同步
       if (appliedRule.mode == RuleMode.js || appliedRule.mode == RuleMode.webJs) {
@@ -749,10 +775,12 @@ class AnalyzeRule {
         result = _applyRule(result, appliedRule, listMode: true, ruleStep: stepDesc);
       }
 
-      final resultType = result?.runtimeType;
-      final resultLen = result is List ? result.length : result?.toString().length ?? 0;
-      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc 完成 (async)',
-        detail: 'resultType=$resultType, resultLen=$resultLen');
+      if (kDebugMode) {
+        final resultType = result?.runtimeType;
+        final resultLen = result is List ? result.length : result?.toString().length ?? 0;
+        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc 完成 (async)',
+          detail: 'resultType=$resultType, resultLen=$resultLen');
+      }
 
       if (result != null && rule.replaceRegex.isNotEmpty) {
         if (result is List) {
@@ -764,10 +792,12 @@ class AnalyzeRule {
     }
 
     // 输出完整 JS 执行树
-    final treeStr = JsTracer.instance.getTreeString();
-    if (treeStr.isNotEmpty && treeStr != '(no trace)') {
-      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] JS执行树',
-        detail: treeStr);
+    if (kDebugMode) {
+      final treeStr = JsTracer.instance.getTreeString();
+      if (treeStr.isNotEmpty && treeStr != '(no trace)') {
+        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] JS执行树',
+          detail: treeStr);
+      }
     }
 
     if (result == null) return [];
@@ -854,13 +884,15 @@ class AnalyzeRule {
       if (result == null) continue;
 
       _executePutRule(rule.putMap);
-      final appliedRule = _applyVariables(rule, result);
+      final appliedRule = await _applyVariablesAsync(rule, result);
 
       final stepDesc = '步骤${i + 1}/${ruleList.length} mode=${appliedRule.mode} (elements)';
-      final rulePreview = appliedRule.rule.length > 60
-          ? '${appliedRule.rule.substring(0, 60)}...' : appliedRule.rule;
-      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc (async)',
-        detail: 'rule=$rulePreview, inputLen=${result?.toString().length ?? 0}');
+      if (kDebugMode) {
+        final rulePreview = appliedRule.rule.length > 60
+            ? '${appliedRule.rule.substring(0, 60)}...' : appliedRule.rule;
+        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc (async)',
+          detail: 'rule=$rulePreview, inputLen=${result?.toString().length ?? 0}');
+      }
 
       // JS 步骤走异步
       if (appliedRule.mode == RuleMode.js || appliedRule.mode == RuleMode.webJs) {
@@ -884,10 +916,12 @@ class AnalyzeRule {
         result = _applyRule(result, appliedRule, listMode: true, ruleStep: stepDesc);
       }
 
-      final resultType = result?.runtimeType;
-      final resultLen = result is List ? result.length : result?.toString().length ?? 0;
-      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc 完成 (async)',
-        detail: 'resultType=$resultType, resultLen=$resultLen');
+      if (kDebugMode) {
+        final resultType = result?.runtimeType;
+        final resultLen = result is List ? result.length : result?.toString().length ?? 0;
+        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc 完成 (async)',
+          detail: 'resultType=$resultType, resultLen=$resultLen');
+      }
 
       if (result != null && rule.replaceRegex.isNotEmpty) {
         if (result is List) {
@@ -899,10 +933,12 @@ class AnalyzeRule {
     }
 
     // 输出完整 JS 执行树
-    final treeStr = JsTracer.instance.getTreeString();
-    if (treeStr.isNotEmpty && treeStr != '(no trace)') {
-      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] JS执行树',
-        detail: treeStr);
+    if (kDebugMode) {
+      final treeStr = JsTracer.instance.getTreeString();
+      if (treeStr.isNotEmpty && treeStr != '(no trace)') {
+        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] JS执行树',
+          detail: treeStr);
+      }
     }
 
     if (result == null) return [];
@@ -977,24 +1013,19 @@ class AnalyzeRule {
   List<String> _jsoupGetStringList(dynamic content, String rule) {
     final element = _toElement(content);
     if (element == null || rule.isEmpty) {
-      debugPrint('📝 _jsoupGetString: element=${element != null}, rule为空');
       return [];
     }
 
-    debugPrint('📝 _jsoupGetString: rule="$rule"');
     final sourceRule = _JsoupSourceRule(rule);
     final analyzer = _RuleAnalyzer(sourceRule.elementsRule);
     final groups = analyzer.splitRule('&&', '||', '%%');
-    debugPrint('📝 分组数: ${groups.length}, 类型: ${analyzer.elementsType}');
 
     final results = <List<String>>[];
 
     for (final group in groups) {
-      debugPrint('📝 处理分组: "$group"');
       final values = sourceRule.isCss
           ? _cssLast(element, group)
           : _chainLast(element, group);
-      debugPrint('📝 分组结果: ${values.length}个');
       if (values.isNotEmpty) {
         results.add(values);
         if (analyzer.elementsType == '||') break;
@@ -1016,7 +1047,6 @@ class AnalyzeRule {
       }
     }
 
-    debugPrint('📝 最终结果: ${text.length}个文本段');
     return text;
   }
 
@@ -1051,7 +1081,6 @@ class AnalyzeRule {
       try {
         elements = root.querySelectorAll(selector).toList();
       } catch (e) {
-        debugPrint('CSS选择器失败: $selector $e');
         elements = [];
       }
       return parsed.apply(elements);
@@ -1127,7 +1156,6 @@ class AnalyzeRule {
               elements = _selectNthChild(root, beforeRule);
             }
           } catch (e) {
-            debugPrint('CSS选择器失败: $beforeRule $e');
             // fallback: 尝试手动处理 :nth-child
             if (beforeRule.contains(':nth-child')) {
               try {
@@ -1158,14 +1186,13 @@ class AnalyzeRule {
   /// 借鉴 legado：拆分选择器，先选基础元素，再按 nth-child 过滤
   List<dom.Element> _selectNthChild(dom.Element root, String selector) {
     // 解析 :nth-child 公式
-    final nthPattern = RegExp(r':nth-child\(([^)]+)\)');
-    final matches = nthPattern.allMatches(selector).toList();
+    final matches = _nthChildRegex.allMatches(selector).toList();
     if (matches.isEmpty) return [];
 
     // 移除所有 :nth-child(...) 得到基础选择器
-    var baseSelector = selector.replaceAll(nthPattern, '').trim();
+    var baseSelector = selector.replaceAll(_nthChildRegex, '').trim();
     // 清理尾部多余空格和伪类分隔符
-    baseSelector = baseSelector.replaceAll(RegExp(r'\s+$'), '');
+    baseSelector = baseSelector.replaceAll(_trailingSpaceRegex, '');
 
     // 获取基础元素
     List<dom.Element> baseElements;
@@ -1221,8 +1248,7 @@ class AnalyzeRule {
     }
 
     // 公式: An+B 或 n+B 或 -n+B 等
-    final formulaPattern = RegExp(r'^(-?\d*)n\s*([+-]\s*\d+)?$');
-    final m = formulaPattern.firstMatch(lower);
+    final m = _anPlusBRegex.firstMatch(lower);
     if (m != null) {
       var aStr = m.group(1);
       var bStr = m.group(2);
@@ -1272,8 +1298,7 @@ class AnalyzeRule {
   List<dom.Element> _selectByAttribute(dom.Element root, String selector) {
     // 解析选择器：标签名 + 属性条件
     // 例如：[property$=author]、meta[property$=author]、[property~=category|status]
-    final attrPattern = RegExp(r'\[([^\]]+)\]');
-    final matches = attrPattern.allMatches(selector).toList();
+    final matches = _attributeRegex.allMatches(selector).toList();
     if (matches.isEmpty) return [];
 
     // 提取标签名（[] 之前的部分）
@@ -1391,7 +1416,6 @@ class AnalyzeRule {
               .where((e) => e.isNotEmpty)
               .toList();
         } catch (e) {
-          debugPrint('CSS selector failed: $selector $e');
           return [];
         }
       }
@@ -1462,7 +1486,7 @@ class AnalyzeRule {
           try {
             next.addAll(element.querySelectorAll(selector).whereType<dom.Element>());
           } catch (e) {
-            debugPrint('CSS selector failed: $selector $e');
+            // CSS selector may not be supported, ignore
           }
         }
         current = next;
@@ -1487,7 +1511,7 @@ class AnalyzeRule {
         try {
           next.addAll(element.querySelectorAll(selector).whereType<dom.Element>());
         } catch (e) {
-          debugPrint('CSS selector failed: $selector $e');
+          // CSS selector may not be supported, ignore
         }
       }
       return next
@@ -1530,7 +1554,6 @@ class AnalyzeRule {
             .where((e) => e.isNotEmpty)
             .toList();
       } catch (e) {
-        debugPrint('CSS selector failed: $selector $e');
         return [];
       }
     }
@@ -1542,7 +1565,6 @@ class AnalyzeRule {
       final elements = root.querySelectorAll(selector).toList();
       return _extractLast(elements, lastRule);
     } catch (e) {
-      debugPrint('CSS selector failed: $selector $e');
       return [];
     }
   }
@@ -1684,7 +1706,7 @@ class AnalyzeRule {
       try {
         var processed = rule;
         processed = processed.replaceAllMapped(
-          RegExp(r'\{(\$\.[^{}]+)\}'),
+          _jsonPathVarRegex,
           (match) => '${LegadoJsonPath.read(content, match.group(1)!)}',
         );
         final values = LegadoJsonPath.readList(content, processed);
@@ -1727,21 +1749,14 @@ class AnalyzeRule {
   dynamic _applyJs(dynamic content, String jsCode, {String? ruleStep}) {
     try {
       // 收集规则上下文变量，注入到JS作用域
-      final vars = <String, dynamic>{};
-      vars.addAll(_variableMap);
-      vars.addAll(_variables);
-      // 注入书源/书籍/章节上下文（借鉴 legado 的 evalJS 绑定）
-      if (_sourceInfo != null) vars['source'] = _sourceInfo;
-      if (_bookInfo != null) vars['book'] = _bookInfo;
-      if (_chapterInfo != null) vars['chapter'] = _chapterInfo;
-      if (!vars.containsKey('cookie')) vars['cookie'] = <String, String>{};
-      // Add src variable (legado: src = content, the original HTML/JSON)
-      if (!vars.containsKey('src')) vars['src'] = _content;
+      final vars = _collectVariables();
 
-      final contentPreview = content?.toString().length ?? 0;
-      final codePreview = jsCode.length > 100 ? '${jsCode.substring(0, 100)}...' : jsCode;
-      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] 执行JS规则',
-        detail: 'content=${contentPreview}chars, code=$codePreview');
+      if (kDebugMode) {
+        final contentPreview = content?.toString().length ?? 0;
+        final codePreview = jsCode.length > 100 ? '${jsCode.substring(0, 100)}...' : jsCode;
+        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] 执行JS规则',
+          detail: 'content=${contentPreview}chars, code=$codePreview');
+      }
 
       return JsEngine.instance.executeSync(
         jsCode,
@@ -1762,13 +1777,9 @@ class AnalyzeRule {
   Future<String?> applyJsAsync(dynamic content, String jsCode) async {
     try {
       // 收集上下文变量（包含 key/page 等自定义变量）
-      final env = <String, dynamic>{
-        'baseUrl': _baseUrl ?? '',
-      };
-      env.addAll(_variableMap);
-      env.addAll(_variables);
+      final env = _collectVariables();
+      env['baseUrl'] = _baseUrl ?? '';
       if (_sourceInfo != null) {
-        env['source'] = _sourceInfo;
         // 注入书源变量（支持 source.getVariable()/setVariable()）
         final sourceVars = _sourceInfo!['variable'];
         if (sourceVars is Map) {
@@ -1787,19 +1798,9 @@ class AnalyzeRule {
           }
         }
       }
-      if (_bookInfo != null) env['book'] = _bookInfo;
-      if (_chapterInfo != null) env['chapter'] = _chapterInfo;
-      env['cookie'] = <String, String>{};
 
       // 序列化 content：List/Map 用 jsonEncode，String 直接用，其他 toString
-      String contentStr;
-      if (content is List || content is Map) {
-        contentStr = jsonEncode(content);
-      } else if (content is String) {
-        contentStr = content;
-      } else {
-        contentStr = content?.toString() ?? '';
-      }
+      final contentStr = _serializeContent(content);
 
       return await JsEngine.instance.processJsRule(
         contentStr,
@@ -1856,7 +1857,6 @@ class AnalyzeRule {
       try {
         return RegExp(pattern, multiLine: true, dotAll: true);
       } catch (e) {
-        debugPrint('Invalid regex pattern: $pattern');
         return null;
       }
     });
@@ -1879,6 +1879,30 @@ class AnalyzeRule {
 
   // ================== 变量处理 ==================
 
+  /// 收集当前上下文的变量 Map
+  Map<String, dynamic> _collectVariables() {
+    final vars = <String, dynamic>{};
+    vars.addAll(_variableMap);
+    vars.addAll(_variables);
+    if (_sourceInfo != null) vars['source'] = _sourceInfo;
+    if (_bookInfo != null) vars['book'] = _bookInfo;
+    if (_chapterInfo != null) vars['chapter'] = _chapterInfo;
+    if (!vars.containsKey('cookie')) vars['cookie'] = <String, String>{};
+    if (!vars.containsKey('src')) vars['src'] = _content;
+    return vars;
+  }
+
+  /// 序列化 content：List/Map 用 jsonEncode，String 直接用
+  static String _serializeContent(dynamic content) {
+    if (content is List || content is Map) {
+      return jsonEncode(content);
+    } else if (content is String) {
+      return content;
+    } else {
+      return content?.toString() ?? '';
+    }
+  }
+
   /// 执行 @put 规则
   void _executePutRule(Map<String, String> putMap) {
     for (final entry in putMap.entries) {
@@ -1892,12 +1916,9 @@ class AnalyzeRule {
     var next = rule.rule;
     var literal = rule.literal;
     final original = rule.rule.trim();
-    final expressionOnly = RegExp(
-      r'^(?:\{\{[\s\S]*\}\}|@get:\{[^}]+\}|\$\d{1,2})$',
-      caseSensitive: false,
-    ).hasMatch(original);
+    final expressionOnly = _expressionOnlyRegex.hasMatch(original);
 
-    next = next.replaceAllMapped(RegExp(r'\$(\d{1,2})'), (match) {
+    next = next.replaceAllMapped(_dollarIndexRegex, (match) {
       final index = int.parse(match.group(1)!);
       if (result is List && index >= 0 && index < result.length) {
         literal = true;
@@ -1909,48 +1930,15 @@ class AnalyzeRule {
 
     // 替换 @get:{key}
     next = next.replaceAllMapped(
-      RegExp(r'@get:\{([^}]+)\}', caseSensitive: false),
+      _getVariableRegex,
       (match) {
         final key = match.group(1) ?? '';
         return getVariable(key)?.toString() ?? '';
       },
     );
 
-    // 替换 {{variable}}
-    next = next.replaceAllMapped(
-      RegExp(r'\{\{([\s\S]*?)\}\}'),
-      (match) {
-        final expr = match.group(1)?.trim() ?? '';
-        // 检查是否为变量名
-        final value = getVariable(expr);
-        if (value != null) return value.toString();
-        if (expr.startsWith('@') ||
-            expr.startsWith(r'$.') ||
-            expr.startsWith(r'$[') ||
-            expr.startsWith('//')) {
-          return getString(expr)?.toString() ?? '';
-        }
-        // 否则尝试作为JS执行
-        try {
-          final vars = <String, dynamic>{};
-          vars.addAll(_variableMap);
-          vars.addAll(_variables);
-          if (_sourceInfo != null) vars['source'] = _sourceInfo;
-          if (_bookInfo != null) vars['book'] = _bookInfo;
-          if (_chapterInfo != null) vars['chapter'] = _chapterInfo;
-          if (!vars.containsKey('cookie')) vars['cookie'] = <String, String>{};
-          if (!vars.containsKey('src')) vars['src'] = _content;
-
-          return JsEngine.instance
-                  .executeSync(expr, _content,
-                      baseUrl: _baseUrl, sourceEngine: _sourceEngine, variables: vars)
-                  ?.toString() ??
-              '';
-        } catch (_) {
-          return '';
-        }
-      },
-    );
+    // 替换 {{variable}} — 同步版本
+    next = _replaceTemplatesSync(next);
 
     // 借鉴 legado：仅当原始规则只包含 {{}} 模板表达式时（expressionOnly），
     // 才将变量替换后的结果当作 literal 处理。
@@ -1971,7 +1959,147 @@ class AnalyzeRule {
     );
   }
 
+  /// 异步版变量替换：{{}} 内的子规则走异步路径
+  Future<_SourceRule> _applyVariablesAsync(_SourceRule rule, dynamic result) async {
+    var next = rule.rule;
+    var literal = rule.literal;
+    final original = rule.rule.trim();
+    final expressionOnly = _expressionOnlyRegex.hasMatch(original);
+
+    next = next.replaceAllMapped(_dollarIndexRegex, (match) {
+      final index = int.parse(match.group(1)!);
+      if (result is List && index >= 0 && index < result.length) {
+        literal = true;
+        return '${result[index] ?? ''}';
+      }
+      return match.group(0)!;
+    });
+    literal = literal || expressionOnly;
+
+    // 替换 @get:{key}
+    next = next.replaceAllMapped(
+      _getVariableRegex,
+      (match) {
+        final key = match.group(1) ?? '';
+        return getVariable(key)?.toString() ?? '';
+      },
+    );
+
+    // 替换 {{variable}} — 异步版本
+    next = await _replaceTemplatesAsync(next);
+
+    return _SourceRule(
+      next,
+      rule.mode,
+      replaceRegex: rule.replaceRegex,
+      replacement: rule.replacement,
+      replaceFirst: rule.replaceFirst,
+      putMap: rule.putMap,
+      literal: literal,
+    );
+  }
+
+  /// 同步替换 {{}} 模板表达式
+  String _replaceTemplatesSync(String text) {
+    return text.replaceAllMapped(
+      _templateRegex,
+      (match) {
+        final expr = match.group(1)?.trim() ?? '';
+        // 检查是否为变量名
+        final value = getVariable(expr);
+        if (value != null) return value.toString();
+        // 借鉴 legado isRule：以 @ 开头、$. 开头、$[ 开头、// 开头的是规则
+        if (expr.startsWith('@') ||
+            expr.startsWith(r'$.') ||
+            expr.startsWith(r'$[') ||
+            expr.startsWith('//')) {
+          return getString(expr)?.toString() ?? '';
+        }
+        // 否则尝试作为JS执行
+        try {
+          final vars = _collectVariables();
+
+          return JsEngine.instance
+                  .executeSync(expr, _content,
+                      baseUrl: _baseUrl, sourceEngine: _sourceEngine, variables: vars)
+                  ?.toString() ??
+              '';
+        } catch (_) {
+          return '';
+        }
+      },
+    );
+  }
+
+  /// 异步替换 {{}} 模板表达式
+  Future<String> _replaceTemplatesAsync(String text) async {
+    final matches = _templateRegex.allMatches(text).toList();
+    if (matches.isEmpty) return text;
+
+    if (kDebugMode) {
+      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] 模板替换',
+        detail: '模板数=${matches.length}, 原文=${text.length > 200 ? '${text.substring(0, 200)}...' : text}');
+    }
+
+    // 收集所有替换结果，然后从后往前拼接
+    final replacements = <String>[];
+    for (var i = 0; i < matches.length; i++) {
+      final match = matches[i];
+      final expr = match.group(1)?.trim() ?? '';
+      String replacement;
+
+      // 检查是否为变量名
+      final value = getVariable(expr);
+      if (value != null) {
+        replacement = value.toString();
+      } else if (expr.startsWith('@') ||
+          expr.startsWith(r'$.') ||
+          expr.startsWith(r'$[') ||
+          expr.startsWith('//')) {
+        // 借鉴 legado isRule：以 @ 开头的是规则，递归调用异步 getString
+        replacement = (await getStringAsync(expr))?.toString() ?? '';
+        if (kDebugMode) {
+          AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] 模板子规则',
+            detail: 'expr=$expr, result=${replacement.length > 100 ? '${replacement.substring(0, 100)}...' : replacement}');
+        }
+      } else {
+        // 否则尝试作为JS执行（异步）
+        try {
+          final vars = _collectVariables();
+
+          final jsResult = await JsEngine.instance.processJsRule(
+            _content is String ? _content : _content?.toString() ?? '',
+            expr,
+            baseUrl: _baseUrl,
+            sourceEngine: _sourceEngine,
+            env: vars,
+            dynamicContent: _content,
+          );
+          replacement = jsResult?.toString() ?? '';
+        } catch (_) {
+          replacement = '';
+        }
+      }
+      replacements.add(replacement);
+    }
+
+    // 从后往前拼接，避免索引偏移
+    final sb = StringBuffer();
+    var lastEnd = 0;
+    for (var i = 0; i < matches.length; i++) {
+      final match = matches[i];
+      sb.write(text.substring(lastEnd, match.start));
+      sb.write(replacements[i]);
+      lastEnd = match.end;
+    }
+    sb.write(text.substring(lastEnd));
+    return sb.toString();
+  }
+
   /// 应用正则替换
+  /// 借鉴 legado：支持 $1, $2 等捕获组反向引用
+  /// replaceFirst 模式（### 结束标记）：先 find 匹配子串，再对子串做替换，没匹配到返回空字符串
+  /// replaceAll 模式（无 ### 结束标记）：对整个字符串做全局替换
   String _applyReplaceRegex(String value, _SourceRule rule) {
     if (rule.replaceRegex.isEmpty) return value;
 
@@ -1980,15 +2108,42 @@ class AnalyzeRule {
       if (regex == null) return value;
 
       if (rule.replaceFirst) {
+        // replaceFirst 模式（### 结束标记）：
+        // 借鉴 legado：先 find() 找到第一个匹配的子串，再对子串做 replaceFirst
+        // 如果没匹配到，返回空字符串
         final match = regex.firstMatch(value);
         if (match == null) return '';
-        return match.group(0)!.replaceFirst(regex, rule.replacement);
+        // 对匹配到的子串做替换（展开 $1 等反向引用）
+        final matchedStr = match.group(0)!;
+        return matchedStr.replaceFirstMapped(regex, (m) {
+          return _expandBackrefs(rule.replacement, m);
+        });
       }
 
-      return value.replaceAll(regex, rule.replacement);
+      // replaceAll 模式：使用 replaceAllMapped 显式处理 $1 反向引用
+      return value.replaceAllMapped(regex, (match) {
+        return _expandBackrefs(rule.replacement, match);
+      });
     } catch (e) {
       return value;
     }
+  }
+
+  /// 展开 $1, $2, ... 反向引用
+  /// 借鉴 legado 的正则替换：$1 引用第一个捕获组，$0 引用整个匹配
+  static String _expandBackrefs(String replacement, Match match) {
+    if (match is! RegExpMatch) return replacement;
+    final regExpMatch = match;
+    return replacement.replaceAllMapped(_backrefRegex, (m) {
+      final index = int.parse(m.group(1)!);
+      if (index == 0) {
+        return regExpMatch.group(0) ?? '';
+      }
+      if (index <= regExpMatch.groupCount) {
+        return regExpMatch.group(index) ?? '';
+      }
+      return m.group(0)!;
+    });
   }
 
   // ================== 工具方法 ==================
@@ -2010,7 +2165,6 @@ class AnalyzeRule {
       try {
         return html_parser.parse(content).body;
       } catch (e) {
-        debugPrint('Parse HTML failed: $e');
         return null;
       }
     }
@@ -2117,7 +2271,7 @@ class _SourceRule {
     // 解析 @put 规则
     final putMap = <String, String>{};
     rule = rule.replaceAllMapped(
-      RegExp(r'@put:\s*(\{[^}]+?\})', caseSensitive: false),
+      AnalyzeRule._putRuleRegex,
       (match) {
         try {
           final decoded = jsonDecode(match.group(1)!);
@@ -2130,29 +2284,38 @@ class _SourceRule {
     );
 
     // 解析 ## 分割的正则替换
-    // 借鉴 legado：## 分割需要跳过 {{}} 内的 ##，避免误切内嵌规则
+    // 借鉴 legado SourceRule：用 ## 拆分规则
+    // 格式：rule##regex##replacement##[replaceFirst]
+    // ### 表示 replaceFirst=true（第4个 ## 分隔的空段）
+    // 例如：onclick##.*\'(.*)\'##$1### → regex=.*\'(.*)\', replacement=$1, replaceFirst=true
     var replaceRegex = '';
     var replacement = '';
     var replaceFirst = false;
 
     final sharpIndex = _findSharpSplit(rule);
     if (sharpIndex >= 0) {
-      final mainRule = rule.substring(0, sharpIndex);
-      var afterSharp = rule.substring(sharpIndex + 2);
-
-      // 借鉴 legado：### 是结束标记，### 后面的内容不属于替换模式
-      // 例如：onclick##.*\'(.*)\'##$1###  → regex=.*\'(.*)\', replacement=$1
-      final endMarker = afterSharp.indexOf('###');
-      if (endMarker >= 0) {
-        afterSharp = afterSharp.substring(0, endMarker);
-      }
-
+      // 从第一个 ## 开始拆分
+      final afterSharp = rule.substring(sharpIndex + 2);
       final parts = afterSharp.split('##');
       replaceRegex = parts.isNotEmpty ? parts[0] : '';
       replacement = parts.length > 1 ? parts[1] : '';
+      // 借鉴 legado：parts.length > 3 时 replaceFirst = true
+      // 因为 ### 拆分后是 ['regex', 'replacement', '']，size=3，> 3 不对
+      // 实际上 legado 对整个 rule 用 split("##")，parts[0] 是主规则
+      // 我们已经分离了主规则，所以 afterSharp 的 parts 对应 legado 的 parts[1:]
+      // legado: ruleStrS.size > 3 → replaceFirst
+      // 等价于 afterSharp 的 parts.length > 2（因为 parts[0] 对应 legado 的 parts[1]）
       replaceFirst = parts.length > 2;
-      rule = mainRule;
+      rule = rule.substring(0, sharpIndex);
     }
+
+    // 借鉴 legado：检测 {{}} 模板表达式
+    // 含 {{}} 的规则在 _applyVariables 中替换子规则后直接返回字符串，
+    // 不应再走 CSS/JS 执行路径
+    final hasTemplate = rule.contains('{{') && rule.contains('}}');
+    final isLiteral = hasTemplate &&
+        currentMode != RuleMode.js &&
+        currentMode != RuleMode.webJs;
 
     return _SourceRule(
       rule.trim(),
@@ -2161,6 +2324,7 @@ class _SourceRule {
       replacement: replacement,
       replaceFirst: replaceFirst,
       putMap: putMap,
+      literal: isLiteral,
     );
   }
 
@@ -2437,6 +2601,12 @@ class _ElementSelector {
     this.rangeExpression,
   });
 
+  // ===== 热路径 RegExp 常量 =====
+  static final _elementIndexRegex = RegExp(r'^(.*)\[(!?)([-\d,:\s]+)\]$');
+  static final _indexPattern = RegExp(r'^!?\d+$');
+  static final _rangePattern = RegExp(r'^-?\d+:-?\d+$');
+  static final _negativeIndexPattern = RegExp(r'^-\d+$');
+
   /// legado 内部规则关键字，这些关键字的 . 分隔是语义分隔
   static const _legadoKeywords = {'class', 'tag', 'id', 'text', 'children'};
 
@@ -2474,7 +2644,7 @@ class _ElementSelector {
     final indexes = <int>[];
 
     // 支持 [!0,1,2] 或 [0,1,2] 格式
-    final bracketMatch = RegExp(r'^(.*)\[(!?)([-\d,:\s]+)\]$').firstMatch(rule);
+    final bracketMatch = _elementIndexRegex.firstMatch(rule);
     if (bracketMatch != null) {
       rule = bracketMatch.group(1)!.trim();
       exclude = bracketMatch.group(2) == '!';
@@ -2524,8 +2694,8 @@ class _ElementSelector {
         if (lastDotIdx > firstDotIdx) {
           final lastSegment = rule.substring(lastDotIdx + 1);
           // 检查最后一段是否是索引或范围（纯数字、!数字、数字:数字）
-          final isIndex = RegExp(r'^!?\d+$').hasMatch(lastSegment);
-          final isRange = RegExp(r'^-?\d+:-?\d+$').hasMatch(lastSegment);
+          final isIndex = _indexPattern.hasMatch(lastSegment);
+          final isRange = _rangePattern.hasMatch(lastSegment);
           if (isIndex || isRange) {
             // dd.0 → tag.dd, 索引 0
             // dd.!0 → tag.dd, 排除索引 0
@@ -2551,8 +2721,8 @@ class _ElementSelector {
         // dd.0 只有一个 . → 检查 . 后面是否是纯数字
         if (lastDotIdx == firstDotIdx) {
           final afterDot = rule.substring(firstDotIdx + 1);
-          final isIndex = RegExp(r'^!?\d+$').hasMatch(afterDot);
-          final isRange = RegExp(r'^-?\d+:-?\d+$').hasMatch(afterDot);
+          final isIndex = _indexPattern.hasMatch(afterDot);
+          final isRange = _rangePattern.hasMatch(afterDot);
           if (isIndex) {
             final excludeIdx = afterDot.startsWith('!');
             final numStr = excludeIdx ? afterDot.substring(1) : afterDot;
@@ -2579,9 +2749,9 @@ class _ElementSelector {
       if (lastDotIdx > 0) {
         final lastSegment = rule.substring(lastDotIdx + 1);
         // 检查最后一段是否是索引（纯数字或负数）
-        final isNegativeIndex = RegExp(r'^-\d+$').hasMatch(lastSegment);
-        final isPositiveIndex = RegExp(r'^!?\d+$').hasMatch(lastSegment);
-        final isRange = RegExp(r'^-?\d+:-?\d+$').hasMatch(lastSegment);
+        final isNegativeIndex = _negativeIndexPattern.hasMatch(lastSegment);
+        final isPositiveIndex = _indexPattern.hasMatch(lastSegment);
+        final isRange = _rangePattern.hasMatch(lastSegment);
         if (isNegativeIndex) {
           // .page-item.-2 → beforeRule=.page-item, index=-2
           final idx = int.tryParse(lastSegment);

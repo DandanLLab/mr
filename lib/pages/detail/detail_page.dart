@@ -1154,10 +1154,25 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
+  /// 检测内容是否包含HTML标签（用于决定是否用Html widget渲染）
+  /// 支持两种情况：
+  /// 1. 以<开头的纯HTML内容
+  /// 2. 混合内容（纯文本+HTML标签，如模板规则返回的结果）
+  static final RegExp _htmlTagPattern = RegExp(
+    r'<(a|abbr|address|article|aside|b|blockquote|br|caption|cite|code|col|dd|del|details|div|dl|dt|em|fieldset|figcaption|figure|footer|form|h[1-6]|header|hr|i|img|input|ins|label|legend|li|main|mark|nav|ol|optgroup|option|p|pre|section|select|small|source|span|strong|sub|summary|sup|table|tbody|td|textarea|tfoot|th|thead|time|tr|u|ul|video)\b[^/>]*/?>',
+    caseSensitive: false,
+  );
+
   bool _isHtmlContent(String text) {
     final trimmed = text.trim();
-    return trimmed.startsWith('<') &&
-        (trimmed.contains('</') || trimmed.contains('/>'));
+    if (trimmed.isEmpty) return false;
+    // 快速路径：以<开头且包含闭合标签
+    if (trimmed.startsWith('<') &&
+        (trimmed.contains('</') || trimmed.contains('/>'))) {
+      return true;
+    }
+    // 混合内容：检测是否包含有意义的HTML标签
+    return _htmlTagPattern.hasMatch(trimmed);
   }
 
   bool _isMarkdownContent(String text) {

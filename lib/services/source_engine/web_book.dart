@@ -425,14 +425,16 @@ class WebBook {
     // 先检查 header 整体是否是 JS 代码
     if (_isJsRule(headerStr)) {
       try {
-        final jsResult = JsEngine.instance.executeSync(
+        // header 规则可能含 java.getWebViewUA() 等桥接调用，必须走异步路径
+        final jsResult = await JsEngine.instance.processJsRule(
+          '',
           headerStr,
-          null,
           baseUrl: source.bookSourceUrl,
           sourceEngine: source.engineType,
-          variables: {
+          env: {
             'source': _sourceToMap(source),
             'cookie': <String, String>{},
+            'baseUrl': source.bookSourceUrl,
           },
         );
         if (jsResult != null) {
@@ -458,22 +460,26 @@ class WebBook {
     try {
       final decoded = json.decode(headerStr);
       if (decoded is Map) {
-        decoded.forEach((key, value) {
-          final val = value.toString();
-          // 如果值包含 JS 表达式，执行它
+        for (final entry in decoded.entries) {
+          final val = entry.value.toString();
+          // 如果值包含 JS 表达式，异步执行它
           if (_isJsRule(val)) {
-            final jsResult = JsEngine.instance.executeSync(val, null,
-                baseUrl: source.bookSourceUrl,
-                sourceEngine: source.engineType,
-                variables: {
-                  'source': _sourceToMap(source),
-                  'cookie': <String, String>{},
-                });
-            headers[key.toString()] = jsResult?.toString() ?? val;
+            final jsResult = await JsEngine.instance.processJsRule(
+              '',
+              val,
+              baseUrl: source.bookSourceUrl,
+              sourceEngine: source.engineType,
+              env: {
+                'source': _sourceToMap(source),
+                'cookie': <String, String>{},
+                'baseUrl': source.bookSourceUrl,
+              },
+            );
+            headers[entry.key.toString()] = jsResult ?? val;
           } else {
-            headers[key.toString()] = val;
+            headers[entry.key.toString()] = val;
           }
-        });
+        }
         return headers;
       }
     } catch (_) {
@@ -1947,6 +1953,10 @@ class WebBook {
   }
 
   /// 简介 HTML 格式化（借鉴 legado 的 HtmlFormatter.format）
+  /// 核心逻辑：
+  /// - <usehtml>/<md>/<useweb> 前缀：保留原始内容
+  /// - 内容中包含有意义的HTML标签：保留HTML（供详情页Html widget渲染）
+  /// - 纯文本：清除残留HTML标签 + 实体解码
   static String _formatIntro(String intro) {
     var result = intro.trim();
     // 检测特殊标签（借鉴 legado：<usehtml>/<md>/<useweb> 保留原始内容）
@@ -1955,7 +1965,12 @@ class WebBook {
         result.startsWith('<useweb>')) {
       return result;
     }
-    // 清理 HTML 标签
+    // 检测内容中是否包含有意义的HTML标签（如<dd>,<div>,<span>,<a>,<p>,<img>等）
+    // 如果包含，保留HTML供详情页Html widget渲染
+    if (_containsHtmlTag(result)) {
+      return result;
+    }
+    // 纯文本：清理残留HTML标签
     result = result.replaceAll(RegExp(r'<[^>]+>'), '');
     // HTML 实体解码
     result = result
@@ -1978,6 +1993,14 @@ class WebBook {
     result = result.replaceAll(RegExp(r'\s+'), ' ').trim();
     return result;
   }
+
+  /// 检测字符串中是否包含有意义的HTML标签
+  /// 排除自闭合标签如<br/>,<hr/>等纯格式标签
+  static final RegExp _htmlTagRegex = RegExp(
+    r'<(dd|div|span|a|p|img|table|tr|td|th|ul|ol|li|h[1-6]|section|article|main|header|footer|nav|dl|dt|em|strong|b|i|u|pre|code|blockquote|figure|figcaption|details|summary)\b[^>]*>',
+    caseSensitive: false,
+  );
+  static bool _containsHtmlTag(String text) => _htmlTagRegex.hasMatch(text);
 
   /// 正文 HTML 格式化（对齐 legado HtmlFormatter.formatKeepImg）
   /// 核心逻辑：块级标签 → 换行符，移除非 img 标签，补全 img URL，段落缩进
