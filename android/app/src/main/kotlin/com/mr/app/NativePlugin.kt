@@ -55,8 +55,7 @@ class NativePlugin(private val context: Context) {
     // 协程作用域：网络请求在 IO 线程执行，避免阻塞主线程
     private val pluginScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // 内置 Node.js 运行时（已禁用 — 减少包体积）
-    // private val nodeRuntime by lazy { NodeRuntime(context) }
+
 
     // SharedPreferences 用于键值对存储
     private val sharedPreferences by lazy {
@@ -117,11 +116,6 @@ class NativePlugin(private val context: Context) {
             "getScreenBrightness" -> getScreenBrightness(result)
             "setScreenBrightness" -> setScreenBrightness(call, result)
             "executeWebViewJs" -> executeWebViewJs(call, result)
-            // 内置 Node.js 运行时（已禁用）
-            // "nodeSetup" -> nodeSetup(call, result)
-            // "nodeStartProxy" -> nodeStartProxy(call, result)
-            // "nodeStop" -> nodeStop(call, result)
-            // "nodeStatus" -> nodeStatus(call, result)
             else -> result.notImplemented()
         }
     }
@@ -1472,66 +1466,6 @@ class NativePlugin(private val context: Context) {
             }
         }
     }
-
-    // ===== 内置 Node.js 运行时（已禁用 — 减少包体积）=====
-    // 如需恢复，取消注释并恢复 NodeRuntime.kt
-
-    /*
-    @Suppress("UNUSED_PARAMETER")
-    private fun nodeSetup(call: MethodCall, result: MethodChannel.Result) {
-        try {
-            val nodePath = nodeRuntime.setup()
-            if (nodePath != null) {
-                result.success(nodePath)
-            } else {
-                result.error("NODE_ERROR", "Node.js 初始化失败", null)
-            }
-        } catch (e: Exception) {
-            result.error("NODE_ERROR", e.message, null)
-        }
-    }
-
-    @Suppress("UNUSED_PARAMETER")
-    private fun nodeStartProxy(call: MethodCall, result: MethodChannel.Result) {
-        try {
-            val success = nodeRuntime.startProxy()
-            if (success) {
-                result.success(mapOf(
-                    "proxyPort" to nodeRuntime.currentProxyPort,
-                    "apiPort" to nodeRuntime.currentApiPort,
-                    "running" to true
-                ))
-            } else {
-                result.error("NODE_ERROR", "Node.js 代理启动失败", null)
-            }
-        } catch (e: Exception) {
-            result.error("NODE_ERROR", e.message, null)
-        }
-    }
-
-    @Suppress("UNUSED_PARAMETER")
-    private fun nodeStop(call: MethodCall, result: MethodChannel.Result) {
-        try {
-            nodeRuntime.stop()
-            result.success(true)
-        } catch (e: Exception) {
-            result.error("NODE_ERROR", e.message, null)
-        }
-    }
-
-    @Suppress("UNUSED_PARAMETER")
-    private fun nodeStatus(call: MethodCall, result: MethodChannel.Result) {
-        try {
-            result.success(mapOf(
-                "running" to nodeRuntime.isRunning,
-                "proxyPort" to nodeRuntime.currentProxyPort,
-                "apiPort" to nodeRuntime.currentApiPort
-            ))
-        } catch (e: Exception) {
-            result.error("NODE_ERROR", e.message, null)
-        }
-    }
-    */
 
     // ===== 解析规则桥接（直接对接 Dart AnalyzeRule）=====
 

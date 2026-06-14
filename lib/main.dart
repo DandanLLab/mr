@@ -9,9 +9,7 @@ import 'providers/discovery_provider.dart';
 import 'providers/reader_provider.dart';
 import 'providers/search_provider.dart';
 import 'routes/app_routes.dart';
-import 'themes/app_theme.dart';
 import 'services/native/js_engine.dart';
-import 'services/native/engine_dispatcher.dart';
 import 'services/storage_service.dart';
 import 'services/source_engine/proxy_service.dart';
 import 'services/cover_config_service.dart';
@@ -47,16 +45,6 @@ void main() async {
   if (kIsWeb) {
     await ProxyService.instance.start();
   }
-
-  // 启动四引擎调度器（Node.js 已禁用 — 减少包体积）
-  // if (!kIsWeb) {
-  //   try {
-  //     await EngineDispatcher.instance.startNodeProxy();
-  //     debugPrint('[四引擎] 状态:\n${EngineDispatcher.instance.statusSummary}');
-  //   } catch (e) {
-  //     debugPrint('[四引擎] Node.js 启动失败: $e');
-  //   }
-  // }
 
   runApp(const DanShenqiApp());
 }

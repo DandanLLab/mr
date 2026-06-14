@@ -3219,8 +3219,7 @@ class JsEngine {
             error: resultShort,
           );
         }
-        // QuickJS 失败 → 降级到 Rust 引擎
-        return fallbackToRustEngine(jsCode, result: result, env: env);
+        return null;
       }
       final strResult = evalResult.stringResult;
       // 追踪树：记录成功输出
@@ -3246,8 +3245,7 @@ class JsEngine {
       }
       // 即使异常也尝试提取 console 日志
       _flushConsoleLogs();
-      // QuickJS 异常 → 降级到 Rust 引擎
-      return fallbackToRustEngine(jsCode, result: result, env: env);
+      return null;
     }
   }
 
@@ -3300,68 +3298,6 @@ class JsEngine {
         }
       }
     } catch (_) {}
-  }
-
-  // ===== Rust 引擎降级（通过 native-proxy API）=====
-
-  /// QuickJS 执行失败时，降级到 Rust boa 引擎
-  /// 通过 HTTP 调用 native-proxy 的 /api/js/* 接口
-  Future<String?> fallbackToRustEngine(String jsCode, {
-    dynamic result,
-    Map<String, dynamic>? env,
-  }) async {
-    if (kIsWeb) return null;
-
-    final apiPort = _rustApiPort;
-    if (apiPort == 0) {
-      return null;
-    }
-
-    // 序列化 result：List/Map 用 jsonEncode，String 直接用，其他 toString
-    final resultStr = serializeContent(result);
-
-    try {
-      final client = HttpClient();
-      final code = Uri.encodeComponent(jsCode);
-      final encodedResult = Uri.encodeComponent(resultStr);
-      final baseUrl = Uri.encodeComponent(env?['baseUrl'] ?? '');
-      final bookJson = env?['book'] != null ? Uri.encodeComponent(jsonEncode(env!['book'])) : '';
-      final chapterJson = env?['chapter'] != null ? Uri.encodeComponent(jsonEncode(env!['chapter'])) : '';
-
-      final url = 'http://localhost:$apiPort/api/js/evaluateWithContext'
-          '?code=$code'
-          '&result=$encodedResult'
-          '&baseUrl=$baseUrl'
-          '&content=$encodedResult'
-          '${bookJson.isNotEmpty ? '&book=$bookJson' : ''}'
-          '${chapterJson.isNotEmpty ? '&chapter=$chapterJson' : ''}';
-
-      final request = await client.getUrl(Uri.parse(url));
-      final response = await request.close();
-      final body = await response.transform(utf8.decoder).join();
-      client.close();
-
-      if (body.isEmpty) return null;
-
-      final json = jsonDecode(body) as Map<String, dynamic>;
-      final apiResult = json['result'] as Map<String, dynamic>?;
-
-      if (apiResult == null || apiResult['success'] != true) {
-        return null;
-      }
-
-      return apiResult['result']?.toString();
-    } catch (e) {
-      return null;
-    }
-  }
-
-  /// Rust API 端口（由 cors-proxy.js 启动时通过 stderr 输出）
-  int _rustApiPort = 0;
-
-  /// 设置 Rust API 端口（供外部调用）
-  void setRustApiPort(int port) {
-    _rustApiPort = port;
   }
 
   // ===== Rhino 规则执行（通过 NativeChannel）=====

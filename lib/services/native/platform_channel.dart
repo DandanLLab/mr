@@ -537,49 +537,4 @@ class NativeChannel {
       return null;
     }
   }
-
-  // ===== 内置 Node.js 运行时（已禁用 — 减少包体积）=====
-
-  /*
-  /// 初始化内置 Node.js（解压二进制 + 脚本）
-  Future<String?> nodeSetup() async {
-    try {
-      return await _channel.invokeMethod<String>('nodeSetup');
-    } on PlatformException {
-      return null;
-    }
-  }
-
-  /// 启动内置 Node.js 代理服务
-  Future<Map<String, dynamic>?> nodeStartProxy() async {
-    try {
-      final result = await _channel.invokeMethod<Map>('nodeStartProxy');
-      if (result == null) return null;
-      return Map<String, dynamic>.from(result);
-    } on PlatformException {
-      return null;
-    }
-  }
-
-  /// 停止内置 Node.js 进程
-  Future<bool> nodeStop() async {
-    try {
-      await _channel.invokeMethod<void>('nodeStop');
-      return true;
-    } on PlatformException {
-      return false;
-    }
-  }
-
-  /// 获取内置 Node.js 运行状态
-  Future<Map<String, dynamic>?> nodeStatus() async {
-    try {
-      final result = await _channel.invokeMethod<Map>('nodeStatus');
-      if (result == null) return null;
-      return Map<String, dynamic>.from(result);
-    } on PlatformException {
-      return null;
-    }
-  }
-  */
 }
