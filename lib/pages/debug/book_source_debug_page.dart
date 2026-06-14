@@ -771,6 +771,10 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
     final stamp = match?.group(1);
     final body = match?.group(2) ?? line;
 
+    if (body.startsWith('└\n')) {
+      return _buildContentLogLine(line, stamp, body.substring(2));
+    }
+
     // 默认颜色根据主题调整
     Color bodyColor = isDark ? Colors.grey[300]! : const Color(0xFF444444);
     FontWeight bodyWeight = FontWeight.w400;
@@ -871,6 +875,55 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
                   style: TextStyle(color: stampColor, fontSize: 13),
                 ),
               ...spans,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContentLogLine(String line, String? stamp, String content) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final stampColor = isDark ? Colors.grey[500] : const Color(0xFFAAAAAA);
+    final textColor = isDark ? Colors.grey[200] : const Color(0xFF333333);
+    final bgColor = isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF7F7F7);
+    final borderColor = isDark ? Colors.grey[800]! : const Color(0xFFE0E0E0);
+
+    return GestureDetector(
+      onTap: () => _showDebugLogDetail(line, content),
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: borderColor),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (stamp != null) ...[
+                Text(
+                  '[$stamp] 正文内容',
+                  style: TextStyle(
+                    color: stampColor,
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                const SizedBox(height: 6),
+              ],
+              SelectableText(
+                content,
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.5,
+                  color: textColor,
+                  fontFamily: 'monospace',
+                ),
+              ),
             ],
           ),
         ),

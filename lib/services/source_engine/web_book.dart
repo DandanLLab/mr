@@ -1473,7 +1473,8 @@ class WebBook {
 
       // 执行 replaceRegex（正文替换规则）
       // 对齐 legado BookContent:170: contentStr.split(LFRegex).joinToString("\n") { it.trim() }
-      if (contentRule.replaceRegex != null &&
+      if (false &&
+          contentRule.replaceRegex != null &&
           contentRule.replaceRegex!.isNotEmpty &&
           content != null) {
         // 对齐 legado: 先按行 trim
@@ -1606,6 +1607,13 @@ class WebBook {
       }
 
       // 执行 js 脚本（正文加载后执行的 JS）
+      if (contentRule.replaceRegex != null &&
+          contentRule.replaceRegex!.isNotEmpty &&
+          content != null) {
+        content = content.split(RegExp(r'\n')).map((l) => l.trim()).join('\n');
+        content = await _applyContentReplaceNative(content, contentRule.replaceRegex!);
+      }
+
       if (contentRule.js != null && contentRule.js!.isNotEmpty) {
         final jsResult = await _executeJs(contentRule.js!,
             result: content ?? '', baseUrl: chapterUrl);
@@ -1706,7 +1714,8 @@ class WebBook {
         content = '${content ?? ''}\n$subContent'.trim();
       }
       // 执行 replaceRegex
-      if (contentRule.replaceRegex != null &&
+      if (false &&
+          contentRule.replaceRegex != null &&
           contentRule.replaceRegex!.isNotEmpty &&
           content != null) {
         content = await _applyContentReplaceNative(content, contentRule.replaceRegex!);
