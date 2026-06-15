@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// 阅读器增强版控制面板
-/// 复刻 legado_flutter 的 ReaderControlOverlay 设计
-/// 优化：拖拽进度条时禁止背景点击关闭
+/// Reader menu patterned after Legado: top book/source actions, center quick
+/// actions, and bottom catalog/TTS/interface/settings entries.
 class ReaderControlOverlay extends StatefulWidget {
   final String bookName;
   final String chapterTitle;
@@ -32,6 +31,7 @@ class ReaderControlOverlay extends StatefulWidget {
   final VoidCallback onOpenReplaceRules;
   final VoidCallback onShowDirectory;
   final VoidCallback onStartTts;
+  final VoidCallback onShowInterface;
   final VoidCallback onShowSettings;
   final VoidCallback? onOpenDetail;
   final VoidCallback? onOpenChapterUrl;
@@ -70,6 +70,7 @@ class ReaderControlOverlay extends StatefulWidget {
     required this.onOpenReplaceRules,
     required this.onShowDirectory,
     required this.onStartTts,
+    required this.onShowInterface,
     required this.onShowSettings,
     required this.onSliderChanged,
     required this.onSliderChangeEnd,
@@ -86,7 +87,6 @@ class ReaderControlOverlay extends StatefulWidget {
 
 class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
   bool _isSliderDragging = false;
-  double _dragValue = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -97,36 +97,36 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
 
     return Column(
       children: [
-        // 顶部导航栏
         _buildTopBar(context, cs, isDark, topPad),
-        // 中间悬浮按钮
         Expanded(
           child: Stack(
             children: [
-              // 点击关闭（拖拽进度条时禁止关闭）
               Positioned.fill(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: _isSliderDragging ? null : widget.onClose,
                 ),
               ),
-              // 悬浮按钮
               Positioned(
                 left: 0,
                 right: 0,
                 bottom: 120,
-                child: _buildCenterButtons(context, cs),
+                child: _buildCenterButtons(cs),
               ),
             ],
           ),
         ),
-        // 底部控制栏
         _buildBottomBar(context, cs, botPad),
       ],
     );
   }
 
-  Widget _buildTopBar(BuildContext context, ColorScheme cs, bool isDark, double topPad) {
+  Widget _buildTopBar(
+    BuildContext context,
+    ColorScheme cs,
+    bool isDark,
+    double topPad,
+  ) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle(
         statusBarColor: cs.surface,
@@ -138,10 +138,7 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
           padding: EdgeInsets.fromLTRB(8, topPad, 4, 0),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildHeaderRow1(context, cs),
-              _buildHeaderRow2(cs),
-            ],
+            children: [_buildHeaderRow1(context, cs), _buildHeaderRow2(cs)],
           ),
         ),
       ),
@@ -149,10 +146,17 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
   }
 
   Widget _buildHeaderRow1(BuildContext context, ColorScheme cs) {
-    final title = widget.bookName.isNotEmpty ? widget.bookName : (widget.chapterTitle.isNotEmpty ? widget.chapterTitle : '阅读');
+    final title = widget.bookName.isNotEmpty
+        ? widget.bookName
+        : (widget.chapterTitle.isNotEmpty ? widget.chapterTitle : '阅读');
     return Row(
       children: [
-        _buildIconBtn(Icons.arrow_back, cs, tooltip: '返回', onTap: widget.onBack),
+        _buildIconBtn(
+          Icons.arrow_back,
+          cs,
+          tooltip: '返回',
+          onTap: widget.onBack,
+        ),
         const SizedBox(width: 8),
         Expanded(
           child: InkWell(
@@ -186,12 +190,29 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
             ),
           ),
         ),
-        _buildIconBtn(Icons.swap_horiz, cs, tooltip: '换源', onTap: widget.onChangeSource),
-        _buildIconBtn(Icons.refresh, cs, tooltip: '刷新', onTap: widget.onRefresh),
-        _buildIconBtn(Icons.download, cs, tooltip: '缓存', onTap: widget.onDownload),
+        _buildIconBtn(
+          Icons.swap_horiz,
+          cs,
+          tooltip: '换源',
+          onTap: widget.onChangeSource,
+        ),
+        _buildIconBtn(
+          Icons.refresh,
+          cs,
+          tooltip: '刷新',
+          onTap: widget.onRefresh,
+        ),
+        _buildIconBtn(
+          Icons.download,
+          cs,
+          tooltip: '缓存',
+          onTap: widget.onDownload,
+        ),
         PopupMenuButton<String>(
           icon: Icon(Icons.more_vert, color: cs.onSurfaceVariant, size: 24),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           tooltip: '更多选项',
           offset: const Offset(0, 48),
           padding: EdgeInsets.zero,
@@ -205,7 +226,10 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
                 children: [
-                  Icon(widget.hasBookmark ? Icons.bookmark : Icons.bookmark_border, size: 20),
+                  Icon(
+                    widget.hasBookmark ? Icons.bookmark : Icons.bookmark_border,
+                    size: 20,
+                  ),
                   const SizedBox(width: 8),
                   const Text('书签'),
                 ],
@@ -220,7 +244,7 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
   Widget _buildHeaderRow2(ColorScheme cs) {
     final label = widget.sourceName.isNotEmpty ? widget.sourceName : '书源';
     final hasUrl = widget.chapterUrl != null && widget.chapterUrl!.isNotEmpty;
-    
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
       child: Row(
@@ -239,10 +263,15 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
                       children: [
                         Expanded(
                           child: Text(
-                            widget.chapterTitle.isNotEmpty ? widget.chapterTitle : '章节',
+                            widget.chapterTitle.isNotEmpty
+                                ? widget.chapterTitle
+                                : '章节',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
+                            style: TextStyle(
+                              color: cs.onSurfaceVariant,
+                              fontSize: 13,
+                            ),
                           ),
                         ),
                         if (hasUrl)
@@ -264,7 +293,9 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
                             color: cs.onSurfaceVariant.withValues(alpha: 0.6),
                             fontSize: 11,
                             decoration: TextDecoration.underline,
-                            decorationColor: cs.onSurfaceVariant.withValues(alpha: 0.38),
+                            decorationColor: cs.onSurfaceVariant.withValues(
+                              alpha: 0.38,
+                            ),
                           ),
                         ),
                       ),
@@ -291,10 +322,17 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
             itemBuilder: (context) => [
               PopupMenuItem(
                 value: 'edit',
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 child: Row(
                   children: [
-                    Icon(Icons.edit_outlined, size: 20, color: cs.onSurfaceVariant),
+                    Icon(
+                      Icons.edit_outlined,
+                      size: 20,
+                      color: cs.onSurfaceVariant,
+                    ),
                     const SizedBox(width: 8),
                     const Text('编辑书源'),
                   ],
@@ -302,7 +340,10 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
               ),
               PopupMenuItem(
                 value: 'disable',
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 child: Row(
                   children: [
                     Icon(Icons.block, size: 20, color: cs.onSurfaceVariant),
@@ -356,14 +397,22 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
     );
   }
 
-  Widget _buildCenterButtons(BuildContext context, ColorScheme cs) {
+  Widget _buildCenterButtons(ColorScheme cs) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
         _buildFab(Icons.search, cs, onTap: widget.onStartSearch),
-        _buildFab(widget.isAutoScroll ? Icons.pause : Icons.autorenew, cs, onTap: widget.onToggleAutoScroll),
-        _buildFab(widget.isNightMode ? Icons.wb_sunny : Icons.nightlight_round, cs, onTap: widget.onToggleNightMode),
-        _buildFab(Icons.settings, cs, onTap: widget.onShowSettings),
+        _buildFab(
+          widget.isAutoScroll ? Icons.pause : Icons.autorenew,
+          cs,
+          onTap: widget.onToggleAutoScroll,
+        ),
+        _buildFab(Icons.find_replace, cs, onTap: widget.onOpenReplaceRules),
+        _buildFab(
+          widget.isNightMode ? Icons.wb_sunny : Icons.nightlight_round,
+          cs,
+          onTap: widget.onToggleNightMode,
+        ),
       ],
     );
   }
@@ -376,21 +425,24 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _buildProgressBar(context, cs),
+            _buildProgressBar(cs),
             const SizedBox(height: 8),
-            _buildBottomNav(context, cs),
+            _buildBottomNav(cs),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildProgressBar(BuildContext context, ColorScheme cs) {
+  Widget _buildProgressBar(ColorScheme cs) {
     final maxCh = (widget.totalChapters - 1).toDouble();
     final maxChClamped = maxCh < 0 ? 0.0 : maxCh;
-    final cur = (widget.sliderValue >= 0 ? widget.sliderValue : widget.currentChapter.toDouble())
-        .clamp(0.0, maxChClamped)
-        .toDouble();
+    final cur =
+        (widget.sliderValue >= 0
+                ? widget.sliderValue
+                : widget.currentChapter.toDouble())
+            .clamp(0.0, maxChClamped)
+            .toDouble();
 
     return Row(
       children: [
@@ -410,16 +462,10 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
               value: cur,
               min: 0,
               max: maxChClamped > 0 ? maxChClamped : 1,
-              onChanged: (value) {
-                setState(() {
-                  _dragValue = value;
-                });
-                widget.onSliderChanged(value);
-              },
-              onChangeStart: (value) {
+              onChanged: widget.onSliderChanged,
+              onChangeStart: (_) {
                 setState(() {
                   _isSliderDragging = true;
-                  _dragValue = value;
                 });
                 widget.onSliderChangeStart?.call();
               },
@@ -438,19 +484,24 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
     );
   }
 
-  Widget _buildBottomNav(BuildContext context, ColorScheme cs) {
+  Widget _buildBottomNav(ColorScheme cs) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceAround,
       children: [
         _buildNavBtn(Icons.list, '目录', cs, widget.onShowDirectory),
         _buildNavBtn(Icons.headphones, '朗读', cs, widget.onStartTts),
-        _buildNavBtn(Icons.format_size, '界面', cs, widget.onToggleNightMode),
+        _buildNavBtn(Icons.format_size, '界面', cs, widget.onShowInterface),
         _buildNavBtn(Icons.settings, '设置', cs, widget.onShowSettings),
       ],
     );
   }
 
-  Widget _buildIconBtn(IconData icon, ColorScheme cs, {String? tooltip, required VoidCallback onTap}) {
+  Widget _buildIconBtn(
+    IconData icon,
+    ColorScheme cs, {
+    String? tooltip,
+    required VoidCallback onTap,
+  }) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
@@ -484,7 +535,12 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
     );
   }
 
-  Widget _buildNavBtn(IconData icon, String label, ColorScheme cs, VoidCallback onTap) {
+  Widget _buildNavBtn(
+    IconData icon,
+    String label,
+    ColorScheme cs,
+    VoidCallback onTap,
+  ) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
@@ -495,14 +551,21 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
           children: [
             Icon(icon, color: cs.onSurfaceVariant, size: 24),
             const SizedBox(height: 2),
-            Text(label, style: TextStyle(color: cs.onSurfaceVariant, fontSize: 10)),
+            Text(
+              label,
+              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 10),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildFab(IconData icon, ColorScheme cs, {required VoidCallback onTap}) {
+  Widget _buildFab(
+    IconData icon,
+    ColorScheme cs, {
+    required VoidCallback onTap,
+  }) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,

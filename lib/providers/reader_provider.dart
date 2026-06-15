@@ -12,21 +12,21 @@ enum TapZoneAction {
   previousPage,
   nextPage,
   previousChapter,
-  nextChapter
+  nextChapter,
 }
 
 class ReaderProvider extends ChangeNotifier {
   PageMode _pageMode = PageMode.simulation;
-  double _fontSize = 18.0;
-  double _lineHeight = 1.5;
+  double _fontSize = 20.0;
+  double _lineHeight = 1.6;
   Color _backgroundColor = const Color(0xFFFFF8E1);
   Color _textColor = Colors.black87;
   double _brightness = 1.0;
   bool _isNightMode = false;
   bool _initialized = false;
 
-  double _letterSpacing = 0.0;
-  double _paragraphSpacing = 8.0;
+  double _letterSpacing = 0.1;
+  double _paragraphSpacing = 4.0;
   double _textIndent = 2.0;
   List<HighlightRule> _highlightRules = HighlightRule.builtInRules();
   List<Highlight> _highlights = [];
@@ -69,7 +69,7 @@ class ReaderProvider extends ChangeNotifier {
   int _autoPageIntervalSeconds = 0;
   List<int> _tapZones = [0, 4, 0, 0, 1, 0, 0, 3, 2];
   double _horizontalPadding = 16.0;
-  double _verticalPadding = 12.0;
+  double _verticalPadding = 6.0;
   String _paragraphIndent = '\u3000\u3000';
   int _fontWeightIndex = 1;
   String? _backgroundImagePath;
@@ -96,8 +96,8 @@ class ReaderProvider extends ChangeNotifier {
     if (_initialized) return;
     final config = StorageService.instance.getReaderConfig();
     if (config != null) {
-      _fontSize = (config['fontSize'] as num?)?.toDouble() ?? 18.0;
-      _lineHeight = (config['lineHeight'] as num?)?.toDouble() ?? 1.5;
+      _fontSize = (config['fontSize'] as num?)?.toDouble() ?? 20.0;
+      _lineHeight = (config['lineHeight'] as num?)?.toDouble() ?? 1.6;
       _brightness = (config['brightness'] as num?)?.toDouble() ?? 1.0;
       _isNightMode = config['isNightMode'] as bool? ?? false;
       final bgValue = config['backgroundColor'] as int?;
@@ -134,9 +134,9 @@ class ReaderProvider extends ChangeNotifier {
         _backgroundColor = const Color(0xFF1A1A1A);
         _textColor = Colors.white70;
       }
-      _letterSpacing = (config['letterSpacing'] as num?)?.toDouble() ?? 0.0;
+      _letterSpacing = (config['letterSpacing'] as num?)?.toDouble() ?? 0.1;
       _paragraphSpacing =
-          (config['paragraphSpacing'] as num?)?.toDouble() ?? 8.0;
+          (config['paragraphSpacing'] as num?)?.toDouble() ?? 4.0;
       _textIndent = (config['textIndent'] as num?)?.toDouble() ?? 2.0;
       _showReadingInfo = config['showReadingInfo'] as bool? ?? true;
       _showChapterTitle = config['showChapterTitle'] as bool? ?? true;
@@ -151,10 +151,10 @@ class ReaderProvider extends ChangeNotifier {
       _autoPageIntervalSeconds = config['autoPageIntervalSeconds'] as int? ?? 0;
       _horizontalPadding =
           (config['horizontalPadding'] as num?)?.toDouble() ?? 16.0;
-      _verticalPadding =
-          (config['verticalPadding'] as num?)?.toDouble() ?? 12.0;
+      _verticalPadding = (config['verticalPadding'] as num?)?.toDouble() ?? 6.0;
       _paragraphIndent = config['paragraphIndent'] as String? ?? '\u3000\u3000';
       _fontWeightIndex = config['fontWeightIndex'] as int? ?? 1;
+      _backgroundImagePath = config['backgroundImagePath'] as String?;
       final highlightRulesJson = config['highlightRules'] as List?;
       if (highlightRulesJson != null) {
         _highlightRules = highlightRulesJson
@@ -207,6 +207,7 @@ class ReaderProvider extends ChangeNotifier {
       'verticalPadding': _verticalPadding,
       'paragraphIndent': _paragraphIndent,
       'fontWeightIndex': _fontWeightIndex,
+      'backgroundImagePath': _backgroundImagePath,
     });
   }
 
@@ -360,8 +361,10 @@ class ReaderProvider extends ChangeNotifier {
   void updateHighlightNote(String highlightId, String note) {
     final index = _highlights.indexWhere((h) => h.id == highlightId);
     if (index != -1) {
-      _highlights[index] =
-          _highlights[index].copyWith(note: note, updatedAt: DateTime.now());
+      _highlights[index] = _highlights[index].copyWith(
+        note: note,
+        updatedAt: DateTime.now(),
+      );
       _saveToStorage();
       notifyListeners();
     }
@@ -446,8 +449,10 @@ class ReaderProvider extends ChangeNotifier {
   void setTtsChapterContent(String content) {
     _ttsManager?.setChapterContent(content);
     // 计算段落总数
-    _ttsParagraphTotal =
-        content.split(RegExp(r'\n+')).where((p) => p.trim().isNotEmpty).length;
+    _ttsParagraphTotal = content
+        .split(RegExp(r'\n+'))
+        .where((p) => p.trim().isNotEmpty)
+        .length;
     notifyListeners();
   }
 
