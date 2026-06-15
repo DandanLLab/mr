@@ -966,7 +966,14 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       itemCount: _horizontalItemCount,
       onPageChanged: (itemIndex) {
         final imageIndex = itemIndex - _horizontalLeadingCount;
-        if (imageIndex < 0 || imageIndex >= _images.length) return;
+        if (imageIndex < 0) {
+          _previousChapter(toLastPage: true);
+          return;
+        }
+        if (imageIndex >= _images.length) {
+          _nextChapter();
+          return;
+        }
         _currentPageIndex = imageIndex;
         _pageNotifier.value = imageIndex;
         _scheduleProgressSave();
@@ -1947,7 +1954,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     return position >= 0 && position < _chapters.length - 1;
   }
 
-  void _previousChapter() {
+  void _previousChapter({bool toLastPage = false}) {
     final position = _chapters.indexWhere(
       (chapter) => chapter.index == _currentChapterIndex,
     );
@@ -1957,7 +1964,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       return;
     }
     _currentChapterIndex = _chapters[position - 1].index;
-    _loadChapter();
+    _loadChapter(pageIndex: toLastPage ? 1 << 30 : 0);
   }
 
   void _nextChapter() {
@@ -1989,7 +1996,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       if (_currentPageIndex > 0) {
         _goToPage(_currentPageIndex - 1);
       } else {
-        _previousChapter();
+        _previousChapter(toLastPage: true);
       }
       return;
     }
@@ -1999,7 +2006,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
         curve: Curves.easeOut,
       );
     } else {
-      _previousChapter();
+      _previousChapter(toLastPage: true);
     }
   }
 
@@ -2642,6 +2649,9 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                       update(() {
                         _readMode = mode;
                         _resetControllers();
+                      });
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) _jumpToCurrentPage();
                       });
                     },
                   ),

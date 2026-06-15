@@ -52,6 +52,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   bool _isLoading = true;
   bool _restoreInitialPosition = false;
   int _initialChapterPos = 0;
+  int? _pendingInitialPage;
+  bool _pendingInitialPageToEnd = false;
+  bool _isChangingChapterByPageView = false;
   Book? _book;
   BookSource? _bookSource;
   List<Chapter> _chapters = [];
@@ -366,8 +369,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       _checkBookmark();
 
       final provider = context.read<ReaderProvider>();
-      final restorePos = _restoreInitialPosition ? _initialChapterPos : 0;
+      final restorePos = _pendingInitialPageToEnd
+          ? 1 << 30
+          : _pendingInitialPage ??
+                (_restoreInitialPosition ? _initialChapterPos : 0);
       _restoreInitialPosition = false;
+      _pendingInitialPage = null;
+      _pendingInitialPageToEnd = false;
       _repaginate(initialPage: restorePos);
 
       // 滚动模式下重置滚动位置到顶部
@@ -498,8 +506,46 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     _pages = _splitContentToPages(_content, provider);
     _currentPage = initialPage.clamp(0, max(_pages.length - 1, 0));
     _pageController?.dispose();
-    _pageController = PageController(initialPage: _currentPage);
+    _pageController = PageController(
+      initialPage: _currentPage + _pagedLeadingCount,
+    );
+    _isChangingChapterByPageView = false;
     if (mounted) setState(() {});
+  }
+
+  void _repaginatePreservingPosition() {
+    final provider = context.read<ReaderProvider>();
+    var fraction = 0.0;
+    if (_pages.length > 1) {
+      fraction = _currentPage / (_pages.length - 1);
+    } else if (_scrollController.hasClients &&
+        _scrollController.position.maxScrollExtent > 0) {
+      fraction =
+          _scrollController.offset / _scrollController.position.maxScrollExtent;
+    }
+
+    if (provider.pageMode == PageMode.scroll) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scrollController.hasClients) return;
+        _scrollController.jumpTo(
+          (_scrollController.position.maxScrollExtent *
+                  fraction.clamp(0.0, 1.0))
+              .clamp(0.0, _scrollController.position.maxScrollExtent),
+        );
+      });
+      return;
+    }
+
+    _pages = _splitContentToPages(_content, provider);
+    final lastPage = max(_pages.length - 1, 0);
+    _currentPage = (fraction.clamp(0.0, 1.0) * lastPage).round();
+    _pageController?.dispose();
+    _pageController = PageController(
+      initialPage: _currentPage + _pagedLeadingCount,
+    );
+    _isChangingChapterByPageView = false;
+    if (mounted) setState(() {});
+    unawaited(_saveCurrentProgress(pos: _currentPage));
   }
 
   List<String> _splitContentToPages(String content, ReaderProvider provider) {
@@ -676,7 +722,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     if (provider.pageMode == PageMode.scroll) {
       if (!_scrollController.hasClients) return;
       if (_scrollController.offset <= 8) {
-        _previousChapter();
+        _previousChapter(toLastPage: true);
         return;
       }
       _scrollController.animateTo(
@@ -699,7 +745,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           _scheduleProgressSave(pos: _currentPage);
         }
       } else {
-        _previousChapter();
+        _previousChapter(toLastPage: true);
       }
     }
   }
@@ -749,9 +795,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     return Duration(milliseconds: provider.pageAnimDurationMs.clamp(80, 1200));
   }
 
-  void _previousChapter() {
+  void _previousChapter({bool toLastPage = false}) {
     final previousIndex = _previousReadableChapterIndex(_currentChapterIndex);
     if (previousIndex != null) {
+      _pendingInitialPageToEnd = toLastPage;
       setState(() {
         _currentChapterIndex = previousIndex;
       });
@@ -1190,23 +1237,69 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         child: Text('无内容', style: TextStyle(color: provider.textColor)),
       );
     }
+    final leadingCount = _pagedLeadingCount;
+    final itemCount = _pages.length + leadingCount + _pagedTrailingCount;
     return PageView.builder(
       controller: _pageController,
       onPageChanged: _onPageChanged,
-      itemCount: _pages.length,
+      itemCount: itemCount,
       itemBuilder: (context, index) {
+        if (index < leadingCount) {
+          return _buildChapterBoundaryPage(provider, '上一章');
+        }
+        final pageIndex = index - leadingCount;
+        if (pageIndex >= _pages.length) {
+          return _buildChapterBoundaryPage(provider, '下一章');
+        }
         return RepaintBoundary(
-          child: _buildPageContent(provider, _pages[index], pageIndex: index),
+          child: _buildPageContent(
+            provider,
+            _pages[pageIndex],
+            pageIndex: pageIndex,
+          ),
         );
       },
     );
   }
 
+  int get _pagedLeadingCount =>
+      _previousReadableChapterIndex(_currentChapterIndex) == null ? 0 : 1;
+
+  int get _pagedTrailingCount =>
+      _nextReadableChapterIndex(_currentChapterIndex) == null ? 0 : 1;
+
   void _onPageChanged(int index) {
+    if (_isChangingChapterByPageView) return;
+    final leadingCount = _pagedLeadingCount;
+    if (index < leadingCount) {
+      _isChangingChapterByPageView = true;
+      _previousChapter(toLastPage: true);
+      return;
+    }
+    final pageIndex = index - leadingCount;
+    if (pageIndex >= _pages.length) {
+      _isChangingChapterByPageView = true;
+      _nextChapter();
+      return;
+    }
     setState(() {
-      _currentPage = index;
+      _currentPage = pageIndex;
     });
-    unawaited(_saveCurrentProgress(pos: index));
+    unawaited(_saveCurrentProgress(pos: pageIndex));
+  }
+
+  Widget _buildChapterBoundaryPage(ReaderProvider provider, String text) {
+    return Container(
+      color: provider.backgroundColor,
+      alignment: Alignment.center,
+      child: Text(
+        text,
+        style: TextStyle(
+          color: provider.textColor.withValues(alpha: 0.58),
+          fontSize: max(14, provider.fontSize - 2),
+        ),
+      ),
+    );
   }
 
   // ==================== Simulation Mode ====================
@@ -2247,7 +2340,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   return GestureDetector(
                     onTap: () {
                       provider.setPageMode(modes[i]);
-                      _repaginate();
+                      _repaginatePreservingPosition();
                       Navigator.pop(context);
                     },
                     child: Column(
@@ -2488,35 +2581,35 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       isNightMode: provider.isNightMode,
       onFontSizeChanged: (value) {
         provider.setFontSize(value);
-        _repaginate();
+        _repaginatePreservingPosition();
       },
       onLineHeightChanged: (value) {
         provider.setLineHeight(value);
-        _repaginate();
+        _repaginatePreservingPosition();
       },
       onLetterSpacingChanged: (value) {
         provider.setLetterSpacing(value);
-        _repaginate();
+        _repaginatePreservingPosition();
       },
       onParagraphSpacingChanged: (value) {
         provider.setParagraphSpacing(value);
-        _repaginate();
+        _repaginatePreservingPosition();
       },
       onHorizontalPaddingChanged: (value) {
         provider.setHorizontalPadding(value);
-        _repaginate();
+        _repaginatePreservingPosition();
       },
       onVerticalPaddingChanged: (value) {
         provider.setVerticalPadding(value);
-        _repaginate();
+        _repaginatePreservingPosition();
       },
       onParagraphIndentChanged: (value) {
         provider.setParagraphIndent(value);
-        _repaginate();
+        _repaginatePreservingPosition();
       },
       onFontWeightChanged: (value) {
         provider.setFontWeightIndex(value);
-        _repaginate();
+        _repaginatePreservingPosition();
       },
       onFontFamilyChanged: (value) => provider.setFontFamily(value),
       onBackgroundColorChanged: (value) => provider.setBackgroundColor(value),
@@ -2525,14 +2618,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       onShowReadingInfoChanged: (value) => provider.setShowReadingInfo(value),
       onShowChapterTitleChanged: (value) {
         provider.setShowChapterTitle(value);
-        _repaginate();
+        _repaginatePreservingPosition();
       },
       onShowClockChanged: (value) => provider.setShowClock(value),
       onShowProgressChanged: (value) => provider.setShowProgress(value),
       onPageAnimChanged: (value) {
         if (value < PageMode.values.length) {
           provider.setPageMode(PageMode.values[value]);
-          _repaginate();
+          _repaginatePreservingPosition();
         }
       },
       onPageAnimDurationChanged: (value) =>
