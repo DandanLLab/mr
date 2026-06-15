@@ -242,19 +242,69 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
   }
 
   Widget _buildHeaderRow2(ColorScheme cs) {
+    final label = widget.sourceName.isNotEmpty ? widget.sourceName : '书源';
+    final hasUrl = widget.chapterUrl != null && widget.chapterUrl!.isNotEmpty;
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(52, 0, 12, 4),
+      padding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Expanded(
-            child: Text(
-              widget.chapterTitle.isNotEmpty ? widget.chapterTitle : '章节',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
+            child: InkWell(
+              onTap: hasUrl ? widget.onOpenChapterUrl : null,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            widget.chapterTitle.isNotEmpty
+                                ? widget.chapterTitle
+                                : '章节',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: cs.onSurfaceVariant,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                        if (hasUrl)
+                          Icon(
+                            Icons.open_in_new,
+                            color: cs.onSurfaceVariant.withValues(alpha: 0.54),
+                            size: 14,
+                          ),
+                      ],
+                    ),
+                    if (hasUrl)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Text(
+                          widget.chapterUrl!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: cs.onSurfaceVariant.withValues(alpha: 0.6),
+                            fontSize: 11,
+                            decoration: TextDecoration.underline,
+                            decorationColor: cs.onSurfaceVariant.withValues(
+                              alpha: 0.38,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
           ),
+          const SizedBox(width: 8),
           PopupMenuButton<String>(
             enabled: widget.hasBookSource,
             tooltip: '书源操作',
@@ -303,15 +353,42 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
                 ),
               ),
             ],
-            child: SizedBox(
-              width: 36,
-              height: 30,
-              child: Icon(
-                Icons.more_horiz,
-                size: 20,
-                color: widget.hasBookSource
-                    ? cs.onSurfaceVariant
-                    : cs.onSurfaceVariant.withValues(alpha: 0.35),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 120, minHeight: 30),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+              decoration: BoxDecoration(
+                color: cs.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: cs.primary.withValues(alpha: 0.3),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(Icons.source, size: 11, color: cs.primary),
+                  const SizedBox(width: 2),
+                  Flexible(
+                    child: Text(
+                      label,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: cs.primary,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  if (widget.hasBookSource)
+                    Icon(
+                      Icons.arrow_drop_down,
+                      size: 12,
+                      color: cs.primary.withValues(alpha: 0.7),
+                    ),
+                ],
               ),
             ),
           ),

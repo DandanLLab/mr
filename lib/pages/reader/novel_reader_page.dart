@@ -53,10 +53,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   List<Chapter> _chapters = [];
   BookDataProvider? _dataProvider;
   double _sliderValue = 0; // 滑动进度条的实时值
-  String? _prevContent;
   String? _nextContent;
-  String? _prevChapterTitle;
-  String? _nextChapterTitle;
+  int _chapterLoadToken = 0;
 
   // Pagination for non-scroll modes
   List<String> _pages = [];
@@ -288,13 +286,16 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       return;
     }
 
+    final loadToken = ++_chapterLoadToken;
+    final chapterIndex = _currentChapterIndex;
     setState(() {
       _isLoading = true;
       _sliderValue = _currentChapterIndex.toDouble();
+      _nextContent = null;
     });
 
-    final chapter = _currentChapterIndex < _chapters.length
-        ? _chapters[_currentChapterIndex]
+    final chapter = chapterIndex < _chapters.length
+        ? _chapters[chapterIndex]
         : null;
 
     if (chapter == null) {
@@ -335,7 +336,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       }
     }
 
-    if (mounted) {
+    if (mounted &&
+        loadToken == _chapterLoadToken &&
+        chapterIndex == _currentChapterIndex) {
       setState(() {
         _chapterTitle = chapter.title;
         _chapterUrl = chapter.url?.split(',{').first.trim();
@@ -353,9 +356,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
       // 滚动模式下重置滚动位置到顶部
       final provider = context.read<ReaderProvider>();
-      if (provider.pageMode == PageMode.scroll &&
-          _scrollController.hasClients) {
-        _scrollController.jumpTo(0);
+      if (provider.pageMode == PageMode.scroll) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _scrollController.hasClients) {
+            _scrollController.jumpTo(0);
+          }
+        });
       }
 
       context.read<BookshelfProvider>().updateBookProgress(
@@ -370,20 +376,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   Future<void> _preloadAdjacentChapters(int chapterIndex) async {
     if (_book == null) return;
 
-    String? prevContent;
-    String? prevTitle;
     String? nextContent;
-    String? nextTitle;
-
-    if (chapterIndex > 0) {
-      final prevChapter = _chapters[chapterIndex - 1];
-      prevContent = await _dataProvider!.getContent(
-        _book!,
-        prevChapter,
-        allChapters: _chapters,
-      );
-      prevTitle = prevChapter.title;
-    }
 
     if (chapterIndex < _totalChapters - 1) {
       final nextChapter = _chapters[chapterIndex + 1];
@@ -392,15 +385,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         nextChapter,
         allChapters: _chapters,
       );
-      nextTitle = nextChapter.title;
     }
 
     if (!mounted || _currentChapterIndex != chapterIndex) return;
     setState(() {
-      _prevContent = prevContent;
-      _prevChapterTitle = prevTitle;
       _nextContent = nextContent;
-      _nextChapterTitle = nextTitle;
     });
   }
 
@@ -413,7 +402,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         nextChapter,
         allChapters: _chapters,
       );
-      _nextChapterTitle = nextChapter.title;
       if (mounted) setState(() {});
     }
   }
@@ -563,7 +551,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   // ==================== Tap Zone ====================
 
-  void _handleTap(TapDownDetails details) {
+  void _handleTap(TapUpDetails details) {
+    if (_showMenu || _isLoading) return;
     final provider = context.read<ReaderProvider>();
     final size = MediaQuery.of(context).size;
     final x = details.globalPosition.dx;
@@ -605,6 +594,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final provider = context.read<ReaderProvider>();
     if (provider.pageMode == PageMode.scroll) {
       if (!_scrollController.hasClients) return;
+      if (_scrollController.offset <= 8) {
+        _previousChapter();
+        return;
+      }
       _scrollController.animateTo(
         max(_scrollController.offset - _scrollPageExtent(), 0),
         duration: _pageAnimationDuration(provider),
@@ -725,7 +718,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       child: Scaffold(
         backgroundColor: provider.backgroundColor,
         body: GestureDetector(
-          onTapDown: _handleTap,
+          onTapUp: _handleTap,
           onLongPressStart: _onLongPressStart,
           child: Stack(
             children: [
@@ -871,23 +864,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (_prevContent != null) ...[
-                    _buildChapterContent(
-                      provider,
-                      _prevContent!,
-                      _prevChapterTitle ?? '上一章',
-                    ),
-                    _buildChapterDivider(provider),
-                  ],
                   _buildChapterContent(provider, _content, _chapterTitle),
-                  if (_nextContent != null) ...[
-                    _buildChapterDivider(provider),
-                    _buildChapterContent(
-                      provider,
-                      _nextContent!,
-                      _nextChapterTitle ?? '下一章',
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -919,19 +896,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     );
   }
 
-  Widget _buildChapterDivider(ReaderProvider provider) {
-    return Padding(
-      padding: EdgeInsets.symmetric(vertical: provider.paragraphSpacing * 2),
-      child: Divider(
-        color: provider.textColor.withValues(alpha: 0.2),
-        thickness: 1,
-      ),
-    );
-  }
-
   // ==================== Rich Content with Highlights ====================
 
-  Widget _buildRichContent(ReaderProvider provider, String content) {
+  Widget _buildRichContent(
+    ReaderProvider provider,
+    String content, {
+    bool applyIndent = true,
+  }) {
     final paragraphs = _splitToParagraphs(content);
     final highlights = _getActiveHighlights();
     final rules = provider.highlightRules.where((r) => r.enabled).toList();
@@ -939,7 +910,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: paragraphs.map((para) {
-        final indentedPara = _applyIndent(para, provider);
+        final indentedPara = applyIndent ? _applyIndent(para, provider) : para;
         return Padding(
           padding: EdgeInsets.only(bottom: provider.paragraphSpacing),
           child: _buildRichParagraph(provider, indentedPara, highlights, rules),
@@ -1307,7 +1278,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             if (showTitle)
               Text(_chapterTitle, style: _titleTextStyle(provider)),
             if (showTitle) SizedBox(height: provider.paragraphSpacing),
-            _buildRichContent(provider, pageText),
+            _buildRichContent(provider, pageText, applyIndent: false),
           ],
         ),
       ),
