@@ -166,6 +166,9 @@ class AppRoutes {
           builder: (_) => NovelReaderPage(
             bookUrl: argsMap?['bookUrl'] ?? argsMap?['bookId'] ?? '',
             chapterIndex: argsMap?['chapterIndex'] ?? 0,
+            resumeProgress:
+                argsMap?['resumeProgress'] == true ||
+                !(argsMap?.containsKey('chapterIndex') ?? false),
             initialBook: initialBook,
           ),
         );
@@ -192,6 +195,9 @@ class AppRoutes {
           builder: (_) => ComicReaderPage(
             bookUrl: argsMap?['bookUrl'] ?? argsMap?['bookId'] ?? '',
             chapterIndex: argsMap?['chapterIndex'] ?? 0,
+            resumeProgress:
+                argsMap?['resumeProgress'] == true ||
+                !(argsMap?.containsKey('chapterIndex') ?? false),
             initialBook: initialBook,
           ),
         );

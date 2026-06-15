@@ -30,12 +30,14 @@ enum MangaReadMode { scroll, horizontal, japanese }
 class ComicReaderPage extends StatefulWidget {
   final String bookUrl;
   final int chapterIndex;
+  final bool resumeProgress;
   final Book? initialBook;
 
   const ComicReaderPage({
     super.key,
     required this.bookUrl,
     this.chapterIndex = 0,
+    this.resumeProgress = false,
     this.initialBook,
   });
 
@@ -97,7 +99,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   // 预加载设置拖动临时变量
   final ValueNotifier<double> _preloadSliderValue = ValueNotifier(10.0);
   bool _isPreloadDragging = false;
-  
+
   // 阅读记录
   int _readStartTime = 0;
 
@@ -159,7 +161,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   @override
   void initState() {
     super.initState();
-    _currentChapterIndex = widget.chapterIndex;
+    _currentChapterIndex = widget.resumeProgress ? 0 : widget.chapterIndex;
     _readStartTime = ReadRecordService.instance.startReading();
     _scrollController.addListener(_updateScrollProgress);
     _initializeReader();
@@ -202,8 +204,8 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
 
     // 获取当前亮度作为原始亮度
     try {
-      _originalScreenBrightness =
-          await NativeChannel.instance.getScreenBrightness();
+      _originalScreenBrightness = await NativeChannel.instance
+          .getScreenBrightness();
     } catch (_) {
       _originalScreenBrightness = 0.5;
     }
@@ -272,6 +274,10 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       if (_chapters.isEmpty) {
         throw StateError('目录为空');
       }
+      if (widget.resumeProgress) {
+        _currentChapterIndex = _book!.durChapterIndex;
+        _currentPageIndex = _book!.durChapterPos;
+      }
       if (!_chapters.any((chapter) => chapter.index == _currentChapterIndex)) {
         _currentChapterIndex = _chapters.first.index;
       }
@@ -306,23 +312,38 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
 
       // 优先从缓存读取
       if (_book!.originType == BookOriginType.online) {
-        final cachedImages = await ChapterCacheService.instance.readComicChapterContent(_book!, chapter);
+        final cachedImages = await ChapterCacheService.instance
+            .readComicChapterContent(_book!, chapter);
         if (cachedImages != null && cachedImages.isNotEmpty) {
           images = cachedImages;
         } else {
           // 缓存没有则从网络获取
-          final content = await _dataProvider!.getContent(_book!, chapter, allChapters: _chapters);
+          final content = await _dataProvider!.getContent(
+            _book!,
+            chapter,
+            allChapters: _chapters,
+          );
           images = _extractImageUrls(
             content ?? '',
             baseUrl: chapter.url ?? _book!.bookUrl,
           );
           // 保存到缓存
           if (images.isNotEmpty) {
-            unawaited(ChapterCacheService.instance.saveComicChapterContent(_book!, chapter, images));
+            unawaited(
+              ChapterCacheService.instance.saveComicChapterContent(
+                _book!,
+                chapter,
+                images,
+              ),
+            );
           }
         }
       } else {
-        final content = await _dataProvider!.getContent(_book!, chapter, allChapters: _chapters);
+        final content = await _dataProvider!.getContent(
+          _book!,
+          chapter,
+          allChapters: _chapters,
+        );
         images = _extractImageUrls(
           content ?? '',
           baseUrl: chapter.url ?? _book!.bookUrl,
@@ -398,9 +419,12 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
         (chapter) => chapter.index == _currentChapterIndex,
       );
       if (chapterIdx < 0) chapterIdx = 0;
-      final targetGlobalIndex = _resolveGlobalIndex(chapterIdx, pageIndex,
-          chapterStartIndices: chapterStartIndices,
-          globalToChapterIdx: globalToChapterIdx);
+      final targetGlobalIndex = _resolveGlobalIndex(
+        chapterIdx,
+        pageIndex,
+        chapterStartIndices: chapterStartIndices,
+        globalToChapterIdx: globalToChapterIdx,
+      );
       final targetChapterIdx = globalToChapterIdx[targetGlobalIndex];
       final targetChapter = _chapters[targetChapterIdx];
       final targetPage = globalToPageIdx[targetGlobalIndex];
@@ -413,7 +437,8 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       _currentChapterIndex = targetChapter.index;
       _currentPageIndex = targetPage;
       _pageNotifier.value = targetPage;
-      _images = chapterImages[targetChapter.index] ??
+      _images =
+          chapterImages[targetChapter.index] ??
           _imagesForChapterListIndex(targetChapterIdx);
       _imageKeys.clear();
       _imageKeys.addAll(List.generate(_images.length, (_) => GlobalKey()));
@@ -478,7 +503,10 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     if (start < 0 || start >= end || start >= _allImages.length) {
       return const [];
     }
-    return _allImages.sublist(start, end.clamp(start, _allImages.length).toInt());
+    return _allImages.sublist(
+      start,
+      end.clamp(start, _allImages.length).toInt(),
+    );
   }
 
   List<String> _extractImageUrls(String content, {required String baseUrl}) {
@@ -758,9 +786,9 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     if (_eyeCareMode) {
       body = ColorFiltered(
         colorFilter: const ColorFilter.matrix(<double>[
-          1.1, 0, 0, 0, 0,    // R 增强红色
-          0, 0.95, 0, 0, 0,   // G 略微降低绿色
-          0, 0, 0.8, 0, 0,    // B 降低蓝色
+          1.1, 0, 0, 0, 0, // R 增强红色
+          0, 0.95, 0, 0, 0, // G 略微降低绿色
+          0, 0, 0.8, 0, 0, // B 降低蓝色
           0, 0, 0, 1, 0,
         ]),
         child: body,
@@ -774,17 +802,15 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
           _saveReadRecord();
         }
       },
-      child: Scaffold(
-        backgroundColor: _readerBackground,
-        body: body,
-      ),
+      child: Scaffold(backgroundColor: _readerBackground, body: body),
     );
   }
 
   /// 保存阅读记录
   void _saveReadRecord() {
     if (_book != null && _readStartTime > 0) {
-      final chapterTitle = _chapters.isNotEmpty && _currentChapterIndex < _chapters.length
+      final chapterTitle =
+          _chapters.isNotEmpty && _currentChapterIndex < _chapters.length
           ? _chapters[_currentChapterIndex].title
           : '';
       debugPrint('[ComicReader] Saving read record: ${_book!.name}');
@@ -855,7 +881,6 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     );
   }
 
-
   Widget _buildScrollReader() {
     return CustomScrollView(
       controller: _scrollController,
@@ -889,26 +914,46 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     );
   }
 
-
   Future<List<String>> _loadChapterImages(Chapter chapter) async {
     if (_book == null || _dataProvider == null) return [];
 
     try {
       List<String> images;
       if (_book!.originType == BookOriginType.online) {
-        final cachedImages = await ChapterCacheService.instance.readComicChapterContent(_book!, chapter);
+        final cachedImages = await ChapterCacheService.instance
+            .readComicChapterContent(_book!, chapter);
         if (cachedImages != null && cachedImages.isNotEmpty) {
           images = cachedImages;
         } else {
-          final content = await _dataProvider!.getContent(_book!, chapter, allChapters: _chapters);
-          images = _extractImageUrls(content ?? '', baseUrl: chapter.url ?? _book!.bookUrl);
+          final content = await _dataProvider!.getContent(
+            _book!,
+            chapter,
+            allChapters: _chapters,
+          );
+          images = _extractImageUrls(
+            content ?? '',
+            baseUrl: chapter.url ?? _book!.bookUrl,
+          );
           if (images.isNotEmpty) {
-            unawaited(ChapterCacheService.instance.saveComicChapterContent(_book!, chapter, images));
+            unawaited(
+              ChapterCacheService.instance.saveComicChapterContent(
+                _book!,
+                chapter,
+                images,
+              ),
+            );
           }
         }
       } else {
-        final content = await _dataProvider!.getContent(_book!, chapter, allChapters: _chapters);
-        images = _extractImageUrls(content ?? '', baseUrl: chapter.url ?? _book!.bookUrl);
+        final content = await _dataProvider!.getContent(
+          _book!,
+          chapter,
+          allChapters: _chapters,
+        );
+        images = _extractImageUrls(
+          content ?? '',
+          baseUrl: chapter.url ?? _book!.bookUrl,
+        );
       }
       return images;
     } catch (e) {
@@ -999,14 +1044,17 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
         progressIndicatorBuilder: (context, _, progress) {
           final value = progress.progress;
           final now = DateTime.now();
-          final timeStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+          final timeStr =
+              '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
           if (value != null && _imageLoadLog.length < 500) {
             final existingLog = _imageLoadLog.lastWhere(
               (l) => l.contains(url.substring(0, url.length.clamp(0, 50))),
               orElse: () => '',
             );
             if (existingLog.isEmpty) {
-              _imageLoadLog.add('[$timeStr] 开始加载: ${url.substring(0, url.length.clamp(0, 80))}...');
+              _imageLoadLog.add(
+                '[$timeStr] 开始加载: ${url.substring(0, url.length.clamp(0, 80))}...',
+              );
             }
           }
           return Container(
@@ -1038,9 +1086,12 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
         },
         errorWidget: (_, error, ___) {
           final now = DateTime.now();
-          final timeStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+          final timeStr =
+              '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
           if (_imageLoadLog.length < 500) {
-            _imageLoadLog.add('[$timeStr] 加载失败: ${url.substring(0, url.length.clamp(0, 80))} - ${error.toString().substring(0, error.toString().length.clamp(0, 50))}');
+            _imageLoadLog.add(
+              '[$timeStr] 加载失败: ${url.substring(0, url.length.clamp(0, 80))} - ${error.toString().substring(0, error.toString().length.clamp(0, 50))}',
+            );
           }
           return _buildImageError();
         },
@@ -1056,10 +1107,26 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     if (_grayscaleImages) {
       child = ColorFiltered(
         colorFilter: const ColorFilter.matrix(<double>[
-          0.2126, 0.7152, 0.0722, 0, 0,
-          0.2126, 0.7152, 0.0722, 0, 0,
-          0.2126, 0.7152, 0.0722, 0, 0,
-          0, 0, 0, 1, 0,
+          0.2126,
+          0.7152,
+          0.0722,
+          0,
+          0,
+          0.2126,
+          0.7152,
+          0.0722,
+          0,
+          0,
+          0.2126,
+          0.7152,
+          0.0722,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
         ]),
         child: child,
       );
@@ -1199,7 +1266,10 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                         onTap: _openBookDetail,
                         borderRadius: BorderRadius.circular(4),
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 4,
+                          ),
                           child: Row(
                             children: [
                               Expanded(
@@ -1242,109 +1312,138 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                       tooltip: '缓存',
                     ),
                     PopupMenuButton<String>(
-                      icon: Icon(Icons.more_vert, color: _menuForeground, size: 24),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      icon: Icon(
+                        Icons.more_vert,
+                        color: _menuForeground,
+                        size: 24,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
                       tooltip: '更多选项',
                       offset: const Offset(0, 48),
                       padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                      constraints: const BoxConstraints(
+                        minWidth: 40,
+                        minHeight: 40,
+                      ),
                       onSelected: (value) {
-                          switch (value) {
-                            case 'footer':
-                              _showFooterConfig();
-                              break;
-                            case 'eink':
-                              _toggleEinkMode();
-                              break;
-                            case 'grayscale':
-                              _toggleGrayscale();
-                              break;
-                            case 'log':
-                              _showImageLoadLog();
-                              break;
-                          }
-                        },
-                        itemBuilder: (context) => [
-                          const PopupMenuItem(
-                            value: 'footer',
-                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            child: Text('页脚配置'),
+                        switch (value) {
+                          case 'footer':
+                            _showFooterConfig();
+                            break;
+                          case 'eink':
+                            _toggleEinkMode();
+                            break;
+                          case 'grayscale':
+                            _toggleGrayscale();
+                            break;
+                          case 'log':
+                            _showImageLoadLog();
+                            break;
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          value: 'footer',
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
                           ),
-                          PopupMenuItem(
-                            value: 'eink',
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            child: Row(
-                              children: [
-                                const Text('墨水屏'),
-                                const Spacer(),
-                                Container(
-                                  width: 18,
-                                  height: 18,
-                                  decoration: BoxDecoration(
-                                    border: Border.all(
-                                      color: _einkMode
-                                          ? Theme.of(context).colorScheme.primary
-                                          : _menuForeground.withValues(alpha: 0.5),
-                                      width: 1.5,
-                                    ),
-                                    borderRadius: BorderRadius.circular(3),
+                          child: Text('页脚配置'),
+                        ),
+                        PopupMenuItem(
+                          value: 'eink',
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          child: Row(
+                            children: [
+                              const Text('墨水屏'),
+                              const Spacer(),
+                              Container(
+                                width: 18,
+                                height: 18,
+                                decoration: BoxDecoration(
+                                  border: Border.all(
                                     color: _einkMode
                                         ? Theme.of(context).colorScheme.primary
-                                        : Colors.transparent,
+                                        : _menuForeground.withValues(
+                                            alpha: 0.5,
+                                          ),
+                                    width: 1.5,
                                   ),
-                                  child: _einkMode
-                                      ? Icon(
-                                          Icons.check,
-                                          size: 14,
-                                          color: Theme.of(context).colorScheme.onPrimary,
-                                        )
-                                      : null,
+                                  borderRadius: BorderRadius.circular(3),
+                                  color: _einkMode
+                                      ? Theme.of(context).colorScheme.primary
+                                      : Colors.transparent,
                                 ),
-                              ],
-                            ),
+                                child: _einkMode
+                                    ? Icon(
+                                        Icons.check,
+                                        size: 14,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onPrimary,
+                                      )
+                                    : null,
+                              ),
+                            ],
                           ),
-                          PopupMenuItem(
-                            value: 'grayscale',
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            child: Row(
-                              children: [
-                                const Text('图片灰色'),
-                                const Spacer(),
-                                Container(
-                                  width: 18,
-                                  height: 18,
-                                  decoration: BoxDecoration(
-                                    border: Border.all(
-                                      color: _grayscaleImages
-                                          ? Theme.of(context).colorScheme.primary
-                                          : _menuForeground.withValues(alpha: 0.5),
-                                      width: 1.5,
-                                    ),
-                                    borderRadius: BorderRadius.circular(3),
+                        ),
+                        PopupMenuItem(
+                          value: 'grayscale',
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          child: Row(
+                            children: [
+                              const Text('图片灰色'),
+                              const Spacer(),
+                              Container(
+                                width: 18,
+                                height: 18,
+                                decoration: BoxDecoration(
+                                  border: Border.all(
                                     color: _grayscaleImages
                                         ? Theme.of(context).colorScheme.primary
-                                        : Colors.transparent,
+                                        : _menuForeground.withValues(
+                                            alpha: 0.5,
+                                          ),
+                                    width: 1.5,
                                   ),
-                                  child: _grayscaleImages
-                                      ? Icon(
-                                          Icons.check,
-                                          size: 14,
-                                          color: Theme.of(context).colorScheme.onPrimary,
-                                        )
-                                      : null,
+                                  borderRadius: BorderRadius.circular(3),
+                                  color: _grayscaleImages
+                                      ? Theme.of(context).colorScheme.primary
+                                      : Colors.transparent,
                                 ),
-                              ],
-                            ),
+                                child: _grayscaleImages
+                                    ? Icon(
+                                        Icons.check,
+                                        size: 14,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onPrimary,
+                                      )
+                                    : null,
+                              ),
+                            ],
                           ),
-                          const PopupMenuItem(
-                            value: 'log',
-                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            child: Text('日志'),
+                        ),
+                        const PopupMenuItem(
+                          value: 'log',
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
                           ),
-                        ],
-                      ),
-                    ],
-                  ),
+                          child: Text('日志'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
                   child: Row(
@@ -1412,10 +1511,19 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                         itemBuilder: (context) => [
                           PopupMenuItem(
                             value: 'edit',
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
                             child: Row(
                               children: [
-                                Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                Icon(
+                                  Icons.edit_outlined,
+                                  size: 20,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
                                 const SizedBox(width: 8),
                                 const Text('编辑书源'),
                               ],
@@ -1423,10 +1531,19 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                           ),
                           PopupMenuItem(
                             value: 'disable',
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
                             child: Row(
                               children: [
-                                Icon(Icons.block, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                Icon(
+                                  Icons.block,
+                                  size: 20,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
                                 const SizedBox(width: 8),
                                 const Text('禁用书源'),
                               ],
@@ -1434,16 +1551,23 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                           ),
                         ],
                         child: Container(
-                          constraints: const BoxConstraints(maxWidth: 120, minHeight: 30),
+                          constraints: const BoxConstraints(
+                            maxWidth: 120,
+                            minHeight: 30,
+                          ),
                           padding: const EdgeInsets.symmetric(
                             horizontal: 5,
                             vertical: 3,
                           ),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.primary.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.primary.withValues(alpha: 0.3),
                               width: 1,
                             ),
                           ),
@@ -1451,7 +1575,11 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              Icon(Icons.source, size: 11, color: Theme.of(context).colorScheme.primary),
+                              Icon(
+                                Icons.source,
+                                size: 11,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
                               const SizedBox(width: 2),
                               Flexible(
                                 child: Text(
@@ -1459,7 +1587,9 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    color: Theme.of(context).colorScheme.primary,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
                                     fontSize: 10,
                                     fontWeight: FontWeight.w500,
                                   ),
@@ -1468,7 +1598,9 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                               const SizedBox(width: 1),
                               Icon(
                                 Icons.arrow_drop_down,
-                                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.primary.withValues(alpha: 0.7),
                                 size: 12,
                               ),
                             ],
@@ -1514,8 +1646,8 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                           value: _images.isEmpty
                               ? 0
                               : (_isSliderDragging
-                                  ? _sliderPageIndex
-                                  : _currentPageIndex.toDouble()),
+                                    ? _sliderPageIndex
+                                    : _currentPageIndex.toDouble()),
                           min: 0,
                           max: _images.length > 1
                               ? (_images.length - 1).toDouble()
@@ -1665,12 +1797,12 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   void _showChangeSourceDialog() {
     _disableAutoPaging();
     setState(() => _showMenu = false);
-    
+
     if (_book == null || _book!.originType != BookOriginType.online) {
       _showMessage('本地书籍不支持换源');
       return;
     }
-    
+
     ChangeSourceSheet.show(
       context: context,
       bookName: _book!.displayName,
@@ -1679,10 +1811,10 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       currentSourceName: _book!.sourceName,
       onSourceSelected: (sourceUrl, sourceName, bookData) async {
         if (_book == null) return;
-        
+
         try {
           _showMessage('正在切换书源...');
-          
+
           // 创建新的书籍对象
           final newBook = _book!.copyWith(
             sourceUrl: sourceUrl,
@@ -1694,20 +1826,20 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             intro: bookData['intro'] ?? _book!.intro,
             lastChapter: bookData['lastChapter'] ?? _book!.lastChapter,
           );
-          
+
           // 获取新书源的目录
           _dataProvider = createBookDataProvider(newBook);
           final chapters = await _dataProvider!.getChapterList(newBook);
-          
+
           // 更新书籍
           final updatedBook = newBook.copyWith(
             totalChapterNum: chapters.length,
           );
-          
+
           // 保存到书架
           StorageService.instance.addToBookshelf(updatedBook.toJson());
           context.read<BookshelfProvider>().loadBooks();
-          
+
           // 更新状态并重新加载
           setState(() {
             _book = updatedBook;
@@ -1716,9 +1848,9 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             _currentPageIndex = 0;
             _currentGlobalIndex = 0;
           });
-          
+
           _loadChapter();
-          
+
           if (mounted) {
             _showMessage('已切换到 $sourceName');
           }
@@ -1940,7 +2072,9 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     }
 
     final position = _scrollController.position;
-    final ratio = _allImages.length > 1 ? target / (_allImages.length - 1) : 0.0;
+    final ratio = _allImages.length > 1
+        ? target / (_allImages.length - 1)
+        : 0.0;
     final estimatedOffset = (position.maxScrollExtent * ratio)
         .clamp(position.minScrollExtent, position.maxScrollExtent)
         .toDouble();
@@ -1952,17 +2086,17 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             curve: Curves.easeOut,
           )
           .whenComplete(() {
-        final retryContext = _globalImageKeys[target]?.currentContext;
-        if (retryContext != null) {
-          Scrollable.ensureVisible(
-            retryContext,
-            duration: const Duration(milliseconds: 120),
-            curve: Curves.easeOut,
-            alignment: 0,
-          );
-        }
-        finish();
-      });
+            final retryContext = _globalImageKeys[target]?.currentContext;
+            if (retryContext != null) {
+              Scrollable.ensureVisible(
+                retryContext,
+                duration: const Duration(milliseconds: 120),
+                curve: Curves.easeOut,
+                alignment: 0,
+              );
+            }
+            finish();
+          });
     } else {
       _scrollController.jumpTo(estimatedOffset);
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2246,9 +2380,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                           onChanged: followsSystem
                               ? null
                               : updateBrightnessImmediate,
-                          onChangeEnd: followsSystem
-                              ? null
-                              : saveBrightness,
+                          onChangeEnd: followsSystem ? null : saveBrightness,
                         ),
                       ),
                       Icon(
@@ -2418,24 +2550,33 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                   ],
                 ),
               ),
-              Divider(height: 1, color: _menuForeground.withValues(alpha: 0.12)),
+              Divider(
+                height: 1,
+                color: _menuForeground.withValues(alpha: 0.12),
+              ),
               Expanded(
                 child: _imageLoadLog.isEmpty
                     ? Center(
                         child: Text(
                           '暂无日志',
-                          style: TextStyle(color: _menuForeground.withValues(alpha: 0.6)),
+                          style: TextStyle(
+                            color: _menuForeground.withValues(alpha: 0.6),
+                          ),
                         ),
                       )
                     : ListView.builder(
                         itemCount: _imageLoadLog.length,
                         itemBuilder: (context, index) {
-                          final log = _imageLoadLog[_imageLoadLog.length - 1 - index];
+                          final log =
+                              _imageLoadLog[_imageLoadLog.length - 1 - index];
                           return ListTile(
                             dense: true,
                             title: Text(
                               log,
-                              style: TextStyle(color: _menuForeground, fontSize: 12),
+                              style: TextStyle(
+                                color: _menuForeground,
+                                fontSize: 12,
+                              ),
                             ),
                           );
                         },
@@ -2567,7 +2708,9 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                     valueListenable: _preloadSliderValue,
                     builder: (context, value, _) {
                       return Slider(
-                        value: _isPreloadDragging ? value : _preloadCount.toDouble(),
+                        value: _isPreloadDragging
+                            ? value
+                            : _preloadCount.toDouble(),
                         min: 0,
                         max: 30,
                         divisions: 30,
@@ -2595,7 +2738,9 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       // 只在非滚动模式下才重置控制器和跳转
       if (_readMode != MangaReadMode.scroll) {
         setState(_resetControllers);
-        WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToCurrentPage());
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _jumpToCurrentPage(),
+        );
       }
       if (resumeAutoPaging && mounted && _isAutoPaging) {
         _startAutoPageTimer();
@@ -3036,7 +3181,9 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
 
     // 找到当前章节在列表中的位置
     final display = _buildDisplayChapters(_filteredChapters);
-    final targetIndex = display.indexWhere((ch) => ch.index == widget.currentChapterIndex);
+    final targetIndex = display.indexWhere(
+      (ch) => ch.index == widget.currentChapterIndex,
+    );
     if (targetIndex < 0) return;
 
     // 估算位置 - 每个item大约48高度
@@ -3067,8 +3214,12 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
   }
 
   Future<void> _loadCacheInfo() async {
-    if (widget.book == null || widget.book!.originType != BookOriginType.online) return;
-    final files = await ChapterCacheService.instance.getChapterCacheFiles(widget.book!, isComic: true);
+    if (widget.book == null || widget.book!.originType != BookOriginType.online)
+      return;
+    final files = await ChapterCacheService.instance.getChapterCacheFiles(
+      widget.book!,
+      isComic: true,
+    );
     if (mounted) setState(() => _cachedFiles = files);
   }
 
@@ -3134,9 +3285,12 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
     final query = _searchQuery.toLowerCase();
     return _bookmarks.where((b) {
       bool hit = false;
-      if (_searchChapterName && b.chapterTitle.toLowerCase().contains(query)) hit = true;
-      if (_searchBookText && b.content.toLowerCase().contains(query)) hit = true;
-      if (_searchContent && (b.note?.toLowerCase().contains(query) ?? false)) hit = true;
+      if (_searchChapterName && b.chapterTitle.toLowerCase().contains(query))
+        hit = true;
+      if (_searchBookText && b.content.toLowerCase().contains(query))
+        hit = true;
+      if (_searchContent && (b.note?.toLowerCase().contains(query) ?? false))
+        hit = true;
       return hit;
     }).toList();
   }
@@ -3160,19 +3314,29 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
                         style: TextStyle(color: fg),
                         decoration: InputDecoration(
                           hintText: '搜索...',
-                          hintStyle: TextStyle(color: fg.withValues(alpha: 0.5)),
+                          hintStyle: TextStyle(
+                            color: fg.withValues(alpha: 0.5),
+                          ),
                           isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(color: fg.withValues(alpha: 0.3)),
+                            borderSide: BorderSide(
+                              color: fg.withValues(alpha: 0.3),
+                            ),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(color: fg.withValues(alpha: 0.3)),
+                            borderSide: BorderSide(
+                              color: fg.withValues(alpha: 0.3),
+                            ),
                           ),
                         ),
-                        onChanged: (query) => setState(() => _searchQuery = query),
+                        onChanged: (query) =>
+                            setState(() => _searchQuery = query),
                       ),
                     ),
                     IconButton(
@@ -3193,7 +3357,10 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
                     IconButton(
                       icon: Icon(Icons.search, color: fg, size: 22),
                       padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                      constraints: const BoxConstraints(
+                        minWidth: 40,
+                        minHeight: 40,
+                      ),
                       onPressed: () => setState(() => _showSearch = true),
                     ),
                     PopupMenuButton<String>(
@@ -3204,26 +3371,52 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
                       onSelected: _handleMenuAction,
                       itemBuilder: _currentTab == 0
                           ? (context) => [
-                                _menuItem('reverse', '反转目录', _isReversed, fg),
-                                _menuItem('use_replace', '使用替换', _useReplace, fg),
-                                _menuItem('word_count', '加载字数', _showWordCount, fg),
-                                _menuItem('fold_volume', '卷名折叠', _foldVolume, fg),
-                              ]
+                              _menuItem('reverse', '反转目录', _isReversed, fg),
+                              _menuItem('use_replace', '使用替换', _useReplace, fg),
+                              _menuItem(
+                                'word_count',
+                                '加载字数',
+                                _showWordCount,
+                                fg,
+                              ),
+                              _menuItem('fold_volume', '卷名折叠', _foldVolume, fg),
+                            ]
                           : (context) => [
-                                const PopupMenuItem(
-                                  value: 'export',
-                                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                  child: Text('导出'),
+                              const PopupMenuItem(
+                                value: 'export',
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
                                 ),
-                                const PopupMenuItem(
-                                  value: 'export_md',
-                                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                  child: Text('导出(MD)'),
+                                child: Text('导出'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'export_md',
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
                                 ),
-                                _menuItem('bm_search_chapter', '搜索章节名', _searchChapterName, fg),
-                                _menuItem('bm_search_text', '搜索书文', _searchBookText, fg),
-                                _menuItem('bm_search_note', '搜索备注', _searchContent, fg),
-                              ],
+                                child: Text('导出(MD)'),
+                              ),
+                              _menuItem(
+                                'bm_search_chapter',
+                                '搜索章节名',
+                                _searchChapterName,
+                                fg,
+                              ),
+                              _menuItem(
+                                'bm_search_text',
+                                '搜索书文',
+                                _searchBookText,
+                                fg,
+                              ),
+                              _menuItem(
+                                'bm_search_note',
+                                '搜索备注',
+                                _searchContent,
+                                fg,
+                              ),
+                            ],
                     ),
                   ],
                 ),
@@ -3233,17 +3426,19 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
           child: PageView(
             controller: _pageController,
             onPageChanged: (index) => setState(() => _currentTab = index),
-            children: [
-              _buildChapterList(fg, isOnline),
-              _buildBookmarkList(fg),
-            ],
+            children: [_buildChapterList(fg, isOnline), _buildBookmarkList(fg)],
           ),
         ),
       ],
     );
   }
 
-  PopupMenuItem<String> _menuItem(String value, String label, bool checked, Color fg) {
+  PopupMenuItem<String> _menuItem(
+    String value,
+    String label,
+    bool checked,
+    Color fg,
+  ) {
     return PopupMenuItem(
       value: value,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -3304,7 +3499,9 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
             width: 28,
             height: 3,
             decoration: BoxDecoration(
-              color: selected ? Theme.of(context).colorScheme.primary : Colors.transparent,
+              color: selected
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.transparent,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -3375,10 +3572,16 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
           }
 
           final isSelected = chapter.index == widget.currentChapterIndex;
-          final fileName = ChapterCacheService.instance.getChapterFileName(chapter, suffix: 'cb');
+          final fileName = ChapterCacheService.instance.getChapterFileName(
+            chapter,
+            suffix: 'cb',
+          );
           final isCached = !isOnline || _cachedFiles.contains(fileName);
           final hasTag = chapter.tag != null && chapter.tag!.isNotEmpty;
-          final hasWordCount = _showWordCount && chapter.wordCount != null && chapter.wordCount! > 0;
+          final hasWordCount =
+              _showWordCount &&
+              chapter.wordCount != null &&
+              chapter.wordCount! > 0;
           final showSubtitle = hasTag || hasWordCount;
 
           return InkWell(
@@ -3463,11 +3666,18 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
 
   Widget _buildBookmarkList(Color fg) {
     if (_bookmarks.isEmpty) {
-      return Center(child: Text('暂无书签', style: TextStyle(color: fg.withValues(alpha: 0.5))));
+      return Center(
+        child: Text('暂无书签', style: TextStyle(color: fg.withValues(alpha: 0.5))),
+      );
     }
     final list = _searchQuery.isEmpty ? _bookmarks : _filteredBookmarks;
     if (list.isEmpty) {
-      return Center(child: Text('没有匹配的书签', style: TextStyle(color: fg.withValues(alpha: 0.5))));
+      return Center(
+        child: Text(
+          '没有匹配的书签',
+          style: TextStyle(color: fg.withValues(alpha: 0.5)),
+        ),
+      );
     }
     return Scrollbar(
       thumbVisibility: true,
@@ -3478,7 +3688,9 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
           return ListTile(
             title: Text(bookmark.chapterTitle, style: TextStyle(color: fg)),
             subtitle: Text(
-              bookmark.note?.isNotEmpty == true ? bookmark.note! : bookmark.content,
+              bookmark.note?.isNotEmpty == true
+                  ? bookmark.note!
+                  : bookmark.content,
               style: TextStyle(color: fg.withValues(alpha: 0.6)),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
@@ -3503,10 +3715,7 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
       switch (action) {
         case 'reverse':
           _isReversed = !_isReversed;
-          _saveBool(
-            'tocReverse_${widget.book?.bookUrl ?? ""}',
-            _isReversed,
-          );
+          _saveBool('tocReverse_${widget.book?.bookUrl ?? ""}', _isReversed);
           break;
         case 'use_replace':
           _useReplace = !_useReplace;
@@ -3542,9 +3751,9 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
   Future<void> _exportBookmarks(bool asMd) async {
     if (_bookmarks.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('暂无书签可导出')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('暂无书签可导出')));
       }
       return;
     }
@@ -3566,9 +3775,9 @@ class _ChapterListPanelState extends State<_ChapterListPanel> {
 
     await Clipboard.setData(ClipboardData(text: text));
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(asMd ? '书签已导出为MD' : '书签已复制到剪贴板')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(asMd ? '书签已导出为MD' : '书签已复制到剪贴板')));
     }
   }
 

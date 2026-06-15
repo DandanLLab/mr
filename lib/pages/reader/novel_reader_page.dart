@@ -26,12 +26,14 @@ import '../../routes/app_routes.dart';
 class NovelReaderPage extends StatefulWidget {
   final String bookUrl;
   final int chapterIndex;
+  final bool resumeProgress;
   final Book? initialBook;
 
   const NovelReaderPage({
     super.key,
     required this.bookUrl,
     this.chapterIndex = 0,
+    this.resumeProgress = false,
     this.initialBook,
   });
 
@@ -91,8 +93,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   @override
   void initState() {
     super.initState();
-    _currentChapterIndex = widget.chapterIndex;
-    _sliderValue = widget.chapterIndex.toDouble();
+    _currentChapterIndex = widget.resumeProgress ? 0 : widget.chapterIndex;
+    _sliderValue = _currentChapterIndex.toDouble();
     _readStartTime = ReadRecordService.instance.startReading();
 
     _menuAnimController = AnimationController(
@@ -251,10 +253,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         _chapters = await _dataProvider!.getChapterList(_book!);
         _totalChapters = _chapters.length;
         if (_totalChapters > 0) {
-          _currentChapterIndex = widget.chapterIndex.clamp(
-            0,
-            _totalChapters - 1,
-          );
+          final initialIndex = widget.resumeProgress
+              ? _book!.durChapterIndex
+              : widget.chapterIndex;
+          _currentChapterIndex = initialIndex.clamp(0, _totalChapters - 1);
+          _sliderValue = _currentChapterIndex.toDouble();
         }
         // 加载书源信息
         if (_book!.originType == BookOriginType.online &&
@@ -364,13 +367,28 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         });
       }
 
-      context.read<BookshelfProvider>().updateBookProgress(
-        widget.bookUrl,
-        durChapterIndex: _currentChapterIndex,
-        durChapterTitle: chapter.title,
-      );
+      unawaited(_saveCurrentProgress(chapter));
       unawaited(_preloadAdjacentChapters(_currentChapterIndex));
     }
+  }
+
+  Future<void> _saveCurrentProgress(Chapter chapter) async {
+    final book = _book;
+    if (book == null) return;
+
+    _book = book.copyWith(
+      durChapterIndex: _currentChapterIndex,
+      durChapterTitle: chapter.title,
+      durChapterPos: 0,
+      durChapterTime: DateTime.now(),
+    );
+
+    await context.read<BookshelfProvider>().updateBookProgress(
+      book.bookUrl,
+      durChapterIndex: _currentChapterIndex,
+      durChapterTitle: chapter.title,
+      durChapterPos: 0,
+    );
   }
 
   Future<void> _preloadAdjacentChapters(int chapterIndex) async {

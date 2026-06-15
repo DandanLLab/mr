@@ -108,7 +108,9 @@ class _ChapterListPageState extends State<ChapterListPage> {
       _groupChaptersByVolume();
       // 加载缓存信息
       if (_book!.originType == BookOriginType.online) {
-        _cachedFiles = await ChapterCacheService.instance.getChapterCacheFiles(_book!);
+        _cachedFiles = await ChapterCacheService.instance.getChapterCacheFiles(
+          _book!,
+        );
       }
       _loadError = null;
     } catch (e) {
@@ -157,11 +159,13 @@ class _ChapterListPageState extends State<ChapterListPage> {
     }
 
     if (_volumeGroups.isEmpty) {
-      _volumeGroups.add(_VolumeGroup(
-        title: '全部章节',
-        chapterIndex: -1,
-        chapters: List.from(_chapters),
-      ));
+      _volumeGroups.add(
+        _VolumeGroup(
+          title: '全部章节',
+          chapterIndex: -1,
+          chapters: List.from(_chapters),
+        ),
+      );
     }
 
     if (_foldVolume) {
@@ -173,16 +177,15 @@ class _ChapterListPageState extends State<ChapterListPage> {
       );
       _expandedVolumes.add(currentGroup.chapterIndex);
     } else {
-      _expandedVolumes.addAll(
-        _volumeGroups.map((group) => group.chapterIndex),
-      );
+      _expandedVolumes.addAll(_volumeGroups.map((group) => group.chapterIndex));
     }
   }
 
   void _scrollToCurrentChapter() {
     if (!_scrollController.hasClients) return;
-    var targetIndex = _visibleChapterEntries
-        .indexWhere((ch) => ch.index == widget.currentChapterIndex);
+    var targetIndex = _visibleChapterEntries.indexWhere(
+      (ch) => ch.index == widget.currentChapterIndex,
+    );
     if (targetIndex < 0) {
       final group = _volumeGroups.where(
         (item) => item.chapters.any(
@@ -239,7 +242,11 @@ class _ChapterListPageState extends State<ChapterListPage> {
       _readerRouteName(),
       arguments: {
         'bookUrl': widget.bookUrl,
+        'bookId': widget.bookUrl,
         'chapterIndex': chapter.index,
+        'trackId': chapter.index.toString(),
+        'episodeId': chapter.index.toString(),
+        'resumeProgress': false,
         'bookData': _book,
       },
     );
@@ -266,14 +273,21 @@ class _ChapterListPageState extends State<ChapterListPage> {
                       decoration: InputDecoration(
                         hintText: '搜索...',
                         isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: fg.withValues(alpha: 0.3)),
+                          borderSide: BorderSide(
+                            color: fg.withValues(alpha: 0.3),
+                          ),
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: fg.withValues(alpha: 0.3)),
+                          borderSide: BorderSide(
+                            color: fg.withValues(alpha: 0.3),
+                          ),
                         ),
                       ),
                       onChanged: _filterChapters,
@@ -306,7 +320,10 @@ class _ChapterListPageState extends State<ChapterListPage> {
                       icon: const Icon(Icons.search, size: 22),
                       tooltip: '搜索',
                       padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                      constraints: const BoxConstraints(
+                        minWidth: 40,
+                        minHeight: 40,
+                      ),
                       onPressed: () => setState(() => _showSearch = true),
                     ),
                     PopupMenuButton<String>(
@@ -317,30 +334,64 @@ class _ChapterListPageState extends State<ChapterListPage> {
                       onSelected: _handleMenuAction,
                       itemBuilder: (context) => _currentTab == 0
                           ? [
-                              _menuItem('reverse', '反转目录', _isChapterReversed, fg),
+                              _menuItem(
+                                'reverse',
+                                '反转目录',
+                                _isChapterReversed,
+                                fg,
+                              ),
                               _menuItem('use_replace', '使用替换', _useReplace, fg),
-                              _menuItem('word_count', '加载字数', _showWordCount, fg),
+                              _menuItem(
+                                'word_count',
+                                '加载字数',
+                                _showWordCount,
+                                fg,
+                              ),
                               _menuItem('fold_volume', '卷名折叠', _foldVolume, fg),
                               const PopupMenuItem(
                                 value: 'regex_config',
-                                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
                                 child: Text('正则配置'),
                               ),
                             ]
                           : [
                               const PopupMenuItem(
                                 value: 'export',
-                                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
                                 child: Text('导出'),
                               ),
                               const PopupMenuItem(
                                 value: 'export_md',
-                                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
                                 child: Text('导出(MD)'),
                               ),
-                              _menuItem('bm_search_chapter', '搜索章节名', _searchChapterName, fg),
-                              _menuItem('bm_search_text', '搜索书文', _searchBookText, fg),
-                              _menuItem('bm_search_note', '搜索备注', _searchNote, fg),
+                              _menuItem(
+                                'bm_search_chapter',
+                                '搜索章节名',
+                                _searchChapterName,
+                                fg,
+                              ),
+                              _menuItem(
+                                'bm_search_text',
+                                '搜索书文',
+                                _searchBookText,
+                                fg,
+                              ),
+                              _menuItem(
+                                'bm_search_note',
+                                '搜索备注',
+                                _searchNote,
+                                fg,
+                              ),
                             ],
                     ),
                   ],
@@ -353,7 +404,12 @@ class _ChapterListPageState extends State<ChapterListPage> {
     );
   }
 
-  PopupMenuItem<String> _menuItem(String value, String label, bool checked, Color fg) {
+  PopupMenuItem<String> _menuItem(
+    String value,
+    String label,
+    bool checked,
+    Color fg,
+  ) {
     return PopupMenuItem(
       value: value,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -431,9 +487,9 @@ class _ChapterListPageState extends State<ChapterListPage> {
   }
 
   Future<void> _exportBookmarks() async {
-    final data = const JsonEncoder.withIndent('  ').convert(
-      _bookmarks.map((bookmark) => bookmark.toJson()).toList(),
-    );
+    final data = const JsonEncoder.withIndent(
+      '  ',
+    ).convert(_bookmarks.map((bookmark) => bookmark.toJson()).toList());
     await _shareBookmarkFile(
       fileName: 'bookmark-${_safeFileName(_book?.displayName ?? "book")}.json',
       content: data,
@@ -476,9 +532,9 @@ class _ChapterListPageState extends State<ChapterListPage> {
       await Share.shareXFiles([XFile(file.path)], text: text);
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('导出失败：$error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('导出失败：$error')));
     }
   }
 
@@ -514,10 +570,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
     return PageView(
       controller: _pageController,
       onPageChanged: (index) => setState(() => _currentTab = index),
-      children: [
-        _buildChapterPage(),
-        _buildBookmarkList(fg),
-      ],
+      children: [_buildChapterPage(), _buildBookmarkList(fg)],
     );
   }
 
@@ -611,7 +664,9 @@ class _ChapterListPageState extends State<ChapterListPage> {
             width: 28,
             height: 3,
             decoration: BoxDecoration(
-              color: selected ? Theme.of(context).colorScheme.primary : Colors.transparent,
+              color: selected
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.transparent,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -627,10 +682,9 @@ class _ChapterListPageState extends State<ChapterListPage> {
         child: Text(
           _searchQuery.isEmpty ? '目录列表为空' : '没有匹配的章节',
           style: TextStyle(
-            color: Theme.of(context)
-                .colorScheme
-                .onSurfaceVariant
-                .withValues(alpha: 0.7),
+            color: Theme.of(
+              context,
+            ).colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
           ),
         ),
       );
@@ -645,10 +699,9 @@ class _ChapterListPageState extends State<ChapterListPage> {
         separatorBuilder: (_, __) => Divider(
           height: 1,
           thickness: 0.5,
-          color: Theme.of(context)
-              .colorScheme
-              .outlineVariant
-              .withValues(alpha: 0.65),
+          color: Theme.of(
+            context,
+          ).colorScheme.outlineVariant.withValues(alpha: 0.65),
         ),
         itemBuilder: (context, index) => _buildChapterItem(entries[index]),
       ),
@@ -664,9 +717,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
     }
 
     final entries = <Chapter>[];
-    final groups = _isChapterReversed
-        ? _volumeGroups.reversed
-        : _volumeGroups;
+    final groups = _isChapterReversed ? _volumeGroups.reversed : _volumeGroups;
     for (final group in groups) {
       final volume = _chapters.where(
         (chapter) => chapter.index == group.chapterIndex && chapter.isVolume,
@@ -676,9 +727,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
       final expanded = _expandedVolumes.contains(group.chapterIndex);
       if (expanded || volume.isEmpty) {
         entries.addAll(
-          _isChapterReversed
-              ? group.chapters.reversed
-              : group.chapters,
+          _isChapterReversed ? group.chapters.reversed : group.chapters,
         );
       }
     }
@@ -692,14 +741,17 @@ class _ChapterListPageState extends State<ChapterListPage> {
     final title = current.isNotEmpty
         ? current.first.title
         : (_book?.durChapterTitle.isNotEmpty == true
-            ? _book!.durChapterTitle
-            : '未开始阅读');
+              ? _book!.durChapterTitle
+              : '未开始阅读');
     final total = _chapters.where((chapter) => !chapter.isVolume).length;
     if (total == 0) return title;
-    final position = _chapters
+    final position =
+        _chapters
             .where((chapter) => !chapter.isVolume)
             .toList()
-            .indexWhere((chapter) => chapter.index == widget.currentChapterIndex) +
+            .indexWhere(
+              (chapter) => chapter.index == widget.currentChapterIndex,
+            ) +
         1;
     return '$title(${position > 0 ? position : 1}/$total)';
   }
@@ -727,20 +779,30 @@ class _ChapterListPageState extends State<ChapterListPage> {
     final query = _searchQuery.toLowerCase();
     return _bookmarks.where((b) {
       bool hit = false;
-      if (_searchChapterName && b.chapterTitle.toLowerCase().contains(query)) hit = true;
-      if (_searchBookText && b.content.toLowerCase().contains(query)) hit = true;
-      if (_searchNote && (b.note?.toLowerCase().contains(query) ?? false)) hit = true;
+      if (_searchChapterName && b.chapterTitle.toLowerCase().contains(query))
+        hit = true;
+      if (_searchBookText && b.content.toLowerCase().contains(query))
+        hit = true;
+      if (_searchNote && (b.note?.toLowerCase().contains(query) ?? false))
+        hit = true;
       return hit;
     }).toList();
   }
 
   Widget _buildBookmarkList(Color fg) {
     if (_bookmarks.isEmpty) {
-      return Center(child: Text('暂无书签', style: TextStyle(color: fg.withValues(alpha: 0.5))));
+      return Center(
+        child: Text('暂无书签', style: TextStyle(color: fg.withValues(alpha: 0.5))),
+      );
     }
     final list = _searchQuery.isEmpty ? _bookmarks : _filteredBookmarks;
     if (list.isEmpty) {
-      return Center(child: Text('没有匹配的书签', style: TextStyle(color: fg.withValues(alpha: 0.5))));
+      return Center(
+        child: Text(
+          '没有匹配的书签',
+          style: TextStyle(color: fg.withValues(alpha: 0.5)),
+        ),
+      );
     }
     return Scrollbar(
       thumbVisibility: true,
@@ -749,10 +811,9 @@ class _ChapterListPageState extends State<ChapterListPage> {
         separatorBuilder: (_, __) => Divider(
           height: 1,
           thickness: 0.5,
-          color: Theme.of(context)
-              .colorScheme
-              .outlineVariant
-              .withValues(alpha: 0.65),
+          color: Theme.of(
+            context,
+          ).colorScheme.outlineVariant.withValues(alpha: 0.65),
         ),
         itemBuilder: (context, index) {
           final bookmark = list[index];
@@ -814,7 +875,11 @@ class _ChapterListPageState extends State<ChapterListPage> {
       _readerRouteName(),
       arguments: {
         'bookUrl': widget.bookUrl,
+        'bookId': widget.bookUrl,
         'chapterIndex': chapterIndex,
+        'trackId': chapterIndex.toString(),
+        'episodeId': chapterIndex.toString(),
+        'resumeProgress': false,
         'bookData': _book,
       },
     );
@@ -834,7 +899,10 @@ class _ChapterListPageState extends State<ChapterListPage> {
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
-              await ReaderBookmarkService().remove(bookUrl: widget.bookUrl, bookmarkId: bookmark.id);
+              await ReaderBookmarkService().remove(
+                bookUrl: widget.bookUrl,
+                bookmarkId: bookmark.id,
+              );
               _loadBookmarks();
             },
             child: const Text('删除'),
@@ -848,17 +916,23 @@ class _ChapterListPageState extends State<ChapterListPage> {
     final scheme = Theme.of(context).colorScheme;
     final isOnline = _book?.originType == BookOriginType.online;
     final isCurrent = chapter.index == widget.currentChapterIndex;
-    final isCurrentVolume = chapter.isVolume &&
+    final isCurrentVolume =
+        chapter.isVolume &&
         _isChapterInsideVolume(widget.currentChapterIndex, chapter.index);
     final isExpanded = _expandedVolumes.contains(chapter.index);
-    final fileName = ChapterCacheService.instance.getChapterFileName(chapter, suffix: 'cb');
+    final fileName = ChapterCacheService.instance.getChapterFileName(
+      chapter,
+      suffix: 'cb',
+    );
     final isCached =
         !isOnline || chapter.isVolume || _cachedFiles.contains(fileName);
     final hasTag = chapter.tag != null && chapter.tag!.isNotEmpty;
-    final hasWordCount = _showWordCount && chapter.wordCount != null && chapter.wordCount! > 0;
+    final hasWordCount =
+        _showWordCount && chapter.wordCount != null && chapter.wordCount! > 0;
     final showSubtitle = hasTag || hasWordCount;
-    final titleColor =
-        isCurrent || isCurrentVolume ? scheme.primary : scheme.onSurface;
+    final titleColor = isCurrent || isCurrentVolume
+        ? scheme.primary
+        : scheme.onSurface;
 
     return Material(
       color: isCurrentVolume
@@ -896,11 +970,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                   child: AnimatedRotation(
                     duration: const Duration(milliseconds: 180),
                     turns: isExpanded ? 0.25 : 0,
-                    child: Icon(
-                      Icons.arrow_right,
-                      size: 20,
-                      color: titleColor,
-                    ),
+                    child: Icon(Icons.arrow_right, size: 20, color: titleColor),
                   ),
                 ),
               if (chapter.isVip && !chapter.isPay)
@@ -918,10 +988,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                   children: [
                     Text(
                       chapter.title,
-                      style: TextStyle(
-                        color: titleColor,
-                        fontSize: 14,
-                      ),
+                      style: TextStyle(color: titleColor, fontSize: 14),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -966,12 +1033,12 @@ class _ChapterListPageState extends State<ChapterListPage> {
                 child: isCurrent
                     ? Icon(Icons.check, size: 18, color: scheme.primary)
                     : !isCached
-                        ? Icon(
-                            Icons.cloud_outlined,
-                            size: 18,
-                            color: scheme.onSurfaceVariant,
-                          )
-                        : null,
+                    ? Icon(
+                        Icons.cloud_outlined,
+                        size: 18,
+                        color: scheme.onSurfaceVariant,
+                      )
+                    : null,
               ),
             ],
           ),
@@ -1058,8 +1125,9 @@ class _RegexConfigSheetState extends State<_RegexConfigSheet> {
                   Text('目录正则配置', style: Theme.of(context).textTheme.titleLarge),
                   const Spacer(),
                   TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('完成')),
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('完成'),
+                  ),
                 ],
               ),
             ),
@@ -1070,12 +1138,14 @@ class _RegexConfigSheetState extends State<_RegexConfigSheet> {
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 children: [
                   _buildSectionTitle('预设规则'),
-                  ..._presetRules
-                      .map((rule) => _buildRuleTile(rule, isPreset: true)),
+                  ..._presetRules.map(
+                    (rule) => _buildRuleTile(rule, isPreset: true),
+                  ),
                   const Divider(),
                   _buildSectionTitle('自定义规则'),
-                  ..._customRules
-                      .map((rule) => _buildRuleTile(rule, isPreset: false)),
+                  ..._customRules.map(
+                    (rule) => _buildRuleTile(rule, isPreset: false),
+                  ),
                   _buildAddRuleForm(),
                 ],
               ),
@@ -1089,11 +1159,14 @@ class _RegexConfigSheetState extends State<_RegexConfigSheet> {
   Widget _buildSectionTitle(String title) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Text(title,
-          style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 14,
-              color: Colors.grey[700])),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          fontSize: 14,
+          color: Colors.grey[700],
+        ),
+      ),
     );
   }
 
@@ -1101,9 +1174,14 @@ class _RegexConfigSheetState extends State<_RegexConfigSheet> {
     return ListTile(
       dense: true,
       title: Text(rule.name),
-      subtitle: Text(rule.rule,
-          style: TextStyle(
-              fontSize: 12, color: Colors.grey[600], fontFamily: 'monospace')),
+      subtitle: Text(
+        rule.rule,
+        style: TextStyle(
+          fontSize: 12,
+          color: Colors.grey[600],
+          fontFamily: 'monospace',
+        ),
+      ),
       trailing: isPreset
           ? null
           : IconButton(
@@ -1123,11 +1201,14 @@ class _RegexConfigSheetState extends State<_RegexConfigSheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('添加自定义规则',
-              style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                  color: Colors.grey[700])),
+          Text(
+            '添加自定义规则',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              color: Colors.grey[700],
+            ),
+          ),
           const SizedBox(height: 8),
           TextField(
             decoration: const InputDecoration(
@@ -1166,12 +1247,15 @@ class _RegexConfigSheetState extends State<_RegexConfigSheet> {
               if (_newRulePattern.isNotEmpty)
                 TextButton(
                   onPressed: () {
-                    final matches =
-                        TxtParser.testRule('sample text', _newRulePattern);
+                    final matches = TxtParser.testRule(
+                      'sample text',
+                      _newRulePattern,
+                    );
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                          content: Text('测试匹配: ${matches.length} 行'),
-                          duration: const Duration(seconds: 1)),
+                        content: Text('测试匹配: ${matches.length} 行'),
+                        duration: const Duration(seconds: 1),
+                      ),
                     );
                   },
                   child: const Text('测试'),

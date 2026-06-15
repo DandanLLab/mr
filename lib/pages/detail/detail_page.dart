@@ -26,11 +26,7 @@ class DetailPage extends StatefulWidget {
   final String bookUrl;
   final Book? initialBook;
 
-  const DetailPage({
-    super.key,
-    required this.bookUrl,
-    this.initialBook,
-  });
+  const DetailPage({super.key, required this.bookUrl, this.initialBook});
 
   @override
   State<DetailPage> createState() => _DetailPageState();
@@ -81,7 +77,9 @@ class _DetailPageState extends State<DetailPage> {
           }
           // 获取书源
           if (book.sourceUrl != null) {
-            final sourceData = StorageService.instance.getBookSource(book.sourceUrl!);
+            final sourceData = StorageService.instance.getBookSource(
+              book.sourceUrl!,
+            );
             if (sourceData != null) {
               bookSource = BookSource.fromJson(sourceData);
               // 参照 Legado：根据书源类型刷新 mediaType，确保类型始终与书源一致
@@ -101,8 +99,10 @@ class _DetailPageState extends State<DetailPage> {
       }
     }
 
-    _totalWordCount =
-        chapters.fold<int>(0, (sum, ch) => sum + (ch.wordCount ?? 0));
+    _totalWordCount = chapters.fold<int>(
+      0,
+      (sum, ch) => sum + (ch.wordCount ?? 0),
+    );
 
     if (mounted) {
       setState(() {
@@ -113,9 +113,9 @@ class _DetailPageState extends State<DetailPage> {
         _bookSource = bookSource;
       });
       if (error != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('部分信息加载失败：$error')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('部分信息加载失败：$error')));
       }
     }
   }
@@ -136,7 +136,9 @@ class _DetailPageState extends State<DetailPage> {
           }
           // 参照 Legado：根据书源类型刷新 mediaType
           if (_book!.sourceUrl != null) {
-            final sourceData = StorageService.instance.getBookSource(_book!.sourceUrl!);
+            final sourceData = StorageService.instance.getBookSource(
+              _book!.sourceUrl!,
+            );
             if (sourceData != null) {
               final source = BookSource.fromJson(sourceData);
               final sourceMediaType = source.bookSourceType.mediaType;
@@ -150,8 +152,10 @@ class _DetailPageState extends State<DetailPage> {
       } catch (_) {
         // Keep the currently displayed metadata if refreshing fails.
       }
-      _totalWordCount =
-          _chapters.fold<int>(0, (sum, ch) => sum + (ch.wordCount ?? 0));
+      _totalWordCount = _chapters.fold<int>(
+        0,
+        (sum, ch) => sum + (ch.wordCount ?? 0),
+      );
     }
 
     if (mounted) {
@@ -177,8 +181,9 @@ class _DetailPageState extends State<DetailPage> {
       );
     }
 
-    final bookInfoBackground =
-        context.watch<AppProvider>().currentBookInfoBackgroundImage;
+    final bookInfoBackground = context
+        .watch<AppProvider>()
+        .currentBookInfoBackgroundImage;
     final hasCustomBackground =
         bookInfoBackground != null && bookInfoBackground.isNotEmpty;
     return Scaffold(
@@ -187,9 +192,7 @@ class _DetailPageState extends State<DetailPage> {
       body: Stack(
         children: [
           if (hasCustomBackground)
-            Positioned.fill(
-              child: _buildBackgroundImage(bookInfoBackground),
-            ),
+            Positioned.fill(child: _buildBackgroundImage(bookInfoBackground)),
           if (!hasCustomBackground &&
               _book!.coverUrl.isNotEmpty &&
               !CoverConfigService.instance.useDefaultCover)
@@ -197,9 +200,8 @@ class _DetailPageState extends State<DetailPage> {
               child: CachedNetworkImage(
                 imageUrl: _book!.coverUrl,
                 fit: BoxFit.cover,
-                errorWidget: (_, __, ___) => Container(
-                  color: Theme.of(context).colorScheme.primary,
-                ),
+                errorWidget: (_, __, ___) =>
+                    Container(color: Theme.of(context).colorScheme.primary),
               ),
             ),
           Positioned.fill(
@@ -251,7 +253,8 @@ class _DetailPageState extends State<DetailPage> {
   Widget _buildOriginalBookInfoLayout() {
     final scheme = Theme.of(context).colorScheme;
     final labels = _buildOriginalLabels();
-    final availableHeight = MediaQuery.sizeOf(context).height -
+    final availableHeight =
+        MediaQuery.sizeOf(context).height -
         MediaQuery.paddingOf(context).top -
         kToolbarHeight -
         50 -
@@ -270,10 +273,7 @@ class _DetailPageState extends State<DetailPage> {
                 right: 0,
                 child: ClipPath(
                   clipper: _BookInfoArcClipper(),
-                  child: Container(
-                    height: 78,
-                    color: scheme.surface,
-                  ),
+                  child: Container(height: 78, color: scheme.surface),
                 ),
               ),
               Positioned(
@@ -348,10 +348,7 @@ class _DetailPageState extends State<DetailPage> {
               const SizedBox(height: 14),
               Text(
                 '内容简介',
-                style: TextStyle(
-                  color: scheme.onSurfaceVariant,
-                  fontSize: 16,
-                ),
+                style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 16),
               ),
               const SizedBox(height: 9),
               _buildIntroContent(scheme.onSurfaceVariant),
@@ -421,10 +418,7 @@ class _DetailPageState extends State<DetailPage> {
     }
   }
 
-  Widget _buildOriginalLabel(
-    String text, {
-    required _BookLabelType type,
-  }) {
+  Widget _buildOriginalLabel(String text, {required _BookLabelType type}) {
     final scheme = Theme.of(context).colorScheme;
     final filled = type == _BookLabelType.tag;
     final borderColor = type == _BookLabelType.status
@@ -433,8 +427,8 @@ class _DetailPageState extends State<DetailPage> {
     final textColor = filled
         ? scheme.onPrimary
         : type == _BookLabelType.status
-            ? scheme.primary
-            : scheme.onSurfaceVariant;
+        ? scheme.primary
+        : scheme.onSurfaceVariant;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(
@@ -447,11 +441,7 @@ class _DetailPageState extends State<DetailPage> {
       ),
       child: Text(
         text,
-        style: TextStyle(
-          color: textColor,
-          fontSize: 13,
-          height: 1.25,
-        ),
+        style: TextStyle(color: textColor, fontSize: 13, height: 1.25),
       ),
     );
   }
@@ -529,17 +519,10 @@ class _DetailPageState extends State<DetailPage> {
               text,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: color,
-                fontSize: 13,
-                height: 1.35,
-              ),
+              style: TextStyle(color: color, fontSize: 13, height: 1.35),
             ),
           ),
-          if (action != null) ...[
-            const SizedBox(width: 8),
-            action,
-          ],
+          if (action != null) ...[const SizedBox(width: 8), action],
         ],
       ),
     );
@@ -555,14 +538,9 @@ class _DetailPageState extends State<DetailPage> {
         minimumSize: const Size(0, 24),
         padding: const EdgeInsets.symmetric(horizontal: 5),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(2),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(2)),
       ),
-      child: Text(
-        text,
-        style: const TextStyle(fontSize: 13, height: 1),
-      ),
+      child: Text(text, style: const TextStyle(fontSize: 13, height: 1)),
     );
   }
 
@@ -639,8 +617,8 @@ class _DetailPageState extends State<DetailPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                   if (labels.isNotEmpty) ...[
@@ -660,8 +638,8 @@ class _DetailPageState extends State<DetailPage> {
                     child: Text(
                       '简介',
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -687,14 +665,17 @@ class _DetailPageState extends State<DetailPage> {
     if (_book!.sourceName?.trim().isNotEmpty == true) {
       labels.add(_book!.sourceName!.trim());
     }
-    final chapterCount = _chapters.isNotEmpty ? _chapters.length : _book!.totalChapterNum;
+    final chapterCount = _chapters.isNotEmpty
+        ? _chapters.length
+        : _book!.totalChapterNum;
     if (chapterCount != null && chapterCount > 0) {
       labels.add('$chapterCount章');
     }
     if (_displayWordCount.isNotEmpty) {
       labels.add(_displayWordCount);
     }
-    final extraTags = _book!.tags ??
+    final extraTags =
+        _book!.tags ??
         (_book!.kind ?? '')
             .split(RegExp(r'[,，|/\s]+'))
             .where((tag) => tag.trim().isNotEmpty)
@@ -785,10 +766,7 @@ class _DetailPageState extends State<DetailPage> {
               ),
             ),
           ),
-          if (trailing != null) ...[
-            const SizedBox(width: 8),
-            trailing,
-          ],
+          if (trailing != null) ...[const SizedBox(width: 8), trailing],
         ],
       ),
     );
@@ -809,10 +787,7 @@ class _DetailPageState extends State<DetailPage> {
   Widget _buildIntroContent(Color color) {
     final intro = _book!.displayIntro;
     if (intro.isEmpty) {
-      return Text(
-        '暂无简介',
-        style: TextStyle(color: color),
-      );
+      return Text('暂无简介', style: TextStyle(color: color));
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -823,7 +798,9 @@ class _DetailPageState extends State<DetailPage> {
               _isDescExpanded = !_isDescExpanded;
             });
           },
-          child: _isDescExpanded ? _buildFullIntro(intro) : _buildCollapsedIntro(intro),
+          child: _isDescExpanded
+              ? _buildFullIntro(intro)
+              : _buildCollapsedIntro(intro),
         ),
         Align(
           alignment: Alignment.centerRight,
@@ -853,7 +830,9 @@ class _DetailPageState extends State<DetailPage> {
   String _readRecordSummaryText() {
     if (_book!.durChapterTitle.isNotEmpty) {
       final index = _book!.durChapterIndex + 1;
-      final total = _chapters.isNotEmpty ? _chapters.length : (_book!.totalChapterNum ?? 0);
+      final total = _chapters.isNotEmpty
+          ? _chapters.length
+          : (_book!.totalChapterNum ?? 0);
       if (total > 0) {
         return '$index/$total章 · ${_book!.durChapterTitle}';
       }
@@ -865,7 +844,8 @@ class _DetailPageState extends State<DetailPage> {
   /// 构建详情页封面 - 接入封面配置
   Widget _buildDetailCover() {
     final coverConfig = CoverConfigService.instance;
-    final isDark = context.watch<AppProvider>().themeMode == ThemeMode.dark ||
+    final isDark =
+        context.watch<AppProvider>().themeMode == ThemeMode.dark ||
         (context.watch<AppProvider>().themeMode == ThemeMode.system &&
             MediaQuery.of(context).platformBrightness == Brightness.dark);
     final useDefault = coverConfig.useDefaultCover;
@@ -1005,7 +985,10 @@ class _DetailPageState extends State<DetailPage> {
             if (_isInBookshelf)
               PopupMenuItem(
                 value: 'top',
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 child: Row(
                   children: [
                     const Expanded(child: Text('置顶')),
@@ -1038,7 +1021,10 @@ class _DetailPageState extends State<DetailPage> {
             if (isOnline)
               PopupMenuItem(
                 value: 'can_update',
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 child: Row(
                   children: [
                     const Expanded(child: Text('允许更新')),
@@ -1049,7 +1035,10 @@ class _DetailPageState extends State<DetailPage> {
             if (_isInBookshelf)
               PopupMenuItem(
                 value: 'delete_alert',
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 child: Row(
                   children: [
                     const Expanded(child: Text('删除提醒')),
@@ -1137,8 +1126,9 @@ class _DetailPageState extends State<DetailPage> {
                     child: Container(
                       width: 110,
                       height: 160,
-                      color:
-                          Theme.of(context).colorScheme.surfaceContainerHighest,
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
                       child: _buildDetailCover(),
                     ),
                   ),
@@ -1157,8 +1147,8 @@ class _DetailPageState extends State<DetailPage> {
                       child: Text(
                         _book!.displayName,
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
+                          fontWeight: FontWeight.bold,
+                        ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1325,7 +1315,7 @@ class _DetailPageState extends State<DetailPage> {
 
   void _showChangeSourceDialog() {
     if (_book == null) return;
-    
+
     ChangeSourceSheet.show(
       context: context,
       bookName: _book!.displayName,
@@ -1335,13 +1325,13 @@ class _DetailPageState extends State<DetailPage> {
       onSourceSelected: (sourceUrl, sourceName, bookData) async {
         // 切换书源
         if (_book == null) return;
-        
+
         try {
           // 显示加载提示
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('正在获取目录...')),
-          );
-          
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('正在获取目录...')));
+
           // 创建新的书籍对象
           final newBook = _book!.copyWith(
             sourceUrl: sourceUrl,
@@ -1353,40 +1343,43 @@ class _DetailPageState extends State<DetailPage> {
             intro: bookData['intro'] ?? _book!.intro,
             lastChapter: bookData['lastChapter'] ?? _book!.lastChapter,
           );
-          
+
           // 获取新书源的目录
           _dataProvider = createBookDataProvider(newBook);
           final chapters = await _dataProvider!.getChapterList(newBook);
-          
+
           // 更新书籍
           final updatedBook = newBook.copyWith(
             totalChapterNum: chapters.length,
           );
-          
+
           // 保存到书架
           if (_isInBookshelf) {
             StorageService.instance.addToBookshelf(updatedBook.toJson());
             final provider = context.read<BookshelfProvider>();
             provider.loadBooks();
           }
-          
+
           // 更新状态
           setState(() {
             _book = updatedBook;
             _chapters = chapters;
-            _totalWordCount = chapters.fold<int>(0, (sum, ch) => sum + (ch.wordCount ?? 0));
-          });
-          
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('已切换到 $sourceName')),
+            _totalWordCount = chapters.fold<int>(
+              0,
+              (sum, ch) => sum + (ch.wordCount ?? 0),
             );
+          });
+
+          if (mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('已切换到 $sourceName')));
           }
         } catch (e) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('换源失败: $e')),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('换源失败: $e')));
           }
         }
       },
@@ -1415,7 +1408,10 @@ class _DetailPageState extends State<DetailPage> {
                   children: [
                     Expanded(
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 16,
+                        ),
                         child: Text(
                           '选择分组',
                           style: TextStyle(
@@ -1427,7 +1423,10 @@ class _DetailPageState extends State<DetailPage> {
                       ),
                     ),
                     IconButton(
-                      icon: Icon(Icons.add, color: Theme.of(context).colorScheme.onPrimary),
+                      icon: Icon(
+                        Icons.add,
+                        color: Theme.of(context).colorScheme.onPrimary,
+                      ),
                       tooltip: '添加分组',
                       onPressed: () {
                         Navigator.pop(context);
@@ -1442,12 +1441,16 @@ class _DetailPageState extends State<DetailPage> {
                 child: StatefulBuilder(
                   builder: (context, setDialogState) => ListView.separated(
                     itemCount: groups.length,
-                    separatorBuilder: (context, index) => const Divider(height: 1),
+                    separatorBuilder: (context, index) =>
+                        const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final group = groups[index];
                       final isDefault = defaultGroups.contains(group);
                       return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
                         child: Row(
                           children: [
                             Expanded(
@@ -1459,7 +1462,8 @@ class _DetailPageState extends State<DetailPage> {
                                     setDialogState(() => selectedGroup = group);
                                   }
                                 },
-                                controlAffinity: ListTileControlAffinity.leading,
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
                                 contentPadding: EdgeInsets.zero,
                               ),
                             ),
@@ -1468,7 +1472,10 @@ class _DetailPageState extends State<DetailPage> {
                               TextButton(
                                 onPressed: () {
                                   Navigator.pop(context);
-                                  _showEditGroupDialog(bookshelfProvider, group);
+                                  _showEditGroupDialog(
+                                    bookshelfProvider,
+                                    group,
+                                  );
                                 },
                                 child: const Text('编辑'),
                               ),
@@ -1493,9 +1500,15 @@ class _DetailPageState extends State<DetailPage> {
                       onPressed: () async {
                         Navigator.pop(context);
                         // 更新分组
-                        final newGroupId = selectedGroup == '全部' ? null : selectedGroup;
-                        final updatedBook = _book!.copyWith(groupId: newGroupId);
-                        await StorageService.instance.addToBookshelf(updatedBook.toJson());
+                        final newGroupId = selectedGroup == '全部'
+                            ? null
+                            : selectedGroup;
+                        final updatedBook = _book!.copyWith(
+                          groupId: newGroupId,
+                        );
+                        await StorageService.instance.addToBookshelf(
+                          updatedBook.toJson(),
+                        );
                         setState(() {
                           _book = updatedBook;
                         });
@@ -1504,7 +1517,9 @@ class _DetailPageState extends State<DetailPage> {
                       },
                       child: Text(
                         '确定',
-                        style: TextStyle(color: Theme.of(context).colorScheme.primary),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
                       ),
                     ),
                   ],
@@ -1526,9 +1541,7 @@ class _DetailPageState extends State<DetailPage> {
         content: TextField(
           controller: controller,
           autofocus: true,
-          decoration: const InputDecoration(
-            hintText: '输入分组名称',
-          ),
+          decoration: const InputDecoration(hintText: '输入分组名称'),
         ),
         actions: [
           TextButton(
@@ -1565,9 +1578,7 @@ class _DetailPageState extends State<DetailPage> {
         content: TextField(
           controller: controller,
           autofocus: true,
-          decoration: const InputDecoration(
-            hintText: '输入分组名称',
-          ),
+          decoration: const InputDecoration(hintText: '输入分组名称'),
         ),
         actions: [
           TextButton(
@@ -1578,7 +1589,10 @@ class _DetailPageState extends State<DetailPage> {
               // 重新打开分组选择对话框
               _showChangeGroupDialog();
             },
-            child: Text('删除', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            child: Text(
+              '删除',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -1587,12 +1601,15 @@ class _DetailPageState extends State<DetailPage> {
           FilledButton(
             onPressed: () async {
               if (controller.text.isNotEmpty && controller.text != oldName) {
-                final success = await provider.renameCustomGroup(oldName, controller.text);
+                final success = await provider.renameCustomGroup(
+                  oldName,
+                  controller.text,
+                );
                 Navigator.pop(context);
                 if (!success && mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('分组名称已存在')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: Text('分组名称已存在')));
                 }
                 // 重新打开分组选择对话框
                 _showChangeGroupDialog();
@@ -1640,8 +1657,9 @@ class _DetailPageState extends State<DetailPage> {
             ListTile(
               leading: const Icon(Icons.menu_book),
               title: const Text('阅读章节'),
-              subtitle:
-                  Text('${_book!.durChapterIndex + 1}/${_chapters.length}'),
+              subtitle: Text(
+                '${_book!.durChapterIndex + 1}/${_chapters.length}',
+              ),
               contentPadding: EdgeInsets.zero,
             ),
           ],
@@ -1698,8 +1716,9 @@ class _DetailPageState extends State<DetailPage> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color:
-              Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.5),
+          color: Theme.of(
+            context,
+          ).colorScheme.primaryContainer.withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Row(
@@ -1769,8 +1788,9 @@ class _DetailPageState extends State<DetailPage> {
             child: FilledButton.icon(
               onPressed: _toggleBookshelf,
               icon: Icon(
-                  _isInBookshelf ? Icons.bookmark : Icons.bookmark_border,
-                  size: 20),
+                _isInBookshelf ? Icons.bookmark : Icons.bookmark_border,
+                size: 20,
+              ),
               label: Text(_isInBookshelf ? '已在书架' : '加入书架'),
             ),
           ),
@@ -1811,10 +1831,7 @@ class _DetailPageState extends State<DetailPage> {
                   child: Center(
                     child: Text(
                       _isInBookshelf ? '移出书架' : '放入书架',
-                      style: TextStyle(
-                        fontSize: 15,
-                        color: scheme.onSurface,
-                      ),
+                      style: TextStyle(fontSize: 15, color: scheme.onSurface),
                     ),
                   ),
                 ),
@@ -1895,18 +1912,13 @@ class _DetailPageState extends State<DetailPage> {
         },
       );
     } else if (_isMarkdownContent(text)) {
-      return MarkdownBody(
-        data: text,
-        selectable: true,
-      );
+      return MarkdownBody(data: text, selectable: true);
     } else {
       return Text(
         text,
         maxLines: 3,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
-        ),
+        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
       );
     }
   }
@@ -1916,22 +1928,15 @@ class _DetailPageState extends State<DetailPage> {
       return Html(
         data: text,
         style: {
-          'body': Style(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
+          'body': Style(color: Theme.of(context).colorScheme.onSurfaceVariant),
         },
       );
     } else if (_isMarkdownContent(text)) {
-      return MarkdownBody(
-        data: text,
-        selectable: true,
-      );
+      return MarkdownBody(data: text, selectable: true);
     } else {
       return Text(
         text,
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
-        ),
+        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
       );
     }
   }
@@ -1943,10 +1948,7 @@ class _DetailPageState extends State<DetailPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '简介',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
+          Text('简介', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           GestureDetector(
             onTap: () {
@@ -1956,8 +1958,8 @@ class _DetailPageState extends State<DetailPage> {
             },
             child: intro.isNotEmpty
                 ? (_isDescExpanded
-                    ? _buildFullIntro(intro)
-                    : _buildCollapsedIntro(intro))
+                      ? _buildFullIntro(intro)
+                      : _buildCollapsedIntro(intro))
                 : Text(
                     '暂无简介',
                     style: TextStyle(
@@ -1983,7 +1985,8 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   Widget _buildTags() {
-    final tags = _book!.tags ??
+    final tags =
+        _book!.tags ??
         (_book!.kind ?? '')
             .split(RegExp(r'[,，/|·\s]+'))
             .where((tag) => tag.trim().isNotEmpty)
@@ -2000,8 +2003,9 @@ class _DetailPageState extends State<DetailPage> {
         children: tags.map((tag) {
           return Chip(
             label: Text(tag),
-            backgroundColor:
-                Theme.of(context).colorScheme.surfaceContainerHighest,
+            backgroundColor: Theme.of(
+              context,
+            ).colorScheme.surfaceContainerHighest,
           );
         }).toList(),
       ),
@@ -2014,10 +2018,7 @@ class _DetailPageState extends State<DetailPage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            '目录',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
+          Text('目录', style: Theme.of(context).textTheme.titleMedium),
           TextButton(
             onPressed: () => _openFullChapterList(),
             child: const Text('查看全部'),
@@ -2061,7 +2062,11 @@ class _DetailPageState extends State<DetailPage> {
             if (chapter.isVip && !chapter.isPay)
               Padding(
                 padding: const EdgeInsets.only(right: 8),
-                child: Icon(Icons.lock_outline, size: 18, color: fg.withValues(alpha: 0.6)),
+                child: Icon(
+                  Icons.lock_outline,
+                  size: 18,
+                  color: fg.withValues(alpha: 0.6),
+                ),
               ),
             // 章节信息
             Expanded(
@@ -2093,8 +2098,7 @@ class _DetailPageState extends State<DetailPage> {
                                 fontSize: 12,
                               ),
                             ),
-                          if (hasTag && hasWordCount)
-                            const SizedBox(width: 8),
+                          if (hasTag && hasWordCount) const SizedBox(width: 8),
                           if (hasWordCount)
                             Text(
                               '${(chapter.wordCount! / 10000).toStringAsFixed(1)}万',
@@ -2114,7 +2118,11 @@ class _DetailPageState extends State<DetailPage> {
             if (isSelected)
               Icon(Icons.check, size: 18, color: fg)
             else if (!isCached)
-              Icon(Icons.cloud_outlined, size: 18, color: fg.withValues(alpha: 0.4)),
+              Icon(
+                Icons.cloud_outlined,
+                size: 18,
+                color: fg.withValues(alpha: 0.4),
+              ),
           ],
         ),
       ),
@@ -2171,9 +2179,9 @@ class _DetailPageState extends State<DetailPage> {
 
   void _startReading() {
     if (_chapters.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('目录为空，无法开始阅读')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('目录为空，无法开始阅读')));
       return;
     }
     Navigator.pushNamed(
@@ -2181,7 +2189,11 @@ class _DetailPageState extends State<DetailPage> {
       _readerRouteName(),
       arguments: {
         'bookUrl': widget.bookUrl,
+        'bookId': widget.bookUrl,
         'chapterIndex': _book?.durChapterIndex ?? 0,
+        'trackId': (_book?.durChapterIndex ?? 0).toString(),
+        'episodeId': (_book?.durChapterIndex ?? 0).toString(),
+        'resumeProgress': true,
         'bookData': _book,
       },
     );
@@ -2203,10 +2215,7 @@ class _DetailPageState extends State<DetailPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (context) => BookEditSheet(
-        book: _book!,
-        onSaved: _refreshData,
-      ),
+      builder: (context) => BookEditSheet(book: _book!, onSaved: _refreshData),
     );
   }
 
@@ -2217,7 +2226,11 @@ class _DetailPageState extends State<DetailPage> {
       _readerRouteName(),
       arguments: {
         'bookUrl': widget.bookUrl,
+        'bookId': widget.bookUrl,
         'chapterIndex': chapter.index,
+        'trackId': chapter.index.toString(),
+        'episodeId': chapter.index.toString(),
+        'resumeProgress': false,
         'bookData': _book,
       },
     );
@@ -2236,22 +2249,23 @@ class _DetailPageState extends State<DetailPage> {
 
   void _shareBook() {
     if (_book == null) return;
-    final shareText = '${_book!.displayName}\n作者：${_book!.displayAuthor}\n来源：${_book!.sourceName ?? "本地"}\n链接：${_book!.bookUrl}';
+    final shareText =
+        '${_book!.displayName}\n作者：${_book!.displayAuthor}\n来源：${_book!.sourceName ?? "本地"}\n链接：${_book!.bookUrl}';
     Clipboard.setData(ClipboardData(text: shareText));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('书籍信息已复制到剪贴板')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('书籍信息已复制到剪贴板')));
   }
 
   void _searchBookName() async {
     if (_book == null) return;
-    
+
     // 执行书源回调，如果返回true则不执行默认操作
     final handled = await _executeSourceCallback(
       'clickBookName',
       result: _book!.displayName,
     );
-    
+
     if (!handled && mounted) {
       // 跳转到搜索页面搜索书名
       Navigator.pushNamed(
@@ -2264,30 +2278,30 @@ class _DetailPageState extends State<DetailPage> {
 
   void _copyBookName() async {
     if (_book == null) return;
-    
+
     // 执行书源回调
     final handled = await _executeSourceCallback(
       'longClickBookName',
       result: _book!.displayName,
     );
-    
+
     if (!handled && mounted) {
       Clipboard.setData(ClipboardData(text: _book!.displayName));
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('书名已复制')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('书名已复制')));
     }
   }
 
   void _searchAuthor() async {
     if (_book == null) return;
-    
+
     // 执行书源回调
     final handled = await _executeSourceCallback(
       'clickAuthor',
       result: _book!.displayAuthor,
     );
-    
+
     if (!handled && mounted) {
       // 跳转到搜索页面搜索作者
       Navigator.pushNamed(
@@ -2300,42 +2314,39 @@ class _DetailPageState extends State<DetailPage> {
 
   void _copyAuthor() async {
     if (_book == null) return;
-    
+
     // 执行书源回调
     final handled = await _executeSourceCallback(
       'longClickAuthor',
       result: _book!.displayAuthor,
     );
-    
+
     if (!handled && mounted) {
       Clipboard.setData(ClipboardData(text: _book!.displayAuthor));
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('作者已复制')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('作者已复制')));
     }
   }
 
   /// 执行书源回调
   /// 返回 true 表示回调已处理，不需要执行默认操作
-  Future<bool> _executeSourceCallback(
-    String event, {
-    String? result,
-  }) async {
+  Future<bool> _executeSourceCallback(String event, {String? result}) async {
     if (_bookSource == null || !_bookSource!.eventListener) {
       return false;
     }
-    
+
     final callBackJs = _bookSource!.ruleContent?.callBackJs;
     if (callBackJs == null || callBackJs.isEmpty) {
       return false;
     }
-    
+
     try {
       // TODO: 实现JS执行
       // 参考 SourceCallBack.callBackBtn
       // 执行JS: source.evalJS(jsStr) { put("event", event); put("result", result); put("book", book); }
       // 如果返回 "true"，则不执行默认操作
-      
+
       debugPrint('执行书源回调: $event, result: $result');
       // 目前先返回false，执行默认操作
       return false;
@@ -2349,7 +2360,7 @@ class _DetailPageState extends State<DetailPage> {
     if (_book == null) return;
     if (_book!.originType == BookOriginType.local) return;
     if (_book!.sourceUrl == null) return;
-    
+
     // 跳转到书源编辑页面
     Navigator.pushNamed(
       context,
@@ -2361,17 +2372,17 @@ class _DetailPageState extends State<DetailPage> {
   void _copyBookUrl() {
     if (_book == null) return;
     Clipboard.setData(ClipboardData(text: _book!.bookUrl));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('书籍链接已复制')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('书籍链接已复制')));
   }
 
   void _copyTocUrl() {
     if (_book == null || _book!.tocUrl == null) return;
     Clipboard.setData(ClipboardData(text: _book!.tocUrl!));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('目录链接已复制')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('目录链接已复制')));
   }
 
   void _clearCache() async {
@@ -2379,15 +2390,15 @@ class _DetailPageState extends State<DetailPage> {
     try {
       await ChapterCacheService.instance.clearBookCache(_book!);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('缓存已清除')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('缓存已清除')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('清除缓存失败：$e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('清除缓存失败：$e')));
       }
     }
   }
@@ -2401,9 +2412,9 @@ class _DetailPageState extends State<DetailPage> {
     }
     _book = _book!.copyWith(isTop: newTop);
     setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(newTop ? '已置顶' : '已取消置顶')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(newTop ? '已置顶' : '已取消置顶')));
   }
 
   void _toggleCanUpdate() {
@@ -2414,9 +2425,9 @@ class _DetailPageState extends State<DetailPage> {
       StorageService.instance.addToBookshelf(_book!.toJson());
     }
     setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(newValue ? '已允许更新' : '已禁止更新')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(newValue ? '已允许更新' : '已禁止更新')));
   }
 
   void _toggleDeleteAlert() {
@@ -2427,9 +2438,9 @@ class _DetailPageState extends State<DetailPage> {
       StorageService.instance.addToBookshelf(_book!.toJson());
     }
     setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(newValue ? '已开启删除提醒' : '已关闭删除提醒')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(newValue ? '已开启删除提醒' : '已关闭删除提醒')));
   }
 
   Future<void> _toggleShowReadRecord() async {
@@ -2452,9 +2463,9 @@ class _DetailPageState extends State<DetailPage> {
         try {
           // 这里需要执行JS并处理结果
           // 如果JS返回true，则不显示默认菜单
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('执行书源定制按钮回调...')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('执行书源定制按钮回调...')));
           return;
         } catch (e) {
           debugPrint('执行定制按钮回调失败: $e');
@@ -2528,15 +2539,15 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _uploadToRemote() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('上传功能开发中...')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('上传功能开发中...')));
   }
 
   void _showSourceLogin() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('登录功能开发中...')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('登录功能开发中...')));
   }
 
   void _showSetSourceVariable() {
@@ -2558,9 +2569,9 @@ class _DetailPageState extends State<DetailPage> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('源变量已设置')),
-              );
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('源变量已设置')));
             },
             child: const Text('确定'),
           ),
@@ -2588,9 +2599,9 @@ class _DetailPageState extends State<DetailPage> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('书籍变量已设置')),
-              );
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('书籍变量已设置')));
             },
             child: const Text('确定'),
           ),
@@ -2637,7 +2648,9 @@ class _DetailPageState extends State<DetailPage> {
                   const SizedBox(height: 8),
                   Text('当前章节: ${_book?.durChapterTitle ?? "无"}'),
                   const SizedBox(height: 8),
-                  Text('阅读进度: ${_book?.durChapterIndex ?? 0}/${_chapters.length}'),
+                  Text(
+                    '阅读进度: ${_book?.durChapterIndex ?? 0}/${_chapters.length}',
+                  ),
                 ],
               ),
             ),
@@ -2664,9 +2677,4 @@ class _BookInfoArcClipper extends CustomClipper<Path> {
   bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
 }
 
-enum _BookLabelType {
-  tag,
-  status,
-  wordCount,
-}
-
+enum _BookLabelType { tag, status, wordCount }

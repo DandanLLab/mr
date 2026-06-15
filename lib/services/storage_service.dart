@@ -212,9 +212,15 @@ class StorageService {
     return null;
   }
 
-  Future<void> updateBookProgress(String bookUrl, int durChapterIndex,
-      String durChapterTitle, int durChapterPos) async {
-    final book = _bookshelfBox?.get(bookUrl);
+  Future<void> updateBookProgress(
+    String bookUrl,
+    int durChapterIndex,
+    String durChapterTitle,
+    int durChapterPos,
+  ) async {
+    _bookshelfBox = await _ensureBox('bookshelf', _bookshelfBox);
+    final rawBook = _bookshelfBox?.get(bookUrl);
+    final book = rawBook is Map ? Map<String, dynamic>.from(rawBook) : null;
     if (book != null) {
       book['durChapterIndex'] = durChapterIndex;
       book['durChapterTitle'] = durChapterTitle;
@@ -282,7 +288,10 @@ class StorageService {
   List<Map<String, dynamic>> getAllBookSources() {
     if (_bookSourceBox == null || !_bookSourceBox!.isOpen) {
       debugPrint('⚠️ StorageService: bookSource Box不可用，尝试异步恢复');
-      _ensureBox('bookSource', _bookSourceBox).then((box) => _bookSourceBox = box);
+      _ensureBox(
+        'bookSource',
+        _bookSourceBox,
+      ).then((box) => _bookSourceBox = box);
       return [];
     }
     return _bookSourceBox!.values
@@ -294,7 +303,10 @@ class StorageService {
   Map<String, dynamic>? getBookSource(String sourceUrl) {
     if (_bookSourceBox == null || !_bookSourceBox!.isOpen) {
       debugPrint('⚠️ StorageService: bookSource Box不可用，尝试异步恢复');
-      _ensureBox('bookSource', _bookSourceBox).then((box) => _bookSourceBox = box);
+      _ensureBox(
+        'bookSource',
+        _bookSourceBox,
+      ).then((box) => _bookSourceBox = box);
       return null;
     }
     final data = _bookSourceBox!.get(sourceUrl);
@@ -392,7 +404,9 @@ class StorageService {
   }
 
   List<Map<String, dynamic>> getChapterHighlights(
-      String bookUrl, int chapterIndex) {
+    String bookUrl,
+    int chapterIndex,
+  ) {
     if (_cacheBox == null || !_cacheBox!.isOpen) {
       _ensureBox('cache', _cacheBox).then((box) => _cacheBox = box);
       return [];
@@ -400,8 +414,7 @@ class StorageService {
     return _cacheBox!.values
         .where((e) {
           if (e is! Map) return false;
-          return e['bookUrl'] == bookUrl &&
-              e['chapterIndex'] == chapterIndex;
+          return e['bookUrl'] == bookUrl && e['chapterIndex'] == chapterIndex;
         })
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
