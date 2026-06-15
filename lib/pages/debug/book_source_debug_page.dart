@@ -83,9 +83,6 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
       if (!mounted) return;
       setState(() {
         _appLogs.add(entry);
-        if (_appLogs.length > 500) {
-          _appLogs.removeRange(0, _appLogs.length - 500);
-        }
       });
     });
 

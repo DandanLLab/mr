@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_js/flutter_js.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:path_provider/path_provider.dart';
+import 'package:synchronized/synchronized.dart';
 import '../app_logger.dart';
 import 'platform_channel.dart';
 import 'shared_js_scope.dart';
@@ -73,11 +74,11 @@ class JsTraceNode {
 
     if (inputPreview != null && inputPreview!.isNotEmpty) {
       final inp = inputPreview!.replaceAll('\n', '\\n');
-      buf.writeln('$prefix│  input: ${inp.length > 100 ? '${inp.substring(0, 100)}...' : inp}');
+      buf.writeln('$prefix│  input: $inp');
     }
     if (outputPreview != null && outputPreview!.isNotEmpty) {
       final out = outputPreview!.replaceAll('\n', '\\n');
-      buf.writeln('$prefix│  output($outputType): ${out.length > 100 ? '${out.substring(0, 100)}...' : out}');
+      buf.writeln('$prefix│  output($outputType): $out');
     }
     if (error != null) {
       buf.writeln('$prefix│  error: $error');
@@ -191,6 +192,9 @@ class JsEngine {
   static JsEngine get instance => _instance ??= JsEngine._();
 
   JsEngine._();
+
+  /// JS 执行互斥锁：防止并发调用时全局变量（result/baseUrl 等）被覆盖
+  final Lock _evalLock = Lock();
 
   // 热路径正则常量
   static final _javaCallRegex = RegExp(r'\bjava\.');
@@ -2664,7 +2668,7 @@ class JsEngine {
     final resolved = resolveEngine(extracted, sourceEngine: sourceEngine);
 
     final engineTag = resolved.engine == JsEngineType.rhino ? 'Rhino→QuickJS' : 'QuickJS';
-    final codePreview = resolved.code.length > 200 ? '${resolved.code.substring(0, 200)}...' : resolved.code;
+    final codePreview = resolved.code;
 
     if (kDebugMode) {
       AppLogger.instance.debug(LogCategory.js, '[$engineTag] 同步执行JS',
@@ -2679,13 +2683,11 @@ class JsEngine {
       if (content is List || content is Map) {
         try {
           inputPreview = jsonEncode(content);
-          if (inputPreview.length > 200) inputPreview = '${inputPreview.substring(0, 200)}...';
         } catch (_) {
           inputPreview = content.toString();
         }
       } else {
         inputPreview = content?.toString();
-        if (inputPreview != null && inputPreview.length > 200) inputPreview = '${inputPreview.substring(0, 200)}...';
       }
       if (tracer._stack.isEmpty) {
         traceNode = tracer.beginRoot('executeSync', engineTag, codePreview,
@@ -2786,8 +2788,7 @@ class JsEngine {
         AppLogger.instance.logJsError('QuickJS', evalResult.stringResult);
         // 追踪树：记录错误
         if (JsTracer.instance.enabled && JsTracer.instance._stack.isNotEmpty) {
-          JsTracer.instance._stack.last.error = evalResult.stringResult.length > 200
-            ? '${evalResult.stringResult.substring(0, 200)}...' : evalResult.stringResult;
+          JsTracer.instance._stack.last.error = evalResult.stringResult;
         }
         return null;
       }
@@ -2802,8 +2803,7 @@ class JsEngine {
       AppLogger.instance.logJsError('QuickJS', e.toString());
       // 追踪树：记录异常
       if (JsTracer.instance.enabled && JsTracer.instance._stack.isNotEmpty) {
-        JsTracer.instance._stack.last.error = e.toString().length > 200
-          ? '${e.toString().substring(0, 200)}...' : e.toString();
+        JsTracer.instance._stack.last.error = e.toString();
       }
       return null;
     }
@@ -2908,7 +2908,9 @@ class JsEngine {
       AppLogger.instance.warn(LogCategory.js, '预缓存桥接调用失败，继续执行JS', detail: e.toString());
     }
 
-    return _executeQuickJSRule(resolved.code, result: actualResult, env: mergedEnv, variables: _extractVariables(mergedEnv));
+    return _evalLock.synchronized(() =>
+      _executeQuickJSRule(resolved.code, result: actualResult, env: mergedEnv, variables: _extractVariables(mergedEnv))
+    );
   }
 
   /// 处理带书籍上下文的 JS 规则
@@ -2942,7 +2944,8 @@ class JsEngine {
       return _executeRhinoRule(resolved.code, result: content, env: env);
     }
 
-    try {
+    return _evalLock.synchronized(() async {
+      try {
       final wrappedCode = _wrapJsCode(resolved.code);
 
       // 构建共享作用域变量注入
@@ -2993,6 +2996,7 @@ class JsEngine {
       AppLogger.instance.logJsError('QuickJS', e.toString());
       return null;
     }
+    });
   }
 
   /// 执行书源规则（统一入口，支持分流）
@@ -3023,7 +3027,9 @@ class JsEngine {
       return _executeRhinoRule(code, result: rhinoResult.isEmpty ? null : rhinoResult, env: env);
     }
 
-    return _executeQuickJSRule(code, result: result, env: env);
+    return _evalLock.synchronized(() =>
+      _executeQuickJSRule(code, result: result, env: env)
+    );
   }
 
   // ===== QuickJS 规则执行 =====
@@ -3056,7 +3062,7 @@ class JsEngine {
     JsTraceNode? traceNode;
     try {
       // 断点1：记录原始JS代码
-      final codePreview = jsCode.length > 300 ? '${jsCode.substring(0, 300)}...' : jsCode;
+      final codePreview = jsCode;
       if (kDebugMode) {
         AppLogger.instance.debug(LogCategory.js, '[QuickJS] 开始异步执行',
           detail: codePreview);
@@ -3069,9 +3075,9 @@ class JsEngine {
         String? inputPreview;
         if (result is List || result is Map) {
           final encoded = jsonEncode(result);
-          inputPreview = encoded.length > 200 ? '${encoded.substring(0, 200)}...' : encoded;
+          inputPreview = encoded;
         } else if (result is String) {
-          inputPreview = result.length > 200 ? '${result.substring(0, 200)}...' : result;
+          inputPreview = result;
         } else {
           inputPreview = result?.toString();
         }
@@ -3091,7 +3097,7 @@ class JsEngine {
       // 断点2：记录包装后的代码
       if (kDebugMode) {
         AppLogger.instance.debug(LogCategory.js, '[QuickJS] 代码包装完成',
-          detail: wrappedCode.length > 200 ? '${wrappedCode.substring(0, 200)}...' : wrappedCode);
+          detail: wrappedCode);
       }
 
       // 构建共享作用域变量注入（借鉴 legado 的 scope 链）
@@ -3203,7 +3209,7 @@ class JsEngine {
 
       // 断点3：记录执行结果
       final evalResultStr = evalResult.stringResult;
-      final resultShort = evalResultStr.length > 200 ? '${evalResultStr.substring(0, 200)}...' : evalResultStr;
+      final resultShort = evalResultStr;
       if (kDebugMode) {
         AppLogger.instance.debug(LogCategory.js, '[QuickJS] 异步执行完成',
           detail: 'isError=${evalResult.isError}, result=$resultShort');
@@ -3225,7 +3231,7 @@ class JsEngine {
       // 追踪树：记录成功输出
       if (traceNode != null) {
         JsTracer.instance.pop(
-          outputPreview: strResult.length > 200 ? '${strResult.substring(0, 200)}...' : strResult,
+          outputPreview: strResult,
           outputType: 'String',
         );
       }
@@ -3240,7 +3246,7 @@ class JsEngine {
       if (traceNode != null) {
         JsTracer.instance.pop(
           outputType: 'exception',
-          error: e.toString().length > 200 ? '${e.toString().substring(0, 200)}...' : e.toString(),
+          error: e.toString(),
         );
       }
       // 即使异常也尝试提取 console 日志

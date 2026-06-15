@@ -67,6 +67,8 @@ dependencies:
 
   # JS 引擎增强 - Node.js 兼容的脚本执行
   flutter_js: ^0.8.2
+  # 互斥锁 - JS 引擎并发保护
+  synchronized: ^3.3.0
   # WebView 组件 - 用于 webJs 执行和页面渲染（借鉴 legado 的 BackstageWebView）
   flutter_inappwebview: ^6.1.5
   # JSON 处理

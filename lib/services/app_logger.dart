@@ -83,8 +83,8 @@ class AppLogger {
   AppLogger._();
   static final AppLogger instance = AppLogger._();
 
-  /// 日志缓冲区最大条数
-  static const int maxBufferSize = 2000;
+  /// 日志缓冲区（无上限，确保导出日志完整）
+  static const int maxBufferSize = -1;
 
   /// 日志缓冲区
   final List<LogEntry> _buffer = [];
@@ -127,9 +127,7 @@ class AppLogger {
     );
 
     _buffer.add(entry);
-    if (_buffer.length > maxBufferSize) {
-      _buffer.removeRange(0, _buffer.length - maxBufferSize);
-    }
+    // 无上限，不删除旧日志，确保导出完整
 
     _controller.add(entry);
 
@@ -183,13 +181,13 @@ class AppLogger {
   /// 记录 JS 执行
   void logJsExecute(String engine, String code, {int? codeLength}) {
     debug(LogCategory.js, '[$engine] 执行JS (${codeLength ?? code.length} chars)',
-      detail: code.length > 200 ? '${code.substring(0, 200)}...' : code);
+      detail: code);
   }
 
   /// 记录 JS 执行结果
   void logJsResult(String engine, String? result) {
     debug(LogCategory.js, '[$engine] 结果: ${result != null ? "${result.length} chars" : "null"}',
-      detail: result != null && result.length > 200 ? '${result.substring(0, 200)}...' : result);
+      detail: result);
   }
 
   /// 记录 JS 执行失败

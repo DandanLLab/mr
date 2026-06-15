@@ -477,11 +477,8 @@ class AnalyzeRule {
       // 构建步骤描述
       final stepDesc = '步骤${i + 1}/${ruleList.length} mode=${appliedRule.mode}';
       if (kDebugMode) {
-        final rulePreview = appliedRule.rule.length > 60
-            ? '${appliedRule.rule.substring(0, 60)}...'
-            : appliedRule.rule;
         AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc',
-          detail: 'rule=$rulePreview, inputLen=${result?.toString().length ?? 0}');
+          detail: 'rule=${appliedRule.rule}, inputLen=${result?.toString().length ?? 0}');
       }
 
       // 执行规则（传递 stepDesc 给追踪器）
@@ -500,10 +497,8 @@ class AnalyzeRule {
         final resultType = result?.runtimeType;
         final resultLen = result?.toString().length ?? 0;
         final resultPreview = result?.toString();
-        final resultShort = resultPreview != null && resultPreview.length > 100
-            ? '${resultPreview.substring(0, 100)}...' : resultPreview;
         AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc 完成',
-          detail: 'resultType=$resultType, resultLen=$resultLen, preview=$resultShort');
+          detail: 'resultType=$resultType, resultLen=$resultLen, preview=$resultPreview');
       }
 
       // 应用正则替换
@@ -566,11 +561,8 @@ class AnalyzeRule {
       // 构建步骤描述
       final stepDesc = '步骤${i + 1}/${ruleList.length} mode=${appliedRule.mode}';
       if (kDebugMode) {
-        final rulePreview = appliedRule.rule.length > 60
-            ? '${appliedRule.rule.substring(0, 60)}...'
-            : appliedRule.rule;
         AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc (async)',
-          detail: 'rule=$rulePreview, inputLen=${result?.toString().length ?? 0}');
+          detail: 'rule=${appliedRule.rule}, inputLen=${result?.toString().length ?? 0}');
       }
 
       // JS 步骤走异步路径，非 JS 步骤走同步路径
@@ -594,10 +586,8 @@ class AnalyzeRule {
         final resultType = result?.runtimeType;
         final resultLen = result?.toString().length ?? 0;
         final resultPreview = result?.toString();
-        final resultShort = resultPreview != null && resultPreview.length > 100
-            ? '${resultPreview.substring(0, 100)}...' : resultPreview;
         AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc 完成 (async)',
-          detail: 'resultType=$resultType, resultLen=$resultLen, preview=$resultShort');
+          detail: 'resultType=$resultType, resultLen=$resultLen, preview=$resultPreview');
       }
 
       // 应用正则替换
@@ -661,7 +651,7 @@ class AnalyzeRule {
       // 正确序列化 content：List/Map 用 jsonEncode，String 直接传
       // 对齐 _executeQuickJSSync 的序列化逻辑
       final contentStr = _serializeContent(content);
-      final codePreview = jsCode.length > 200 ? '${jsCode.substring(0, 200)}...' : jsCode;
+      final codePreview = jsCode;
 
       if (kDebugMode) {
         AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] 异步JS执行',
@@ -672,7 +662,7 @@ class AnalyzeRule {
       JsTraceNode? traceNode;
       if (JsTracer.instance.enabled) {
         final tracer = JsTracer.instance;
-        final inputPreview = contentStr.length > 200 ? '${contentStr.substring(0, 200)}...' : contentStr;
+        final inputPreview = contentStr;
         if (tracer.isStackEmpty) {
           traceNode = tracer.beginRoot('_applyJsAsync', 'QuickJS(async)', codePreview,
             inputPreview: inputPreview, ruleStep: ruleStep);
@@ -697,10 +687,8 @@ class AnalyzeRule {
       // 追踪树：记录输出
       if (traceNode != null) {
         final outputStr = result?.toString();
-        final outputShort = outputStr != null && outputStr.length > 200
-            ? '${outputStr.substring(0, 200)}...' : outputStr;
         JsTracer.instance.pop(
-          outputPreview: outputShort,
+          outputPreview: outputStr,
           outputType: result?.runtimeType.toString(),
         );
       }
@@ -792,10 +780,8 @@ class AnalyzeRule {
 
       final stepDesc = '步骤${i + 1}/${ruleList.length} mode=${appliedRule.mode} (list)';
       if (kDebugMode) {
-        final rulePreview = appliedRule.rule.length > 60
-            ? '${appliedRule.rule.substring(0, 60)}...' : appliedRule.rule;
         AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc (async)',
-          detail: 'rule=$rulePreview, inputLen=${result?.toString().length ?? 0}');
+          detail: 'rule=${appliedRule.rule}, inputLen=${result?.toString().length ?? 0}');
       }
 
       // JS 步骤走异步，非 JS 走同步
@@ -926,10 +912,8 @@ class AnalyzeRule {
 
       final stepDesc = '步骤${i + 1}/${ruleList.length} mode=${appliedRule.mode} (elements)';
       if (kDebugMode) {
-        final rulePreview = appliedRule.rule.length > 60
-            ? '${appliedRule.rule.substring(0, 60)}...' : appliedRule.rule;
         AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc (async)',
-          detail: 'rule=$rulePreview, inputLen=${result?.toString().length ?? 0}');
+          detail: 'rule=${appliedRule.rule}, inputLen=${result?.toString().length ?? 0}');
       }
 
       // JS 步骤走异步
@@ -1790,7 +1774,7 @@ class AnalyzeRule {
 
       if (kDebugMode) {
         final contentPreview = content?.toString().length ?? 0;
-        final codePreview = jsCode.length > 100 ? '${jsCode.substring(0, 100)}...' : jsCode;
+        final codePreview = jsCode;
         AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] 执行JS规则',
           detail: 'content=${contentPreview}chars, code=$codePreview');
       }
@@ -2075,7 +2059,7 @@ class AnalyzeRule {
 
     if (kDebugMode) {
       AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] 模板替换',
-        detail: '模板数=${matches.length}, 原文=${text.length > 200 ? '${text.substring(0, 200)}...' : text}');
+        detail: '模板数=${matches.length}, 原文=$text');
     }
 
     // 收集所有替换结果，然后从后往前拼接
@@ -2097,7 +2081,7 @@ class AnalyzeRule {
         replacement = (await getStringAsync(expr))?.toString() ?? '';
         if (kDebugMode) {
           AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] 模板子规则',
-            detail: 'expr=$expr, result=${replacement.length > 100 ? '${replacement.substring(0, 100)}...' : replacement}');
+            detail: 'expr=$expr, result=$replacement');
         }
       } else {
         // 否则尝试作为JS执行（异步）
