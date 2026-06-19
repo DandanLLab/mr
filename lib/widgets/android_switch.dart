@@ -35,7 +35,7 @@ class AndroidSwitch extends StatelessWidget {
         : (isDark ? const Color(0xFF424242) : const Color(0xFFBDBDBD));
 
     final trackColor = enabled
-        ? (value ? effectiveAccentColor.withOpacity(0.5) : (isDark ? const Color(0x4DFFFFFF) : const Color(0x43000000)))
+        ? (value ? effectiveAccentColor.withValues(alpha: 0.5) : (isDark ? const Color(0x4DFFFFFF) : const Color(0x43000000)))
         : (isDark ? const Color(0x1AFFFFFF) : const Color(0x1F000000));
 
     return GestureDetector(
@@ -67,7 +67,7 @@ class AndroidSwitch extends StatelessWidget {
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
+                      color: Colors.black.withValues(alpha: 0.2),
                       blurRadius: 2,
                       offset: const Offset(0, 1),
                     ),

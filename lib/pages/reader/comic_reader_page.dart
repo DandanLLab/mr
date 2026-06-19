@@ -1155,21 +1155,6 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     );
   }
 
-  Widget _buildChapterEdge(String text) {
-    return SizedBox(
-      height: 96,
-      child: Center(
-        child: Text(
-          text,
-          style: TextStyle(
-            color: _readerForeground,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildInfoFooter() {
     final chapterPosition = _chapters.indexWhere(
       (chapter) => chapter.index == _currentChapterIndex,

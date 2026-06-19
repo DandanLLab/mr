@@ -163,7 +163,7 @@ class _MiniprogramPageState extends State<MiniprogramPage>
             '点击右上角按钮安装小程序',
             style: TextStyle(
               fontSize: DesignTokens.fontBody,
-              color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
+              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
             ),
           ),
         ],

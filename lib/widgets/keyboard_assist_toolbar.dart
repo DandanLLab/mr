@@ -145,10 +145,6 @@ class _KeyboardAssistToolbarState extends State<KeyboardAssistToolbar> {
         ? const Color(0xFF3C3C3C)  // 深色模式
         : const Color(0x63ACACAC); // 浅色模式: #63ACACAC (39%透明度的灰色)
 
-    final pressedBgColor = isDark
-        ? const Color(0xFF4A4A4A)  // 深色模式按下
-        : const Color(0x63858585); // 浅色模式按下: #63858585
-
     // 原版文字颜色: primaryText
     final textColor = isDark
         ? const Color(0xDEFFFFFF)  // 深色模式: 87%白色

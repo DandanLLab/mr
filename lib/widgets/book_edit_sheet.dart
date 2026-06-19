@@ -65,7 +65,7 @@ class _BookEditSheetState extends State<BookEditSheet> {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.grey[300],
+                  color: Theme.of(context).colorScheme.outlineVariant,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -131,7 +131,7 @@ class _BookEditSheetState extends State<BookEditSheet> {
         style: TextStyle(
           fontWeight: FontWeight.bold,
           fontSize: 14,
-          color: Colors.grey[700],
+          color: Theme.of(context).colorScheme.onSurface,
         ),
       ),
     );

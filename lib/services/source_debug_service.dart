@@ -59,9 +59,6 @@ class SourceDebugService {
   /// 当前调试回调
   DebugCallback? callback;
 
-  /// 当前调试的书源 URL
-  String? _debugSourceUrl;
-
   /// 调试任务
   Completer<void>? _debugTask;
 
@@ -138,7 +135,6 @@ class SourceDebugService {
     _debugTask = null;
 
     if (destroy) {
-      _debugSourceUrl = null;
       callback = null;
     }
   }
@@ -150,7 +146,6 @@ class SourceDebugService {
     // 重置状态
     cancelDebug();
     _isCancelled = false;
-    _debugSourceUrl = bookSource.bookSourceUrl;
     _startTime = DateTime.now();
     _debugTask = Completer<void>();
 

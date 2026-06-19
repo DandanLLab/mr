@@ -114,6 +114,7 @@ class _BookmarkPageState extends State<BookmarkPage> {
       child: ListTile(
         leading: ClipRRect(
           borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
+          clipBehavior: Clip.hardEdge,
           child: book.coverUrl.isNotEmpty
               ? CachedNetworkImage(
                   imageUrl: book.coverUrl,
@@ -123,14 +124,14 @@ class _BookmarkPageState extends State<BookmarkPage> {
                   errorWidget: (_, __, ___) => Container(
                     width: 40,
                     height: 56,
-                    color: Colors.grey[300],
+                    color: Theme.of(context).colorScheme.outlineVariant,
                     child: const Icon(Icons.book, size: 20),
                   ),
                 )
               : Container(
                   width: 40,
                   height: 56,
-                  color: Colors.grey[300],
+                  color: Theme.of(context).colorScheme.outlineVariant,
                   child: const Icon(Icons.book, size: 20),
                 ),
         ),
@@ -154,7 +155,7 @@ class _BookmarkPageState extends State<BookmarkPage> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: DesignTokens.fontCaption,
-                color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
+                color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
               ),
             ),
           ],

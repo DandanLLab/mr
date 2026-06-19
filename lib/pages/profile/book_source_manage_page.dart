@@ -37,16 +37,16 @@ class SourceTemplate {
 }
 
 /// JSON模板列表（创建.json书源文件）
-const List<SourceTemplate> kJsonTemplates = [
+List<SourceTemplate> kJsonTemplates(BuildContext context) => [
   SourceTemplate(
     id: 'json_custom',
     name: '自定义',
     description: '空白模板，无预设值，完全自由配置',
     icon: Icons.edit_note,
-    color: Colors.grey,
+    color: Theme.of(context).colorScheme.outline,
     assetPath: '', // 空模板，无资源文件
   ),
-  SourceTemplate(
+  const SourceTemplate(
     id: 'json_default',
     name: '默认模板',
     description: '阅读3.0原版格式，CSS选择器规则，兼容Legado',
@@ -54,7 +54,7 @@ const List<SourceTemplate> kJsonTemplates = [
     color: Colors.blue,
     assetPath: 'assets/templates/book_source_template.json',
   ),
-  SourceTemplate(
+  const SourceTemplate(
     id: 'json_api',
     name: 'JSON API 模板',
     description: '适用于JSON接口API，使用\$.xxx语法',
@@ -62,7 +62,7 @@ const List<SourceTemplate> kJsonTemplates = [
     color: Colors.green,
     assetPath: 'assets/templates/book_source_json_template.json',
   ),
-  SourceTemplate(
+  const SourceTemplate(
     id: 'json_xpath',
     name: 'XPath 模板',
     description: '使用XPath选择器解析HTML/XML',
@@ -70,7 +70,7 @@ const List<SourceTemplate> kJsonTemplates = [
     color: Colors.purple,
     assetPath: 'assets/templates/book_source_xpath_template.json',
   ),
-  SourceTemplate(
+  const SourceTemplate(
     id: 'json_regex',
     name: '正则模板',
     description: '使用正则表达式匹配网页内容',
@@ -78,7 +78,7 @@ const List<SourceTemplate> kJsonTemplates = [
     color: Colors.red,
     assetPath: 'assets/templates/book_source_regex_template.json',
   ),
-  SourceTemplate(
+  const SourceTemplate(
     id: 'json_js',
     name: 'JSON+JS 模板',
     description: 'JSON格式 + JS规则混合，jsLib内置工具库',
@@ -210,7 +210,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: Colors.grey.shade300,
+                color: Theme.of(context).colorScheme.outlineVariant,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -247,7 +247,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
                   Wrap(
                     spacing: DesignTokens.spacingSm,
                     runSpacing: DesignTokens.spacingSm,
-                    children: kJsonTemplates.map((t) => _buildTemplateCard(context, t)).toList(),
+                    children: kJsonTemplates(context).map((t) => _buildTemplateCard(context, t)).toList(),
                   ),
                   const SizedBox(height: DesignTokens.spacingLg),
                   // JS 模板分组标题
@@ -291,7 +291,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
           Container(
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
+              color: color.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
             ),
             child: Icon(icon, size: DesignTokens.fontTitle, color: color),
@@ -341,7 +341,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
             const SizedBox(height: 6),
             Text(
               template.description,
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade600, height: 1.3),
+              style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant, height: 1.3),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
@@ -1628,12 +1628,12 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
         break;
       case BookSourceType.file:
         icon = Icons.folder;
-        color = Colors.grey;
+        color = Theme.of(context).colorScheme.outline;
         break;
     }
 
     return CircleAvatar(
-      backgroundColor: color.withOpacity(0.2),
+      backgroundColor: color.withValues(alpha: 0.2),
       child: Icon(icon, color: color, size: 20),
     );
   }

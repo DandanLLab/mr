@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/app_provider.dart';
-import '../../providers/bookshelf_provider.dart';
 import '../../providers/discovery_provider.dart';
 import '../../utils/design_tokens.dart';
 import '../../widgets/android_switch.dart';
@@ -24,8 +23,6 @@ class _ProfilePageState extends State<ProfilePage>
     with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
-  String _nickname = '小蛋子';
-  int _bookCount = 0;
   int _sourceCount = 0;
 
   @override
@@ -35,13 +32,10 @@ class _ProfilePageState extends State<ProfilePage>
   }
 
   void _loadStats() {
-    final bookshelfProvider = context.read<BookshelfProvider>();
     final discoveryProvider = context.read<DiscoveryProvider>();
 
     setState(() {
-      _bookCount = bookshelfProvider.books.length;
       _sourceCount = discoveryProvider.bookSources.length;
-      _nickname = context.read<AppProvider>().nickname ?? '小蛋子';
     });
   }
 
@@ -583,13 +577,11 @@ class _ProfilePageState extends State<ProfilePage>
 }
 
 class _LegacyThemeIcon extends StatelessWidget {
-  final Color? color;
-
-  const _LegacyThemeIcon({this.color});
+  const _LegacyThemeIcon();
 
   @override
   Widget build(BuildContext context) {
-    final resolvedColor = color ?? Theme.of(context).colorScheme.secondary;
+    final resolvedColor = Theme.of(context).colorScheme.secondary;
     return SizedBox(
       width: 24,
       height: 24,
@@ -656,7 +648,7 @@ class _SvgPathParser {
       } else if (command == null) {
         throw FormatException('Invalid SVG path data');
       }
-      _parseCommand(command!);
+      _parseCommand(command);
     }
     return _path;
   }
@@ -832,12 +824,10 @@ class _SvgPathParser {
   }
 
   bool _skipSeparators() {
-    var moved = false;
     while (_index < data.length) {
       final ch = data[_index];
       if (ch == ',' || ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t') {
         _index++;
-        moved = true;
         continue;
       }
       break;

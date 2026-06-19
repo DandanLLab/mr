@@ -75,7 +75,6 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
 
   // 当前焦点的输入框
   TextEditingController? _focusedController;
-  String? _focusedFieldKey;
 
   @override
   void initState() {
@@ -1140,7 +1139,6 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
           onTap: () {
             // 记录当前焦点的输入框
             _focusedController = controller;
-            _focusedFieldKey = entity.key;
           },
         );
       },
@@ -1953,7 +1951,7 @@ class UnderlineWidget extends StatelessWidget {
           height: 1.5,
           width: 48,
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5),
             borderRadius: BorderRadius.circular(1),
           ),
         ),
@@ -2130,7 +2128,6 @@ class _SourceLoginPage extends StatefulWidget {
 }
 
 class _SourceLoginPageState extends State<_SourceLoginPage> {
-  InAppWebViewController? _webViewController;
   bool _isLoading = true;
   bool _checking = false;
 
@@ -2200,9 +2197,6 @@ class _SourceLoginPageState extends State<_SourceLoginPage> {
               databaseEnabled: true,
               useHybridComposition: true,
             ),
-            onWebViewCreated: (controller) {
-              _webViewController = controller;
-            },
             onLoadStart: (controller, url) async {
               if (url != null) {
                 await _saveCookies(url.toString());

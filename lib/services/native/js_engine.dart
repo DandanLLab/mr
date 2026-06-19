@@ -2936,7 +2936,7 @@ class JsEngine {
 
     // 调试：输出 processJsRule 的 result 参数类型和长度
     if (kDebugMode) {
-      AppLogger.instance.debug(LogCategory.js, '[processJsRule] result type=${actualResult.runtimeType}, len=${actualResult is String ? (actualResult as String).length : (actualResult is List ? (actualResult as List).length : '?')}');
+      AppLogger.instance.debug(LogCategory.js, '[processJsRule] result type=${actualResult.runtimeType}, len=${actualResult is String ? actualResult.length : (actualResult is List ? actualResult.length : '?')}');
     }
 
     return _evalLock.synchronized(() =>

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -11,9 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../models/book.dart';
 import '../../models/book_source.dart';
-import '../../models/chapter.dart';
 import '../../services/app_logger.dart';
 import '../../services/source_debug_service.dart';
 import '../../services/storage_service.dart';
@@ -229,13 +226,6 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
     return items;
   }
 
-  void _clearLogs() {
-    if (!mounted) return;
-    setState(() {
-      _debugLogs.clear();
-    });
-  }
-
   Future<void> _submitDebug([String? value]) async {
     final text = (value ?? _searchController.text).trim();
     if (text.isEmpty) return;
@@ -427,9 +417,9 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
               hintStyle: theme.textTheme.bodyMedium?.copyWith(
                 color: hintColor,
               ),
-              prefixIcon: Icon(Icons.search, size: 18, color: textColor.withOpacity(0.6)),
+              prefixIcon: Icon(Icons.search, size: 18, color: textColor.withValues(alpha: 0.6)),
               suffixIcon: IconButton(
-                icon: Icon(Icons.chevron_right_rounded, size: 20, color: textColor.withOpacity(0.6)),
+                icon: Icon(Icons.chevron_right_rounded, size: 20, color: textColor.withValues(alpha: 0.6)),
                 onPressed: () => _submitDebug(),
               ),
               filled: true,
@@ -1170,13 +1160,13 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
     Color bgColor;
     switch (entry.level) {
       case LogLevel.error:
-        bgColor = isDark ? Colors.red[900]!.withOpacity(0.3) : const Color(0xFFFFEBEE);
+        bgColor = isDark ? Colors.red[900]!.withValues(alpha: 0.3) : const Color(0xFFFFEBEE);
         break;
       case LogLevel.warning:
-        bgColor = isDark ? Colors.orange[900]!.withOpacity(0.3) : const Color(0xFFFFF8E1);
+        bgColor = isDark ? Colors.orange[900]!.withValues(alpha: 0.3) : const Color(0xFFFFF8E1);
         break;
       case LogLevel.info:
-        bgColor = isDark ? Colors.green[900]!.withOpacity(0.3) : const Color(0xFFE8F5E9);
+        bgColor = isDark ? Colors.green[900]!.withValues(alpha: 0.3) : const Color(0xFFE8F5E9);
         break;
       default:
         bgColor = Colors.transparent;
@@ -1377,9 +1367,6 @@ class _QrScannerPageState extends State<_QrScannerPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -1442,7 +1429,7 @@ class _QrScannerPageState extends State<_QrScannerPage> {
               '将二维码放入框内自动扫描',
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: Colors.white.withOpacity(0.8),
+                color: Colors.white.withValues(alpha: 0.8),
                 fontSize: 14,
               ),
             ),

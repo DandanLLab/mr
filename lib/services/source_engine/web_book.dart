@@ -1495,17 +1495,6 @@ class WebBook {
 
       AppLogger.instance.logParseResult('正文', content != null ? 1 : 0);
 
-      // 执行 replaceRegex（正文替换规则）
-      // 对齐 legado BookContent:170: contentStr.split(LFRegex).joinToString("\n") { it.trim() }
-      if (false &&
-          contentRule.replaceRegex != null &&
-          contentRule.replaceRegex!.isNotEmpty &&
-          content != null) {
-        // 对齐 legado: 先按行 trim
-        content = content.split(RegExp(r'\n')).map((l) => l.trim()).join('\n');
-        content = await _applyContentReplaceNative(content, contentRule.replaceRegex!);
-      }
-
       // 处理 nextContentUrl（正文下一页）
       // 对齐 legado BookContent.kt:257-259: nextUrlList.addAll(it)
       // legado 不过滤当前页 URL，靠 nextUrlList.contains(nextUrl) 去重
@@ -1599,7 +1588,7 @@ class WebBook {
           if (contentList.length > 1) {
             content = contentList.join('\n');
             AppLogger.instance.info(LogCategory.parse,
-                '正文串行翻页合并: ${contentList.length}页, ${content!.length} chars');
+                '正文串行翻页合并: ${contentList.length}页, ${content.length} chars');
           }
         } else {
           // ===== 并发批量获取模式（legado: size > 1）=====
@@ -1737,13 +1726,6 @@ class WebBook {
       if (subContent != null && subContent.isNotEmpty) {
         content = '${content ?? ''}\n$subContent'.trim();
       }
-      // 执行 replaceRegex
-      if (false &&
-          contentRule.replaceRegex != null &&
-          contentRule.replaceRegex!.isNotEmpty &&
-          content != null) {
-        content = await _applyContentReplaceNative(content, contentRule.replaceRegex!);
-      }
       return content;
     } catch (e) {
       AppLogger.instance.warn(LogCategory.parse, '获取正文页失败', detail: '$url: $e');
@@ -1822,50 +1804,6 @@ class WebBook {
       debugPrint('❌ 替换规则执行失败: $pattern → $e');
       return content;
     }
-  }
-
-  /// 应用正文替换规则（旧版 Dart 简单实现，保留兼容）
-  String? _applyContentReplace(String? content, String replaceRegex) {
-    if (content == null || replaceRegex.isEmpty) return content;
-
-    // legado 规则：多组用 `\n` 分隔，每组用 `##` 分隔 pattern##replacement
-    //   - `xxx##yyy` → 把 xxx 替换为 yyy
-    //   - `##xxx`   → 把 xxx 替换为空（pattern 为空时取 replacement 当作 pattern，目标是空字符串）
-    //   - `xxx`     → 把 xxx 替换为空（无 ##）
-    //   - 多组之间用 `\n` 分隔（按 legado 5.x 规范）
-    var result = content;
-    final lines = replaceRegex.split('\n');
-    for (final line in lines) {
-      if (line.isEmpty) continue;
-      String pattern;
-      String replacement;
-      final idx = line.indexOf('##');
-      if (idx < 0) {
-        // 无 ## → 整条作为 pattern，替换为空
-        pattern = line;
-        replacement = '';
-      } else if (idx == 0) {
-        // ## 开头 → 后面是 pattern，替换为空
-        pattern = line.substring(2);
-        replacement = '';
-      } else {
-        pattern = line.substring(0, idx);
-        // 支持二级 ## 分隔 replacement##js（暂只取前一段）
-        final rest = line.substring(idx + 2);
-        final jsIdx = rest.indexOf('##');
-        replacement = jsIdx < 0 ? rest : rest.substring(0, jsIdx);
-      }
-      if (pattern.isEmpty) continue;
-
-      try {
-        final regex = RegExp(pattern, multiLine: true, dotAll: true);
-        result = result.replaceAll(regex, replacement);
-      } catch (e) {
-        debugPrint('❌ 替换规则执行失败: $pattern → $e');
-      }
-    }
-
-    return result;
   }
 
   // ================== 借鉴 legado 的辅助方法 ==================

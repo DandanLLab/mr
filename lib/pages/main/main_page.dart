@@ -88,12 +88,6 @@ class _MainPageState extends State<MainPage> {
     }
   }
 
-  void _toggleSidebar() {
-    setState(() {
-      _sidebarOpen = !_sidebarOpen;
-    });
-  }
-
   void _closeSidebar() {
     if (_sidebarOpen) {
       setState(() {

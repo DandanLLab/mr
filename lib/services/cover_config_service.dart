@@ -199,7 +199,7 @@ class CoverConfigService {
     // connectivity_plus 不同版本返回类型不同
     // 5.x 返回 List<ConnectivityResult>, 旧版返回单个 ConnectivityResult
     if (result is List) {
-      return (result as List).contains(ConnectivityResult.wifi);
+      return result.contains(ConnectivityResult.wifi);
     } else if (result == ConnectivityResult.wifi) {
       return true;
     }
@@ -322,7 +322,7 @@ class CoverConfigService {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: colorScheme.onSurface.withOpacity(0.6),
+                  color: colorScheme.onSurface.withValues(alpha: 0.6),
                   fontSize: 12,
                   height: 1.3,
                 ),

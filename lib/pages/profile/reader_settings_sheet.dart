@@ -34,7 +34,7 @@ class ReaderSettingsSheet extends StatelessWidget {
               height: 24,
               decoration: BoxDecoration(
                 color: const Color(0xFFFFF8E1),
-                border: Border.all(color: Colors.grey),
+                border: Border.all(color: Theme.of(context).colorScheme.outline),
                 borderRadius:
                     BorderRadius.circular(DesignTokens.actionRadius),
               ),

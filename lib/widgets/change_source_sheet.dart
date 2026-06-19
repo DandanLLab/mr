@@ -52,7 +52,6 @@ class _ChangeSourceSheetState extends State<ChangeSourceSheet> {
   final List<Map<String, dynamic>> _searchResults = [];
   bool _isLoading = true;
   String? _error;
-  int _currentSourceIndex = -1;
 
   @override
   void initState() {
@@ -132,20 +131,10 @@ class _ChangeSourceSheetState extends State<ChangeSourceSheet> {
         return (a['sourceName'] as String? ?? '').compareTo(b['sourceName'] as String? ?? '');
       });
 
-      // 找到当前书源的索引
-      int currentIndex = -1;
-      for (int i = 0; i < results.length; i++) {
-        if (results[i]['sourceUrl'] == widget.currentSourceUrl) {
-          currentIndex = i;
-          break;
-        }
-      }
-
       setState(() {
         _searchResults.clear();
         _searchResults.addAll(results);
         _isLoading = false;
-        _currentSourceIndex = currentIndex;
       });
     } catch (e) {
       setState(() {

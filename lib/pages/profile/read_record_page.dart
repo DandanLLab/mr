@@ -28,8 +28,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
   List<ReadRecordSummary> _summaryRecords = [];
   bool _isLoading = true;
   int _totalReadTime = 0;
-  int _todayReadTime = 0;
-  
+
   bool _showSearch = false;
   DisplayMode _displayMode = DisplayMode.aggregate;
   bool _enableReadRecord = true;
@@ -80,8 +79,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     final allRecords = await _service.getAllRecords();
     final summaryRecords = await _service.getSummaryRecords();
     final totalReadTime = await _service.getTotalReadTime();
-    final todayReadTime = await _service.getTodayReadTime();
-    
+
     // 计算每日阅读次数和时长
     final dailyCounts = <DateTime, int>{};
     final dailyTimes = <DateTime, int>{};
@@ -96,7 +94,6 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
       _allRecords = allRecords;
       _summaryRecords = summaryRecords;
       _totalReadTime = totalReadTime;
-      _todayReadTime = todayReadTime;
       _dailyReadCounts = dailyCounts;
       _dailyReadTimes = dailyTimes;
       _isLoading = false;
@@ -646,7 +643,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                   borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
+                      color: Colors.black.withValues(alpha: 0.1),
                       blurRadius: 2,
                       offset: const Offset(0, 1),
                     ),
@@ -654,6 +651,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
+                  clipBehavior: Clip.hardEdge,
                   child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
                       ? CachedNetworkImage(
                           imageUrl: record.coverUrl,
@@ -725,7 +723,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingSm),
-              color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+              color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -784,7 +782,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingSm),
-              color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+              color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -847,6 +845,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
+                clipBehavior: Clip.hardEdge,
                 child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
                     ? CachedNetworkImage(
                         imageUrl: record.coverUrl,
@@ -1070,6 +1069,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
+                clipBehavior: Clip.hardEdge,
                 child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
                     ? CachedNetworkImage(
                         imageUrl: record.coverUrl,
@@ -1193,7 +1193,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         width: 2,
                         height: 16,
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.secondary.withOpacity(0.5),
+                          color: Theme.of(context).colorScheme.secondary.withValues(alpha: 0.5),
                           borderRadius: BorderRadius.circular(1),
                         ),
                       ),
@@ -1206,7 +1206,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         width: 2,
                         height: 16,
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.secondary.withOpacity(0.5),
+                          color: Theme.of(context).colorScheme.secondary.withValues(alpha: 0.5),
                           borderRadius: BorderRadius.circular(1),
                         ),
                       ),
@@ -1220,7 +1220,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: Theme.of(context).colorScheme.secondary.withOpacity(0.3),
+                          color: Theme.of(context).colorScheme.secondary.withValues(alpha: 0.3),
                           blurRadius: 4,
                         ),
                       ],
@@ -1246,6 +1246,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
             // 封面
             ClipRRect(
               borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
+              clipBehavior: Clip.hardEdge,
               child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
                   ? CachedNetworkImage(
                       imageUrl: record.coverUrl,
@@ -1326,7 +1327,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     return Container(
       width: size,
       height: size * 60 / 44,
-      color: Colors.grey[300],
+      color: Theme.of(context).colorScheme.outlineVariant,
       child: Icon(Icons.book, size: size * 0.45),
     );
   }
@@ -1431,7 +1432,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
         Container(
           padding: const EdgeInsets.all(DesignTokens.spacingMd),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+            color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
             borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
           ),
           child: Column(
@@ -1589,7 +1590,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
           Container(
             padding: const EdgeInsets.all(DesignTokens.spacingMd),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.3),
+              color: Theme.of(context).colorScheme.secondaryContainer.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
             ),
             child: Row(
@@ -1636,7 +1637,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingSm, vertical: 7),
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface.withOpacity(0.7),
+          color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.7),
           borderRadius: BorderRadius.circular(DesignTokens.spacingSm),
         ),
         child: Column(
@@ -1658,13 +1659,6 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     );
   }
 
-  Widget _buildEmptyCell() {
-    return SizedBox(
-      width: (MediaQuery.of(context).size.width - 48) / 7 - 4,
-      height: (MediaQuery.of(context).size.width - 48) / 7 - 4,
-    );
-  }
-
   Widget _buildDayCell(
     int day,
     int value,
@@ -1683,16 +1677,16 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
       bgColor = Theme.of(context).colorScheme.secondary;
       textColor = Theme.of(context).colorScheme.onSecondary;
     } else if (!isCurrentMonth) {
-      bgColor = Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.22);
-      textColor = Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.35);
+      bgColor = Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.22);
+      textColor = Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.35);
     } else if (value <= 0) {
-      bgColor = Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.38);
+      bgColor = Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.38);
       textColor = Theme.of(context).colorScheme.onSurfaceVariant;
     } else {
       final ratio = (value / maxValue).clamp(0.0, 1.0);
       final intensity = ratio * ratio;
       bgColor = Color.lerp(
-        Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.42),
+        Theme.of(context).colorScheme.secondaryContainer.withValues(alpha: 0.42),
         Theme.of(context).colorScheme.secondary,
         intensity,
       )!;
@@ -1712,7 +1706,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
           border: isToday && !isSelected
               ? Border.all(color: Theme.of(context).colorScheme.secondary, width: 2)
               : isSelected
-                  ? Border.all(color: Theme.of(context).colorScheme.onSecondary.withOpacity(0.75), width: 2)
+                  ? Border.all(color: Theme.of(context).colorScheme.onSecondary.withValues(alpha: 0.75), width: 2)
                   : null,
         ),
         child: Center(
@@ -1731,12 +1725,12 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
 
   Color _getHeatmapColor(int index, int maxIndex) {
     if (index == 0) {
-      return Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.4);
+      return Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4);
     }
     final ratio = index / maxIndex;
     final intensity = ratio * ratio;
     return Color.lerp(
-      Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.4),
+      Theme.of(context).colorScheme.secondaryContainer.withValues(alpha: 0.4),
       Theme.of(context).colorScheme.secondary,
       intensity,
     )!;

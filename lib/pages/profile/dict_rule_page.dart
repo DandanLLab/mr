@@ -252,7 +252,7 @@ class _DictRulePageState extends State<DictRulePage> {
                         rule.isEnabled ? Icons.check_circle : Icons.check_circle_outline,
                         color: rule.isEnabled
                             ? Theme.of(context).colorScheme.primary
-                            : Colors.grey,
+                            : Theme.of(context).colorScheme.outline,
                       ),
                       title: Text(rule.name),
                       subtitle: Text(

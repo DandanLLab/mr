@@ -21,6 +21,7 @@ class CommonWidgets {
   }
 
   static Widget buildEmptyWidget({
+    required BuildContext context,
     required IconData icon,
     required String message,
     String? actionText,
@@ -33,14 +34,14 @@ class CommonWidgets {
           Icon(
             icon,
             size: DesignTokens.emptyIconSize,
-            color: Colors.grey,
+            color: Theme.of(context).colorScheme.outline,
           ),
           const SizedBox(height: DesignTokens.spacingMd),
           Text(
             message,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: DesignTokens.fontTitle,
-              color: Colors.grey,
+              color: Theme.of(context).colorScheme.outline,
             ),
           ),
           if (actionText != null && onAction != null) ...[
@@ -56,6 +57,7 @@ class CommonWidgets {
   }
 
   static Widget buildErrorWidget({
+    required BuildContext context,
     required String message,
     String? actionText,
     VoidCallback? onRetry,
@@ -72,9 +74,9 @@ class CommonWidgets {
           const SizedBox(height: DesignTokens.spacingMd),
           Text(
             message,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: DesignTokens.fontTitle,
-              color: Colors.grey,
+              color: Theme.of(context).colorScheme.outline,
             ),
             textAlign: TextAlign.center,
           ),

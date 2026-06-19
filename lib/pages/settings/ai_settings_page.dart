@@ -16,8 +16,6 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('AI 设置'),
@@ -167,10 +165,10 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: colorScheme.surface.withOpacity(0.12),
+        color: colorScheme.surface.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: colorScheme.onSurface.withOpacity(0.04),
+          color: colorScheme.onSurface.withValues(alpha: 0.04),
           width: 1,
         ),
       ),

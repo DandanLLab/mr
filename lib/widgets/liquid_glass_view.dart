@@ -1,6 +1,5 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 
 /// 液态玻璃效果视图 - 参考 legado-main 的 StableLiquidGlassView
 /// 实现高级的模糊、折射、色散效果
@@ -117,6 +116,7 @@ class LiquidGlassViewState extends State<LiquidGlassView>
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(widget.cornerRadius),
+              clipBehavior: Clip.hardEdge,
               child: widget.child,
             ),
           );
@@ -174,7 +174,7 @@ class LiquidGlassPainter extends CustomPainter {
   void _drawGlassLayers(Canvas canvas, Size size, RRect rrect) {
     // 基础玻璃层
     final basePaint = Paint()
-      ..color = tintColor.withOpacity(tintAlpha)
+      ..color = tintColor.withValues(alpha: tintAlpha)
       ..style = PaintingStyle.fill;
     canvas.drawRRect(rrect, basePaint);
 
@@ -183,9 +183,9 @@ class LiquidGlassPainter extends CustomPainter {
       begin: Alignment.topCenter,
       end: Alignment.bottomCenter,
       colors: [
-        tintColor.withOpacity(tintAlpha * 0.8),
-        tintColor.withOpacity(tintAlpha * 0.4),
-        tintColor.withOpacity(tintAlpha * 0.6),
+        tintColor.withValues(alpha: tintAlpha * 0.8),
+        tintColor.withValues(alpha: tintAlpha * 0.4),
+        tintColor.withValues(alpha: tintAlpha * 0.6),
       ],
       stops: const [0.0, 0.5, 1.0],
     );
@@ -197,7 +197,7 @@ class LiquidGlassPainter extends CustomPainter {
     // 色散效果 - 模拟光的分散
     if (dispersion > 0) {
       final dispersionPaint = Paint()
-        ..color = tintColor.withOpacity(dispersion * 0.1)
+        ..color = tintColor.withValues(alpha: dispersion * 0.1)
         ..style = PaintingStyle.fill
         ..maskFilter = MaskFilter.blur(BlurStyle.normal, blurRadius * 0.5);
       canvas.drawRRect(rrect, dispersionPaint);
@@ -220,8 +220,8 @@ class LiquidGlassPainter extends CustomPainter {
       begin: Alignment.topCenter,
       end: Alignment.bottomCenter,
       colors: [
-        Colors.white.withOpacity(0.15 + pulseValue * 0.05),
-        Colors.white.withOpacity(0.05),
+        Colors.white.withValues(alpha: 0.15 + pulseValue * 0.05),
+        Colors.white.withValues(alpha: 0.05),
         Colors.transparent,
       ],
     );
@@ -248,7 +248,7 @@ class LiquidGlassPainter extends CustomPainter {
       end: Alignment.bottomCenter,
       colors: [
         Colors.transparent,
-        Colors.white.withOpacity(0.08),
+        Colors.white.withValues(alpha: 0.08),
       ],
     );
     final reflectionPaint = Paint()
@@ -262,14 +262,14 @@ class LiquidGlassPainter extends CustomPainter {
   void _drawBorder(Canvas canvas, Size size, RRect rrect) {
     // 外边框 - 模拟玻璃边缘
     final borderPaint = Paint()
-      ..color = Colors.white.withOpacity(0.2)
+      ..color = Colors.white.withValues(alpha: 0.2)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.0;
     canvas.drawRRect(rrect, borderPaint);
 
     // 内边框
     final innerBorderPaint = Paint()
-      ..color = Colors.black.withOpacity(0.1)
+      ..color = Colors.black.withValues(alpha: 0.1)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.5;
     final innerRrect = RRect.fromRectAndRadius(
@@ -285,7 +285,7 @@ class LiquidGlassPainter extends CustomPainter {
     // 触摸涟漪效果
     final rippleRadius = 60.0;
     final ripplePaint = Paint()
-      ..color = Colors.white.withOpacity(0.2)
+      ..color = Colors.white.withValues(alpha: 0.2)
       ..style = PaintingStyle.fill
       ..maskFilter = MaskFilter.blur(BlurStyle.normal, 10);
 
@@ -329,15 +329,16 @@ class FrostedGlassView extends StatelessWidget {
     
     Widget content = ClipRRect(
       borderRadius: BorderRadius.circular(cornerRadius),
+      clipBehavior: Clip.hardEdge,
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: blurRadius, sigmaY: blurRadius),
         child: Container(
           padding: padding,
           decoration: BoxDecoration(
-            color: bgColor.withOpacity(opacity),
+            color: bgColor.withValues(alpha: opacity),
             borderRadius: BorderRadius.circular(cornerRadius),
             border: Border.all(
-              color: Colors.white.withOpacity(0.2),
+              color: Colors.white.withValues(alpha: 0.2),
               width: 1,
             ),
           ),
@@ -427,7 +428,7 @@ class NavigationIndicatorState extends State<NavigationIndicator>
               boxShadow: [
                 BoxShadow(
                   color: (widget.color ?? Theme.of(context).colorScheme.primary)
-                      .withOpacity(0.3),
+                      .withValues(alpha: 0.3),
                   blurRadius: 4,
                   spreadRadius: 1,
                 ),

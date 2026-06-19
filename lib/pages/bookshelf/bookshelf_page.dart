@@ -5,7 +5,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/book.dart';
 import '../../providers/bookshelf_provider.dart';
-import '../../providers/app_provider.dart';
 import '../../routes/app_routes.dart';
 import '../../services/local_book/local_book_service.dart';
 import '../../services/cover_config_service.dart';
@@ -69,7 +68,6 @@ class _BookshelfPageState extends State<BookshelfPage>
   GroupStyle _groupStyle = GroupStyle.byGroup;
   bool _showUnread = true;
   bool _showLastUpdateTime = true;
-  bool _showBookName = true;
   bool _showWaitUpdate = true;
   bool _showFastScroller = false;
   int _gridColumnCount = 3;
@@ -628,8 +626,6 @@ class _BookshelfPageState extends State<BookshelfPage>
   }
 
   void _showGroupManageDialog() {
-    final provider = context.read<BookshelfProvider>();
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,

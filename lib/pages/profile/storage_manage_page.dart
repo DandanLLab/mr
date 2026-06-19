@@ -142,6 +142,7 @@ class _StorageManagePageState extends State<StorageManagePage> {
     return ListTile(
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
+        clipBehavior: Clip.hardEdge,
         child: book.coverUrl.isNotEmpty
             ? CachedNetworkImage(
                 imageUrl: book.coverUrl,
@@ -151,14 +152,14 @@ class _StorageManagePageState extends State<StorageManagePage> {
                 errorWidget: (_, __, ___) => Container(
                   width: 40,
                   height: 56,
-                  color: Colors.grey[300],
+                  color: Theme.of(context).colorScheme.outlineVariant,
                   child: const Icon(Icons.book, size: 20),
                 ),
               )
             : Container(
                 width: 40,
                 height: 56,
-                color: Colors.grey[300],
+                color: Theme.of(context).colorScheme.outlineVariant,
                 child: const Icon(Icons.book, size: 20),
               ),
       ),

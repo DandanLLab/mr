@@ -280,6 +280,7 @@ class BackgroundImagePreview extends StatelessWidget {
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
+      clipBehavior: Clip.hardEdge,
       child: SizedBox(width: width, height: height, child: imageWidget),
     );
   }

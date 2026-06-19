@@ -5,7 +5,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../services/storage_service.dart';
-import '../../providers/discovery_provider.dart';
 import '../../utils/design_tokens.dart';
 
 class BackupRestorePage extends StatefulWidget {
@@ -17,7 +16,6 @@ class BackupRestorePage extends StatefulWidget {
 
 class _BackupRestorePageState extends State<BackupRestorePage> {
   bool _isBackingUp = false;
-  bool _isRestoring = false;
   List<String> _backupFiles = [];
   String? _lastBackupTime;
 
@@ -92,8 +90,6 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   }
 
   Future<void> _restoreFromFile(String fileName) async {
-    setState(() => _isRestoring = true);
-
     try {
       final directory = await getApplicationDocumentsDirectory();
       final file = File('${directory.path}/backup/$fileName');
@@ -113,15 +109,12 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         await StorageService.instance.cacheData('book_sources', data['bookSources']);
       }
 
-      setState(() => _isRestoring = false);
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('恢复成功')),
         );
       }
     } catch (e) {
-      setState(() => _isRestoring = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('恢复失败: $e')),
