@@ -95,6 +95,7 @@ class _BookshelfPageState extends State<BookshelfPage>
 
   Future<void> _loadBookshelfConfig() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() {
       _layout = BookshelfLayout.values[prefs.getInt('bookshelf_layout') ?? 0];
       _sort = BookshelfSort.values[prefs.getInt('bookshelf_sort') ?? 0];
@@ -199,13 +200,15 @@ class _BookshelfPageState extends State<BookshelfPage>
                                   onTap: () {
                                     provider.setSelectedGroupIndex(index);
                                     provider.setGroup(groups[index]);
-                                    _pageController.animateToPage(
-                                      index,
-                                      duration: const Duration(
-                                        milliseconds: 300,
-                                      ),
-                                      curve: Curves.easeInOut,
-                                    );
+                                    if (_pageController.hasClients) {
+                                      _pageController.animateToPage(
+                                        index,
+                                        duration: const Duration(
+                                          milliseconds: 300,
+                                        ),
+                                        curve: Curves.easeInOut,
+                                      );
+                                    }
                                     _scrollToCenterTag(index);
                                   },
                                   child: Container(
@@ -1283,7 +1286,7 @@ class _BookshelfPageState extends State<BookshelfPage>
       itemCount: books.length,
       itemBuilder: (context, index) {
         final book = books[index];
-        return _buildListBookCard(book, provider);
+        return RepaintBoundary(child: _buildListBookCard(book, provider));
       },
     );
 
@@ -1318,23 +1321,6 @@ class _BookshelfPageState extends State<BookshelfPage>
     return gridView;
   }
 
-  Widget _buildGridView(BookshelfProvider provider) {
-    return GridView.builder(
-      padding: EdgeInsets.all(_margin),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: _gridColumnCount,
-        childAspectRatio: 0.65,
-        crossAxisSpacing: _margin,
-        mainAxisSpacing: _margin,
-      ),
-      itemCount: provider.books.length,
-      itemBuilder: (context, index) {
-        final book = provider.books[index];
-        return RepaintBoundary(child: _buildGridBookCard(book, provider));
-      },
-    );
-  }
-
   Widget _buildGridBookCard(Book book, BookshelfProvider provider) {
     // 参考原版设计：简洁的网格卡片
     final coverConfig = CoverConfigService.instance;
@@ -1360,6 +1346,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                     borderRadius: BorderRadius.circular(
                       DesignTokens.actionRadius,
                     ),
+                    clipBehavior: Clip.hardEdge,
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
@@ -1516,17 +1503,6 @@ class _BookshelfPageState extends State<BookshelfPage>
     );
   }
 
-  Widget _buildListView(BookshelfProvider provider) {
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: DesignTokens.spacingSm),
-      itemCount: provider.books.length,
-      itemBuilder: (context, index) {
-        final book = provider.books[index];
-        return _buildListBookCard(book, provider);
-      },
-    );
-  }
-
   Widget _buildListBookCard(Book book, BookshelfProvider provider) {
     final isCompact = _layout == BookshelfLayout.listCompact;
     final coverConfig = CoverConfigService.instance;
@@ -1547,6 +1523,7 @@ class _BookshelfPageState extends State<BookshelfPage>
             // 封面（参考原版：66x90dp，圆角4dp）
             ClipRRect(
               borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
+              clipBehavior: Clip.hardEdge,
               child: SizedBox(
                 width: isCompact ? 48 : 66,
                 height: isCompact ? 64 : 90,
@@ -1832,7 +1809,8 @@ class _BookshelfPageState extends State<BookshelfPage>
                 book.bookUrl,
               );
 
-              return GestureDetector(
+              return RepaintBoundary(
+                child: GestureDetector(
                 onTap: () => provider.toggleBookSelection(book.bookUrl),
                 child: Stack(
                   children: [
@@ -1858,6 +1836,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                         ),
                       ),
                   ],
+                ),
                 ),
               );
             },
@@ -2001,9 +1980,11 @@ class _BookshelfPageState extends State<BookshelfPage>
         final books = await LocalBookService.instance.scanDirectory(
           directoryPath,
         );
+        if (!mounted) return;
         for (final book in books) {
           await context.read<BookshelfProvider>().addToBookshelf(book);
         }
+        if (!mounted) return;
         if (books.isNotEmpty) {
           ScaffoldMessenger.of(
             context,
@@ -2015,6 +1996,7 @@ class _BookshelfPageState extends State<BookshelfPage>
         }
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('扫描失败: $e')));
@@ -2039,11 +2021,13 @@ class _BookshelfPageState extends State<BookshelfPage>
             }
           }
         }
+        if (!mounted) return;
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('已导入 $successCount 本书籍')));
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('导入失败: $e')));

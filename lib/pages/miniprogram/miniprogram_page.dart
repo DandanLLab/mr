@@ -140,45 +140,6 @@ class _MiniprogramPageState extends State<MiniprogramPage>
     );
   }
 
-  Widget _buildSearchBar() {
-    // 参考原版设计：搜索框
-    return Container(
-      height: 48,
-      padding: const EdgeInsets.fromLTRB(DesignTokens.spacingMd, DesignTokens.spacingXs, DesignTokens.spacingMd, DesignTokens.spacingSm),
-      child: TextField(
-        controller: _searchController,
-        decoration: InputDecoration(
-          hintText: '搜索小程序',
-          hintStyle: const TextStyle(fontSize: DesignTokens.fontBody),
-          prefixIcon: const Icon(Icons.search, size: 18),
-          suffixIcon: _searchQuery.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.clear, size: 18),
-                  padding: EdgeInsets.zero,
-                  onPressed: () {
-                    _searchController.clear();
-                    setState(() {
-                      _searchQuery = '';
-                    });
-                  },
-                )
-              : null,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(DesignTokens.searchRadius),
-          ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingMd, vertical: 0),
-          isDense: true,
-        ),
-        style: const TextStyle(fontSize: DesignTokens.fontBody),
-        onChanged: (value) {
-          setState(() {
-            _searchQuery = value;
-          });
-        },
-      ),
-    );
-  }
-
   Widget _buildEmptyState() {
     return Center(
       child: Column(
@@ -217,7 +178,7 @@ class _MiniprogramPageState extends State<MiniprogramPage>
       itemCount: _miniprograms.length,
       itemBuilder: (context, index) {
         final mp = _miniprograms[index];
-        return _buildMiniprogramItem(mp);
+        return RepaintBoundary(child: _buildMiniprogramItem(mp));
       },
     );
   }
@@ -240,6 +201,7 @@ class _MiniprogramPageState extends State<MiniprogramPage>
           child: mp.icon != null
               ? ClipRRect(
                   borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
+                  clipBehavior: Clip.hardEdge,
                   child: CachedNetworkImage(
                     imageUrl: mp.icon!,
                     fit: BoxFit.cover,

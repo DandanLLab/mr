@@ -39,6 +39,12 @@ class _DiscoveryPageState extends State<DiscoveryPage>
   int _selectedSourceIndex = -1;
   int _selectedCategoryIndex = -1;
 
+  // 性能优化：缓存过滤结果和分类解析结果
+  List<BookSource> _cachedFilteredSources = [];
+  List<BookSource> _lastBookSources = [];
+  String _lastSearchQuery = '';
+  final Map<int, List<ExploreCategory>> _cachedCategories = {};
+
   @override
   void dispose() {
     _searchController.dispose();
@@ -78,13 +84,13 @@ class _DiscoveryPageState extends State<DiscoveryPage>
     _scrollTagToCenter(_categoryTagController, index);
 
     final provider = context.read<DiscoveryProvider>();
-    final sources = _filterSources(provider.bookSources);
+    final sources = _getFilteredSources(provider.bookSources);
     if (_selectedSourceIndex < 0 ||
         _selectedSourceIndex >= sources.length) {
       return;
     }
     final source = sources[_selectedSourceIndex];
-    final categories = _parseExploreKinds(source.exploreUrl);
+    final categories = _getCategories(_selectedSourceIndex, source);
     if (index < 0 || index >= categories.length) return;
     _openExplore(source, categories[index]);
   }
@@ -241,7 +247,7 @@ class _DiscoveryPageState extends State<DiscoveryPage>
         if (provider.isLoading) {
           return const SizedBox.shrink();
         }
-        final sources = _filterSources(provider.bookSources);
+        final sources = _getFilteredSources(provider.bookSources);
         if (sources.isEmpty) return const SizedBox.shrink();
 
         return Container(
@@ -259,6 +265,7 @@ class _DiscoveryPageState extends State<DiscoveryPage>
           child: ListView.builder(
             controller: _sourceTagController,
             scrollDirection: Axis.horizontal,
+            itemExtent: DesignTokens.tagItemMaxWidth,
             padding: const EdgeInsets.symmetric(
               vertical: (DesignTokens.tagBarHeight - DesignTokens.tagHeight) / 2,
             ),
@@ -286,13 +293,13 @@ class _DiscoveryPageState extends State<DiscoveryPage>
         if (provider.isLoading) {
           return const SizedBox.shrink();
         }
-        final sources = _filterSources(provider.bookSources);
+        final sources = _getFilteredSources(provider.bookSources);
         if (_selectedSourceIndex < 0 ||
             _selectedSourceIndex >= sources.length) {
           return const SizedBox.shrink();
         }
         final source = sources[_selectedSourceIndex];
-        final categories = _parseExploreKinds(source.exploreUrl);
+        final categories = _getCategories(_selectedSourceIndex, source);
         if (categories.isEmpty) return const SizedBox.shrink();
 
         return Container(
@@ -310,6 +317,7 @@ class _DiscoveryPageState extends State<DiscoveryPage>
           child: ListView.builder(
             controller: _categoryTagController,
             scrollDirection: Axis.horizontal,
+            itemExtent: DesignTokens.tagItemMaxWidth,
             padding: const EdgeInsets.symmetric(
               vertical: (DesignTokens.tagBarHeight - DesignTokens.tagHeight) / 2,
             ),
@@ -383,7 +391,7 @@ class _DiscoveryPageState extends State<DiscoveryPage>
           return const Center(child: CircularProgressIndicator());
         }
 
-        final sources = _filterSources(provider.bookSources);
+        final sources = _getFilteredSources(provider.bookSources);
 
         if (sources.isEmpty) {
           return _buildEmptyState(
@@ -407,7 +415,7 @@ class _DiscoveryPageState extends State<DiscoveryPage>
         }
 
         final source = sources[_selectedSourceIndex];
-        final categories = _parseExploreKinds(source.exploreUrl);
+        final categories = _getCategories(_selectedSourceIndex, source);
 
         if (categories.isEmpty) {
           return _buildEmptyState(
@@ -514,6 +522,32 @@ class _DiscoveryPageState extends State<DiscoveryPage>
         ),
       ),
     );
+  }
+
+  /// 获取过滤后的书源列表（带缓存，避免每次 build 重复计算）
+  List<BookSource> _getFilteredSources(List<BookSource> sources) {
+    if (_searchQuery == _lastSearchQuery &&
+        identical(sources, _lastBookSources)) {
+      return _cachedFilteredSources;
+    }
+    _lastSearchQuery = _searchQuery;
+    _lastBookSources = sources;
+    _cachedFilteredSources = _filterSources(sources);
+    _cachedCategories.clear();
+    return _cachedFilteredSources;
+  }
+
+  /// 获取分类列表（带缓存，按书源索引缓存）
+  List<ExploreCategory> _getCategories(
+    int sourceIndex,
+    BookSource source,
+  ) {
+    if (_cachedCategories.containsKey(sourceIndex)) {
+      return _cachedCategories[sourceIndex]!;
+    }
+    final categories = _parseExploreKinds(source.exploreUrl);
+    _cachedCategories[sourceIndex] = categories;
+    return categories;
   }
 
   List<BookSource> _filterSources(List<BookSource> sources) {

@@ -428,6 +428,7 @@ class _SearchPageState extends State<SearchPage> {
               // 封面（参考原版：80x110）
               ClipRRect(
                 borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
+                clipBehavior: Clip.hardEdge,
                 child: SizedBox(
                   width: DesignTokens.emptyIconSize,
                   height: 110.0,
@@ -553,7 +554,7 @@ class _SearchPageState extends State<SearchPage> {
       itemCount: provider.searchResults.length,
       itemBuilder: (context, index) {
         final result = provider.searchResults[index];
-        return _buildGridResultItem(result);
+        return RepaintBoundary(child: _buildGridResultItem(result));
       },
     );
   }

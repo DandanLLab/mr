@@ -26,6 +26,7 @@ class _MainPageState extends State<MainPage> {
   bool _isLoading = true;
   String? _error;
   late PageController _pageController;
+  late final List<Widget> _pages;
 
   // 侧边栏状态
   bool _sidebarOpen = false;
@@ -34,6 +35,12 @@ class _MainPageState extends State<MainPage> {
   void initState() {
     super.initState();
     _pageController = PageController(initialPage: 0);
+    _pages = [
+      BookshelfPage(onSwipeToNext: _navigateToDiscovery),
+      const DiscoveryPage(),
+      const MiniprogramPage(),
+      const ProfilePage(),
+    ];
     _loadData();
     _requestPermissions();
   }
@@ -45,11 +52,13 @@ class _MainPageState extends State<MainPage> {
   }
 
   void _navigateToDiscovery() {
-    _pageController.animateToPage(
-      1,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
+    if (_pageController.hasClients) {
+      _pageController.animateToPage(
+        1,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+      );
+    }
   }
 
   Future<void> _requestPermissions() async {
@@ -66,10 +75,12 @@ class _MainPageState extends State<MainPage> {
     try {
       await context.read<BookshelfProvider>().loadBooks();
       await context.read<DiscoveryProvider>().loadBookSources();
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
         _error = e.toString();
@@ -155,12 +166,6 @@ class _MainPageState extends State<MainPage> {
 
   /// 悬浮模式布局 - 玻璃效果 + 悬浮导航栏
   Widget _buildFloatingLayout(AppProvider appProvider) {
-    final pages = [
-      BookshelfPage(onSwipeToNext: _navigateToDiscovery),
-      const DiscoveryPage(),
-      const MiniprogramPage(),
-      const ProfilePage(),
-    ];
     final bottomSafeArea = MediaQuery.paddingOf(context).bottom;
     const bottomBarHeight = DesignTokens.bottomBarHeight;
     const bottomBarGap = 10.0;
@@ -179,7 +184,7 @@ class _MainPageState extends State<MainPage> {
                   _currentIndex = index;
                 });
               },
-              children: pages,
+              children: _pages,
             ),
           ),
           // 底部导航栏
@@ -252,18 +257,18 @@ class _MainPageState extends State<MainPage> {
     final borderColor = appProvider.navBarBorderColor != null
         ? Color(
             appProvider.navBarBorderColor!,
-          ).withOpacity(appProvider.navBarBorderAlpha / 100.0)
+          ).withValues(alpha:appProvider.navBarBorderAlpha / 100.0)
         : null;
 
     // 根据材质模式设置背景色
     Color bgColor;
     if (effectMode == 'solid') {
-      bgColor = navBarColor.withOpacity(opacity);
+      bgColor = navBarColor.withValues(alpha:opacity);
     } else if (effectMode == 'frosted') {
-      bgColor = navBarColor.withOpacity((navBarIsDark ? 0.7 : 0.85) * opacity);
+      bgColor = navBarColor.withValues(alpha:(navBarIsDark ? 0.7 : 0.85) * opacity);
     } else {
       // glass
-      bgColor = navBarColor.withOpacity((navBarIsDark ? 0.85 : 0.9) * opacity);
+      bgColor = navBarColor.withValues(alpha:(navBarIsDark ? 0.85 : 0.9) * opacity);
     }
 
     return Padding(
@@ -276,7 +281,8 @@ class _MainPageState extends State<MainPage> {
         elevation: 12,
         borderRadius: BorderRadius.circular(cornerRadius),
         color: Colors.transparent,
-        child: ClipRRect(
+        child: RepaintBoundary(
+          child: ClipRRect(
           borderRadius: BorderRadius.circular(cornerRadius),
           child: BackdropFilter(
             filter: ImageFilter.blur(
@@ -292,8 +298,8 @@ class _MainPageState extends State<MainPage> {
                     ? Border.all(color: borderColor, width: 1)
                     : Border.all(
                         color: navBarIsDark
-                            ? Colors.white.withOpacity(0.08)
-                            : Colors.black.withOpacity(0.04),
+                            ? Colors.white.withValues(alpha:0.08)
+                            : Colors.black.withValues(alpha:0.04),
                         width: 1,
                       ),
               ),
@@ -332,6 +338,7 @@ class _MainPageState extends State<MainPage> {
               ),
             ),
           ),
+          ),
         ),
       ),
     );
@@ -354,11 +361,13 @@ class _MainPageState extends State<MainPage> {
         child: GestureDetector(
           onTap: () {
             if (_currentIndex != index) {
-              _pageController.animateToPage(
-                index,
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeInOut,
-              );
+              if (_pageController.hasClients) {
+                _pageController.animateToPage(
+                  index,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                );
+              }
             }
           },
           behavior: HitTestBehavior.opaque,
@@ -396,19 +405,12 @@ class _MainPageState extends State<MainPage> {
 
   /// 标准模式布局 - 传统底部导航栏
   Widget _buildStandardLayout(AppProvider appProvider) {
-    final pages = [
-      BookshelfPage(onSwipeToNext: _navigateToDiscovery),
-      const DiscoveryPage(),
-      const MiniprogramPage(),
-      const ProfilePage(),
-    ];
-
     final navBarColor = appProvider.currentNavBarColor;
     final opacity = appProvider.navBarOpacity / 100.0;
     final borderColor = appProvider.navBarBorderColor != null
         ? Color(
             appProvider.navBarBorderColor!,
-          ).withOpacity(appProvider.navBarBorderAlpha / 100.0)
+          ).withValues(alpha:appProvider.navBarBorderAlpha / 100.0)
         : null;
 
     return Scaffold(
@@ -419,11 +421,11 @@ class _MainPageState extends State<MainPage> {
             _currentIndex = index;
           });
         },
-        children: pages,
+        children: _pages,
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
-          color: navBarColor.withOpacity(opacity),
+          color: navBarColor.withValues(alpha:opacity),
           border: borderColor != null
               ? Border(top: BorderSide(color: borderColor, width: 1))
               : null,
@@ -469,11 +471,13 @@ class _MainPageState extends State<MainPage> {
       message: label,
       child: GestureDetector(
         onTap: () {
-          _pageController.animateToPage(
-            index,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeInOut,
-          );
+          if (_pageController.hasClients) {
+            _pageController.animateToPage(
+              index,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            );
+          }
         },
         behavior: HitTestBehavior.opaque,
         child: Container(
@@ -528,13 +532,6 @@ class _MainPageState extends State<MainPage> {
 
   /// 侧边栏模式布局
   Widget _buildSidebarLayout(String sidebarGravity) {
-    final pages = [
-      BookshelfPage(onSwipeToNext: _navigateToDiscovery),
-      const DiscoveryPage(),
-      const MiniprogramPage(),
-      const ProfilePage(),
-    ];
-
     return Scaffold(
       body: Stack(
         children: [
@@ -546,14 +543,14 @@ class _MainPageState extends State<MainPage> {
                 _currentIndex = index;
               });
             },
-            children: pages,
+            children: _pages,
           ),
           // 侧边栏遮罩
           if (_sidebarOpen)
             GestureDetector(
               onTap: _closeSidebar,
               child: Container(
-                color: Colors.black.withOpacity(0.5),
+                color: Colors.black.withValues(alpha:0.5),
                 width: double.infinity,
                 height: double.infinity,
               ),
@@ -583,7 +580,7 @@ class _MainPageState extends State<MainPage> {
         color: colorScheme.surface,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.2),
+            color: Colors.black.withValues(alpha:0.2),
             blurRadius: 20,
             spreadRadius: 5,
           ),
@@ -596,7 +593,7 @@ class _MainPageState extends State<MainPage> {
             Container(
               padding: const EdgeInsets.all(DesignTokens.spacingXl),
               decoration: BoxDecoration(
-                color: colorScheme.primaryContainer.withOpacity(0.3),
+                color: colorScheme.primaryContainer.withValues(alpha:0.3),
               ),
               child: Row(
                 children: [
@@ -656,8 +653,8 @@ class _MainPageState extends State<MainPage> {
                 ),
                 decoration: BoxDecoration(
                   color: isDark
-                      ? Colors.white.withOpacity(0.1)
-                      : Colors.black.withOpacity(0.05),
+                      ? Colors.white.withValues(alpha:0.1)
+                      : Colors.black.withValues(alpha:0.05),
                   borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
                 ),
                 child: Row(
@@ -705,22 +702,26 @@ class _MainPageState extends State<MainPage> {
           ),
         ),
         selected: isSelected,
-        selectedTileColor: colorScheme.secondary.withOpacity(0.12),
+        selectedTileColor: colorScheme.secondary.withValues(alpha:0.12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DesignTokens.panelRadius)),
         onTap: () {
           if (index < 4) {
-            _pageController.animateToPage(
-              index,
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeInOut,
-            );
+            if (_pageController.hasClients) {
+              _pageController.animateToPage(
+                index,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+              );
+            }
             _closeSidebar();
           } else if (index == 4) {
-            _pageController.animateToPage(
-              3,
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeInOut,
-            );
+            if (_pageController.hasClients) {
+              _pageController.animateToPage(
+                3,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+              );
+            }
             _closeSidebar();
           } else if (index == 5) {
             _closeSidebar();
