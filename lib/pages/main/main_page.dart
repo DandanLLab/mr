@@ -12,6 +12,7 @@ import '../../providers/bookshelf_provider.dart';
 import '../../providers/discovery_provider.dart';
 import '../../providers/app_provider.dart';
 import '../../utils/design_tokens.dart';
+import '../../routes/app_routes.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -188,6 +189,37 @@ class _MainPageState extends State<MainPage> {
             bottom: 0,
             child: _buildFloatingNavBar(appProvider),
           ),
+          // 浮动搜索按钮 (legado: main_search_button_size=48dp, icon_size=22dp, elevation=14dp)
+          Positioned(
+            right: DesignTokens.spacingXl,
+            bottom: contentBottomInset + DesignTokens.bottomBarGap,
+            child: GestureDetector(
+              onTap: () {
+                Navigator.pushNamed(context, AppRoutes.search);
+              },
+              child: Material(
+                color: Colors.transparent,
+                elevation: 14,
+                shape: const CircleBorder(),
+                clipBehavior: Clip.antiAlias,
+                child: Container(
+                  width: DesignTokens.searchButtonSize,
+                  height: DesignTokens.searchButtonSize,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primary,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.search,
+                    size: 22.0,
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.black
+                        : Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -333,12 +365,28 @@ class _MainPageState extends State<MainPage> {
           child: Container(
             height: DesignTokens.bottomBarHeight,
             alignment: Alignment.center,
-            child: Icon(
-              isSelected ? activeIcon : icon,
-              size: iconSize,
-              color: isSelected
-                  ? colorScheme.secondary
-                  : _navBarContentColor(navBarColor),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 320),
+              curve: Curves.easeOutBack,
+              width: isSelected ? DesignTokens.bottomIndicatorWidth : 0,
+              height: isSelected ? DesignTokens.bottomIndicatorHeight : 0,
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? colorScheme.primary.withValues(alpha: 0.15)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(
+                  DesignTokens.bottomIndicatorCornerRadius,
+                ),
+              ),
+              child: Center(
+                child: Icon(
+                  isSelected ? activeIcon : icon,
+                  size: iconSize,
+                  color: isSelected
+                      ? colorScheme.secondary
+                      : _navBarContentColor(navBarColor),
+                ),
+              ),
             ),
           ),
         ),
@@ -433,14 +481,30 @@ class _MainPageState extends State<MainPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                isSelected ? activeIcon : icon,
-                size: 24,
-                color: isSelected
-                    ? colorScheme.secondary
-                    : _navBarContentColor(
-                        context.read<AppProvider>().currentNavBarColor,
-                      ),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 320),
+                curve: Curves.easeOutBack,
+                width: isSelected ? DesignTokens.bottomIndicatorWidth : 0,
+                height: isSelected ? DesignTokens.bottomIndicatorHeight : 0,
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? colorScheme.primary.withValues(alpha: 0.15)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(
+                    DesignTokens.bottomIndicatorCornerRadius,
+                  ),
+                ),
+                child: Center(
+                  child: Icon(
+                    isSelected ? activeIcon : icon,
+                    size: 24,
+                    color: isSelected
+                        ? colorScheme.secondary
+                        : _navBarContentColor(
+                            context.read<AppProvider>().currentNavBarColor,
+                          ),
+                  ),
+                ),
               ),
               const SizedBox(height: DesignTokens.spacingXs),
               Text(

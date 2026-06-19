@@ -59,6 +59,8 @@ class _BookshelfPageState extends State<BookshelfPage>
   @override
   bool get wantKeepAlive => true;
   late PageController _pageController;
+  late ScrollController _tagScrollController;
+  final Map<int, GlobalKey> _tagKeys = {};
 
   // 书架配置
   BookshelfLayout _layout = BookshelfLayout.list; // 默认列表模式
@@ -76,12 +78,19 @@ class _BookshelfPageState extends State<BookshelfPage>
   @override
   void initState() {
     super.initState();
+    _tagScrollController = ScrollController();
     // 使用 provider 中保存的分组索引
     final provider = context.read<BookshelfProvider>();
     _pageController = PageController(initialPage: provider.selectedGroupIndex);
     _loadBookshelfConfig();
     // 加载自定义分组
     provider.loadCustomGroups();
+    // 初始滚动使选中标签居中
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _scrollToCenterTag(provider.selectedGroupIndex);
+      }
+    });
   }
 
   Future<void> _loadBookshelfConfig() async {
@@ -108,19 +117,30 @@ class _BookshelfPageState extends State<BookshelfPage>
   @override
   void dispose() {
     _pageController.dispose();
+    _tagScrollController.dispose();
     super.dispose();
+  }
+
+  /// 滚动标签栏使选中项居中
+  void _scrollToCenterTag(int index) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final key = _tagKeys[index];
+      final ctx = key?.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.5,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    // 参考 legado-main: 根据实际 primary 颜色明暗决定标题文字颜色
-    final primaryColor = Theme.of(context).colorScheme.primary;
-    final appBarForeground =
-        ThemeData.estimateBrightnessForColor(primaryColor) == Brightness.dark
-        ? Colors.white
-        : Colors.black;
     return Scaffold(
       body: Consumer<BookshelfProvider>(
         builder: (context, provider, child) {
@@ -131,278 +151,372 @@ class _BookshelfPageState extends State<BookshelfPage>
           // 分组标签和搜索在同一排，左右滑动切换分组
           return Column(
             children: [
-              // 顶部栏：分组标签 + 搜索按钮 + 更多菜单（同一排）
+              // 顶部区域：状态栏间距 + RoundedTagBarView 标签栏 + 操作按钮
               Container(
                 padding: EdgeInsets.only(
                   top: MediaQuery.of(context).padding.top,
                 ),
-                color: Theme.of(context).colorScheme.primary,
-                child: SizedBox(
-                  height: DesignTokens.topBarHeight,
-                  child: Row(
-                    children: [
-                      // 分组标签（横向滚动）
-                      Expanded(
-                        child: ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingSm),
-                          itemCount: groups.length,
-                          itemBuilder: (context, index) {
-                            final isSelected =
-                                index == provider.selectedGroupIndex;
-                            return GestureDetector(
-                              onTap: () {
-                                provider.setSelectedGroupIndex(index);
-                                provider.setGroup(groups[index]);
-                                _pageController.animateToPage(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(height: DesignTokens.spacingSm),
+                    Row(
+                      children: [
+                        // 分组标签栏（RoundedTagBarView 风格）
+                        Expanded(
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(
+                              horizontal: DesignTokens.spacingLg,
+                            ),
+                            height: DesignTokens.tagBarHeight,
+                            decoration: BoxDecoration(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(
+                                DesignTokens.panelRadius,
+                              ),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 3.0,
+                              vertical: 1.0,
+                            ),
+                            child: ListView.builder(
+                              controller: _tagScrollController,
+                              scrollDirection: Axis.horizontal,
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 4.0,
+                              ),
+                              itemCount: groups.length,
+                              itemBuilder: (context, index) {
+                                final isSelected =
+                                    index == provider.selectedGroupIndex;
+                                final key = _tagKeys.putIfAbsent(
                                   index,
-                                  duration: const Duration(milliseconds: 300),
-                                  curve: Curves.easeInOut,
+                                  () => GlobalKey(),
+                                );
+                                return GestureDetector(
+                                  onTap: () {
+                                    provider.setSelectedGroupIndex(index);
+                                    provider.setGroup(groups[index]);
+                                    _pageController.animateToPage(
+                                      index,
+                                      duration: const Duration(
+                                        milliseconds: 300,
+                                      ),
+                                      curve: Curves.easeInOut,
+                                    );
+                                    _scrollToCenterTag(index);
+                                  },
+                                  child: Container(
+                                    key: key,
+                                    height: DesignTokens.tagHeight,
+                                    margin: const EdgeInsets.symmetric(
+                                      horizontal: 2.0,
+                                    ),
+                                    constraints: const BoxConstraints(
+                                      minWidth: DesignTokens.tagItemMinWidth,
+                                      maxWidth: DesignTokens.tagItemMaxWidth,
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal:
+                                          DesignTokens.tagItemPaddingHorizontal,
+                                    ),
+                                    alignment: Alignment.center,
+                                    decoration: BoxDecoration(
+                                      color: isSelected
+                                          ? Theme.of(
+                                              context,
+                                            ).colorScheme.surface
+                                          : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(
+                                        DesignTokens.actionRadius,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      groups[index],
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: DesignTokens.fontBody,
+                                        fontWeight: isSelected
+                                            ? FontWeight.w500
+                                            : FontWeight.normal,
+                                        color: isSelected
+                                            ? Theme.of(
+                                                context,
+                                              ).colorScheme.secondary
+                                            : Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurface
+                                                  .withValues(alpha: 0.7),
+                                      ),
+                                    ),
+                                  ),
                                 );
                               },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: DesignTokens.spacingLg,
-                                ),
-                                alignment: Alignment.center,
-                                child: Text(
-                                  groups[index],
-                                  style: TextStyle(
-                                    fontSize: DesignTokens.fontBody,
-                                    fontWeight: isSelected
-                                        ? FontWeight.w500
-                                        : FontWeight.normal,
-                                    color: isSelected
-                                        ? appBarForeground
-                                        : appBarForeground.withValues(
-                                            alpha: 0.7,
-                                          ),
-                                  ),
-                                ),
-                              ),
-                            );
+                            ),
+                          ),
+                        ),
+                        // 搜索按钮
+                        IconButton(
+                          icon: Icon(
+                            Icons.search,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                          tooltip: '搜索',
+                          onPressed: () {
+                            Navigator.pushNamed(context, AppRoutes.search);
                           },
                         ),
-                      ),
-                      // 搜索按钮
-                      IconButton(
-                        icon: Icon(Icons.search, color: appBarForeground),
-                        tooltip: '搜索',
-                        onPressed: () {
-                          Navigator.pushNamed(context, AppRoutes.search);
-                        },
-                      ),
-                      // 更多菜单
-                      PopupMenuButton<String>(
-                        icon: Icon(Icons.more_vert, color: appBarForeground),
-                        tooltip: '更多选项',
-                        color: Theme.of(context).colorScheme.surface,
-                        elevation: 8,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
+                        // 更多菜单
+                        PopupMenuButton<String>(
+                          icon: Icon(
+                            Icons.more_vert,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                          tooltip: '更多选项',
+                          color: Theme.of(context).colorScheme.surface,
+                          elevation: 8,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(
+                              DesignTokens.panelRadius,
+                            ),
+                          ),
+                          offset: const Offset(0, DesignTokens.topBarHeight),
+                          onSelected: (value) => _handleMenuSelection(value),
+                          itemBuilder: (context) {
+                            final onSurface = Theme.of(
+                              context,
+                            ).colorScheme.onSurface;
+                            return [
+                              PopupMenuItem(
+                                value: 'refresh',
+                                height: DesignTokens.topBarHeight,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.refresh,
+                                      size: DesignTokens.listItemIconSize,
+                                      color: onSurface,
+                                    ),
+                                    const SizedBox(
+                                      width: DesignTokens.spacingLg,
+                                    ),
+                                    Text(
+                                      '更新目录',
+                                      style: TextStyle(color: onSurface),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'import_local',
+                                height: DesignTokens.topBarHeight,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.add,
+                                      size: DesignTokens.listItemIconSize,
+                                      color: onSurface,
+                                    ),
+                                    const SizedBox(
+                                      width: DesignTokens.spacingLg,
+                                    ),
+                                    Text(
+                                      '添加本地',
+                                      style: TextStyle(color: onSurface),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'import_remote',
+                                height: DesignTokens.topBarHeight,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.add,
+                                      size: DesignTokens.listItemIconSize,
+                                      color: onSurface,
+                                    ),
+                                    const SizedBox(
+                                      width: DesignTokens.spacingLg,
+                                    ),
+                                    Text(
+                                      '远程书籍',
+                                      style: TextStyle(color: onSurface),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'import_url',
+                                height: DesignTokens.topBarHeight,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.language,
+                                      size: DesignTokens.listItemIconSize,
+                                      color: onSurface,
+                                    ),
+                                    const SizedBox(
+                                      width: DesignTokens.spacingLg,
+                                    ),
+                                    Text(
+                                      '添加网址',
+                                      style: TextStyle(color: onSurface),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'bookshelf_manage',
+                                height: DesignTokens.topBarHeight,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.reorder,
+                                      size: DesignTokens.listItemIconSize,
+                                      color: onSurface,
+                                    ),
+                                    const SizedBox(
+                                      width: DesignTokens.spacingLg,
+                                    ),
+                                    Text(
+                                      '书架管理',
+                                      style: TextStyle(color: onSurface),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'download',
+                                height: DesignTokens.topBarHeight,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.download_outlined,
+                                      size: DesignTokens.listItemIconSize,
+                                      color: onSurface,
+                                    ),
+                                    const SizedBox(
+                                      width: DesignTokens.spacingLg,
+                                    ),
+                                    Text(
+                                      '缓存/导出',
+                                      style: TextStyle(color: onSurface),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'group_manage',
+                                height: DesignTokens.topBarHeight,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.folder_copy,
+                                      size: DesignTokens.listItemIconSize,
+                                      color: onSurface,
+                                    ),
+                                    const SizedBox(
+                                      width: DesignTokens.spacingLg,
+                                    ),
+                                    Text(
+                                      '分组管理',
+                                      style: TextStyle(color: onSurface),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'layout',
+                                height: DesignTokens.topBarHeight,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.view_quilt,
+                                      size: DesignTokens.listItemIconSize,
+                                      color: onSurface,
+                                    ),
+                                    const SizedBox(
+                                      width: DesignTokens.spacingLg,
+                                    ),
+                                    Text(
+                                      '书架布局',
+                                      style: TextStyle(color: onSurface),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'export_bookshelf',
+                                height: DesignTokens.topBarHeight,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.ios_share,
+                                      size: DesignTokens.listItemIconSize,
+                                      color: onSurface,
+                                    ),
+                                    const SizedBox(
+                                      width: DesignTokens.spacingLg,
+                                    ),
+                                    Text(
+                                      '导出书单',
+                                      style: TextStyle(color: onSurface),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'import_bookshelf',
+                                height: DesignTokens.topBarHeight,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.file_download,
+                                      size: DesignTokens.listItemIconSize,
+                                      color: onSurface,
+                                    ),
+                                    const SizedBox(
+                                      width: DesignTokens.spacingLg,
+                                    ),
+                                    Text(
+                                      '导入书单',
+                                      style: TextStyle(color: onSurface),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'log',
+                                height: DesignTokens.topBarHeight,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.info_outline,
+                                      size: DesignTokens.listItemIconSize,
+                                      color: onSurface,
+                                    ),
+                                    const SizedBox(
+                                      width: DesignTokens.spacingLg,
+                                    ),
+                                    Text(
+                                      '日志',
+                                      style: TextStyle(color: onSurface),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ];
+                          },
                         ),
-                        offset: const Offset(0, DesignTokens.topBarHeight),
-                        onSelected: (value) => _handleMenuSelection(value),
-                        itemBuilder: (context) {
-                          final onSurface = Theme.of(
-                            context,
-                          ).colorScheme.onSurface;
-                          return [
-                            PopupMenuItem(
-                              value: 'refresh',
-                              height: DesignTokens.topBarHeight,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.refresh,
-                                    size: DesignTokens.listItemIconSize,
-                                    color: onSurface,
-                                  ),
-                                  const SizedBox(width: DesignTokens.spacingLg),
-                                  Text(
-                                    '更新目录',
-                                    style: TextStyle(color: onSurface),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'import_local',
-                              height: DesignTokens.topBarHeight,
-                              child: Row(
-                                children: [
-                                  Icon(Icons.add, size: DesignTokens.listItemIconSize, color: onSurface),
-                                  const SizedBox(width: DesignTokens.spacingLg),
-                                  Text(
-                                    '添加本地',
-                                    style: TextStyle(color: onSurface),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'import_remote',
-                              height: DesignTokens.topBarHeight,
-                              child: Row(
-                                children: [
-                                  Icon(Icons.add, size: DesignTokens.listItemIconSize, color: onSurface),
-                                  const SizedBox(width: DesignTokens.spacingLg),
-                                  Text(
-                                    '远程书籍',
-                                    style: TextStyle(color: onSurface),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'import_url',
-                              height: DesignTokens.topBarHeight,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.language,
-                                    size: DesignTokens.listItemIconSize,
-                                    color: onSurface,
-                                  ),
-                                  const SizedBox(width: DesignTokens.spacingLg),
-                                  Text(
-                                    '添加网址',
-                                    style: TextStyle(color: onSurface),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'bookshelf_manage',
-                              height: DesignTokens.topBarHeight,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.reorder,
-                                    size: DesignTokens.listItemIconSize,
-                                    color: onSurface,
-                                  ),
-                                  const SizedBox(width: DesignTokens.spacingLg),
-                                  Text(
-                                    '书架管理',
-                                    style: TextStyle(color: onSurface),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'download',
-                              height: DesignTokens.topBarHeight,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.download_outlined,
-                                    size: DesignTokens.listItemIconSize,
-                                    color: onSurface,
-                                  ),
-                                  const SizedBox(width: DesignTokens.spacingLg),
-                                  Text(
-                                    '缓存/导出',
-                                    style: TextStyle(color: onSurface),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'group_manage',
-                              height: DesignTokens.topBarHeight,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.folder_copy,
-                                    size: DesignTokens.listItemIconSize,
-                                    color: onSurface,
-                                  ),
-                                  const SizedBox(width: DesignTokens.spacingLg),
-                                  Text(
-                                    '分组管理',
-                                    style: TextStyle(color: onSurface),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'layout',
-                              height: DesignTokens.topBarHeight,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.view_quilt,
-                                    size: DesignTokens.listItemIconSize,
-                                    color: onSurface,
-                                  ),
-                                  const SizedBox(width: DesignTokens.spacingLg),
-                                  Text(
-                                    '书架布局',
-                                    style: TextStyle(color: onSurface),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'export_bookshelf',
-                              height: DesignTokens.topBarHeight,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.ios_share,
-                                    size: DesignTokens.listItemIconSize,
-                                    color: onSurface,
-                                  ),
-                                  const SizedBox(width: DesignTokens.spacingLg),
-                                  Text(
-                                    '导出书单',
-                                    style: TextStyle(color: onSurface),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'import_bookshelf',
-                              height: DesignTokens.topBarHeight,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.file_download,
-                                    size: DesignTokens.listItemIconSize,
-                                    color: onSurface,
-                                  ),
-                                  const SizedBox(width: DesignTokens.spacingLg),
-                                  Text(
-                                    '导入书单',
-                                    style: TextStyle(color: onSurface),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'log',
-                              height: DesignTokens.topBarHeight,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.info_outline,
-                                    size: DesignTokens.listItemIconSize,
-                                    color: onSurface,
-                                  ),
-                                  const SizedBox(width: DesignTokens.spacingLg),
-                                  Text(
-                                    '日志',
-                                    style: TextStyle(color: onSurface),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ];
-                        },
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
               // 书籍列表（支持左右滑动切换分组）
@@ -1243,7 +1357,9 @@ class _BookshelfPageState extends State<BookshelfPage>
               children: [
                 Expanded(
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
+                    borderRadius: BorderRadius.circular(
+                      DesignTokens.actionRadius,
+                    ),
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
@@ -1421,7 +1537,10 @@ class _BookshelfPageState extends State<BookshelfPage>
       onTap: () => _openBook(book),
       onLongPress: () => _showBookOptions(book, provider),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingSm, vertical: DesignTokens.spacingSm),
+        padding: const EdgeInsets.symmetric(
+          horizontal: DesignTokens.spacingSm,
+          vertical: DesignTokens.spacingSm,
+        ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1468,14 +1587,18 @@ class _BookshelfPageState extends State<BookshelfPage>
                         // 未读数徽章
                         if (_showUnread && book.unreadCount > 0)
                           Container(
-                            margin: const EdgeInsets.only(left: DesignTokens.spacingSm),
+                            margin: const EdgeInsets.only(
+                              left: DesignTokens.spacingSm,
+                            ),
                             padding: const EdgeInsets.symmetric(
                               horizontal: 5,
                               vertical: 1,
                             ),
                             decoration: BoxDecoration(
                               color: Theme.of(context).colorScheme.secondary,
-                              borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
+                              borderRadius: BorderRadius.circular(
+                                DesignTokens.panelRadius,
+                              ),
                             ),
                             child: Text(
                               '${book.unreadCount}',
@@ -1521,7 +1644,9 @@ class _BookshelfPageState extends State<BookshelfPage>
                                   if (book.durChapterTitle.isNotEmpty) ...[
                                     const TextSpan(
                                       text: ' · ',
-                                      style: TextStyle(fontSize: DesignTokens.fontSummary),
+                                      style: TextStyle(
+                                        fontSize: DesignTokens.fontSummary,
+                                      ),
                                     ),
                                     TextSpan(text: book.durChapterTitle),
                                   ],
@@ -1719,7 +1844,9 @@ class _BookshelfPageState extends State<BookshelfPage>
                             color: Theme.of(
                               context,
                             ).colorScheme.primary.withValues(alpha: 0.3),
-                            borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
+                            borderRadius: BorderRadius.circular(
+                              DesignTokens.panelRadius,
+                            ),
                           ),
                           child: Center(
                             child: Icon(
@@ -2066,7 +2193,10 @@ class _BookshelfPageState extends State<BookshelfPage>
               ),
               // 底部按钮
               Padding(
-                padding: const EdgeInsets.only(right: DesignTokens.spacingLg, bottom: DesignTokens.spacingSm),
+                padding: const EdgeInsets.only(
+                  right: DesignTokens.spacingLg,
+                  bottom: DesignTokens.spacingSm,
+                ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [

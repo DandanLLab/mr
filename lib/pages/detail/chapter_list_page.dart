@@ -14,6 +14,7 @@ import '../../services/storage_service.dart';
 import '../../services/chapter_cache_service.dart';
 import '../../services/reader_bookmark_service.dart';
 import '../../routes/app_routes.dart';
+import '../../utils/design_tokens.dart';
 
 class ChapterListPage extends StatefulWidget {
   final String bookUrl;
@@ -201,7 +202,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
       return;
     }
 
-    final estimatedOffset = targetIndex * 49.0;
+    final estimatedOffset = targetIndex * DesignTokens.listItemMinHeight * 0.8;
     _scrollController.animateTo(
       estimatedOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
       duration: const Duration(milliseconds: 300),
@@ -274,17 +275,17 @@ class _ChapterListPageState extends State<ChapterListPage> {
                         hintText: '搜索...',
                         isDense: true,
                         contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
+                          horizontal: DesignTokens.spacingMd,
                           vertical: 10,
                         ),
                         border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                           borderSide: BorderSide(
                             color: fg.withValues(alpha: 0.3),
                           ),
                         ),
                         enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                           borderSide: BorderSide(
                             color: fg.withValues(alpha: 0.3),
                           ),
@@ -317,7 +318,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.search, size: 22),
+                      icon: const Icon(Icons.search, size: DesignTokens.bottomNavIconSize),
                       tooltip: '搜索',
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(
@@ -327,7 +328,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                       onPressed: () => setState(() => _showSearch = true),
                     ),
                     PopupMenuButton<String>(
-                      icon: const Icon(Icons.more_vert, size: 22),
+                      icon: const Icon(Icons.more_vert, size: DesignTokens.bottomNavIconSize),
                       tooltip: '更多',
                       offset: const Offset(0, 48),
                       padding: EdgeInsets.zero,
@@ -351,7 +352,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                               const PopupMenuItem(
                                 value: 'regex_config',
                                 padding: EdgeInsets.symmetric(
-                                  horizontal: 16,
+                                  horizontal: DesignTokens.spacingLg,
                                   vertical: 12,
                                 ),
                                 child: Text('正则配置'),
@@ -361,7 +362,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                               const PopupMenuItem(
                                 value: 'export',
                                 padding: EdgeInsets.symmetric(
-                                  horizontal: 16,
+                                  horizontal: DesignTokens.spacingLg,
                                   vertical: 12,
                                 ),
                                 child: Text('导出'),
@@ -369,7 +370,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                               const PopupMenuItem(
                                 value: 'export_md',
                                 padding: EdgeInsets.symmetric(
-                                  horizontal: 16,
+                                  horizontal: DesignTokens.spacingLg,
                                   vertical: 12,
                                 ),
                                 child: Text('导出(MD)'),
@@ -412,7 +413,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
   ) {
     return PopupMenuItem(
       value: value,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 12),
       child: Row(
         children: [
           Expanded(child: Text(label)),
@@ -426,7 +427,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                     : fg.withValues(alpha: 0.5),
                 width: 1.5,
               ),
-              borderRadius: BorderRadius.circular(3),
+              borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
               color: checked
                   ? Theme.of(context).colorScheme.primary
                   : Colors.transparent,
@@ -585,14 +586,14 @@ class _ChapterListPageState extends State<ChapterListPage> {
           child: SafeArea(
             top: false,
             child: SizedBox(
-              height: 36,
+              height: DesignTokens.bottomBarHeight,
               child: Row(
                 children: [
                   Expanded(
                     child: InkWell(
                       onTap: _scrollToCurrentChapter,
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingXl),
                         child: Align(
                           alignment: Alignment.centerLeft,
                           child: Text(
@@ -601,7 +602,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: scheme.onSurface,
-                              fontSize: 12,
+                              fontSize: DesignTokens.fontCaption,
                             ),
                           ),
                         ),
@@ -656,7 +657,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
             style: TextStyle(
               color: selected ? fg : fg.withValues(alpha: 0.5),
               fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-              fontSize: 20,
+              fontSize: DesignTokens.fontLargeTitle,
             ),
           ),
           const SizedBox(height: 4),
@@ -667,7 +668,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
               color: selected
                   ? Theme.of(context).colorScheme.primary
                   : Colors.transparent,
-              borderRadius: BorderRadius.circular(2),
+              borderRadius: BorderRadius.circular(2.0),
             ),
           ),
         ],
@@ -821,7 +822,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
             onTap: () => _doOpenChapterAtIndex(bookmark.chapterIndex),
             onLongPress: () => _deleteBookmark(bookmark),
             child: Padding(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(DesignTokens.spacingSm),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -843,7 +844,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: fg.withValues(alpha: 0.68),
-                          fontSize: 12,
+                          fontSize: DesignTokens.fontCaption,
                         ),
                       ),
                     ),
@@ -856,7 +857,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: fg.withValues(alpha: 0.68),
-                          fontSize: 12,
+                          fontSize: DesignTokens.fontCaption,
                         ),
                       ),
                     ),
@@ -961,7 +962,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
           );
         },
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(DesignTokens.spacingMd),
           child: Row(
             children: [
               if (chapter.isVolume)
@@ -970,7 +971,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                   child: AnimatedRotation(
                     duration: const Duration(milliseconds: 180),
                     turns: isExpanded ? 0.25 : 0,
-                    child: Icon(Icons.arrow_right, size: 20, color: titleColor),
+                    child: Icon(Icons.arrow_right, size: DesignTokens.listItemIconSize, color: titleColor),
                   ),
                 ),
               if (chapter.isVip && !chapter.isPay)
@@ -978,7 +979,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                   padding: const EdgeInsets.only(right: 8),
                   child: Icon(
                     Icons.lock_outline,
-                    size: 16,
+                    size: DesignTokens.listItemIconSize * 0.67,
                     color: scheme.onSurfaceVariant,
                   ),
                 ),
@@ -988,7 +989,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                   children: [
                     Text(
                       chapter.title,
-                      style: TextStyle(color: titleColor, fontSize: 14),
+                      style: TextStyle(color: titleColor, fontSize: DesignTokens.fontBody),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1007,7 +1008,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
                                       color: scheme.onSurfaceVariant,
-                                      fontSize: 12,
+                                      fontSize: DesignTokens.fontCaption,
                                     ),
                                   ),
                                 ),
@@ -1017,7 +1018,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                                 '${chapter.wordCount}字',
                                 style: TextStyle(
                                   color: scheme.onSurfaceVariant,
-                                  fontSize: 12,
+                                  fontSize: DesignTokens.fontCaption,
                                 ),
                               ),
                           ],
@@ -1026,16 +1027,16 @@ class _ChapterListPageState extends State<ChapterListPage> {
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: DesignTokens.spacingSm),
               SizedBox(
                 width: 24,
                 height: 24,
                 child: isCurrent
-                    ? Icon(Icons.check, size: 18, color: scheme.primary)
+                    ? Icon(Icons.check, size: DesignTokens.listItemIconSize, color: scheme.primary)
                     : !isCached
                     ? Icon(
                         Icons.cloud_outlined,
-                        size: 18,
+                        size: DesignTokens.listItemIconSize,
                         color: scheme.onSurfaceVariant,
                       )
                     : null,
@@ -1113,13 +1114,13 @@ class _RegexConfigSheetState extends State<_RegexConfigSheet> {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2),
+                  color: Theme.of(context).colorScheme.outline,
+                  borderRadius: BorderRadius.circular(2.0),
                 ),
               ),
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 8),
               child: Row(
                 children: [
                   Text('目录正则配置', style: Theme.of(context).textTheme.titleLarge),
@@ -1163,8 +1164,8 @@ class _RegexConfigSheetState extends State<_RegexConfigSheet> {
         title,
         style: TextStyle(
           fontWeight: FontWeight.bold,
-          fontSize: 14,
-          color: Colors.grey[700],
+          fontSize: DesignTokens.fontBody,
+          color: Theme.of(context).colorScheme.onSurface,
         ),
       ),
     );
@@ -1177,15 +1178,15 @@ class _RegexConfigSheetState extends State<_RegexConfigSheet> {
       subtitle: Text(
         rule.rule,
         style: TextStyle(
-          fontSize: 12,
-          color: Colors.grey[600],
+          fontSize: DesignTokens.fontCaption,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
           fontFamily: 'monospace',
         ),
       ),
       trailing: isPreset
           ? null
           : IconButton(
-              icon: const Icon(Icons.delete_outline, size: 20),
+              icon: const Icon(Icons.delete_outline, size: DesignTokens.listItemIconSize),
               onPressed: () async {
                 _customRules.remove(rule);
                 await TxtParser.saveCustomRules(_customRules);
@@ -1197,7 +1198,7 @@ class _RegexConfigSheetState extends State<_RegexConfigSheet> {
 
   Widget _buildAddRuleForm() {
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(DesignTokens.spacingLg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1205,11 +1206,11 @@ class _RegexConfigSheetState extends State<_RegexConfigSheet> {
             '添加自定义规则',
             style: TextStyle(
               fontWeight: FontWeight.bold,
-              fontSize: 14,
-              color: Colors.grey[700],
+              fontSize: DesignTokens.fontBody,
+              color: Theme.of(context).colorScheme.onSurface,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: DesignTokens.spacingSm),
           TextField(
             decoration: const InputDecoration(
               labelText: '规则名称',
@@ -1218,7 +1219,7 @@ class _RegexConfigSheetState extends State<_RegexConfigSheet> {
             ),
             onChanged: (v) => _newRuleName = v,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: DesignTokens.spacingSm),
           TextField(
             decoration: InputDecoration(
               labelText: '正则表达式',
@@ -1236,14 +1237,14 @@ class _RegexConfigSheetState extends State<_RegexConfigSheet> {
               }
             },
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: DesignTokens.spacingSm),
           Row(
             children: [
               ElevatedButton(
                 onPressed: _addCustomRule,
                 child: const Text('添加'),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: DesignTokens.spacingSm),
               if (_newRulePattern.isNotEmpty)
                 TextButton(
                   onPressed: () {

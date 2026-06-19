@@ -58,7 +58,7 @@ class _SearchPageState extends State<SearchPage> {
     final appProvider = context.watch<AppProvider>();
     final searchRadius = appProvider.currentSearchFollow
         ? 10 * appProvider.currentCornerScale
-        : 16.0;
+        : DesignTokens.searchRadius;
     return Scaffold(
       body: Consumer<SearchProvider>(
         builder: (context, provider, child) {
@@ -82,7 +82,7 @@ class _SearchPageState extends State<SearchPage> {
                             icon: const Icon(Icons.arrow_back),
                             onPressed: () => Navigator.pop(context),
                           ),
-                          // 搜索框（参考原版：高度30dp）
+                          // 搜索框（参考原版：高度32dp）
                           Expanded(
                             child: SizedBox(
                               height: 32,
@@ -94,13 +94,13 @@ class _SearchPageState extends State<SearchPage> {
                                   hintStyle: const TextStyle(fontSize: 13),
                                   prefixIcon: const Icon(
                                     Icons.search,
-                                    size: 16,
+                                    size: DesignTokens.listItemIconSize * 0.67,
                                   ),
                                   suffixIcon: _searchController.text.isNotEmpty
                                       ? IconButton(
                                           icon: const Icon(
                                             Icons.clear,
-                                            size: 16,
+                                            size: DesignTokens.listItemIconSize * 0.67,
                                           ),
                                           padding: EdgeInsets.zero,
                                           constraints: const BoxConstraints(),
@@ -244,7 +244,7 @@ class _SearchPageState extends State<SearchPage> {
                   child: Text(
                     '结果 ${provider.searchResults.length}',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: DesignTokens.fontSummary,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
@@ -305,7 +305,7 @@ class _SearchPageState extends State<SearchPage> {
         children: [
           Icon(
             Icons.error_outline,
-            size: 64,
+            size: DesignTokens.emptyIconSize,
             color: Theme.of(context).colorScheme.error,
           ),
           const SizedBox(height: DesignTokens.spacingLg),
@@ -429,8 +429,8 @@ class _SearchPageState extends State<SearchPage> {
               ClipRRect(
                 borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                 child: SizedBox(
-                  width: 80,
-                  height: 110,
+                  width: DesignTokens.emptyIconSize,
+                  height: 110.0,
                   child: _buildSearchCoverImage(
                     coverUrl,
                     bookName: result['name']?.toString(),
@@ -488,7 +488,7 @@ class _SearchPageState extends State<SearchPage> {
                             child: Text(
                               tag,
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: DesignTokens.fontCaption,
                                 color: Theme.of(context).colorScheme.primary,
                               ),
                             ),
@@ -526,7 +526,7 @@ class _SearchPageState extends State<SearchPage> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 10,
+                          fontSize: DesignTokens.fontCaption,
                           color: Theme.of(context).colorScheme.outline,
                         ),
                       ),
@@ -585,7 +585,7 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.all(6),
+              padding: const EdgeInsets.all(DesignTokens.spacingXs + 2),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -606,7 +606,7 @@ class _SearchPageState extends State<SearchPage> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 10,
+                      fontSize: DesignTokens.fontCaption,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
@@ -617,7 +617,7 @@ class _SearchPageState extends State<SearchPage> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 10,
+                      fontSize: DesignTokens.fontCaption,
                       color: Theme.of(context).colorScheme.primary,
                     ),
                   ),
@@ -629,7 +629,7 @@ class _SearchPageState extends State<SearchPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 9,
+                        fontSize: DesignTokens.fontCaption,
                         color: Theme.of(context).colorScheme.outline,
                       ),
                     ),
@@ -985,6 +985,6 @@ class _SearchPageState extends State<SearchPage> {
         icon = Icons.folder;
         break;
     }
-    return Icon(icon, size: 20);
+    return Icon(icon, size: DesignTokens.listItemIconSize);
   }
 }

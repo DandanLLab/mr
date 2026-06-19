@@ -22,6 +22,7 @@ import '../../widgets/reader/reader_settings_sheet.dart';
 import '../../widgets/reader/reader_tts_bar.dart';
 import '../../widgets/change_source_sheet.dart';
 import '../../routes/app_routes.dart';
+import '../../utils/design_tokens.dart';
 
 class NovelReaderPage extends StatefulWidget {
   final String bookUrl;
@@ -1184,7 +1185,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         return TextSpan(
           text: text,
           style: TextStyle(
-            backgroundColor: highlightColor.withOpacity(0.4),
+            backgroundColor: highlightColor.withValues(alpha: 0.4),
             color: provider.textColor,
           ),
         );
@@ -1457,12 +1458,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       left: max(16, _highlightMenuPosition.dx - 100),
       child: Material(
         elevation: 8,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingSm, vertical: 4),
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surface,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -1491,12 +1492,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingSm, vertical: 4),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon, size: 20),
-            Text(label, style: const TextStyle(fontSize: 10)),
+            Text(label, style: const TextStyle(fontSize: DesignTokens.fontCaption)),
           ],
         ),
       ),
@@ -1514,12 +1515,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             mainAxisSize: MainAxisSize.min,
             children: [
               const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('选择高亮样式', style: TextStyle(fontSize: 16)),
+                padding: EdgeInsets.all(DesignTokens.spacingLg),
+                child: Text('选择高亮样式', style: TextStyle(fontSize: DesignTokens.fontSubtitle)),
               ),
               // Color row
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: colors.map((c) {
@@ -1541,7 +1542,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   }).toList(),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: DesignTokens.spacingLg),
             ],
           ),
         );
@@ -1561,8 +1562,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             mainAxisSize: MainAxisSize.min,
             children: [
               const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('选择高亮类型', style: TextStyle(fontSize: 16)),
+                padding: EdgeInsets.all(DesignTokens.spacingLg),
+                child: Text('选择高亮类型', style: TextStyle(fontSize: DesignTokens.fontSubtitle)),
               ),
               ...List.generate(styles.length, (i) {
                 return ListTile(
@@ -1570,8 +1571,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                     width: 24,
                     height: 24,
                     decoration: BoxDecoration(
-                      color: color.color.withOpacity(0.4),
-                      borderRadius: BorderRadius.circular(4),
+                      color: color.color.withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                     ),
                   ),
                   title: Text(styleNames[i]),
@@ -1710,7 +1711,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                 _chapterTitle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 16),
+                style: const TextStyle(fontSize: DesignTokens.fontSubtitle),
               ),
             ),
             IconButton(
@@ -1746,9 +1747,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           mainAxisSize: MainAxisSize.min,
           children: [
             _buildProgressSlider(),
-            const SizedBox(height: 8),
+            const SizedBox(height: DesignTokens.spacingSm),
             _buildQuickActionsGrid(provider),
-            const SizedBox(height: 8),
+            const SizedBox(height: DesignTokens.spacingSm),
           ],
         ),
       ),
@@ -1760,10 +1761,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final displayChapter = (_sliderValue + 1).round();
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg),
       child: Row(
         children: [
-          Text('$displayChapter', style: const TextStyle(fontSize: 12)),
+          Text('$displayChapter', style: const TextStyle(fontSize: DesignTokens.fontCaption)),
           Expanded(
             child: SliderTheme(
               data: SliderThemeData(
@@ -1787,7 +1788,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               ),
             ),
           ),
-          Text('$_totalChapters', style: const TextStyle(fontSize: 12)),
+          Text('$_totalChapters', style: const TextStyle(fontSize: DesignTokens.fontCaption)),
         ],
       ),
     );
@@ -1888,7 +1889,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             const SizedBox(height: 4),
             Text(
               label,
-              style: const TextStyle(fontSize: 11),
+              style: const TextStyle(fontSize: DesignTokens.fontCaption),
               textAlign: TextAlign.center,
             ),
           ],
@@ -2181,11 +2182,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                       ],
                     ),
                     // Font family
-                    const SizedBox(height: 8),
+                    const SizedBox(height: DesignTokens.spacingSm),
                     Row(
                       children: [
                         const Text('字体'),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: DesignTokens.spacingSm),
                         Expanded(
                           child: DropdownButton<String>(
                             value: provider.fontFamily.isEmpty
@@ -2209,7 +2210,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                     if (_book != null &&
                         LocalBookService.detectBookType(_book!.bookUrl) ==
                             LocalBookType.epub) ...[
-                      const SizedBox(height: 8),
+                      const SizedBox(height: DesignTokens.spacingSm),
                       SwitchListTile(
                         title: const Text('加载EPUB内嵌字体'),
                         value: provider.loadEpubFonts,
@@ -2343,7 +2344,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             mainAxisSize: MainAxisSize.min,
             children: [
               Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(DesignTokens.spacingLg),
                 child: Text(
                   '翻页模式',
                   style: Theme.of(context).textTheme.titleMedium,
@@ -2371,7 +2372,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                                     context,
                                   ).colorScheme.primary.withValues(alpha: 0.2)
                                 : Colors.grey.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
                             border: isSelected
                                 ? Border.all(
                                     color: Theme.of(
@@ -2403,7 +2404,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   );
                 }),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: DesignTokens.spacingLg),
             ],
           ),
         );
@@ -2683,7 +2684,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                 controller: scrollController,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(DesignTokens.spacingLg),
                     child: Text(
                       '更多设置',
                       style: Theme.of(context).textTheme.titleLarge,
@@ -2767,7 +2768,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text('点击区域对应动作：'),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: DesignTokens.spacingSm),
                   ...List.generate(3, (row) {
                     return Row(
                       children: List.generate(3, (col) {
@@ -2785,20 +2786,20 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                             },
                             child: Container(
                               margin: const EdgeInsets.all(2),
-                              padding: const EdgeInsets.all(8),
+                              padding: const EdgeInsets.all(DesignTokens.spacingSm),
                               decoration: BoxDecoration(
                                 border: Border.all(color: Colors.grey),
-                                borderRadius: BorderRadius.circular(4),
+                                borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                                 color: row == 1 && col == 1
                                     ? Theme.of(
                                         context,
-                                      ).colorScheme.primary.withOpacity(0.1)
+                                      ).colorScheme.primary.withValues(alpha: 0.1)
                                     : null,
                               ),
                               child: Text(
                                 actionLabels[action] ?? '无',
                                 textAlign: TextAlign.center,
-                                style: const TextStyle(fontSize: 12),
+                                style: const TextStyle(fontSize: DesignTokens.fontCaption),
                               ),
                             ),
                           ),
@@ -2881,7 +2882,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   child: Column(
                     children: [
                       Padding(
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(DesignTokens.spacingLg),
                         child: Row(
                           children: [
                             Text(
@@ -2911,7 +2912,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                               subtitle: Text(
                                 rule.pattern,
                                 style: const TextStyle(
-                                  fontSize: 11,
+                                  fontSize: DesignTokens.fontCaption,
                                   fontFamily: 'monospace',
                                 ),
                                 maxLines: 1,
@@ -2980,7 +2981,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                         hintText: r'如：「[^」]+」',
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: DesignTokens.spacingLg),
                     // Color picker
                     const Text('高亮颜色'),
                     Wrap(
@@ -3005,7 +3006,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                         );
                       }).toList(),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: DesignTokens.spacingLg),
                     // Style picker
                     const Text('高亮样式'),
                     Wrap(
@@ -3073,7 +3074,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(DesignTokens.spacingLg),
                     child: Row(
                       children: [
                         Text(
@@ -3112,7 +3113,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                         ),
                       );
                     }),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: DesignTokens.spacingLg),
                 ],
               ),
             );
@@ -3197,9 +3198,9 @@ class _PageCurlPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (dragDelta < 1) return;
 
-    final paint = Paint()..color = Colors.white.withOpacity(0.9);
+    final paint = Paint()..color = Colors.white.withValues(alpha: 0.9);
     final shadowPaint = Paint()
-      ..color = Colors.black.withOpacity(0.3)
+      ..color = Colors.black.withValues(alpha: 0.3)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
 
     final curlWidth = dragDelta.clamp(0.0, width);
@@ -3253,12 +3254,12 @@ class _PageCurlPainter extends CustomPainter {
       );
     }
 
-    paint.color = backgroundColor.withOpacity(0.95);
+    paint.color = backgroundColor.withValues(alpha: 0.95);
     canvas.drawPath(curlPath, paint);
 
     // Draw curl line
     final linePaint = Paint()
-      ..color = Colors.grey.withOpacity(0.5)
+      ..color = Colors.grey.withValues(alpha: 0.5)
       ..strokeWidth = 1;
     if (isDragLeft) {
       canvas.drawLine(Offset(touchX, 0), Offset(touchX, height), linePaint);
@@ -3443,7 +3444,7 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
       mainAxisSize: MainAxisSize.min,
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 8),
           child: Row(
             children: [
               _buildTab(0, '目录 (${widget.chapters.length})', fg),
@@ -3476,7 +3477,7 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
                         const PopupMenuItem(
                           value: 'export',
                           padding: EdgeInsets.symmetric(
-                            horizontal: 16,
+                            horizontal: DesignTokens.spacingLg,
                             vertical: 12,
                           ),
                           child: Text('导出'),
@@ -3484,7 +3485,7 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
                         const PopupMenuItem(
                           value: 'export_md',
                           padding: EdgeInsets.symmetric(
-                            horizontal: 16,
+                            horizontal: DesignTokens.spacingLg,
                             vertical: 12,
                           ),
                           child: Text('导出(MD)'),
@@ -3510,7 +3511,7 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
         ),
         if (_showSearch)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg),
             child: TextField(
               controller: _searchController,
               style: TextStyle(color: fg),
@@ -3541,7 +3542,7 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
   ) {
     return PopupMenuItem(
       value: value,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 12),
       child: Row(
         children: [
           Expanded(child: Text(label)),
@@ -3620,7 +3621,7 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
                       chapter.title,
                       style: TextStyle(
                         color: isCurrentVolume ? accent : fg,
-                        fontSize: 14,
+                        fontSize: DesignTokens.fontBody,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -3661,7 +3662,7 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
                         chapter.title,
                         style: TextStyle(
                           color: isSelected ? accent : fg,
-                          fontSize: 14,
+                          fontSize: DesignTokens.fontBody,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -3679,14 +3680,14 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
                             ].join('  '),
                             style: TextStyle(
                               color: fg.withValues(alpha: 0.62),
-                              fontSize: 12,
+                              fontSize: DesignTokens.fontCaption,
                             ),
                           ),
                         ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: DesignTokens.spacingSm),
                 if (isSelected)
                   Icon(Icons.check, size: 18, color: accent)
                 else if (!isCached)
@@ -3734,7 +3735,7 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
           ),
           trailing: Text(
             _formatTime(bookmark.createdAt),
-            style: TextStyle(color: fg.withValues(alpha: 0.5), fontSize: 12),
+            style: TextStyle(color: fg.withValues(alpha: 0.5), fontSize: DesignTokens.fontCaption),
           ),
           onTap: () {
             Navigator.pop(context);

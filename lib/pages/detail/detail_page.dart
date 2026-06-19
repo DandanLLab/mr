@@ -23,6 +23,9 @@ import '../../services/cover_config_service.dart';
 import '../../widgets/book_edit_sheet.dart';
 import '../../utils/design_tokens.dart';
 
+const _coverWidth = 110.0;
+const _coverHeight = 160.0;
+
 class DetailPage extends StatefulWidget {
   final String bookUrl;
   final Book? initialBook;
@@ -295,8 +298,8 @@ class _DetailPageState extends State<DetailPage> {
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                       child: SizedBox(
-                        width: 110,
-                        height: 160,
+                        width: _coverWidth,
+                        height: _coverHeight,
                         child: _buildDetailCover(),
                       ),
                     ),
@@ -523,7 +526,7 @@ class _DetailPageState extends State<DetailPage> {
               style: TextStyle(color: color, fontSize: DesignTokens.fontSummary, height: 1.35),
             ),
           ),
-          if (action != null) ...[const SizedBox(width: 8), action],
+          if (action != null) ...[const SizedBox(width: DesignTokens.spacingSm), action],
         ],
       ),
     );
@@ -585,8 +588,8 @@ class _DetailPageState extends State<DetailPage> {
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                         child: Container(
-                          width: 110,
-                          height: 160,
+                          width: _coverWidth,
+                          height: _coverHeight,
                           color: scheme.surfaceContainerHighest,
                           child: _buildDetailCover(),
                         ),
@@ -602,7 +605,7 @@ class _DetailPageState extends State<DetailPage> {
             decoration: BoxDecoration(
               color: panelColor,
               borderRadius: const BorderRadius.vertical(
-                bottom: Radius.circular(10),
+                bottom: Radius.circular(DesignTokens.panelRadius),
               ),
             ),
             child: Padding(
@@ -623,7 +626,7 @@ class _DetailPageState extends State<DetailPage> {
                     ),
                   ),
                   if (labels.isNotEmpty) ...[
-                    const SizedBox(height: 8),
+                    const SizedBox(height: DesignTokens.spacingSm),
                     Wrap(
                       alignment: WrapAlignment.center,
                       spacing: 6,
@@ -633,7 +636,7 @@ class _DetailPageState extends State<DetailPage> {
                   ],
                   const SizedBox(height: 12),
                   _buildLegacyInfoRows(),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: DesignTokens.spacingSm),
                   Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
@@ -643,7 +646,7 @@ class _DetailPageState extends State<DetailPage> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: DesignTokens.spacingSm),
                   Align(
                     alignment: Alignment.centerLeft,
                     child: _buildIntroContent(scheme.onSurfaceVariant),
@@ -767,7 +770,7 @@ class _DetailPageState extends State<DetailPage> {
               ),
             ),
           ),
-          if (trailing != null) ...[const SizedBox(width: 8), trailing],
+          if (trailing != null) ...[const SizedBox(width: DesignTokens.spacingSm), trailing],
         ],
       ),
     );
@@ -893,7 +896,7 @@ class _DetailPageState extends State<DetailPage> {
     const fg = Colors.white;
 
     return SliverAppBar(
-      expandedHeight: 48,
+      expandedHeight: DesignTokens.topBarHeight,
       pinned: true,
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
@@ -974,20 +977,20 @@ class _DetailPageState extends State<DetailPage> {
           itemBuilder: (context) => [
             PopupMenuItem(
               value: 'refresh',
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 12),
               child: const Text('刷新'),
             ),
             if (isOnline)
               const PopupMenuItem(
                 value: 'login',
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 12),
                 child: Text('登录'),
               ),
             if (_isInBookshelf)
               PopupMenuItem(
                 value: 'top',
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
+                  horizontal: DesignTokens.spacingLg,
                   vertical: 12,
                 ),
                 child: Row(
@@ -1000,30 +1003,30 @@ class _DetailPageState extends State<DetailPage> {
             if (isOnline)
               const PopupMenuItem(
                 value: 'set_source_variable',
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 12),
                 child: Text('设置源变量'),
               ),
             const PopupMenuItem(
               value: 'set_book_variable',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 12),
               child: Text('设置书籍变量'),
             ),
             const PopupMenuItem(
               value: 'copy_book_url',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 12),
               child: Text('拷贝书籍URL'),
             ),
             if (_book!.tocUrl?.isNotEmpty == true)
               const PopupMenuItem(
                 value: 'copy_toc_url',
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 12),
                 child: Text('拷贝目录URL'),
               ),
             if (isOnline)
               PopupMenuItem(
                 value: 'can_update',
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
+                  horizontal: DesignTokens.spacingLg,
                   vertical: 12,
                 ),
                 child: Row(
@@ -1037,7 +1040,7 @@ class _DetailPageState extends State<DetailPage> {
               PopupMenuItem(
                 value: 'delete_alert',
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
+                  horizontal: DesignTokens.spacingLg,
                   vertical: 12,
                 ),
                 child: Row(
@@ -1049,7 +1052,7 @@ class _DetailPageState extends State<DetailPage> {
               ),
             PopupMenuItem(
               value: 'show_read_record',
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 12),
               child: Row(
                 children: [
                   const Expanded(child: Text('显示阅读记录')),
@@ -1059,12 +1062,12 @@ class _DetailPageState extends State<DetailPage> {
             ),
             const PopupMenuItem(
               value: 'clear_cache',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 12),
               child: Text('清理缓存'),
             ),
             const PopupMenuItem(
               value: 'log',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 12),
               child: Text('日志'),
             ),
           ],
@@ -1116,7 +1119,7 @@ class _DetailPageState extends State<DetailPage> {
                     borderRadius: BorderRadius.circular(DesignTokens.spacingSm),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.3),
+                        color: Colors.black.withValues(alpha: 0.3),
                         blurRadius: 12,
                         offset: const Offset(0, 4),
                       ),
@@ -1125,8 +1128,8 @@ class _DetailPageState extends State<DetailPage> {
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(DesignTokens.spacingSm),
                     child: Container(
-                      width: 110,
-                      height: 160,
+                      width: _coverWidth,
+                      height: _coverHeight,
                       color: Theme.of(
                         context,
                       ).colorScheme.surfaceContainerHighest,
@@ -1135,7 +1138,7 @@ class _DetailPageState extends State<DetailPage> {
                   ),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: DesignTokens.spacingLg),
               // 书籍信息
               Expanded(
                 child: Column(
@@ -1154,7 +1157,7 @@ class _DetailPageState extends State<DetailPage> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: DesignTokens.spacingSm),
                     // 标签行
                     Wrap(
                       spacing: 6,
@@ -1177,7 +1180,7 @@ class _DetailPageState extends State<DetailPage> {
                           _buildInfoChip(_displayWordCount),
                       ],
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: DesignTokens.spacingSm),
                     // 阅读进度
                     if (_book!.durChapterIndex > 0) _buildReadProgress(),
                   ],
@@ -1205,7 +1208,7 @@ class _DetailPageState extends State<DetailPage> {
               value: _book!.displayAuthor,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: DesignTokens.spacingSm),
           // 来源（可点击）
           InkWell(
             onTap: () => _editSource(),
@@ -1225,7 +1228,7 @@ class _DetailPageState extends State<DetailPage> {
                   : null,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: DesignTokens.spacingSm),
           // 分组
           InkWell(
             onTap: _showChangeGroupDialog,
@@ -1243,7 +1246,7 @@ class _DetailPageState extends State<DetailPage> {
               ),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: DesignTokens.spacingSm),
           // 最新章节
           if (_book!.latestChapterTitle.isNotEmpty)
             _buildInfoRow(
@@ -1251,7 +1254,7 @@ class _DetailPageState extends State<DetailPage> {
               label: '最新',
               value: _book!.latestChapterTitle,
             ),
-          if (_book!.latestChapterTitle.isNotEmpty) const SizedBox(height: 8),
+          if (_book!.latestChapterTitle.isNotEmpty) const SizedBox(height: DesignTokens.spacingSm),
           // 阅读记录
           if (_showReadRecord && _book!.durChapterIndex > 0)
             _buildInfoRow(
@@ -1292,7 +1295,7 @@ class _DetailPageState extends State<DetailPage> {
           size: 18,
           color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: DesignTokens.spacingSm),
         Text(
           label,
           style: TextStyle(
@@ -1300,7 +1303,7 @@ class _DetailPageState extends State<DetailPage> {
             fontSize: DesignTokens.fontBody,
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: DesignTokens.spacingSm),
         Expanded(
           child: Text(
             value,
@@ -1410,7 +1413,7 @@ class _DetailPageState extends State<DetailPage> {
                     Expanded(
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
+                          horizontal: DesignTokens.spacingLg,
                           vertical: 16,
                         ),
                         child: Text(
@@ -1632,41 +1635,6 @@ class _DetailPageState extends State<DetailPage> {
       AppRoutes.readRecord,
       arguments: {'bookUrl': _book!.bookUrl},
     );
-    return;
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(DesignTokens.spacingLg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('阅读记录', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 16),
-            ListTile(
-              leading: const Icon(Icons.schedule),
-              title: const Text('累计阅读'),
-              subtitle: Text('2小时30分钟'),
-              contentPadding: EdgeInsets.zero,
-            ),
-            ListTile(
-              leading: const Icon(Icons.calendar_today),
-              title: const Text('最近阅读'),
-              subtitle: Text('今天 14:30'),
-              contentPadding: EdgeInsets.zero,
-            ),
-            ListTile(
-              leading: const Icon(Icons.menu_book),
-              title: const Text('阅读章节'),
-              subtitle: Text(
-                '${_book!.durChapterIndex + 1}/${_chapters.length}',
-              ),
-              contentPadding: EdgeInsets.zero,
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   void _showDownloadDialog() {
@@ -1828,7 +1796,7 @@ class _DetailPageState extends State<DetailPage> {
               child: InkWell(
                 onTap: _toggleBookshelf,
                 child: SizedBox(
-                  height: 50,
+                  height: DesignTokens.bottomBarHeight,
                   child: Center(
                     child: Text(
                       _isInBookshelf ? '移出书架' : '放入书架',
@@ -1846,7 +1814,7 @@ class _DetailPageState extends State<DetailPage> {
                 child: InkWell(
                   onTap: canRead ? _startReading : null,
                   child: SizedBox(
-                    height: 50,
+                    height: DesignTokens.bottomBarHeight,
                     child: Center(
                       child: Text(
                         '阅读',
@@ -1950,7 +1918,7 @@ class _DetailPageState extends State<DetailPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('简介', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
+          const SizedBox(height: DesignTokens.spacingSm),
           GestureDetector(
             onTap: () {
               setState(() {
@@ -1997,7 +1965,7 @@ class _DetailPageState extends State<DetailPage> {
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg),
       child: Wrap(
         spacing: 8,
         runSpacing: 8,
@@ -2056,7 +2024,7 @@ class _DetailPageState extends State<DetailPage> {
       onTap: () => _openChapter(chapter),
       onLongPress: () => _openFullChapterList(),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 10),
         child: Row(
           children: [
             // VIP锁定图标
@@ -2099,7 +2067,7 @@ class _DetailPageState extends State<DetailPage> {
                                 fontSize: DesignTokens.fontCaption,
                               ),
                             ),
-                          if (hasTag && hasWordCount) const SizedBox(width: 8),
+                          if (hasTag && hasWordCount) const SizedBox(width: DesignTokens.spacingSm),
                           if (hasWordCount)
                             Text(
                               '${(chapter.wordCount! / 10000).toStringAsFixed(1)}万',
@@ -2114,7 +2082,7 @@ class _DetailPageState extends State<DetailPage> {
                 ],
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: DesignTokens.spacingSm),
             // 右侧图标
             if (isSelected)
               Icon(Icons.check, size: 18, color: fg)
@@ -2656,13 +2624,13 @@ class _DetailPageState extends State<DetailPage> {
                 padding: const EdgeInsets.all(DesignTokens.spacingLg),
                 children: [
                   Text('书籍URL: ${_book?.bookUrl ?? "未知"}'),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: DesignTokens.spacingSm),
                   Text('书源: ${_book?.sourceName ?? "本地"}'),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: DesignTokens.spacingSm),
                   Text('章节数: ${_chapters.length}'),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: DesignTokens.spacingSm),
                   Text('当前章节: ${_book?.durChapterTitle ?? "无"}'),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: DesignTokens.spacingSm),
                   Text(
                     '阅读进度: ${_book?.durChapterIndex ?? 0}/${_chapters.length}',
                   ),
