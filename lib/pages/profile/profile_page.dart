@@ -5,8 +5,10 @@ import 'package:provider/provider.dart';
 import '../../providers/app_provider.dart';
 import '../../providers/bookshelf_provider.dart';
 import '../../providers/discovery_provider.dart';
+import '../../utils/design_tokens.dart';
 import '../../widgets/android_switch.dart';
 import 'book_source_manage_page.dart';
+import 'reader_settings_sheet.dart';
 import '../settings/theme_settings_page.dart';
 import '../settings/ai_settings_page.dart';
 import '../../routes/app_routes.dart';
@@ -60,15 +62,15 @@ class _ProfilePageState extends State<ProfilePage>
             padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
             color: primaryColor,
             child: SizedBox(
-              height: 48,
+              height: DesignTokens.topBarHeight,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg),
                 child: Row(
                   children: [
                     Text(
                       '我的',
                       style: TextStyle(
-                        fontSize: 20,
+                        fontSize: DesignTokens.fontTitle,
                         fontWeight: FontWeight.normal,
                         color: primaryForeground,
                       ),
@@ -254,7 +256,7 @@ class _ProfilePageState extends State<ProfilePage>
     final provider = context.watch<AppProvider>();
     final imagePath = provider.currentPanelBackgroundImage;
     final borderColor = provider.currentPanelBorderColor;
-    final radius = 10 * provider.currentCornerScale;
+    final radius = DesignTokens.panelRadius * provider.currentCornerScale;
     return Container(
       clipBehavior: imagePath == null ? Clip.none : Clip.antiAlias,
       decoration: BoxDecoration(
@@ -290,11 +292,11 @@ class _ProfilePageState extends State<ProfilePage>
   Widget _buildCategoryTitle(String title) {
     final colorScheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      padding: const EdgeInsets.fromLTRB(DesignTokens.spacingLg, DesignTokens.spacingLg, DesignTokens.spacingLg, DesignTokens.spacingSm),
       child: Text(
         title,
         style: TextStyle(
-          fontSize: 14,
+          fontSize: DesignTokens.fontBody,
           fontWeight: FontWeight.w500,
           color: colorScheme.secondary,
         ),
@@ -317,13 +319,11 @@ class _ProfilePageState extends State<ProfilePage>
       child: InkWell(
         onTap: onTap,
         splashColor: Colors.transparent,
-        highlightColor: theme.brightness == Brightness.dark
-            ? const Color(0x634D4D4D)
-            : const Color(0x63ACACAC),
+        highlightColor: DesignTokens.highlightColor(context),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 60),
+          constraints: const BoxConstraints(minHeight: DesignTokens.listItemMinHeight),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 10),
             child: Row(
               children: [
                 Padding(
@@ -332,10 +332,10 @@ class _ProfilePageState extends State<ProfilePage>
                       Icon(
                         icon ?? Icons.circle_outlined,
                         color: colorScheme.secondary,
-                        size: 24,
+                        size: DesignTokens.listItemIconSize,
                       ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: DesignTokens.spacingLg),
                 Expanded(
                   child: _buildItemText(
                     title: title,
@@ -367,20 +367,18 @@ class _ProfilePageState extends State<ProfilePage>
       child: InkWell(
         onTap: () => onChanged(!value),
         splashColor: Colors.transparent,
-        highlightColor: isDark
-            ? const Color(0x634D4D4D)
-            : const Color(0x63ACACAC),
+        highlightColor: DesignTokens.highlightColor(context),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 60),
+          constraints: const BoxConstraints(minHeight: DesignTokens.listItemMinHeight),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 10),
             child: Row(
               children: [
                 Padding(
                   padding: const EdgeInsets.only(top: 1),
-                  child: Icon(icon, color: colorScheme.secondary, size: 24),
+                  child: Icon(icon, color: colorScheme.secondary, size: DesignTokens.listItemIconSize),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: DesignTokens.spacingLg),
                 Expanded(
                   child: _buildItemText(
                     title: title,
@@ -388,7 +386,7 @@ class _ProfilePageState extends State<ProfilePage>
                     colorScheme: colorScheme,
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: DesignTokens.spacingSm),
                 AndroidSwitch(
                   value: value,
                   onChanged: onChanged,
@@ -416,13 +414,13 @@ class _ProfilePageState extends State<ProfilePage>
           title,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 16, color: colorScheme.onSurface),
+          style: TextStyle(fontSize: DesignTokens.fontSubtitle, color: colorScheme.onSurface),
         ),
         if (subtitle != null) ...[
-          const SizedBox(height: 8),
+          const SizedBox(height: DesignTokens.spacingSm),
           Text(
             subtitle,
-            style: TextStyle(fontSize: 14, color: colorScheme.onSurfaceVariant),
+            style: TextStyle(fontSize: DesignTokens.fontBody, color: colorScheme.onSurfaceVariant),
           ),
         ],
       ],
@@ -853,59 +851,5 @@ class _SvgPathParser {
 
   bool _isCommandLetter(String ch) {
     return ch.length == 1 && RegExp(r'[A-Za-z]').hasMatch(ch);
-  }
-}
-
-class ReaderSettingsSheet extends StatelessWidget {
-  const ReaderSettingsSheet({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('阅读设置', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 16),
-          ListTile(
-            title: const Text('默认翻页方式'),
-            subtitle: const Text('仿真翻页'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {},
-          ),
-          ListTile(
-            title: const Text('字体大小'),
-            subtitle: const Text('18'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {},
-          ),
-          ListTile(
-            title: const Text('背景色'),
-            trailing: Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF8E1),
-                border: Border.all(color: Colors.grey),
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-            onTap: () {},
-          ),
-          SwitchListTile(
-            title: const Text('屏幕常亮'),
-            value: true,
-            onChanged: (value) {},
-          ),
-          SwitchListTile(
-            title: const Text('音量键翻页'),
-            value: false,
-            onChanged: (value) {},
-          ),
-        ],
-      ),
-    );
   }
 }

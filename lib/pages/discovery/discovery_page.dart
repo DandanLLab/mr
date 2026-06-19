@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../models/book_source.dart';
 import '../../providers/discovery_provider.dart';
 import '../../routes/app_routes.dart';
+import '../../utils/design_tokens.dart';
 
 class DiscoveryPage extends StatefulWidget {
   const DiscoveryPage({super.key});
@@ -51,10 +52,10 @@ class _DiscoveryPageState extends State<DiscoveryPage>
               children: [
                 // Toolbar + 搜索框在同一行（不显示标题文字）
                 SizedBox(
-                  height: 48,
+                  height: DesignTokens.topBarHeight,
                   child: Row(
                     children: [
-                      const SizedBox(width: 8),
+                      const SizedBox(width: DesignTokens.spacingSm),
                       // 搜索框（参考原版：高度30dp）
                       Expanded(
                         child: SizedBox(
@@ -63,7 +64,7 @@ class _DiscoveryPageState extends State<DiscoveryPage>
                             controller: _searchController,
                             decoration: InputDecoration(
                               hintText: '搜索书源',
-                              hintStyle: const TextStyle(fontSize: 13),
+                              hintStyle: const TextStyle(fontSize: DesignTokens.fontSummary),
                               prefixIcon: Icon(Icons.search, size: 16, color: appBarForeground.withValues(alpha: 0.7)),
                               suffixIcon: _searchQuery.isNotEmpty
                                   ? IconButton(
@@ -79,12 +80,12 @@ class _DiscoveryPageState extends State<DiscoveryPage>
                                     )
                                   : null,
                               border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
+                                borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
                               ),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingSm, vertical: 0),
                               isDense: true,
                             ),
-                            style: TextStyle(fontSize: 13, color: appBarForeground),
+                            style: TextStyle(fontSize: DesignTokens.fontSummary, color: appBarForeground),
                             onChanged: (value) {
                               setState(() {
                                 _searchQuery = value;
@@ -93,7 +94,7 @@ class _DiscoveryPageState extends State<DiscoveryPage>
                           ),
                         ),
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: DesignTokens.spacingXs),
                       // 收藏分组
                       IconButton(
                         icon: Icon(Icons.folder_outlined, size: 20, color: appBarForeground),
@@ -104,7 +105,7 @@ class _DiscoveryPageState extends State<DiscoveryPage>
                       PopupMenuButton<String>(
                         icon: Icon(Icons.sort, size: 20, color: appBarForeground),
                         tooltip: '排序',
-                        offset: const Offset(0, 48),
+                        offset: const Offset(0, DesignTokens.topBarHeight),
                         onSelected: (value) {},
                         itemBuilder: (context) => [
                           PopupMenuItem(
@@ -147,15 +148,15 @@ class _DiscoveryPageState extends State<DiscoveryPage>
   Widget _buildSearchBarWithActions() {
     // 参考原版设计：搜索框和分组按钮在同一行
     return Container(
-      height: 48,
-      padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+      height: DesignTokens.topBarHeight,
+      padding: const EdgeInsets.fromLTRB(DesignTokens.spacingSm, DesignTokens.spacingXs, DesignTokens.spacingSm, DesignTokens.spacingSm),
       child: Row(
         children: [
           // 分组按钮
           PopupMenuButton<String>(
             icon: const Icon(Icons.folder_outlined, size: 20),
             tooltip: '分组',
-            offset: const Offset(0, 48), // 向下偏移，避免遮挡
+            offset: const Offset(0, DesignTokens.topBarHeight), // 向下偏移，避免遮挡
             onSelected: (value) {
               if (value.startsWith('group:')) {
                 _searchController.text = value;
@@ -177,7 +178,7 @@ class _DiscoveryPageState extends State<DiscoveryPage>
               controller: _searchController,
               decoration: InputDecoration(
                 hintText: '搜索书源',
-                hintStyle: const TextStyle(fontSize: 14),
+                hintStyle: const TextStyle(fontSize: DesignTokens.fontBody),
                 prefixIcon: const Icon(Icons.search, size: 18),
                 suffixIcon: _searchQuery.isNotEmpty
                     ? IconButton(
@@ -192,12 +193,12 @@ class _DiscoveryPageState extends State<DiscoveryPage>
                       )
                     : null,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(DesignTokens.frostCardRadius),
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                contentPadding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingMd, vertical: 0),
                 isDense: true,
               ),
-              style: const TextStyle(fontSize: 14),
+              style: const TextStyle(fontSize: DesignTokens.fontBody),
               onChanged: (value) {
                 setState(() {
                   _searchQuery = value;
@@ -214,12 +215,12 @@ class _DiscoveryPageState extends State<DiscoveryPage>
     // 参考原版设计：紧凑的搜索框（高度30dp）
     return Container(
       height: 40,
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      padding: const EdgeInsets.fromLTRB(DesignTokens.spacingMd, DesignTokens.spacingXs, DesignTokens.spacingMd, DesignTokens.spacingSm),
       child: TextField(
         controller: _searchController,
         decoration: InputDecoration(
           hintText: '搜索书源',
-          hintStyle: const TextStyle(fontSize: 14),
+          hintStyle: const TextStyle(fontSize: DesignTokens.fontBody),
           prefixIcon: const Icon(Icons.search, size: 18),
           suffixIcon: _searchQuery.isNotEmpty
               ? IconButton(
@@ -234,12 +235,12 @@ class _DiscoveryPageState extends State<DiscoveryPage>
                 )
               : null,
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(DesignTokens.frostCardRadius),
           ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+          contentPadding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingMd, vertical: 0),
           isDense: true,
         ),
-        style: const TextStyle(fontSize: 14),
+        style: const TextStyle(fontSize: DesignTokens.fontBody),
         onChanged: (value) {
           setState(() {
             _searchQuery = value;
@@ -265,10 +266,10 @@ class _DiscoveryPageState extends State<DiscoveryPage>
               children: [
                 Icon(
                   Icons.explore_outlined,
-                  size: 64,
+                  size: DesignTokens.emptyIconSize,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: DesignTokens.spacingLg),
                 Text(
                   _searchQuery.isEmpty ? '暂无发现内容' : '未找到匹配的书源',
                   style: TextStyle(
@@ -276,7 +277,7 @@ class _DiscoveryPageState extends State<DiscoveryPage>
                   ),
                 ),
                 if (_searchQuery.isEmpty) ...[
-                  const SizedBox(height: 8),
+                  const SizedBox(height: DesignTokens.spacingSm),
                   TextButton(
                     onPressed: () {
                       Navigator.pushNamed(context, AppRoutes.profile);
@@ -293,7 +294,7 @@ class _DiscoveryPageState extends State<DiscoveryPage>
           onRefresh: provider.loadBookSources,
           child: ListView.builder(
             cacheExtent: 500,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingSm),
             itemCount: sources.length,
             itemBuilder: (context, index) {
               final source = sources[index];
@@ -319,10 +320,10 @@ class _DiscoveryPageState extends State<DiscoveryPage>
     final exploreKinds = _parseExploreKinds(source.exploreUrl);
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      margin: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingSm, vertical: 2),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -332,10 +333,10 @@ class _DiscoveryPageState extends State<DiscoveryPage>
             onTap: () => _toggleExpand(source.bookSourceUrl),
             onLongPress: () => _showSourceOptions(source),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingMd, vertical: 10),
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
               ),
               child: Row(
                 children: [
@@ -420,23 +421,23 @@ class _DiscoveryPageState extends State<DiscoveryPage>
     List<Map<String, String>> kinds,
   ) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      padding: const EdgeInsets.fromLTRB(DesignTokens.spacingMd, DesignTokens.spacingSm, DesignTokens.spacingMd, DesignTokens.spacingMd),
       child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
+        spacing: DesignTokens.spacingSm,
+        runSpacing: DesignTokens.spacingSm,
         children: kinds.map((kind) {
           return Material(
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
             child: InkWell(
               onTap: () => _openExplore(source, kind),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: DesignTokens.spacingSm),
                 child: Text(
                   kind['title'] ?? '',
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: DesignTokens.fontBody,
                     color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),

@@ -7,6 +7,7 @@ import '../../models/book.dart';
 import '../../models/book_source.dart';
 import '../../routes/app_routes.dart';
 import '../../services/cover_config_service.dart';
+import '../../utils/design_tokens.dart';
 
 class SearchPage extends StatefulWidget {
   final String? initialKeyword;
@@ -73,7 +74,7 @@ class _SearchPageState extends State<SearchPage> {
                   children: [
                     // 顶部栏：返回按钮 + 搜索框 + 搜索按钮
                     SizedBox(
-                      height: 48,
+                      height: DesignTokens.topBarHeight,
                       child: Row(
                         children: [
                           // 返回按钮
@@ -125,7 +126,7 @@ class _SearchPageState extends State<SearchPage> {
                                         )
                                       : null,
                                   contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
+                                    horizontal: DesignTokens.spacingSm,
                                     vertical: 0,
                                   ),
                                   isDense: true,
@@ -135,7 +136,7 @@ class _SearchPageState extends State<SearchPage> {
                               ),
                             ),
                           ),
-                          const SizedBox(width: 4),
+                          const SizedBox(width: DesignTokens.spacingXs),
                           // 更多菜单（参考原版）
                           PopupMenuButton<String>(
                             icon: const Icon(Icons.more_vert),
@@ -237,7 +238,9 @@ class _SearchPageState extends State<SearchPage> {
                   provider.searchResults.isNotEmpty &&
                   provider.isLoading)
                 Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: DesignTokens.spacingSm,
+                  ),
                   child: Text(
                     '结果 ${provider.searchResults.length}',
                     style: TextStyle(
@@ -305,12 +308,12 @@ class _SearchPageState extends State<SearchPage> {
             size: 64,
             color: Theme.of(context).colorScheme.error,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: DesignTokens.spacingLg),
           Text(
             provider.error!,
             style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: DesignTokens.spacingLg),
           ElevatedButton(
             onPressed: () => _showSourceFilter(provider),
             child: const Text('选择书源'),
@@ -327,7 +330,7 @@ class _SearchPageState extends State<SearchPage> {
         children: [
           if (provider.searchHistory.isNotEmpty) ...[
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(DesignTokens.spacingLg),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -340,10 +343,12 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(
+                horizontal: DesignTokens.spacingLg,
+              ),
               child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: DesignTokens.spacingSm,
+                runSpacing: DesignTokens.spacingSm,
                 children: provider.searchHistory.map((keyword) {
                   return InputChip(
                     label: Text(keyword),
@@ -357,25 +362,25 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ),
           ],
-          const SizedBox(height: 24),
+          const SizedBox(height: DesignTokens.spacingXxl),
           Center(
             child: Column(
               children: [
                 Icon(
                   Icons.search,
-                  size: 80,
+                  size: DesignTokens.emptyIconSize,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: DesignTokens.spacingLg),
                 Text(
                   '输入关键词搜索',
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: DesignTokens.fontTitle,
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
                 if (provider.bookSources.isEmpty) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: DesignTokens.spacingLg),
                   TextButton.icon(
                     onPressed: () {
                       Navigator.pushNamed(context, AppRoutes.profile);
@@ -394,7 +399,7 @@ class _SearchPageState extends State<SearchPage> {
 
   Widget _buildListView(SearchProvider provider) {
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: DesignTokens.spacingSm),
       itemCount: provider.searchResults.length,
       itemBuilder: (context, index) {
         final result = provider.searchResults[index];
@@ -416,13 +421,13 @@ class _SearchPageState extends State<SearchPage> {
       child: InkWell(
         onTap: () => _openDetail(result),
         child: Padding(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(DesignTokens.spacingSm),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // 封面（参考原版：80x110）
               ClipRRect(
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                 child: SizedBox(
                   width: 80,
                   height: 110,
@@ -433,7 +438,7 @@ class _SearchPageState extends State<SearchPage> {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: DesignTokens.spacingSm),
               // 右侧信息
               Expanded(
                 child: Column(
@@ -445,7 +450,7 @@ class _SearchPageState extends State<SearchPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 16,
+                        fontSize: DesignTokens.fontSubtitle,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -456,7 +461,7 @@ class _SearchPageState extends State<SearchPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: DesignTokens.fontCaption,
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
@@ -464,12 +469,12 @@ class _SearchPageState extends State<SearchPage> {
                     // 分类标签
                     if (tags.isNotEmpty)
                       Wrap(
-                        spacing: 4,
+                        spacing: DesignTokens.spacingXs,
                         runSpacing: 2,
                         children: tags.take(3).map((tag) {
                           return Container(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 4,
+                              horizontal: DesignTokens.spacingXs,
                               vertical: 1,
                             ),
                             decoration: BoxDecoration(
@@ -477,7 +482,8 @@ class _SearchPageState extends State<SearchPage> {
                                   .colorScheme
                                   .primaryContainer
                                   .withValues(alpha: 0.3),
-                              borderRadius: BorderRadius.circular(2),
+                              borderRadius:
+                                  BorderRadius.circular(DesignTokens.actionRadius),
                             ),
                             child: Text(
                               tag,
@@ -496,7 +502,7 @@ class _SearchPageState extends State<SearchPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: DesignTokens.fontCaption,
                         color: Theme.of(context).colorScheme.primary,
                       ),
                     ),
@@ -507,7 +513,7 @@ class _SearchPageState extends State<SearchPage> {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: DesignTokens.fontCaption,
                         height: 1.3,
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
@@ -537,12 +543,12 @@ class _SearchPageState extends State<SearchPage> {
 
   Widget _buildGridView(SearchProvider provider) {
     return GridView.builder(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(DesignTokens.spacingMd),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         childAspectRatio: 0.58,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
+        crossAxisSpacing: DesignTokens.spacingMd,
+        mainAxisSpacing: DesignTokens.spacingMd,
       ),
       itemCount: provider.searchResults.length,
       itemBuilder: (context, index) {
@@ -564,7 +570,9 @@ class _SearchPageState extends State<SearchPage> {
       child: Card(
         clipBehavior: Clip.antiAlias,
         elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -588,7 +596,7 @@ class _SearchPageState extends State<SearchPage> {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontWeight: FontWeight.w500,
-                      fontSize: 12,
+                      fontSize: DesignTokens.fontCaption,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -811,7 +819,7 @@ class _SearchPageState extends State<SearchPage> {
                     subtitle: Text(
                       source.bookSourceGroup ?? '默认分组',
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: DesignTokens.fontCaption,
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
@@ -876,7 +884,7 @@ class _SearchPageState extends State<SearchPage> {
             return Column(
               children: [
                 Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(DesignTokens.spacingLg),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -907,7 +915,7 @@ class _SearchPageState extends State<SearchPage> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               const Text('暂无可用书源'),
-                              const SizedBox(height: 16),
+                              const SizedBox(height: DesignTokens.spacingLg),
                               ElevatedButton(
                                 onPressed: () {
                                   Navigator.pop(context);
@@ -939,7 +947,7 @@ class _SearchPageState extends State<SearchPage> {
                               subtitle: Text(
                                 source.bookSourceGroup ?? '默认分组',
                                 style: TextStyle(
-                                  fontSize: 12,
+                                  fontSize: DesignTokens.fontCaption,
                                   color: Theme.of(
                                     context,
                                   ).colorScheme.onSurfaceVariant,

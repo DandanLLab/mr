@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../services/storage_service.dart';
+import '../../utils/design_tokens.dart';
 
 /// TXT目录规则模型
 class TxtTocRule {
@@ -123,7 +124,7 @@ class _TxtTocRulePageState extends State<TxtTocRulePage> {
                   hintText: '如：章节标题',
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: DesignTokens.spacingLg),
               TextField(
                 controller: ruleController,
                 decoration: const InputDecoration(
@@ -132,11 +133,11 @@ class _TxtTocRulePageState extends State<TxtTocRulePage> {
                 ),
                 maxLines: 3,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: DesignTokens.spacingSm),
               Text(
                 '提示：规则用于匹配TXT文件中的章节标题行',
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: DesignTokens.fontCaption,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
@@ -236,10 +237,10 @@ class _TxtTocRulePageState extends State<TxtTocRulePage> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.text_snippet, size: 64, color: Colors.grey[400]),
-                      const SizedBox(height: 16),
-                      const Text('暂无TXT目录规则', style: TextStyle(color: Colors.grey)),
-                      const SizedBox(height: 8),
+                      Icon(Icons.text_snippet, size: DesignTokens.emptyIconSize, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      const SizedBox(height: DesignTokens.spacingLg),
+                      Text('暂无TXT目录规则', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                      const SizedBox(height: DesignTokens.spacingSm),
                       TextButton.icon(
                         onPressed: _addRule,
                         icon: const Icon(Icons.add),
@@ -266,7 +267,7 @@ class _TxtTocRulePageState extends State<TxtTocRulePage> {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontFamily: 'monospace',
-                          fontSize: 12,
+                          fontSize: DesignTokens.fontCaption,
                         ),
                       ),
                       trailing: Row(

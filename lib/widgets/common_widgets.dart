@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/design_tokens.dart';
 
 class CommonWidgets {
   static Widget buildLoadingWidget({String? message}) {
@@ -8,8 +9,11 @@ class CommonWidgets {
         children: [
           const CircularProgressIndicator(),
           if (message != null) ...[
-            const SizedBox(height: 16),
-            Text(message),
+            const SizedBox(height: DesignTokens.spacingMd),
+            Text(
+              message,
+              style: const TextStyle(fontSize: DesignTokens.fontBody),
+            ),
           ],
         ],
       ),
@@ -28,19 +32,19 @@ class CommonWidgets {
         children: [
           Icon(
             icon,
-            size: 80,
+            size: DesignTokens.emptyIconSize,
             color: Colors.grey,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: DesignTokens.spacingMd),
           Text(
             message,
             style: const TextStyle(
-              fontSize: 18,
+              fontSize: DesignTokens.fontTitle,
               color: Colors.grey,
             ),
           ),
           if (actionText != null && onAction != null) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: DesignTokens.spacingMd),
             TextButton(
               onPressed: onAction,
               child: Text(actionText),
@@ -62,20 +66,20 @@ class CommonWidgets {
         children: [
           const Icon(
             Icons.error_outline,
-            size: 80,
+            size: DesignTokens.emptyIconSize,
             color: Colors.red,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: DesignTokens.spacingMd),
           Text(
             message,
             style: const TextStyle(
-              fontSize: 18,
+              fontSize: DesignTokens.fontTitle,
               color: Colors.grey,
             ),
             textAlign: TextAlign.center,
           ),
           if (actionText != null && onRetry != null) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: DesignTokens.spacingMd),
             ElevatedButton(
               onPressed: onRetry,
               child: Text(actionText),
@@ -86,8 +90,8 @@ class CommonWidgets {
     );
   }
 
-  /// 通用选择弹窗 - 与原版 AlertDialog selector 一致
-  /// 标题 18sp，内容 16sp，列表项高度 48dp，宽度 280dp
+  /// 通用选择弹窗
+  /// 统一使用设计令牌：圆角 panelRadius，字号 fontTitle/fontBody
   static Future<int?> showSelectorDialog(
     BuildContext context, {
     required String title,
@@ -95,16 +99,25 @@ class CommonWidgets {
     int selectedIndex = -1,
   }) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
+    final titleColor = isDark ? Colors.white : colorScheme.onSurface;
+    final itemColor = isDark ? Colors.white : colorScheme.onSurface;
+    final bgColor = isDark ? colorScheme.surfaceContainer : Colors.white;
 
     return await showDialog<int>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(title, style: TextStyle(fontSize: 18, color: isDark ? Colors.white : const Color(0xFF212121))),
-        titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
-        contentPadding: const EdgeInsets.fromLTRB(0, 0, 0, 0),
-        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
-        backgroundColor: isDark ? const Color(0xFF424242) : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        title: Text(
+          title,
+          style: TextStyle(fontSize: DesignTokens.fontTitle, color: titleColor),
+        ),
+        titlePadding: DesignTokens.dialogTitlePadding,
+        contentPadding: EdgeInsets.zero,
+        insetPadding: DesignTokens.dialogInsetPadding,
+        backgroundColor: bgColor,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
+        ),
         content: SizedBox(
           width: 280,
           child: ListView.builder(
@@ -114,17 +127,21 @@ class CommonWidgets {
               onTap: () => Navigator.pop(ctx, index),
               child: Container(
                 height: 48,
-                padding: const EdgeInsets.symmetric(horizontal: 24),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: DesignTokens.spacingXxl),
                 child: Row(
                   children: [
                     Expanded(
                       child: Text(
                         items[index],
-                        style: TextStyle(fontSize: 16, color: isDark ? Colors.white : const Color(0xFF212121)),
+                        style: TextStyle(
+                            fontSize: DesignTokens.fontSubtitle,
+                            color: itemColor),
                       ),
                     ),
                     if (index == selectedIndex)
-                      Icon(Icons.check, color: Theme.of(context).colorScheme.primary, size: 20),
+                      Icon(Icons.check,
+                          color: colorScheme.primary, size: 20),
                   ],
                 ),
               ),
@@ -135,7 +152,8 @@ class CommonWidgets {
     );
   }
 
-  /// 通用确认弹窗 - 与原版 AlertDialog 一致
+  /// 通用确认弹窗
+  /// 统一使用设计令牌：圆角 panelRadius，字号 fontTitle/fontBody
   static Future<bool> showConfirmDialog(
     BuildContext context, {
     required String title,
@@ -144,25 +162,40 @@ class CommonWidgets {
     String cancelText = '取消',
   }) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
+    final titleColor = isDark ? Colors.white : colorScheme.onSurface;
+    final contentColor =
+        isDark ? Colors.white70 : colorScheme.onSurfaceVariant;
+    final bgColor = isDark ? colorScheme.surfaceContainer : Colors.white;
 
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(title, style: TextStyle(fontSize: 18, color: isDark ? Colors.white : const Color(0xFF212121))),
-        titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
-        contentPadding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
-        backgroundColor: isDark ? const Color(0xFF424242) : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-        content: Text(content, style: TextStyle(fontSize: 16, color: isDark ? Colors.white70 : const Color(0xFF757575))),
+        title: Text(
+          title,
+          style: TextStyle(fontSize: DesignTokens.fontTitle, color: titleColor),
+        ),
+        titlePadding: DesignTokens.dialogTitlePadding,
+        contentPadding: DesignTokens.dialogContentPadding,
+        insetPadding: DesignTokens.dialogInsetPadding,
+        backgroundColor: bgColor,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
+        ),
+        content: Text(
+          content,
+          style: TextStyle(
+              fontSize: DesignTokens.fontSubtitle, color: contentColor),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text(cancelText, style: TextStyle(color: isDark ? Colors.white70 : const Color(0xFF757575))),
+            child: Text(cancelText, style: TextStyle(color: contentColor)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text(confirmText, style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+            child: Text(confirmText,
+                style: TextStyle(color: colorScheme.primary)),
           ),
         ],
       ),

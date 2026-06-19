@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../utils/design_tokens.dart';
 
 class BookCard extends StatelessWidget {
   final String title;
@@ -23,11 +24,15 @@ class BookCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return GestureDetector(
       onTap: onTap,
       onLongPress: onLongPress,
       child: Card(
         clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -35,7 +40,7 @@ class BookCard extends StatelessWidget {
               child: Stack(
                 children: [
                   Container(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    color: colorScheme.surfaceContainerHighest,
                     child: Center(
                       child: cover != null
                           ? CachedNetworkImage(
@@ -51,22 +56,23 @@ class BookCard extends StatelessWidget {
                   ),
                   if (badge != null)
                     Positioned(
-                      top: 8,
-                      left: 8,
+                      top: DesignTokens.spacingSm,
+                      left: DesignTokens.spacingSm,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 6,
                           vertical: 2,
                         ),
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primary,
-                          borderRadius: BorderRadius.circular(4),
+                          color: colorScheme.primary,
+                          borderRadius: BorderRadius.circular(
+                              DesignTokens.actionRadius),
                         ),
                         child: Text(
                           badge!,
                           style: const TextStyle(
                             color: Colors.white,
-                            fontSize: 10,
+                            fontSize: DesignTokens.fontCaption,
                           ),
                         ),
                       ),
@@ -75,7 +81,7 @@ class BookCard extends StatelessWidget {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(DesignTokens.spacingSm),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -85,7 +91,7 @@ class BookCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
-                      fontSize: 12,
+                      fontSize: DesignTokens.fontCaption,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -95,15 +101,14 @@ class BookCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 10,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      color: colorScheme.onSurfaceVariant,
                     ),
                   ),
                   if (progress > 0) ...[
-                    const SizedBox(height: 4),
+                    const SizedBox(height: DesignTokens.spacingXs),
                     LinearProgressIndicator(
                       value: progress,
-                      backgroundColor:
-                          Theme.of(context).colorScheme.surfaceContainerHighest,
+                      backgroundColor: colorScheme.surfaceContainerHighest,
                     ),
                   ],
                 ],

@@ -21,6 +21,7 @@ import '../../services/source_engine/web_book.dart';
 import '../../widgets/change_source_sheet.dart';
 import '../../services/cover_config_service.dart';
 import '../../widgets/book_edit_sheet.dart';
+import '../../utils/design_tokens.dart';
 
 class DetailPage extends StatefulWidget {
   final String bookUrl;
@@ -282,7 +283,7 @@ class _DetailPageState extends State<DetailPage> {
                   tag: 'cover_${widget.bookUrl}',
                   child: Container(
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(5),
+                      borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withValues(alpha: 0.28),
@@ -292,7 +293,7 @@ class _DetailPageState extends State<DetailPage> {
                       ],
                     ),
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(5),
+                      borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                       child: SizedBox(
                         width: 110,
                         height: 160,
@@ -325,7 +326,7 @@ class _DetailPageState extends State<DetailPage> {
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: scheme.onSurface,
-                      fontSize: 18,
+                      fontSize: DesignTokens.fontTitle,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -348,7 +349,7 @@ class _DetailPageState extends State<DetailPage> {
               const SizedBox(height: 14),
               Text(
                 '内容简介',
-                style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 16),
+                style: TextStyle(color: scheme.onSurfaceVariant, fontSize: DesignTokens.fontSubtitle),
               ),
               const SizedBox(height: 9),
               _buildIntroContent(scheme.onSurfaceVariant),
@@ -437,11 +438,11 @@ class _DetailPageState extends State<DetailPage> {
           color: filled ? scheme.primary : borderColor,
           width: 0.8,
         ),
-        borderRadius: BorderRadius.circular(3),
+        borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
       ),
       child: Text(
         text,
-        style: TextStyle(color: textColor, fontSize: 13, height: 1.25),
+        style: TextStyle(color: textColor, fontSize: DesignTokens.fontSummary, height: 1.25),
       ),
     );
   }
@@ -519,7 +520,7 @@ class _DetailPageState extends State<DetailPage> {
               text,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: color, fontSize: 13, height: 1.35),
+              style: TextStyle(color: color, fontSize: DesignTokens.fontSummary, height: 1.35),
             ),
           ),
           if (action != null) ...[const SizedBox(width: 8), action],
@@ -538,9 +539,9 @@ class _DetailPageState extends State<DetailPage> {
         minimumSize: const Size(0, 24),
         padding: const EdgeInsets.symmetric(horizontal: 5),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(2)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DesignTokens.actionRadius)),
       ),
-      child: Text(text, style: const TextStyle(fontSize: 13, height: 1)),
+      child: Text(text, style: TextStyle(fontSize: DesignTokens.fontSummary, height: 1)),
     );
   }
 
@@ -572,7 +573,7 @@ class _DetailPageState extends State<DetailPage> {
                     tag: 'cover_${widget.bookUrl}',
                     child: Container(
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withValues(alpha: 0.28),
@@ -582,7 +583,7 @@ class _DetailPageState extends State<DetailPage> {
                         ],
                       ),
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                         child: Container(
                           width: 110,
                           height: 160,
@@ -605,7 +606,7 @@ class _DetailPageState extends State<DetailPage> {
               ),
             ),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              padding: const EdgeInsets.fromLTRB(DesignTokens.spacingLg, DesignTokens.spacingSm, DesignTokens.spacingLg, DesignTokens.spacingLg),
               child: Column(
                 children: [
                   InkWell(
@@ -761,7 +762,7 @@ class _DetailPageState extends State<DetailPage> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 13,
+                fontSize: DesignTokens.fontSummary,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
@@ -780,7 +781,7 @@ class _DetailPageState extends State<DetailPage> {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
-      child: Text(text, style: const TextStyle(fontSize: 12)),
+      child: Text(text, style: TextStyle(fontSize: DesignTokens.fontCaption)),
     );
   }
 
@@ -899,9 +900,9 @@ class _DetailPageState extends State<DetailPage> {
       foregroundColor: fg,
       elevation: 0,
       title: const Text('书籍信息'),
-      titleTextStyle: const TextStyle(
+      titleTextStyle: TextStyle(
         color: fg,
-        fontSize: 20,
+        fontSize: DesignTokens.fontTitle,
         fontWeight: FontWeight.w600,
       ),
       actions: [
@@ -1083,7 +1084,7 @@ class _DetailPageState extends State<DetailPage> {
               : fg.withValues(alpha: 0.5),
           width: 1.5,
         ),
-        borderRadius: BorderRadius.circular(3),
+        borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
         color: checked
             ? Theme.of(context).colorScheme.primary
             : Colors.transparent,
@@ -1100,7 +1101,7 @@ class _DetailPageState extends State<DetailPage> {
 
   Widget _buildHeader() {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(DesignTokens.spacingLg),
       child: Column(
         children: [
           // 封面和基本信息
@@ -1112,7 +1113,7 @@ class _DetailPageState extends State<DetailPage> {
                 tag: 'cover_${widget.bookUrl}',
                 child: Container(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(DesignTokens.spacingSm),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withOpacity(0.3),
@@ -1122,7 +1123,7 @@ class _DetailPageState extends State<DetailPage> {
                     ],
                   ),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(DesignTokens.spacingSm),
                     child: Container(
                       width: 110,
                       height: 160,
@@ -1191,7 +1192,7 @@ class _DetailPageState extends State<DetailPage> {
 
   Widget _buildInfoRows() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingSm),
       child: Column(
         children: [
           // 作者（可点击）
@@ -1296,7 +1297,7 @@ class _DetailPageState extends State<DetailPage> {
           label,
           style: TextStyle(
             color: Theme.of(context).colorScheme.onSurfaceVariant,
-            fontSize: 14,
+            fontSize: DesignTokens.fontBody,
           ),
         ),
         const SizedBox(width: 8),
@@ -1305,7 +1306,7 @@ class _DetailPageState extends State<DetailPage> {
             value,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 14),
+            style: TextStyle(fontSize: DesignTokens.fontBody),
           ),
         ),
         if (trailing != null) trailing,
@@ -1416,7 +1417,7 @@ class _DetailPageState extends State<DetailPage> {
                           '选择分组',
                           style: TextStyle(
                             color: Theme.of(context).colorScheme.onPrimary,
-                            fontSize: 18,
+                            fontSize: DesignTokens.fontTitle,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -1488,7 +1489,7 @@ class _DetailPageState extends State<DetailPage> {
               ),
               // 底部按钮
               Padding(
-                padding: const EdgeInsets.only(right: 16, bottom: 8),
+                padding: const EdgeInsets.only(right: DesignTokens.spacingLg, bottom: DesignTokens.spacingSm),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
@@ -1635,7 +1636,7 @@ class _DetailPageState extends State<DetailPage> {
     showModalBottomSheet(
       context: context,
       builder: (context) => Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(DesignTokens.spacingLg),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1714,12 +1715,12 @@ class _DetailPageState extends State<DetailPage> {
     return GestureDetector(
       onTap: _startReading,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingSm, vertical: DesignTokens.spacingXs),
         decoration: BoxDecoration(
           color: Theme.of(
             context,
           ).colorScheme.primaryContainer.withValues(alpha: 0.5),
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -1734,7 +1735,7 @@ class _DetailPageState extends State<DetailPage> {
               child: Text(
                 chapterName,
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: DesignTokens.fontCaption,
                   color: Theme.of(context).colorScheme.primary,
                 ),
                 maxLines: 1,
@@ -1745,7 +1746,7 @@ class _DetailPageState extends State<DetailPage> {
             Text(
               '$progress%',
               style: TextStyle(
-                fontSize: 11,
+                fontSize: DesignTokens.fontCaption,
                 color: Theme.of(context).colorScheme.onPrimaryContainer,
               ),
             ),
@@ -1767,12 +1768,12 @@ class _DetailPageState extends State<DetailPage> {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.primaryContainer,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
       ),
       child: Text(
         text,
         style: TextStyle(
-          fontSize: 11,
+          fontSize: DesignTokens.fontCaption,
           color: Theme.of(context).colorScheme.onPrimaryContainer,
         ),
       ),
@@ -1781,7 +1782,7 @@ class _DetailPageState extends State<DetailPage> {
 
   Widget _buildActionButtons() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingXs),
       child: Row(
         children: [
           Expanded(
@@ -1831,7 +1832,7 @@ class _DetailPageState extends State<DetailPage> {
                   child: Center(
                     child: Text(
                       _isInBookshelf ? '移出书架' : '放入书架',
-                      style: TextStyle(fontSize: 15, color: scheme.onSurface),
+                      style: TextStyle(fontSize: DesignTokens.fontBody, color: scheme.onSurface),
                     ),
                   ),
                 ),
@@ -1850,7 +1851,7 @@ class _DetailPageState extends State<DetailPage> {
                       child: Text(
                         '阅读',
                         style: TextStyle(
-                          fontSize: 15,
+                          fontSize: DesignTokens.fontBody,
                           fontWeight: FontWeight.w600,
                           color: scheme.onPrimary,
                         ),
@@ -1944,7 +1945,7 @@ class _DetailPageState extends State<DetailPage> {
   Widget _buildDescription() {
     final intro = _book!.displayIntro;
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(DesignTokens.spacingLg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2079,7 +2080,7 @@ class _DetailPageState extends State<DetailPage> {
                     style: TextStyle(
                       color: isSelected ? fg : fg.withValues(alpha: 0.85),
                       fontWeight: isSelected ? FontWeight.bold : null,
-                      fontSize: 15,
+                      fontSize: DesignTokens.fontBody,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -2095,7 +2096,7 @@ class _DetailPageState extends State<DetailPage> {
                               chapter.tag!,
                               style: TextStyle(
                                 color: fg.withValues(alpha: 0.5),
-                                fontSize: 12,
+                                fontSize: DesignTokens.fontCaption,
                               ),
                             ),
                           if (hasTag && hasWordCount) const SizedBox(width: 8),
@@ -2104,7 +2105,7 @@ class _DetailPageState extends State<DetailPage> {
                               '${(chapter.wordCount! / 10000).toStringAsFixed(1)}万',
                               style: TextStyle(
                                 color: fg.withValues(alpha: 0.5),
-                                fontSize: 12,
+                                fontSize: DesignTokens.fontCaption,
                               ),
                             ),
                         ],
@@ -2499,7 +2500,7 @@ class _DetailPageState extends State<DetailPage> {
         builder: (context, scrollController) => Column(
           children: [
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(DesignTokens.spacingLg),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -2515,7 +2516,7 @@ class _DetailPageState extends State<DetailPage> {
             Expanded(
               child: ListView(
                 controller: scrollController,
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(DesignTokens.spacingLg),
                 children: [
                   ListTile(
                     leading: const Icon(Icons.refresh),
@@ -2636,7 +2637,7 @@ class _DetailPageState extends State<DetailPage> {
         builder: (context, scrollController) => Column(
           children: [
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(DesignTokens.spacingLg),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -2652,7 +2653,7 @@ class _DetailPageState extends State<DetailPage> {
             Expanded(
               child: ListView(
                 controller: scrollController,
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(DesignTokens.spacingLg),
                 children: [
                   Text('书籍URL: ${_book?.bookUrl ?? "未知"}'),
                   const SizedBox(height: 8),

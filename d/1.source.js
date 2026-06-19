@@ -2,25 +2,32 @@
 // @url https://m.00shu.la/
 // @group 写源
 // @type 0
-// @searchUrl /s.php,{"body":"searchkey={{key}}&type=articlename","charset":"utf-8","method":"POST"}
-// @exploreUrl @js:
-// sort=[];
-// push=(title,url,type1,type2)=>sort.push({title:title,url:url,style:{layout_flexGrow:type1,layout_flexBasisPercent:type2}});
-// push("全部🌊分类",null,1,1);
-// push("全本🌊小说","/full/{{page}}/",1,0.35);
-// push("最新🌊入库","/top/postdate_{{page}}/",1,0.35);
-// arList=["玄幻奇幻","武侠仙侠","都市言情","历史军事","游戏竞技","科幻灵异","其他类型"];
-// arList.map((tag,index)=>{push(tag,"/sort/"+(index+1)+"_{{page}}/",1,0.25)});
-// JSON.stringify(sort)
-// @header @js:
-// JSON.stringify({
-//   'User-Agent': java.getWebViewUA(),
-//   'sec-ch-ua-platform': '"Android"',
-//   'origin': baseUrl,
-//   'x-requested-with': 'cn.mujiankeji.mbrowser',
-//   'Referer': baseUrl,
-//   'Accept-language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7'
-// })
+var searchUrl = JSON.stringify({
+  url: '/s.php',
+  body: 'searchkey={{key}}&type=articlename',
+  charset: 'utf-8',
+  method: 'POST'
+});
+var exploreUrl = JSON.stringify([
+  {title:"全部🌊分类", url:null, style:{layout_flexGrow:1, layout_flexBasisPercent:1}},
+  {title:"全本🌊小说", url:"/full/{{page}}/", style:{layout_flexGrow:1, layout_flexBasisPercent:0.35}},
+  {title:"最新🌊入库", url:"/top/postdate_{{page}}/", style:{layout_flexGrow:1, layout_flexBasisPercent:0.35}},
+  {title:"玄幻奇幻", url:"/sort/1_{{page}}/", style:{layout_flexGrow:1, layout_flexBasisPercent:0.25}},
+  {title:"武侠仙侠", url:"/sort/2_{{page}}/", style:{layout_flexGrow:1, layout_flexBasisPercent:0.25}},
+  {title:"都市言情", url:"/sort/3_{{page}}/", style:{layout_flexGrow:1, layout_flexBasisPercent:0.25}},
+  {title:"历史军事", url:"/sort/4_{{page}}/", style:{layout_flexGrow:1, layout_flexBasisPercent:0.25}},
+  {title:"游戏竞技", url:"/sort/5_{{page}}/", style:{layout_flexGrow:1, layout_flexBasisPercent:0.25}},
+  {title:"科幻灵异", url:"/sort/6_{{page}}/", style:{layout_flexGrow:1, layout_flexBasisPercent:0.25}},
+  {title:"其他类型", url:"/sort/7_{{page}}/", style:{layout_flexGrow:1, layout_flexBasisPercent:0.25}}
+]);
+var header = JSON.stringify({
+  'User-Agent': getWebViewUA(),
+  'sec-ch-ua-platform': '"Android"',
+  'origin': baseUrl,
+  'x-requested-with': 'cn.mujiankeji.mbrowser',
+  'Referer': baseUrl,
+  'Accept-language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7'
+});
 
 // ===== 搜索 =====
 function search(key, page, result) {

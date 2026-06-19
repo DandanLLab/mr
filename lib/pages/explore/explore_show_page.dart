@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/explore_show_provider.dart';
 import '../../routes/app_routes.dart';
+import '../../utils/design_tokens.dart';
 
 class ExploreShowPage extends StatefulWidget {
   final String sourceUrl;
@@ -63,10 +64,10 @@ class _ExploreShowPageState extends State<ExploreShowPage> {
                 children: [
                   Icon(
                     Icons.book_outlined,
-                    size: 64,
+                    size: DesignTokens.emptyIconSize,
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: DesignTokens.spacingLg),
                   Text(
                     '暂无内容',
                     style: TextStyle(
@@ -85,12 +86,12 @@ class _ExploreShowPageState extends State<ExploreShowPage> {
             ),
             child: GridView.builder(
               cacheExtent: 500,
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(DesignTokens.spacingMd),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 3,
                 childAspectRatio: 0.65,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
+                crossAxisSpacing: DesignTokens.spacingMd,
+                mainAxisSpacing: DesignTokens.spacingMd,
               ),
               itemCount: provider.books.length,
               itemBuilder: (context, index) {
@@ -134,7 +135,7 @@ class _ExploreShowPageState extends State<ExploreShowPage> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(DesignTokens.spacingSm),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -144,7 +145,7 @@ class _ExploreShowPageState extends State<ExploreShowPage> {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
-                      fontSize: 12,
+                      fontSize: DesignTokens.fontCaption,
                     ),
                   ),
                   const SizedBox(height: 2),

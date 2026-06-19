@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../services/storage_service.dart';
 import '../../providers/discovery_provider.dart';
+import '../../utils/design_tokens.dart';
 
 class BackupRestorePage extends StatefulWidget {
   const BackupRestorePage({super.key});
@@ -219,12 +220,12 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         title: const Text('备份恢复'),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(DesignTokens.spacingLg),
         children: [
           // 备份操作
           Card(
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(DesignTokens.spacingLg),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -232,25 +233,25 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
                     '备份',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: DesignTokens.spacingSm),
                   Text(
                     '将书籍和书源数据备份到本地',
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: DesignTokens.fontCaption,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                   if (_lastBackupTime != null) ...[
-                    const SizedBox(height: 8),
+                    const SizedBox(height: DesignTokens.spacingSm),
                     Text(
                       '上次备份: ${_formatBackupTime(_lastBackupTime!)}',
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: DesignTokens.fontCaption,
                         color: Theme.of(context).colorScheme.primary,
                       ),
                     ),
                   ],
-                  const SizedBox(height: 16),
+                  const SizedBox(height: DesignTokens.spacingLg),
                   Row(
                     children: [
                       Expanded(
@@ -266,7 +267,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
                           label: const Text('立即备份'),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: DesignTokens.spacingSm),
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: _importBackup,
@@ -280,17 +281,17 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
               ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: DesignTokens.spacingLg),
           // 备份文件列表
           Text(
             '本地备份',
             style: Theme.of(context).textTheme.titleMedium,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: DesignTokens.spacingSm),
           if (_backupFiles.isEmpty)
             Card(
               child: Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(DesignTokens.spacingLg),
                 child: Text(
                   '暂无备份文件',
                   style: TextStyle(

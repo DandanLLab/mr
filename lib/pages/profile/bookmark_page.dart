@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/reader_bookmark_service.dart';
 import '../../services/storage_service.dart';
 import '../../models/book.dart';
+import '../../utils/design_tokens.dart';
 
 class BookmarkPage extends StatefulWidget {
   const BookmarkPage({super.key});
@@ -71,13 +72,13 @@ class _BookmarkPageState extends State<BookmarkPage> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _bookmarks.isEmpty
-              ? const Center(
+              ? Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.bookmark_border, size: 64, color: Colors.grey),
-                      SizedBox(height: 16),
-                      Text('暂无书签', style: TextStyle(color: Colors.grey)),
+                      Icon(Icons.bookmark_border, size: 64, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      const SizedBox(height: DesignTokens.spacingLg),
+                      Text('暂无书签', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                     ],
                   ),
                 )
@@ -99,7 +100,7 @@ class _BookmarkPageState extends State<BookmarkPage> {
       direction: DismissDirection.endToStart,
       background: Container(
         alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 16),
+        padding: const EdgeInsets.only(right: DesignTokens.spacingLg),
         color: Colors.red,
         child: const Icon(Icons.delete, color: Colors.white),
       ),
@@ -112,7 +113,7 @@ class _BookmarkPageState extends State<BookmarkPage> {
       },
       child: ListTile(
         leading: ClipRRect(
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
           child: book.coverUrl.isNotEmpty
               ? CachedNetworkImage(
                   imageUrl: book.coverUrl,
@@ -142,17 +143,17 @@ class _BookmarkPageState extends State<BookmarkPage> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 12,
+                fontSize: DesignTokens.fontCaption,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: DesignTokens.spacingXs),
             Text(
               bookmark.content,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 12,
+                fontSize: DesignTokens.fontCaption,
                 color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
               ),
             ),

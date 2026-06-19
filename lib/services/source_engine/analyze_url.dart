@@ -119,25 +119,48 @@ class AnalyzeUrl {
     // 支持 @js:xxx 和 <js>xxx</js> 格式
     urlPart = _analyzeJs(urlPart, keyword: keyword, page: page);
 
-    // 2. 分离 URL 和选项
-    final optionMatch = _optionStart.firstMatch(urlPart);
-    urlPart = optionMatch == null
-        ? urlPart.trim()
-        : urlPart.substring(0, optionMatch.start).trim();
+    // 2. 解析 URL 和选项
+    String? extractedUrl;
     UrlOption? option;
 
-    if (optionMatch != null) {
-      final optionText = ruleUrl.substring(optionMatch.end).trim();
+    // 2a. 尝试纯 JSON 对象格式：{url: "/path", body: "...", method: "POST"}
+    if (urlPart.startsWith('{')) {
       try {
-        final decoded = jsonDecode(optionText);
-        if (decoded is! Map) {
-          throw const FormatException('URL option must be a JSON object');
+        final decoded = jsonDecode(urlPart);
+        if (decoded is Map) {
+          final map = Map<String, dynamic>.from(decoded);
+          if (map.containsKey('url')) {
+            extractedUrl = map.remove('url').toString();
+          }
+          option = UrlOption.fromJson(map);
         }
-        option = UrlOption.fromJson(Map<String, dynamic>.from(decoded));
-      } catch (e) {
-        AppLogger.instance.logJsError('AnalyzeUrl', '选项解析失败: $e');
+      } catch (_) {
+        // 不是合法 JSON，走原始逻辑
       }
     }
+
+    // 2b. 原始 legado 格式：URL,{options}
+    if (extractedUrl == null && option == null) {
+      final optionMatch = _optionStart.firstMatch(urlPart);
+      extractedUrl = optionMatch == null
+          ? urlPart.trim()
+          : urlPart.substring(0, optionMatch.start).trim();
+
+      if (optionMatch != null) {
+        final optionText = ruleUrl.substring(optionMatch.end).trim();
+        try {
+          final decoded = jsonDecode(optionText);
+          if (decoded is! Map) {
+            throw const FormatException('URL option must be a JSON object');
+          }
+          option = UrlOption.fromJson(Map<String, dynamic>.from(decoded));
+        } catch (e) {
+          AppLogger.instance.logJsError('AnalyzeUrl', '选项解析失败: $e');
+        }
+      }
+    }
+
+    urlPart = extractedUrl ?? urlPart;
 
     // 3. 替换变量（包括 {{js表达式}}）
     urlPart = replaceVariables(urlPart, keyword: keyword, page: page);

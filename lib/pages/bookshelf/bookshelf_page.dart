@@ -9,6 +9,7 @@ import '../../providers/app_provider.dart';
 import '../../routes/app_routes.dart';
 import '../../services/local_book/local_book_service.dart';
 import '../../services/cover_config_service.dart';
+import '../../utils/design_tokens.dart';
 
 /// 书架布局类型
 enum BookshelfLayout {
@@ -137,14 +138,14 @@ class _BookshelfPageState extends State<BookshelfPage>
                 ),
                 color: Theme.of(context).colorScheme.primary,
                 child: SizedBox(
-                  height: 48,
+                  height: DesignTokens.topBarHeight,
                   child: Row(
                     children: [
                       // 分组标签（横向滚动）
                       Expanded(
                         child: ListView.builder(
                           scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingSm),
                           itemCount: groups.length,
                           itemBuilder: (context, index) {
                             final isSelected =
@@ -161,13 +162,13 @@ class _BookshelfPageState extends State<BookshelfPage>
                               },
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
+                                  horizontal: DesignTokens.spacingLg,
                                 ),
                                 alignment: Alignment.center,
                                 child: Text(
                                   groups[index],
                                   style: TextStyle(
-                                    fontSize: 14,
+                                    fontSize: DesignTokens.fontBody,
                                     fontWeight: isSelected
                                         ? FontWeight.w500
                                         : FontWeight.normal,
@@ -198,9 +199,9 @@ class _BookshelfPageState extends State<BookshelfPage>
                         color: Theme.of(context).colorScheme.surface,
                         elevation: 8,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
                         ),
-                        offset: const Offset(0, 48),
+                        offset: const Offset(0, DesignTokens.topBarHeight),
                         onSelected: (value) => _handleMenuSelection(value),
                         itemBuilder: (context) {
                           final onSurface = Theme.of(
@@ -209,15 +210,15 @@ class _BookshelfPageState extends State<BookshelfPage>
                           return [
                             PopupMenuItem(
                               value: 'refresh',
-                              height: 48,
+                              height: DesignTokens.topBarHeight,
                               child: Row(
                                 children: [
                                   Icon(
                                     Icons.refresh,
-                                    size: 24,
+                                    size: DesignTokens.listItemIconSize,
                                     color: onSurface,
                                   ),
-                                  const SizedBox(width: 16),
+                                  const SizedBox(width: DesignTokens.spacingLg),
                                   Text(
                                     '更新目录',
                                     style: TextStyle(color: onSurface),
@@ -227,11 +228,11 @@ class _BookshelfPageState extends State<BookshelfPage>
                             ),
                             PopupMenuItem(
                               value: 'import_local',
-                              height: 48,
+                              height: DesignTokens.topBarHeight,
                               child: Row(
                                 children: [
-                                  Icon(Icons.add, size: 24, color: onSurface),
-                                  const SizedBox(width: 16),
+                                  Icon(Icons.add, size: DesignTokens.listItemIconSize, color: onSurface),
+                                  const SizedBox(width: DesignTokens.spacingLg),
                                   Text(
                                     '添加本地',
                                     style: TextStyle(color: onSurface),
@@ -241,11 +242,11 @@ class _BookshelfPageState extends State<BookshelfPage>
                             ),
                             PopupMenuItem(
                               value: 'import_remote',
-                              height: 48,
+                              height: DesignTokens.topBarHeight,
                               child: Row(
                                 children: [
-                                  Icon(Icons.add, size: 24, color: onSurface),
-                                  const SizedBox(width: 16),
+                                  Icon(Icons.add, size: DesignTokens.listItemIconSize, color: onSurface),
+                                  const SizedBox(width: DesignTokens.spacingLg),
                                   Text(
                                     '远程书籍',
                                     style: TextStyle(color: onSurface),
@@ -255,15 +256,15 @@ class _BookshelfPageState extends State<BookshelfPage>
                             ),
                             PopupMenuItem(
                               value: 'import_url',
-                              height: 48,
+                              height: DesignTokens.topBarHeight,
                               child: Row(
                                 children: [
                                   Icon(
                                     Icons.language,
-                                    size: 24,
+                                    size: DesignTokens.listItemIconSize,
                                     color: onSurface,
                                   ),
-                                  const SizedBox(width: 16),
+                                  const SizedBox(width: DesignTokens.spacingLg),
                                   Text(
                                     '添加网址',
                                     style: TextStyle(color: onSurface),
@@ -273,15 +274,15 @@ class _BookshelfPageState extends State<BookshelfPage>
                             ),
                             PopupMenuItem(
                               value: 'bookshelf_manage',
-                              height: 48,
+                              height: DesignTokens.topBarHeight,
                               child: Row(
                                 children: [
                                   Icon(
                                     Icons.reorder,
-                                    size: 24,
+                                    size: DesignTokens.listItemIconSize,
                                     color: onSurface,
                                   ),
-                                  const SizedBox(width: 16),
+                                  const SizedBox(width: DesignTokens.spacingLg),
                                   Text(
                                     '书架管理',
                                     style: TextStyle(color: onSurface),
@@ -291,15 +292,15 @@ class _BookshelfPageState extends State<BookshelfPage>
                             ),
                             PopupMenuItem(
                               value: 'download',
-                              height: 48,
+                              height: DesignTokens.topBarHeight,
                               child: Row(
                                 children: [
                                   Icon(
                                     Icons.download_outlined,
-                                    size: 24,
+                                    size: DesignTokens.listItemIconSize,
                                     color: onSurface,
                                   ),
-                                  const SizedBox(width: 16),
+                                  const SizedBox(width: DesignTokens.spacingLg),
                                   Text(
                                     '缓存/导出',
                                     style: TextStyle(color: onSurface),
@@ -309,15 +310,15 @@ class _BookshelfPageState extends State<BookshelfPage>
                             ),
                             PopupMenuItem(
                               value: 'group_manage',
-                              height: 48,
+                              height: DesignTokens.topBarHeight,
                               child: Row(
                                 children: [
                                   Icon(
                                     Icons.folder_copy,
-                                    size: 24,
+                                    size: DesignTokens.listItemIconSize,
                                     color: onSurface,
                                   ),
-                                  const SizedBox(width: 16),
+                                  const SizedBox(width: DesignTokens.spacingLg),
                                   Text(
                                     '分组管理',
                                     style: TextStyle(color: onSurface),
@@ -327,15 +328,15 @@ class _BookshelfPageState extends State<BookshelfPage>
                             ),
                             PopupMenuItem(
                               value: 'layout',
-                              height: 48,
+                              height: DesignTokens.topBarHeight,
                               child: Row(
                                 children: [
                                   Icon(
                                     Icons.view_quilt,
-                                    size: 24,
+                                    size: DesignTokens.listItemIconSize,
                                     color: onSurface,
                                   ),
-                                  const SizedBox(width: 16),
+                                  const SizedBox(width: DesignTokens.spacingLg),
                                   Text(
                                     '书架布局',
                                     style: TextStyle(color: onSurface),
@@ -345,15 +346,15 @@ class _BookshelfPageState extends State<BookshelfPage>
                             ),
                             PopupMenuItem(
                               value: 'export_bookshelf',
-                              height: 48,
+                              height: DesignTokens.topBarHeight,
                               child: Row(
                                 children: [
                                   Icon(
                                     Icons.ios_share,
-                                    size: 24,
+                                    size: DesignTokens.listItemIconSize,
                                     color: onSurface,
                                   ),
-                                  const SizedBox(width: 16),
+                                  const SizedBox(width: DesignTokens.spacingLg),
                                   Text(
                                     '导出书单',
                                     style: TextStyle(color: onSurface),
@@ -363,15 +364,15 @@ class _BookshelfPageState extends State<BookshelfPage>
                             ),
                             PopupMenuItem(
                               value: 'import_bookshelf',
-                              height: 48,
+                              height: DesignTokens.topBarHeight,
                               child: Row(
                                 children: [
                                   Icon(
                                     Icons.file_download,
-                                    size: 24,
+                                    size: DesignTokens.listItemIconSize,
                                     color: onSurface,
                                   ),
-                                  const SizedBox(width: 16),
+                                  const SizedBox(width: DesignTokens.spacingLg),
                                   Text(
                                     '导入书单',
                                     style: TextStyle(color: onSurface),
@@ -381,15 +382,15 @@ class _BookshelfPageState extends State<BookshelfPage>
                             ),
                             PopupMenuItem(
                               value: 'log',
-                              height: 48,
+                              height: DesignTokens.topBarHeight,
                               child: Row(
                                 children: [
                                   Icon(
                                     Icons.info_outline,
-                                    size: 24,
+                                    size: DesignTokens.listItemIconSize,
                                     color: onSurface,
                                   ),
-                                  const SizedBox(width: 16),
+                                  const SizedBox(width: DesignTokens.spacingLg),
                                   Text(
                                     '日志',
                                     style: TextStyle(color: onSurface),
@@ -528,7 +529,7 @@ class _BookshelfPageState extends State<BookshelfPage>
             builder: (context, scrollController) => Column(
               children: [
                 Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(DesignTokens.spacingLg),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -778,7 +779,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                     },
                     contentPadding: EdgeInsets.zero,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: DesignTokens.spacingSm),
                   // 视图和排序（两列布局）
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -793,7 +794,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                               child: Text(
                                 '视图',
                                 style: TextStyle(
-                                  fontSize: 16,
+                                  fontSize: DesignTokens.fontSubtitle,
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
@@ -878,7 +879,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                           ],
                         ),
                       ),
-                      const SizedBox(width: 16),
+                      const SizedBox(width: DesignTokens.spacingLg),
                       // 排序
                       Expanded(
                         child: Column(
@@ -889,7 +890,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                               child: Text(
                                 '排序',
                                 style: TextStyle(
-                                  fontSize: 16,
+                                  fontSize: DesignTokens.fontSubtitle,
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
@@ -950,13 +951,13 @@ class _BookshelfPageState extends State<BookshelfPage>
                   // 书名显示（仅网格模式）
                   if (_layout != BookshelfLayout.list &&
                       _layout != BookshelfLayout.listCompact) ...[
-                    const SizedBox(height: 8),
+                    const SizedBox(height: DesignTokens.spacingSm),
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 6),
                       child: Text(
                         '书名',
                         style: TextStyle(
-                          fontSize: 16,
+                          fontSize: DesignTokens.fontSubtitle,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -971,7 +972,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                             setDialogState(() => _bookNameDisplay = v);
                           },
                         ),
-                        const SizedBox(width: 16),
+                        const SizedBox(width: DesignTokens.spacingLg),
                         _buildRadioItem(
                           '隐藏',
                           BookNameDisplay.hide,
@@ -980,7 +981,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                             setDialogState(() => _bookNameDisplay = v);
                           },
                         ),
-                        const SizedBox(width: 16),
+                        const SizedBox(width: DesignTokens.spacingLg),
                         _buildRadioItem(
                           '叠加',
                           BookNameDisplay.overlay,
@@ -992,7 +993,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                       ],
                     ),
                   ],
-                  const SizedBox(height: 16),
+                  const SizedBox(height: DesignTokens.spacingLg),
                   // 间距
                   Row(
                     children: [
@@ -1236,13 +1237,13 @@ class _BookshelfPageState extends State<BookshelfPage>
         children: [
           // 参考原版：不包 Card，扁平化布局
           Padding(
-            padding: const EdgeInsets.all(4),
+            padding: const EdgeInsets.all(DesignTokens.spacingXs),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Expanded(
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
+                    borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
@@ -1279,7 +1280,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
                                       color: Colors.white,
-                                      fontSize: 11,
+                                      fontSize: DesignTokens.fontCaption,
                                       fontWeight: FontWeight.w500,
                                       shadows: [
                                         Shadow(
@@ -1329,7 +1330,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         fontWeight: FontWeight.w500,
-                        fontSize: 12,
+                        fontSize: DesignTokens.fontCaption,
                       ),
                     ),
                   ),
@@ -1345,7 +1346,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.secondary,
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
                 ),
                 child: Text(
                   '${book.unreadCount}',
@@ -1382,10 +1383,10 @@ class _BookshelfPageState extends State<BookshelfPage>
               bottom: _bookNameDisplay == BookNameDisplay.show ? 32 : 4,
               right: 4,
               child: Container(
-                padding: const EdgeInsets.all(3),
+                padding: const EdgeInsets.all(DesignTokens.spacingXs),
                 decoration: BoxDecoration(
                   color: Colors.black54,
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
                 ),
                 child: const Icon(
                   Icons.push_pin,
@@ -1401,7 +1402,7 @@ class _BookshelfPageState extends State<BookshelfPage>
 
   Widget _buildListView(BookshelfProvider provider) {
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: DesignTokens.spacingSm),
       itemCount: provider.books.length,
       itemBuilder: (context, index) {
         final book = provider.books[index];
@@ -1420,13 +1421,13 @@ class _BookshelfPageState extends State<BookshelfPage>
       onTap: () => _openBook(book),
       onLongPress: () => _showBookOptions(book, provider),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingSm, vertical: DesignTokens.spacingSm),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // 封面（参考原版：66x90dp，圆角4dp）
             ClipRRect(
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
               child: SizedBox(
                 width: isCompact ? 48 : 66,
                 height: isCompact ? 64 : 90,
@@ -1459,7 +1460,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              fontSize: 16,
+                              fontSize: DesignTokens.fontSubtitle,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -1467,14 +1468,14 @@ class _BookshelfPageState extends State<BookshelfPage>
                         // 未读数徽章
                         if (_showUnread && book.unreadCount > 0)
                           Container(
-                            margin: const EdgeInsets.only(left: 8),
+                            margin: const EdgeInsets.only(left: DesignTokens.spacingSm),
                             padding: const EdgeInsets.symmetric(
                               horizontal: 5,
                               vertical: 1,
                             ),
                             decoration: BoxDecoration(
                               color: Theme.of(context).colorScheme.secondary,
-                              borderRadius: BorderRadius.circular(10),
+                              borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
                             ),
                             child: Text(
                               '${book.unreadCount}',
@@ -1487,7 +1488,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                           ),
                       ],
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: DesignTokens.spacingXs),
                     if (isCompact) ...[
                       // 紧凑模式第2行：作者 · 进度 | 更新时间（同一行）
                       Row(
@@ -1499,14 +1500,14 @@ class _BookshelfPageState extends State<BookshelfPage>
                               context,
                             ).colorScheme.onSurfaceVariant,
                           ),
-                          const SizedBox(width: 4),
+                          const SizedBox(width: DesignTokens.spacingXs),
                           Expanded(
                             child: RichText(
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               text: TextSpan(
                                 style: TextStyle(
-                                  fontSize: 13,
+                                  fontSize: DesignTokens.fontSummary,
                                   color: Theme.of(
                                     context,
                                   ).colorScheme.onSurfaceVariant,
@@ -1520,7 +1521,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                                   if (book.durChapterTitle.isNotEmpty) ...[
                                     const TextSpan(
                                       text: ' · ',
-                                      style: TextStyle(fontSize: 11),
+                                      style: TextStyle(fontSize: DesignTokens.fontSummary),
                                     ),
                                     TextSpan(text: book.durChapterTitle),
                                   ],
@@ -1532,7 +1533,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                             Text(
                               _formatUpdateTime(book.lastCheckTime!),
                               style: TextStyle(
-                                fontSize: 13,
+                                fontSize: DesignTokens.fontSummary,
                                 color: Theme.of(
                                   context,
                                 ).colorScheme.onSurfaceVariant,
@@ -1540,7 +1541,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                             ),
                         ],
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: DesignTokens.spacingXs),
                       // 紧凑模式第3行：最新章节
                       if (book.latestChapterTitle.isNotEmpty)
                         Row(
@@ -1552,14 +1553,14 @@ class _BookshelfPageState extends State<BookshelfPage>
                                 context,
                               ).colorScheme.onSurfaceVariant,
                             ),
-                            const SizedBox(width: 4),
+                            const SizedBox(width: DesignTokens.spacingXs),
                             Expanded(
                               child: Text(
                                 book.latestChapterTitle,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  fontSize: 13,
+                                  fontSize: DesignTokens.fontSummary,
                                   color: Theme.of(
                                     context,
                                   ).colorScheme.onSurfaceVariant,
@@ -1579,14 +1580,14 @@ class _BookshelfPageState extends State<BookshelfPage>
                               context,
                             ).colorScheme.onSurfaceVariant,
                           ),
-                          const SizedBox(width: 4),
+                          const SizedBox(width: DesignTokens.spacingXs),
                           Expanded(
                             child: Text(
                               book.author.isNotEmpty ? book.author : '未知作者',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                fontSize: 13,
+                                fontSize: DesignTokens.fontSummary,
                                 color: Theme.of(
                                   context,
                                 ).colorScheme.onSurfaceVariant,
@@ -1597,7 +1598,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                             Text(
                               _formatUpdateTime(book.lastCheckTime!),
                               style: TextStyle(
-                                fontSize: 13,
+                                fontSize: DesignTokens.fontSummary,
                                 color: Theme.of(
                                   context,
                                 ).colorScheme.onSurfaceVariant,
@@ -1605,7 +1606,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                             ),
                         ],
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: DesignTokens.spacingXs),
                       // 标准模式第3行：阅读进度
                       Row(
                         children: [
@@ -1616,7 +1617,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                               context,
                             ).colorScheme.onSurfaceVariant,
                           ),
-                          const SizedBox(width: 4),
+                          const SizedBox(width: DesignTokens.spacingXs),
                           Expanded(
                             child: Text(
                               book.durChapterTitle.isNotEmpty
@@ -1625,7 +1626,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                fontSize: 13,
+                                fontSize: DesignTokens.fontSummary,
                                 color: Theme.of(
                                   context,
                                 ).colorScheme.onSurfaceVariant,
@@ -1634,7 +1635,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                           ),
                         ],
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: DesignTokens.spacingXs),
                       // 标准模式第4行：最新章节
                       if (book.latestChapterTitle.isNotEmpty)
                         Row(
@@ -1646,14 +1647,14 @@ class _BookshelfPageState extends State<BookshelfPage>
                                 context,
                               ).colorScheme.onSurfaceVariant,
                             ),
-                            const SizedBox(width: 4),
+                            const SizedBox(width: DesignTokens.spacingXs),
                             Expanded(
                               child: Text(
                                 book.latestChapterTitle,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  fontSize: 13,
+                                  fontSize: DesignTokens.fontSummary,
                                   color: Theme.of(
                                     context,
                                   ).colorScheme.onSurfaceVariant,
@@ -1692,12 +1693,12 @@ class _BookshelfPageState extends State<BookshelfPage>
       children: [
         Expanded(
           child: GridView.builder(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(DesignTokens.spacingMd),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: _gridColumnCount,
               childAspectRatio: 0.65,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
+              crossAxisSpacing: DesignTokens.spacingMd,
+              mainAxisSpacing: DesignTokens.spacingMd,
             ),
             itemCount: provider.books.length,
             itemBuilder: (context, index) {
@@ -1718,7 +1719,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                             color: Theme.of(
                               context,
                             ).colorScheme.primary.withValues(alpha: 0.3),
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
                           ),
                           child: Center(
                             child: Icon(
@@ -1736,13 +1737,13 @@ class _BookshelfPageState extends State<BookshelfPage>
           ),
         ),
         Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(DesignTokens.spacingLg),
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surface,
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.1),
-                blurRadius: 8,
+                blurRadius: DesignTokens.spacingSm,
                 offset: const Offset(0, -2),
               ),
             ],
@@ -1809,22 +1810,22 @@ class _BookshelfPageState extends State<BookshelfPage>
         children: [
           Icon(
             Icons.book_outlined,
-            size: 80,
+            size: DesignTokens.emptyIconSize,
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: DesignTokens.spacingLg),
           Text(
             '书架空空如也',
             style: TextStyle(
-              fontSize: 18,
+              fontSize: DesignTokens.fontTitle,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: DesignTokens.spacingSm),
           Text(
             '点击右下角按钮导入书籍',
             style: TextStyle(
-              fontSize: 14,
+              fontSize: DesignTokens.fontBody,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
@@ -1985,14 +1986,14 @@ class _BookshelfPageState extends State<BookshelfPage>
                     Expanded(
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 16,
+                          horizontal: DesignTokens.spacingLg,
+                          vertical: DesignTokens.spacingLg,
                         ),
                         child: Text(
                           '选择分组',
                           style: TextStyle(
                             color: Theme.of(context).colorScheme.onPrimary,
-                            fontSize: 18,
+                            fontSize: DesignTokens.fontTitle,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -2024,8 +2025,8 @@ class _BookshelfPageState extends State<BookshelfPage>
                       final isDefault = defaultGroups.contains(group);
                       return Padding(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
+                          horizontal: DesignTokens.spacingSm,
+                          vertical: DesignTokens.spacingXs,
                         ),
                         child: Row(
                           children: [
@@ -2065,7 +2066,7 @@ class _BookshelfPageState extends State<BookshelfPage>
               ),
               // 底部按钮
               Padding(
-                padding: const EdgeInsets.only(right: 16, bottom: 8),
+                padding: const EdgeInsets.only(right: DesignTokens.spacingLg, bottom: DesignTokens.spacingSm),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [

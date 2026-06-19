@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/miniprogram.dart';
+import '../../utils/design_tokens.dart';
 
 class MiniprogramPage extends StatefulWidget {
   const MiniprogramPage({super.key});
@@ -44,10 +45,10 @@ class _MiniprogramPageState extends State<MiniprogramPage>
               children: [
                 // Toolbar + 搜索框在同一行（不显示标题文字）
                 SizedBox(
-                  height: 48,
+                  height: DesignTokens.topBarHeight,
                   child: Row(
                     children: [
-                      const SizedBox(width: 8),
+                      const SizedBox(width: DesignTokens.spacingSm),
                       // 搜索框（参考原版：高度30dp）
                       Expanded(
                         child: SizedBox(
@@ -56,7 +57,7 @@ class _MiniprogramPageState extends State<MiniprogramPage>
                             controller: _searchController,
                             decoration: InputDecoration(
                               hintText: '搜索订阅',
-                              hintStyle: TextStyle(fontSize: 13, color: appBarForeground.withValues(alpha: 0.7)),
+                              hintStyle: TextStyle(fontSize: DesignTokens.fontSummary, color: appBarForeground.withValues(alpha: 0.7)),
                               prefixIcon: Icon(Icons.search, size: 16, color: appBarForeground.withValues(alpha: 0.7)),
                               suffixIcon: _searchQuery.isNotEmpty
                                   ? IconButton(
@@ -72,12 +73,12 @@ class _MiniprogramPageState extends State<MiniprogramPage>
                                     )
                                   : null,
                               border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
+                                borderRadius: BorderRadius.circular(DesignTokens.searchRadius),
                               ),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingSm, vertical: 0),
                               isDense: true,
                             ),
-                            style: TextStyle(fontSize: 13, color: appBarForeground),
+                            style: TextStyle(fontSize: DesignTokens.fontSummary, color: appBarForeground),
                             onChanged: (value) {
                               setState(() {
                                 _searchQuery = value;
@@ -86,7 +87,7 @@ class _MiniprogramPageState extends State<MiniprogramPage>
                           ),
                         ),
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: DesignTokens.spacingXs),
                       // 历史记录
                       IconButton(
                         icon: Icon(Icons.history, size: 20, color: appBarForeground),
@@ -109,7 +110,7 @@ class _MiniprogramPageState extends State<MiniprogramPage>
                       PopupMenuButton<String>(
                         icon: Icon(Icons.more_vert, size: 20, color: appBarForeground),
                         tooltip: '更多',
-                        offset: const Offset(0, 48),
+                        offset: const Offset(0, DesignTokens.topBarHeight),
                         onSelected: (value) {
                           if (value == 'add') {
                             _showInstallDialog();
@@ -143,12 +144,12 @@ class _MiniprogramPageState extends State<MiniprogramPage>
     // 参考原版设计：搜索框
     return Container(
       height: 48,
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      padding: const EdgeInsets.fromLTRB(DesignTokens.spacingMd, DesignTokens.spacingXs, DesignTokens.spacingMd, DesignTokens.spacingSm),
       child: TextField(
         controller: _searchController,
         decoration: InputDecoration(
           hintText: '搜索小程序',
-          hintStyle: const TextStyle(fontSize: 14),
+          hintStyle: const TextStyle(fontSize: DesignTokens.fontBody),
           prefixIcon: const Icon(Icons.search, size: 18),
           suffixIcon: _searchQuery.isNotEmpty
               ? IconButton(
@@ -163,12 +164,12 @@ class _MiniprogramPageState extends State<MiniprogramPage>
                 )
               : null,
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(DesignTokens.searchRadius),
           ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+          contentPadding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingMd, vertical: 0),
           isDense: true,
         ),
-        style: const TextStyle(fontSize: 14),
+        style: const TextStyle(fontSize: DesignTokens.fontBody),
         onChanged: (value) {
           setState(() {
             _searchQuery = value;
@@ -185,22 +186,22 @@ class _MiniprogramPageState extends State<MiniprogramPage>
         children: [
           Icon(
             Icons.apps_outlined,
-            size: 64,
+            size: DesignTokens.emptyIconSize,
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: DesignTokens.spacingLg),
           Text(
             '暂无小程序',
             style: TextStyle(
-              fontSize: 16,
+              fontSize: DesignTokens.fontSubtitle,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: DesignTokens.spacingSm),
           Text(
             '点击右上角按钮安装小程序',
             style: TextStyle(
-              fontSize: 14,
+              fontSize: DesignTokens.fontBody,
               color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
             ),
           ),
@@ -212,7 +213,7 @@ class _MiniprogramPageState extends State<MiniprogramPage>
   Widget _buildList() {
     return ListView.builder(
       cacheExtent: 500,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(DesignTokens.spacingMd),
       itemCount: _miniprograms.length,
       itemBuilder: (context, index) {
         final mp = _miniprograms[index];
@@ -223,10 +224,10 @@ class _MiniprogramPageState extends State<MiniprogramPage>
 
   Widget _buildMiniprogramItem(Miniprogram mp) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: DesignTokens.spacingSm),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
       ),
       child: ListTile(
         leading: Container(
@@ -234,11 +235,11 @@ class _MiniprogramPageState extends State<MiniprogramPage>
           height: 48,
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.primaryContainer,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
           ),
           child: mp.icon != null
               ? ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
                   child: CachedNetworkImage(
                     imageUrl: mp.icon!,
                     fit: BoxFit.cover,
@@ -263,7 +264,7 @@ class _MiniprogramPageState extends State<MiniprogramPage>
         subtitle: Text(
           'v${mp.version} · ${mp.description ?? "暂无描述"}',
           style: TextStyle(
-            fontSize: 12,
+            fontSize: DesignTokens.fontCaption,
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
@@ -274,11 +275,11 @@ class _MiniprogramPageState extends State<MiniprogramPage>
               Text(
                 '${(mp.size! / 1024).toStringAsFixed(1)} KB',
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: DesignTokens.fontCaption,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
-            const SizedBox(width: 8),
+            const SizedBox(width: DesignTokens.spacingSm),
             Icon(
               Icons.chevron_right,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -366,9 +367,9 @@ class _MiniprogramPageState extends State<MiniprogramPage>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildDetailRow('版本', 'v${mp.version}'),
-              const SizedBox(height: 8),
+              const SizedBox(height: DesignTokens.spacingSm),
               _buildDetailRow('描述', mp.description ?? '无'),
-              const SizedBox(height: 8),
+              const SizedBox(height: DesignTokens.spacingSm),
               _buildDetailRow(
                 '占用空间',
                 mp.size != null ? '${(mp.size! / 1024).toStringAsFixed(2)} KB' : '未知',

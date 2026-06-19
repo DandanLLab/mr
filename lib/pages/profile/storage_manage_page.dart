@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/storage_service.dart';
 import '../../models/book.dart';
+import '../../utils/design_tokens.dart';
 
 class StorageManagePage extends StatefulWidget {
   const StorageManagePage({super.key});
@@ -83,7 +84,7 @@ class _StorageManagePageState extends State<StorageManagePage> {
               children: [
                 // 总大小统计
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(DesignTokens.spacingLg),
                   decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   ),
@@ -93,16 +94,16 @@ class _StorageManagePageState extends State<StorageManagePage> {
                         Icons.storage,
                         color: Theme.of(context).colorScheme.primary,
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: DesignTokens.spacingMd),
                       Text(
                         '共 ${_books.length} 本书籍',
-                        style: const TextStyle(fontSize: 14),
+                        style: const TextStyle(fontSize: DesignTokens.fontBody),
                       ),
                       const Spacer(),
                       Text(
                         '总大小: ${_formatSize(_totalSize)}',
                         style: TextStyle(
-                          fontSize: 14,
+                          fontSize: DesignTokens.fontBody,
                           color: Theme.of(context).colorScheme.primary,
                         ),
                       ),
@@ -112,13 +113,13 @@ class _StorageManagePageState extends State<StorageManagePage> {
                 // 书籍列表
                 Expanded(
                   child: _books.isEmpty
-                      ? const Center(
+                      ? Center(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.inbox, size: 64, color: Colors.grey),
-                              SizedBox(height: 16),
-                              Text('暂无书籍', style: TextStyle(color: Colors.grey)),
+                              Icon(Icons.inbox, size: DesignTokens.emptyIconSize, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                              const SizedBox(height: DesignTokens.spacingLg),
+                              Text('暂无书籍', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                             ],
                           ),
                         )
@@ -140,7 +141,7 @@ class _StorageManagePageState extends State<StorageManagePage> {
   Widget _buildBookItem(Book book, int size) {
     return ListTile(
       leading: ClipRRect(
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
         child: book.coverUrl.isNotEmpty
             ? CachedNetworkImage(
                 imageUrl: book.coverUrl,
@@ -173,7 +174,7 @@ class _StorageManagePageState extends State<StorageManagePage> {
           Text(
             _formatSize(size),
             style: TextStyle(
-              fontSize: 12,
+              fontSize: DesignTokens.fontCaption,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),

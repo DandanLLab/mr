@@ -82,17 +82,32 @@ class BookSourceImportService {
       throw const FormatException('JS书源内容为空');
     }
 
-    // 从JS代码注释中提取元数据
+    // 从JS代码注释中提取元数据（支持注释格式和 JS 变量格式）
     String name = '';
     String url = '';
     String group = 'JS书源';
 
     final nameMatch = RegExp(r'@name\s+(.+)', caseSensitive: false).firstMatch(jsCodeTrimmed);
-    if (nameMatch != null) name = nameMatch.group(1)?.trim() ?? '';
+    if (nameMatch != null) {
+      name = nameMatch.group(1)?.trim() ?? '';
+    } else {
+      final jsVarMatch = RegExp(r'''var\s+(?:bookSource)?[Nn]ame\s*=\s*["']([^"']+)["']''').firstMatch(jsCodeTrimmed);
+      if (jsVarMatch != null) name = jsVarMatch.group(1) ?? '';
+    }
     final urlMatch = RegExp(r'@url\s+(.+)', caseSensitive: false).firstMatch(jsCodeTrimmed);
-    if (urlMatch != null) url = urlMatch.group(1)?.trim() ?? '';
+    if (urlMatch != null) {
+      url = urlMatch.group(1)?.trim() ?? '';
+    } else {
+      final jsVarMatch = RegExp(r'''var\s+(?:bookSource)?[Uu]rl\s*=\s*["']([^"']+)["']''').firstMatch(jsCodeTrimmed);
+      if (jsVarMatch != null) url = jsVarMatch.group(1) ?? '';
+    }
     final groupMatch = RegExp(r'@group\s+(.+)', caseSensitive: false).firstMatch(jsCodeTrimmed);
-    if (groupMatch != null) group = groupMatch.group(1)?.trim() ?? 'JS书源';
+    if (groupMatch != null) {
+      group = groupMatch.group(1)?.trim() ?? 'JS书源';
+    } else {
+      final jsVarMatch = RegExp(r'''var\s+(?:bookSource)?[Gg]roup\s*=\s*["']([^"']+)["']''').firstMatch(jsCodeTrimmed);
+      if (jsVarMatch != null) group = jsVarMatch.group(1) ?? 'JS书源';
+    }
 
     // 自动生成缺失的元数据
     if (name.isEmpty) name = 'JS书源_${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
@@ -107,10 +122,10 @@ class BookSourceImportService {
     final hasNextTocUrl = RegExp(r'function\s+nextTocUrl\s*\(').hasMatch(jsCodeTrimmed);
     final hasNextContentUrl = RegExp(r'function\s+nextContentUrl\s*\(').hasMatch(jsCodeTrimmed);
 
-    // 提取元数据注释
-    final searchUrlMeta = _extractMeta(jsCodeTrimmed, 'searchUrl');
-    final exploreUrlMeta = _extractMeta(jsCodeTrimmed, 'exploreUrl');
-    final headerMeta = _extractMeta(jsCodeTrimmed, 'header');
+    // 提取元数据（支持注释格式和 JS 变量格式）
+    final searchUrlMeta = _extractMeta(jsCodeTrimmed, 'searchUrl') ?? _extractJsVar(jsCodeTrimmed, 'searchUrl');
+    final exploreUrlMeta = _extractMeta(jsCodeTrimmed, 'exploreUrl') ?? _extractJsVar(jsCodeTrimmed, 'exploreUrl');
+    final headerMeta = _extractMeta(jsCodeTrimmed, 'header') ?? _extractJsVar(jsCodeTrimmed, 'header');
 
     final source = BookSource(
       bookSourceUrl: url,
@@ -317,5 +332,27 @@ class BookSourceImportService {
 
     final result = buffer.toString().trim();
     return result.isEmpty ? null : result;
+  }
+
+  /// 从 JS 变量声明中提取元数据
+  /// 支持：var searchUrl = "xxx" 或 var searchUrl = 'xxx'
+  /// 对于 JS 表达式（如 JSON.stringify(...)），自动添加 @js: 前缀
+  static String? _extractJsVar(String code, String key) {
+    // 简单字符串赋值：var xxx = "value" 或 var xxx = 'value'
+    final simpleMatch = RegExp('''var\\s+$key\\s*=\\s*["']([^"']+)["']''').firstMatch(code);
+    if (simpleMatch != null) return simpleMatch.group(1);
+
+    // JS 表达式赋值：var xxx = JSON.stringify({...}) 等
+    // 提取到下一个 var/function/@注释 为止
+    final multiLineMatch = RegExp('var\\s+$key\\s*=\\s*(.*?)(?=\\nvar\\s|\\nfunction\\s|\\n//\\s*@)', dotAll: true).firstMatch(code);
+    if (multiLineMatch != null) {
+      var value = multiLineMatch.group(1)?.trim() ?? '';
+      if (value.isNotEmpty) {
+        // JS 表达式需要 @js: 前缀，运行时才知道要执行
+        return '@js:$value';
+      }
+    }
+
+    return null;
   }
 }

@@ -2,148 +2,165 @@
  * 纯JS书源模板
  *
  * 这是全新的书源格式，整个书源就是一个JS文件。
- * 通过导出对象定义书源的所有信息和规则。
+ * 通过函数声明定义书源的所有规则。
  *
- * 可用内置变量：
- *   result  - 当前请求的响应内容
- *   baseUrl - 当前页面的基础URL
- *   source  - 书源元数据对象
- *   book    - 当前书籍信息
- *   chapter - 当前章节信息
- *   cookie  - Cookie信息
+ * 【元数据注释】（必须写在文件顶部）
+ *   @name        书源名称（必填）
+ *   @url         书源URL（必填）
+ *   @group       分组
+ *   @type        类型：0=文字 1=音频 2=图片 3=文件
+ *   @searchUrl   搜索URL模板（{{key}}=关键词 {{page}}=页码）
+ *   @exploreUrl  发现分类JSON
+ *   @header      请求头JS代码
  *
- * 可用桥接方法：
- *   java.get(url, headers)         - HTTP GET
- *   java.post(url, body, headers)  - HTTP POST
- *   java.ajax(url, headers)        - 同java.get
- *   java.put(key, value)           - 存储变量
- *   java.getStr(key, defaultValue) - 读取变量
- *   java.jsoup.select(html, css)   - CSS选择器
- *   java.jsoup.selectFirst(html, css) - CSS选择首个
- *   java.jsoup.getAttr(html, css, attr) - 获取属性
- *   java.regex.match(str, pattern) - 正则匹配
- *   java.regex.matchAll(str, pattern) - 正则匹配全部
- *   java.aesEncode/Decode(data, key, iv) - AES加解密
- *   java.md5Encode(str)            - MD5哈希
- *   java.base64Encode/Decode(str)  - Base64编解码
- *   java.cache.get/put/delete(key) - 持久化缓存
- *   java.log(msg)                  - 日志输出
- *   CryptoJS                       - 加密库（AES/MD5/SHA等）
+ * 【函数参数说明】
+ *   search(key, page, result)    key=搜索词 page=页码 result=搜索页HTML
+ *   explore(baseUrl, result)     baseUrl=分类URL result=发现页HTML
+ *   bookInfo(result)             result=详情页HTML
+ *   toc(result)                  result=目录页HTML
+ *   content(result)              result=正文页HTML
+ *   nextTocUrl(result)           result=目录页HTML（可选，多页目录）
+ *   nextContentUrl(result)       result=正文页HTML（可选，多页正文）
+ *
+ * 【返回值格式】
+ *   search()        → [{name, author, bookUrl, coverUrl, kind, lastChapter, intro}, ...]
+ *   explore()       → [{name, author, bookUrl, coverUrl, kind, lastChapter}, ...]
+ *   bookInfo()      → {name, author, coverUrl, intro, kind, lastChapter, tocUrl, wordCount}
+ *   toc()           → [{name, url, isVolume}, ...]
+ *   content()       → "正文文本"（纯文本或HTML）
+ *   nextTocUrl()    → "下一页URL" 或 ""（空字符串表示没有下一页）
+ *   nextContentUrl() → "下一页URL" 或 ""（空字符串表示没有下一页）
+ *
+ * 【可用API】
+ *   selectFirst(html, selector)             提取首个元素文本
+ *   select(html, selector)                  提取元素列表（返回HTML数组）
+ *   getAttr(html, selector, attr)           提取属性值
+ *   clean(html)                             清理HTML标签
+ *   put(key, value) / getStr(key)           变量存取
+ *   base64Encode/Decode(str)                Base64编解码
+ *   md5Encode(str) / sha256Encode(str)      哈希
+ *   aesEncode(data, key, iv) / aesDecode(data, key, iv)  AES加解密
+ *   CryptoJS.AES/MD5/SHA256/HmacSHA256      加密库
+ *   console.log/warn/error/info             日志输出（调试用，不影响结果）
+ *   JSON.parse/stringify                    JSON操作
+ *   fetch(url) / fetch(url, {method:'POST',body})  HTTP请求
  */
 
-const source = {
-  // ===== 基本信息 =====
-  bookSourceUrl: "",
-  bookSourceName: "",
-  bookSourceGroup: "JS书源",
-  bookSourceType: 0,  // 0文字 1音频 2图片 3文件 4视频
-  enabled: true,
-  enabledExplore: true,
-  enabledCookieJar: true,
-  engine: "quickjs",
+// @name 书源名称
+// @url https://www.example.com
+// @group JS书源
+// @type 0
+var searchUrl = '/search?q={{key}}&p={{page}}';
+var exploreUrl = JSON.stringify([
+  {title:"分类1", url:"/category/1/{{page}}.html", style:{layout_flexBasisPercent:0.25, layout_flexGrow:1}}
+]);
 
-  // ===== 网络配置 =====
-  header: JSON.stringify({
-    "User-Agent": "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-  }),
+// ===== 搜索 =====
+function search(key, page, result) {
+  var html = result;
+  var items = select(html, ".book-list > .item");
+  var results = [];
 
-  // ===== 搜索 =====
-  searchUrl: "https://js.example.com/search?key={{key}}&page={{page}}",
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    results.push({
+      name: selectFirst(item, ".book-name") || "",
+      author: selectFirst(item, ".author") || "",
+      bookUrl: getAttr(item, "a.title", "href") || "",
+      coverUrl: getAttr(item, "img.cover", "src") || "",
+      kind: selectFirst(item, ".tag") || "",
+      lastChapter: selectFirst(item, ".latest") || "",
+      intro: selectFirst(item, ".intro") || ""
+    });
+  }
 
-  // ===== 发现 =====
-  exploreUrl: "推荐::https://js.example.com/recommend\n热门::https://js.example.com/hot\n更新::https://js.example.com/update",
+  return results;
+}
 
-  // ===== 搜索规则 =====
-  search(keyword, page, result) {
-    // result 是搜索页面的HTML/JSON内容
-    // 返回书籍列表数组
-    const list = [];
-    // TODO: 解析result，提取书籍信息
-    // 示例：使用jsoup解析HTML
-    // const items = java.jsoup.select(result, "div.book-list > li");
-    // for (const item of items) {
-    //   list.push({
-    //     name: java.jsoup.selectFirst(item, "h3 a").trim(),
-    //     author: java.jsoup.selectFirst(item, "p.author").replace("作者：", "").trim(),
-    //     bookUrl: java.jsoup.getAttr(item, "h3 a", "href"),
-    //     coverUrl: java.jsoup.getAttr(item, "img", "src"),
-    //     intro: java.jsoup.selectFirst(item, "p.intro").trim(),
-    //     kind: java.jsoup.selectFirst(item, "span.category").trim(),
-    //     lastChapter: java.jsoup.selectFirst(item, "a.chapter").trim(),
-    //   });
-    // }
-    return list;
-  },
+// ===== 发现 =====
+function explore(baseUrl, result) {
+  var html = result;
+  var items = select(html, ".book-list > .item");
+  var results = [];
 
-  // ===== 发现规则 =====
-  explore(url, result) {
-    // result 是发现页面的内容
-    // 返回书籍列表数组，格式同search
-    return this.search("", 1, result);
-  },
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    results.push({
+      name: selectFirst(item, ".book-name") || "",
+      author: selectFirst(item, ".author") || "",
+      bookUrl: getAttr(item, "a.title", "href") || "",
+      coverUrl: getAttr(item, "img.cover", "src") || "",
+      kind: selectFirst(item, ".tag") || "",
+      lastChapter: selectFirst(item, ".latest") || ""
+    });
+  }
 
-  // ===== 详情规则 =====
-  bookInfo(result) {
-    // result 是书籍详情页的内容
-    // 返回书籍详细信息对象
-    const info = {};
-    // TODO: 解析result，提取书籍详情
-    // 示例：
-    // info.name = java.jsoup.selectFirst(result, "h1.book-name").trim();
-    // info.author = java.jsoup.selectFirst(result, "p.author").replace("作者：", "").trim();
-    // info.intro = java.jsoup.selectFirst(result, "div.intro").trim();
-    // info.coverUrl = java.jsoup.getAttr(result, "img.cover", "src");
-    // info.tocUrl = java.jsoup.getAttr(result, "a.read-btn", "href");
-    // info.kind = java.jsoup.selectFirst(result, "span.category").trim();
-    // info.lastChapter = java.jsoup.selectFirst(result, "span.last-chapter").trim();
-    // info.wordCount = java.jsoup.selectFirst(result, "span.word-count").trim();
-    return info;
-  },
+  return results;
+}
 
-  // ===== 目录规则 =====
-  toc(result) {
-    // result 是目录页的内容
-    // 返回章节列表数组
-    const chapters = [];
-    // TODO: 解析result，提取章节列表
-    // 示例：
-    // const items = java.jsoup.select(result, "div.chapter-list li");
-    // for (const item of items) {
-    //   chapters.push({
-    //     name: java.jsoup.selectFirst(item, "a").trim(),
-    //     url: java.jsoup.getAttr(item, "a", "href"),
-    //     isVolume: item.includes("volume") ? true : false,
-    //   });
-    // }
-    return chapters;
-  },
+// ===== 书籍详情 =====
+function bookInfo(result) {
+  var html = result;
 
-  // ===== 正文规则 =====
-  content(result) {
-    // result 是正文页的内容
-    // 返回正文文本
-    // TODO: 解析result，提取正文
-    // 示例：
-    // let text = java.jsoup.selectFirst(result, "div.content");
-    // text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/g, "");
-    // text = text.replace(/<[^>]+>/g, "\n").trim();
-    // return text;
-    return "";
-  },
+  return {
+    name: selectFirst(html, "h1.book-title") || "",
+    author: selectFirst(html, ".author-name") || "",
+    coverUrl: getAttr(html, "img.cover", "src") || "",
+    intro: selectFirst(html, ".book-intro") || "",
+    kind: selectFirst(html, ".book-category") || "",
+    lastChapter: selectFirst(html, ".latest-chapter") || "",
+    tocUrl: "",
+    wordCount: ""
+  };
+}
 
-  // ===== 下一页目录URL（可选）=====
-  nextTocUrl(result) {
-    // 如果目录有多页，返回下一页URL，否则返回空
-    // const next = java.jsoup.getAttr(result, "a.next-page", "href");
-    // return next || "";
-    return "";
-  },
+// ===== 章节目录 =====
+function toc(result) {
+  var html = result;
+  var items = select(html, ".chapter-list li");
+  var chapters = [];
 
-  // ===== 下一页正文URL（可选）=====
-  nextContentUrl(result) {
-    // 如果正文有多页，返回下一页URL，否则返回空
-    // const next = java.jsoup.getAttr(result, "a.next-page", "href");
-    // return next || "";
-    return "";
-  },
-};
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    chapters.push({
+      name: selectFirst(item, "a") || "",
+      url: getAttr(item, "a", "href") || "",
+      isVolume: false
+    });
+  }
+
+  return chapters;
+}
+
+// ===== 目录下一页（可选，没有多页目录可删除）=====
+function nextTocUrl(result) {
+  var html = result;
+  var next = getAttr(html, "a.next-page", "href") || "";
+  return next;
+}
+
+// ===== 正文内容 =====
+function content(result) {
+  var html = result;
+  var text = selectFirst(html, "#content");
+  if (text) {
+    text = text
+      .replace(/.*最新网址.*/g, "")
+      .replace(/上一章|下一章|返回目录/g, "")
+      .trim();
+  }
+  return text || "";
+}
+
+// ===== 正文下一页（可选，没有多页正文可删除）=====
+function nextContentUrl(result) {
+  var html = result;
+  var links = select(html, "a");
+  for (var i = 0; i < links.length; i++) {
+    var text = selectFirst(links[i], "") || "";
+    if (text.indexOf("下一页") >= 0) {
+      return getAttr(links[i], "", "href") || "";
+    }
+  }
+  return "";
+}

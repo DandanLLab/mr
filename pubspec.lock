@@ -33,14 +33,6 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "2.13.1"
-  audio_session:
-    dependency: transitive
-    description:
-      name: audio_session
-      sha256: "2b7fff16a552486d078bfc09a8cde19f426dc6d6329262b684182597bec5b1ac"
-      url: "https://pub.flutter-io.cn"
-    source: hosted
-    version: "0.1.25"
   boolean_selector:
     dependency: transitive
     description:
@@ -49,14 +41,6 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "2.1.2"
-  build_cli_annotations:
-    dependency: transitive
-    description:
-      name: build_cli_annotations
-      sha256: e563c2e01de8974566a1998410d3f6f03521788160a02503b0b1f1a46c7b3d95
-      url: "https://pub.flutter-io.cn"
-    source: hosted
-    version: "2.1.1"
   cached_network_image:
     dependency: "direct main"
     description:
@@ -89,14 +73,6 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "1.4.1"
-  chewie:
-    dependency: "direct main"
-    description:
-      name: chewie
-      sha256: "53dadd2c5b6748742d7744072b38a417ad22691ca55715850300ee793dc7cb27"
-      url: "https://pub.flutter-io.cn"
-    source: hosted
-    version: "1.13.1"
   clock:
     dependency: transitive
     description:
@@ -218,7 +194,7 @@ packages:
     source: hosted
     version: "1.3.3"
   ffi:
-    dependency: "direct main"
+    dependency: transitive
     description:
       name: ffi
       sha256: "6d7fd89431262d8f3125e81b50d3847a091d846eafcd4fdb88dd06f36d705a45"
@@ -371,14 +347,6 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "2.0.35"
-  flutter_rust_bridge:
-    dependency: "direct main"
-    description:
-      name: flutter_rust_bridge
-      sha256: e87d6b9ee934dcd24a128ccb2bd91905d2d5fe5c06245d6a8f5477d4907a437a
-      url: "https://pub.flutter-io.cn"
-    source: hosted
-    version: "2.12.0"
   flutter_slidable:
     dependency: "direct main"
     description:
@@ -493,30 +461,6 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "4.12.0"
-  just_audio:
-    dependency: "direct main"
-    description:
-      name: just_audio
-      sha256: f978d5b4ccea08f267dae0232ec5405c1b05d3f3cd63f82097ea46c015d5c09e
-      url: "https://pub.flutter-io.cn"
-    source: hosted
-    version: "0.9.46"
-  just_audio_platform_interface:
-    dependency: transitive
-    description:
-      name: just_audio_platform_interface
-      sha256: "2532c8d6702528824445921c5ff10548b518b13f808c2e34c2fd54793b999a6a"
-      url: "https://pub.flutter-io.cn"
-    source: hosted
-    version: "4.6.0"
-  just_audio_web:
-    dependency: transitive
-    description:
-      name: just_audio_web
-      sha256: "6ba8a2a7e87d57d32f0f7b42856ade3d6a9fbe0f1a11fabae0a4f00bb73f0663"
-      url: "https://pub.flutter-io.cn"
-    source: hosted
-    version: "0.4.16"
   leak_tracker:
     dependency: transitive
     description:
@@ -670,7 +614,7 @@ packages:
     source: hosted
     version: "3.2.1"
   path:
-    dependency: "direct main"
+    dependency: transitive
     description:
       name: path
       sha256: "75cca69d1490965be98c73ceaea117e8a04dd21217b37b292c9ddbec0d955bc5"

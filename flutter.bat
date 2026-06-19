@@ -3,6 +3,9 @@ set PUB_HOSTED_URL=https://pub.flutter-io.cn
 set FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn
 set PUB_CACHE=%~dp0.pub-cache
 
+REM 国内镜像 + Flutter SDK 路径
+if not defined FLUTTER_ROOT set FLUTTER_ROOT=D:\flutter_windows_3.41.7-stable\flutter
+
 if defined FLUTTER_ROOT if exist "%FLUTTER_ROOT%\bin\flutter.bat" (
   call "%FLUTTER_ROOT%\bin\flutter.bat" %*
   exit /b %errorlevel%

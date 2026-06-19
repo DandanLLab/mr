@@ -1893,6 +1893,21 @@ class JsEngine {
             .replace(/mm/g, d.getMinutes().toString().padStart(2, '0'))
             .replace(/ss/g, d.getSeconds().toString().padStart(2, '0'));
         },
+        timeFormatUTC: function(timestamp, format, offset) {
+          var d = new Date(timestamp);
+          if (offset) {
+            d = new Date(d.getTime() + offset * 3600000);
+          }
+          var year = d.getUTCFullYear().toString();
+          return format
+            .replace(/yyyy/g, year)
+            .replace(/yy/g, year.slice(-2))
+            .replace(/MM/g, (d.getUTCMonth() + 1).toString().padStart(2, '0'))
+            .replace(/dd/g, d.getUTCDate().toString().padStart(2, '0'))
+            .replace(/HH/g, d.getUTCHours().toString().padStart(2, '0'))
+            .replace(/mm/g, d.getUTCMinutes().toString().padStart(2, '0'))
+            .replace(/ss/g, d.getUTCSeconds().toString().padStart(2, '0'));
+        },
         getTime: function() {
           return Date.now();
         },
@@ -2385,6 +2400,9 @@ class JsEngine {
         globalThis.sha256Encode = function(str) { return java.sha256Encode ? java.sha256Encode(str) : ''; };
         globalThis.aesEncode = function(data, key, iv) { return java.aesEncode(data, key, iv); };
         globalThis.aesDecode = function(data, key, iv) { return java.aesDecode(data, key, iv); };
+        globalThis.getWebViewUA = function() { return java.getWebViewUA(); };
+        globalThis.ajax = function(url, opt) { return java.ajax(url, opt); };
+        globalThis.timeFormatUTC = function(ts, fmt, offset) { return java.timeFormatUTC(ts, fmt, offset); };
       ''');
     } catch (_) {}
 

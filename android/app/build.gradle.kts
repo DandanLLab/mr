@@ -27,6 +27,31 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // 只保留 ARM 架构，移除 x86/x86_64（模拟器用，减少约 40% .so 体积）
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
+    }
+
+    // 排除重复/冗余文件，减小 APK 体积
+    packaging {
+        resources {
+            excludes += setOf(
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/license.txt",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt",
+                "META-INF/notice.txt",
+                "META-INF/*.kotlin_module",
+            )
+        }
+        // .so 文件不压缩（Android 6+ 直接 mmap，压缩反而浪费 CPU）
+        jniLibs {
+            useLegacyPackaging = false
+        }
     }
 
     buildTypes {

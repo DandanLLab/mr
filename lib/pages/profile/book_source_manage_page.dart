@@ -10,6 +10,7 @@ import '../../models/book_source.dart';
 import '../../providers/discovery_provider.dart';
 import '../../services/book_source_import_service.dart';
 import '../../services/storage_service.dart';
+import '../../utils/design_tokens.dart';
 import '../../widgets/android_switch.dart';
 import 'book_source_edit_page.dart';
 import 'js_source_edit_page.dart';
@@ -194,7 +195,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(DesignTokens.frostCardRadius)),
       ),
       builder: (context) => DraggableScrollableSheet(
         initialChildSize: 0.65,
@@ -205,7 +206,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
           children: [
             // 顶部拖拽指示条
             Container(
-              margin: const EdgeInsets.symmetric(vertical: 12),
+              margin: const EdgeInsets.symmetric(vertical: DesignTokens.spacingMd),
               width: 40,
               height: 4,
               decoration: BoxDecoration(
@@ -215,10 +216,10 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
             ),
             // 标题
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingXs),
               child: Row(
                 children: [
-                  const Text('选择书源模板', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Text('选择书源模板', style: TextStyle(fontSize: DesignTokens.fontTitle, fontWeight: FontWeight.bold)),
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.close),
@@ -227,12 +228,12 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
                 ],
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: DesignTokens.spacingXs),
             // 模板列表
             Expanded(
               child: ListView(
                 controller: scrollController,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingMd),
                 children: [
                   // JSON 模板分组标题
                   _buildSectionHeader(
@@ -241,14 +242,14 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
                     subtitle: '创建 .json 格式书源',
                     color: Colors.blue,
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: DesignTokens.spacingXs),
                   // JSON 模板网格
                   Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                    spacing: DesignTokens.spacingSm,
+                    runSpacing: DesignTokens.spacingSm,
                     children: kJsonTemplates.map((t) => _buildTemplateCard(context, t)).toList(),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: DesignTokens.spacingLg),
                   // JS 模板分组标题
                   _buildSectionHeader(
                     icon: Icons.javascript,
@@ -256,14 +257,14 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
                     subtitle: '创建 .js 格式书源',
                     color: Colors.amber.shade800,
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: DesignTokens.spacingXs),
                   // JS 模板网格
                   Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                    spacing: DesignTokens.spacingSm,
+                    runSpacing: DesignTokens.spacingSm,
                     children: kJsTemplates.map((t) => _buildTemplateCard(context, t)).toList(),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: DesignTokens.spacingXxl),
                 ],
               ),
             ),
@@ -284,22 +285,22 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
     required Color color,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingXs, vertical: DesignTokens.spacingSm),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
               color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
             ),
-            child: Icon(icon, size: 18, color: color),
+            child: Icon(icon, size: DesignTokens.fontTitle, color: color),
           ),
           const SizedBox(width: 10),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: color)),
+              Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: DesignTokens.fontBody, color: color)),
               Text(subtitle, style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
             ],
           ),
@@ -311,13 +312,13 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
   Widget _buildTemplateCard(BuildContext context, SourceTemplate template) {
     return InkWell(
       onTap: () => Navigator.pop(context, template),
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
       child: Container(
         width: (MediaQuery.of(context).size.width - 56) / 2,
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(DesignTokens.spacingMd),
         decoration: BoxDecoration(
           border: Border.all(color: template.color.withValues(alpha: 0.3)),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
           color: template.color.withValues(alpha: 0.05),
         ),
         child: Column(
@@ -330,7 +331,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
                 Expanded(
                   child: Text(
                     template.name,
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: template.color),
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: DesignTokens.fontSummary, color: template.color),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -690,7 +691,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(DesignTokens.spacingLg),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -736,7 +737,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(DesignTokens.spacingLg),
               child:
                   Text('分组筛选', style: Theme.of(context).textTheme.titleLarge),
             ),
@@ -806,7 +807,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
             if (_groups.isNotEmpty) ...[
               const Divider(),
               Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(DesignTokens.spacingLg),
                 child: Text('自定义分组',
                     style: Theme.of(context).textTheme.titleMedium),
               ),
@@ -1082,15 +1083,15 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text('搜索技巧：'),
-              SizedBox(height: 8),
+              SizedBox(height: DesignTokens.spacingSm),
               Text('• 输入关键词搜索书源名称、URL或分组'),
               Text('• 输入"启用"或"禁用"筛选启用状态'),
               Text('• 输入"需登录"筛选需要登录的书源'),
               Text('• 输入"启用发现"或"禁用发现"筛选发现状态'),
               Text('• 输入"group:分组名"按分组筛选'),
-              SizedBox(height: 16),
+              SizedBox(height: DesignTokens.spacingLg),
               Text('排序方式：'),
-              SizedBox(height: 8),
+              SizedBox(height: DesignTokens.spacingSm),
               Text('• 手动排序：按自定义顺序排列'),
               Text('• 按权重：按书源权重排序'),
               Text('• 按名称：按书源名称排序'),
@@ -1124,7 +1125,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(DesignTokens.spacingLg),
                 child: Row(
                   children: [
                     Expanded(
@@ -1170,9 +1171,9 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
                   Navigator.pop(context);
                 },
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: DesignTokens.spacingLg),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg),
                 child: Row(
                   children: [
                     Expanded(
@@ -1190,7 +1191,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
                   ],
                 ),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: DesignTokens.spacingXxxl),
             ],
           ),
         ),
@@ -1200,7 +1201,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
 
   Widget _buildDetailItem(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingSm),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1235,7 +1236,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
         children: [
           // 搜索框
           Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(DesignTokens.spacingMd),
             child: TextField(
               controller: _searchController,
               decoration: InputDecoration(
@@ -1251,7 +1252,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
                       )
                     : null,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
                 ),
                 filled: true,
               ),
@@ -1260,7 +1261,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
           ),
           // 书源数量
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -1325,7 +1326,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
         PopupMenuButton<String>(
           icon: const Icon(Icons.more_vert),
           tooltip: '更多选项',
-          offset: const Offset(0, 48),
+          offset: const Offset(0, DesignTokens.topBarHeight),
           onSelected: (value) {
             switch (value) {
               case 'add':
@@ -1354,45 +1355,45 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
           itemBuilder: (context) => [
             const PopupMenuItem(
               value: 'add',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.add, size: 18), SizedBox(width: 12), Text('新建书源')]),
+              padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingMd),
+              height: DesignTokens.topBarHeight,
+              child: Row(children: [Icon(Icons.add, size: 18), SizedBox(width: DesignTokens.spacingMd), Text('新建书源')]),
             ),
             const PopupMenuItem(
               value: 'import_local',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.file_upload, size: 18), SizedBox(width: 12), Text('本地导入')]),
+              padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingMd),
+              height: DesignTokens.topBarHeight,
+              child: Row(children: [Icon(Icons.file_upload, size: 18), SizedBox(width: DesignTokens.spacingMd), Text('本地导入')]),
             ),
             const PopupMenuItem(
               value: 'import_url',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.cloud_download, size: 18), SizedBox(width: 12), Text('网络导入')]),
+              padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingMd),
+              height: DesignTokens.topBarHeight,
+              child: Row(children: [Icon(Icons.cloud_download, size: 18), SizedBox(width: DesignTokens.spacingMd), Text('网络导入')]),
             ),
             const PopupMenuItem(
               value: 'export',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.file_download, size: 18), SizedBox(width: 12), Text('导出书源')]),
+              padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingMd),
+              height: DesignTokens.topBarHeight,
+              child: Row(children: [Icon(Icons.file_download, size: 18), SizedBox(width: DesignTokens.spacingMd), Text('导出书源')]),
             ),
             const PopupMenuItem(
               value: 'selection',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.select_all, size: 18), SizedBox(width: 12), Text('批量选择')]),
+              padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingMd),
+              height: DesignTokens.topBarHeight,
+              child: Row(children: [Icon(Icons.select_all, size: 18), SizedBox(width: DesignTokens.spacingMd), Text('批量选择')]),
             ),
             const PopupMenuItem(
               value: 'clear',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.delete_sweep, size: 18), SizedBox(width: 12), Text('清空书源')]),
+              padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingMd),
+              height: DesignTokens.topBarHeight,
+              child: Row(children: [Icon(Icons.delete_sweep, size: 18), SizedBox(width: DesignTokens.spacingMd), Text('清空书源')]),
             ),
             const PopupMenuItem(
               value: 'help',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.help_outline, size: 18), SizedBox(width: 12), Text('帮助')]),
+              padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingMd),
+              height: DesignTokens.topBarHeight,
+              child: Row(children: [Icon(Icons.help_outline, size: 18), SizedBox(width: DesignTokens.spacingMd), Text('帮助')]),
             ),
           ],
         ),
@@ -1420,7 +1421,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
         ),
         PopupMenuButton<String>(
           tooltip: '更多选项',
-          offset: const Offset(0, 48),
+          offset: const Offset(0, DesignTokens.topBarHeight),
           onSelected: (value) {
             switch (value) {
               case 'enable':
@@ -1440,27 +1441,27 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
           itemBuilder: (context) => [
             const PopupMenuItem(
               value: 'enable',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.check_circle, size: 18), SizedBox(width: 12), Text('启用所选')]),
+              padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingMd),
+              height: DesignTokens.topBarHeight,
+              child: Row(children: [Icon(Icons.check_circle, size: 18), SizedBox(width: DesignTokens.spacingMd), Text('启用所选')]),
             ),
             const PopupMenuItem(
               value: 'disable',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.cancel, size: 18), SizedBox(width: 12), Text('禁用所选')]),
+              padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingMd),
+              height: DesignTokens.topBarHeight,
+              child: Row(children: [Icon(Icons.cancel, size: 18), SizedBox(width: DesignTokens.spacingMd), Text('禁用所选')]),
             ),
             const PopupMenuItem(
               value: 'export',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.file_download, size: 18), SizedBox(width: 12), Text('导出所选')]),
+              padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingMd),
+              height: DesignTokens.topBarHeight,
+              child: Row(children: [Icon(Icons.file_download, size: 18), SizedBox(width: DesignTokens.spacingMd), Text('导出所选')]),
             ),
             const PopupMenuItem(
               value: 'delete',
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              height: 48,
-              child: Row(children: [Icon(Icons.delete, size: 18), SizedBox(width: 12), Text('删除所选')]),
+              padding: EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingMd),
+              height: DesignTokens.topBarHeight,
+              child: Row(children: [Icon(Icons.delete, size: 18), SizedBox(width: DesignTokens.spacingMd), Text('删除所选')]),
             ),
           ],
         ),
@@ -1475,18 +1476,18 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
         children: [
           Icon(
             Icons.source,
-            size: 80,
+            size: DesignTokens.emptyIconSize,
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: DesignTokens.spacingLg),
           Text(
             _searchKeyword.isNotEmpty ? '未找到匹配的书源' : '暂无书源',
             style: TextStyle(
-              fontSize: 18,
+              fontSize: DesignTokens.fontTitle,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: DesignTokens.spacingLg),
           if (_searchKeyword.isEmpty)
             FilledButton.icon(
               icon: const Icon(Icons.add),
@@ -1524,7 +1525,7 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.errorContainer,
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
               ),
               child: Text(
                 '禁用',
@@ -1539,14 +1540,14 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 4),
+          const SizedBox(height: DesignTokens.spacingXs),
           Row(
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                 ),
                 child: Text(
                   source.typeName,
@@ -1557,13 +1558,13 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
                 ),
               ),
               if (source.bookSourceGroup != null) ...[
-                const SizedBox(width: 8),
+                const SizedBox(width: DesignTokens.spacingSm),
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.secondaryContainer,
-                    borderRadius: BorderRadius.circular(4),
+                    borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                   ),
                   child: Text(
                     source.bookSourceGroup!,
@@ -1576,13 +1577,13 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
               ],
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: DesignTokens.spacingXs),
           Text(
             source.bookSourceUrl,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 12,
+              fontSize: DesignTokens.fontCaption,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),

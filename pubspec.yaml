@@ -37,8 +37,6 @@ dependencies:
   
   # 媒体播放
   video_player: ^2.8.2
-  chewie: ^1.7.4
-  just_audio: ^0.9.36
   
   # 文件/加密/权限
   archive: ^3.4.10
@@ -57,13 +55,6 @@ dependencies:
   flutter_markdown_plus: ^1.0.1
   # 二维码扫描
   mobile_scanner: ^6.0.2
-
-  # Rust FFI 桥接 - 高性能原生计算（正则/解析/加密）
-  flutter_rust_bridge: ^2.7.0
-  # FFI 基础库
-  ffi: ^2.1.3
-  # Rust 库加载
-  path: ^1.9.0
 
   # JS 引擎增强 - Node.js 兼容的脚本执行
   flutter_js: ^0.8.2

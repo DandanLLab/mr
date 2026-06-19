@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../services/storage_service.dart';
+import '../../utils/design_tokens.dart';
 
 /// 字典规则模型
 class DictRule {
@@ -116,7 +117,7 @@ class _DictRulePageState extends State<DictRulePage> {
                   hintText: '如：汉典',
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: DesignTokens.spacingLg),
               TextField(
                 controller: urlController,
                 decoration: const InputDecoration(
@@ -124,7 +125,7 @@ class _DictRulePageState extends State<DictRulePage> {
                   hintText: '如：https://www.zdic.net/hans/',
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: DesignTokens.spacingLg),
               TextField(
                 controller: ruleController,
                 decoration: const InputDecoration(
@@ -230,10 +231,10 @@ class _DictRulePageState extends State<DictRulePage> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.translate, size: 64, color: Colors.grey[400]),
-                      const SizedBox(height: 16),
-                      const Text('暂无字典规则', style: TextStyle(color: Colors.grey)),
-                      const SizedBox(height: 8),
+                      Icon(Icons.translate, size: DesignTokens.emptyIconSize, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      const SizedBox(height: DesignTokens.spacingLg),
+                      Text('暂无字典规则', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                      const SizedBox(height: DesignTokens.spacingSm),
                       TextButton.icon(
                         onPressed: _addRule,
                         icon: const Icon(Icons.add),

@@ -5,6 +5,7 @@ import '../../services/read_record_service.dart';
 import '../../services/cover_config_service.dart';
 import '../../routes/app_routes.dart';
 import '../../widgets/swipe_action_container.dart';
+import '../../utils/design_tokens.dart';
 
 enum DisplayMode { aggregate, timeline, latest, readTime }
 enum HeatmapMode { count, time }
@@ -343,11 +344,11 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('阅读记录', style: TextStyle(fontSize: 18)),
+            const Text('阅读记录', style: TextStyle(fontSize: DesignTokens.fontTitle)),
             Text(
               _getDisplayModeName(),
               style: TextStyle(
-                fontSize: 11,
+                fontSize: DesignTokens.fontCaption,
                 height: 1.2,
                 color: appBarFg.withValues(alpha: 0.6),
               ),
@@ -419,7 +420,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                 // 搜索框
                 if (_showSearch)
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingSm),
                     child: TextField(
                       controller: _searchController,
                       autofocus: true,
@@ -436,7 +437,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                               )
                             : null,
                         border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(DesignTokens.spacingMd),
                         ),
                         contentPadding: const EdgeInsets.symmetric(vertical: 0),
                       ),
@@ -550,13 +551,13 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     final timeString = hours > 0 ? '$hours小时$minutes分钟' : '$minutes分钟';
     
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      margin: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingMd),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(DesignTokens.spacingLg),
         child: Row(
           children: [
             Expanded(
@@ -566,7 +567,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                   Text(
                     '阅读成就',
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: DesignTokens.fontCaption,
                       fontWeight: FontWeight.w500,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
@@ -578,7 +579,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         TextSpan(
                           text: '已读 ',
                           style: TextStyle(
-                            fontSize: 16,
+                            fontSize: DesignTokens.fontSubtitle,
                             color: Theme.of(context).colorScheme.onSurface,
                           ),
                         ),
@@ -593,7 +594,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         TextSpan(
                           text: ' 本',
                           style: TextStyle(
-                            fontSize: 16,
+                            fontSize: DesignTokens.fontSubtitle,
                             color: Theme.of(context).colorScheme.onSurface,
                           ),
                         ),
@@ -604,7 +605,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                   Text(
                     '累计阅读 $timeString',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: DesignTokens.fontSummary,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
@@ -642,7 +643,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                 width: coverWidth,
                 height: coverHeight,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withOpacity(0.1),
@@ -652,7 +653,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                   ],
                 ),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                   child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
                       ? CachedNetworkImage(
                           imageUrl: record.coverUrl,
@@ -708,7 +709,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
       ..sort((a, b) => b.compareTo(a));
     
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: DesignTokens.spacingSm),
       itemCount: sortedDates.length + 1,
       itemBuilder: (context, index) {
         if (index == 0) return _buildSummaryCard();
@@ -723,7 +724,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
             // 日期头部
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingSm),
               color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -731,7 +732,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                   Text(
                     date,
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: DesignTokens.fontBody,
                       fontWeight: FontWeight.bold,
                       color: Theme.of(context).colorScheme.secondary,
                     ),
@@ -739,7 +740,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                   Text(
                     _formatDuration(dateRecords.fold(0, (sum, r) => sum + r.totalReadTime)),
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: DesignTokens.fontCaption,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
@@ -767,7 +768,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
       ..sort((a, b) => b.compareTo(a));
     
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: DesignTokens.spacingSm),
       itemCount: sortedDates.length + 1,
       itemBuilder: (context, index) {
         if (index == 0) return _buildSummaryCard();
@@ -782,7 +783,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
             // 日期头部
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingSm),
               color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -790,7 +791,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                   Text(
                     date,
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: DesignTokens.fontBody,
                       fontWeight: FontWeight.bold,
                       color: Theme.of(context).colorScheme.secondary,
                     ),
@@ -798,7 +799,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                   Text(
                     _formatDuration(dateRecords.fold(0, (sum, r) => sum + r.readTime)),
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: DesignTokens.fontCaption,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
@@ -824,7 +825,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     records.sort((a, b) => b.lastReadTime.compareTo(a.lastReadTime));
     
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: DesignTokens.spacingSm),
       itemCount: records.length + 1,
       itemBuilder: (context, index) {
         if (index == 0) return _buildSummaryCard();
@@ -841,11 +842,11 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
         });
       },
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingSm),
           child: Row(
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                 child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
                     ? CachedNetworkImage(
                         imageUrl: record.coverUrl,
@@ -870,7 +871,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 16,
+                        fontSize: DesignTokens.fontSubtitle,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -880,7 +881,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: DesignTokens.fontSummary,
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
@@ -896,7 +897,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         Text(
                           _formatDuration(record.totalReadTime),
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: DesignTokens.fontCaption,
                             color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
@@ -911,7 +912,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         Text(
                           _formatDateTime(record.lastReadTime),
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: DesignTokens.fontCaption,
                             color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
@@ -1023,7 +1024,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     records.sort((a, b) => b.totalReadTime.compareTo(a.totalReadTime));
     
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: DesignTokens.spacingSm),
       itemCount: records.length + 1,
       itemBuilder: (context, index) {
         if (index == 0) return _buildSummaryCard();
@@ -1039,14 +1040,14 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
         children: [
           Icon(
             Icons.menu_book,
-            size: 80,
+            size: DesignTokens.emptyIconSize,
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
           const SizedBox(height: 16),
           Text(
             _searchKeyword.isNotEmpty ? '未找到匹配的记录' : '暂无阅读记录',
             style: TextStyle(
-              fontSize: 18,
+              fontSize: DesignTokens.fontTitle,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
@@ -1064,11 +1065,11 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
       },
       onLongPress: () => _deleteRecord(record),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingSm),
           child: Row(
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                 child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
                     ? CachedNetworkImage(
                         imageUrl: record.coverUrl,
@@ -1093,7 +1094,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 16,
+                        fontSize: DesignTokens.fontSubtitle,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -1103,7 +1104,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: DesignTokens.fontSummary,
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
@@ -1119,7 +1120,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         Text(
                           _formatDuration(record.totalReadTime),
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: DesignTokens.fontCaption,
                             color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
@@ -1134,7 +1135,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                         Text(
                           _formatDateTime(record.lastReadTime),
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: DesignTokens.fontCaption,
                             color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
@@ -1147,7 +1148,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                 Text(
                   _formatDuration(record.totalReadTime),
                   style: TextStyle(
-                    fontSize: 16,
+                    fontSize: DesignTokens.fontSubtitle,
                     fontWeight: FontWeight.bold,
                     color: Theme.of(context).colorScheme.onSurface,
                   ),
@@ -1173,7 +1174,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
         });
       },
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingSm),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
@@ -1235,7 +1236,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
               child: Text(
                 timeFormat,
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: DesignTokens.fontCaption,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
                 textAlign: TextAlign.center,
@@ -1244,7 +1245,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
             const SizedBox(width: 8),
             // 封面
             ClipRRect(
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
               child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
                   ? CachedNetworkImage(
                       imageUrl: record.coverUrl,
@@ -1270,7 +1271,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontSize: 15,
+                      fontSize: DesignTokens.fontBody,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -1280,7 +1281,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: DesignTokens.fontCaption,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
@@ -1290,7 +1291,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: DesignTokens.fontCaption,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
@@ -1339,7 +1340,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
   }) {
     return SingleChildScrollView(
       controller: controller,
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      padding: const EdgeInsets.fromLTRB(DesignTokens.spacingLg, DesignTokens.spacingSm, DesignTokens.spacingLg, DesignTokens.spacingLg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1352,12 +1353,12 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                 children: [
                   const Text(
                     '阅读日历',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                    style: TextStyle(fontSize: DesignTokens.fontTitle, fontWeight: FontWeight.bold),
                   ),
                   Text(
                     '记录你的阅读轨迹',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: DesignTokens.fontSummary,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
@@ -1428,10 +1429,10 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
       children: [
         // 月份导航
         Container(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(DesignTokens.spacingMd),
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
           ),
           child: Column(
             children: [
@@ -1448,12 +1449,12 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                     children: [
                       Text(
                         '${_currentMonth.year}年${_currentMonth.month}月',
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        style: const TextStyle(fontSize: DesignTokens.fontSubtitle, fontWeight: FontWeight.bold),
                       ),
                       Text(
                         _heatmapMode == HeatmapMode.count ? '按阅读次数显示' : '按阅读时长显示',
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: DesignTokens.fontCaption,
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
@@ -1490,7 +1491,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                 day,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 13,
+                  fontSize: DesignTokens.fontSummary,
                   fontWeight: FontWeight.bold,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -1555,7 +1556,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
             Text(
               '少',
               style: TextStyle(
-                fontSize: 12,
+                fontSize: DesignTokens.fontCaption,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
@@ -1576,7 +1577,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
             Text(
               '多',
               style: TextStyle(
-                fontSize: 12,
+                fontSize: DesignTokens.fontCaption,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
@@ -1586,10 +1587,10 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
         if (_selectedDate != null) ...[
           const SizedBox(height: 12),
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(DesignTokens.spacingMd),
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.3),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1604,7 +1605,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                     Text(
                       '${_dailyReadCounts[_selectedDate] ?? 0}次 · ${_formatDuration(_dailyReadTimes[_selectedDate] ?? 0)}',
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: DesignTokens.fontCaption,
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
@@ -1633,23 +1634,23 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
   Widget _buildStatPill(String label, String value) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingSm, vertical: 7),
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface.withOpacity(0.7),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(DesignTokens.spacingSm),
         ),
         child: Column(
           children: [
             Text(
               label,
               style: TextStyle(
-                fontSize: 11,
+                fontSize: DesignTokens.fontCaption,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
             Text(
               value,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              style: const TextStyle(fontSize: DesignTokens.fontSummary, fontWeight: FontWeight.w600),
             ),
           ],
         ),
@@ -1707,7 +1708,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
         height: cellSize,
         decoration: BoxDecoration(
           color: bgColor,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(DesignTokens.spacingSm),
           border: isToday && !isSelected
               ? Border.all(color: Theme.of(context).colorScheme.secondary, width: 2)
               : isSelected
@@ -1718,7 +1719,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
           child: Text(
             '$day',
             style: TextStyle(
-              fontSize: 12,
+              fontSize: DesignTokens.fontCaption,
               fontWeight: isToday || isSelected ? FontWeight.bold : FontWeight.normal,
               color: textColor,
             ),
@@ -1745,12 +1746,12 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingMd, vertical: 6),
         decoration: BoxDecoration(
           color: selected
               ? Theme.of(context).colorScheme.secondaryContainer
               : Theme.of(context).colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(DesignTokens.spacingSm),
           border: Border.all(
             color: selected
                 ? Theme.of(context).colorScheme.secondary
@@ -1761,7 +1762,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
         child: Text(
           label,
           style: TextStyle(
-            fontSize: 13,
+            fontSize: DesignTokens.fontSummary,
             color: selected
                 ? Theme.of(context).colorScheme.onSecondaryContainer
                 : Theme.of(context).colorScheme.onSurfaceVariant,

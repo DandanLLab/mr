@@ -11,6 +11,7 @@ import '../profile/profile_page.dart';
 import '../../providers/bookshelf_provider.dart';
 import '../../providers/discovery_provider.dart';
 import '../../providers/app_provider.dart';
+import '../../utils/design_tokens.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -103,7 +104,7 @@ class _MainPageState extends State<MainPage> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const CircularProgressIndicator(),
-              const SizedBox(height: 16),
+              const SizedBox(height: DesignTokens.spacingLg),
               const Text('正在加载...'),
             ],
           ),
@@ -117,10 +118,10 @@ class _MainPageState extends State<MainPage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.error_outline, size: 48, color: Colors.red),
-              const SizedBox(height: 16),
+              Icon(Icons.error_outline, size: 48, color: Theme.of(context).colorScheme.error),
+              const SizedBox(height: DesignTokens.spacingLg),
               Text('加载失败: $_error'),
-              const SizedBox(height: 16),
+              const SizedBox(height: DesignTokens.spacingLg),
               ElevatedButton(
                 onPressed: () {
                   setState(() {
@@ -160,7 +161,7 @@ class _MainPageState extends State<MainPage> {
       const ProfilePage(),
     ];
     final bottomSafeArea = MediaQuery.paddingOf(context).bottom;
-    const bottomBarHeight = 48.0;
+    const bottomBarHeight = DesignTokens.bottomBarHeight;
     const bottomBarGap = 10.0;
     final contentBottomInset = bottomBarHeight + bottomBarGap + bottomSafeArea;
 
@@ -202,12 +203,12 @@ class _MainPageState extends State<MainPage> {
     // main_bottom_bar_gap: 10dp
     // main_bottom_bar_elevation: 12dp
 
-    final bottomBarHeight = 48.0;
-    final cornerRadius = 24.0;
-    final horizontalPadding = 20.0;
-    final bottomPadding = 10.0;
+    const bottomBarHeight = DesignTokens.bottomBarHeight;
+    final cornerRadius = DesignTokens.capsuleRadius(DesignTokens.bottomBarHeight);
+    const horizontalPadding = DesignTokens.spacingXl;
+    const bottomPadding = 10.0;
     final bottomSafeArea = MediaQuery.paddingOf(context).bottom;
-    final iconSize = 23.0;
+    const iconSize = 23.0;
 
     final navBarColor = appProvider.currentNavBarColor;
     final navBarIsDark =
@@ -330,7 +331,7 @@ class _MainPageState extends State<MainPage> {
           },
           behavior: HitTestBehavior.opaque,
           child: Container(
-            height: 48,
+            height: DesignTokens.bottomBarHeight,
             alignment: Alignment.center,
             child: Icon(
               isSelected ? activeIcon : icon,
@@ -428,7 +429,7 @@ class _MainPageState extends State<MainPage> {
         },
         behavior: HitTestBehavior.opaque,
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.symmetric(vertical: DesignTokens.spacingSm),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -441,11 +442,11 @@ class _MainPageState extends State<MainPage> {
                         context.read<AppProvider>().currentNavBarColor,
                       ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: DesignTokens.spacingXs),
               Text(
                 label,
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: DesignTokens.fontCaption,
                   color: isSelected
                       ? colorScheme.secondary
                       : _navBarContentColor(
@@ -529,7 +530,7 @@ class _MainPageState extends State<MainPage> {
           children: [
             // 头部
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(DesignTokens.spacingXl),
               decoration: BoxDecoration(
                 color: colorScheme.primaryContainer.withOpacity(0.3),
               ),
@@ -540,7 +541,7 @@ class _MainPageState extends State<MainPage> {
                     backgroundColor: colorScheme.primary,
                     child: Icon(Icons.person, color: colorScheme.onPrimary),
                   ),
-                  const SizedBox(width: 16),
+                  const SizedBox(width: DesignTokens.spacingLg),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -548,7 +549,7 @@ class _MainPageState extends State<MainPage> {
                         Text(
                           '用户名',
                           style: TextStyle(
-                            fontSize: 18,
+                            fontSize: DesignTokens.fontTitle,
                             fontWeight: FontWeight.bold,
                             color: colorScheme.onSurface,
                           ),
@@ -556,7 +557,7 @@ class _MainPageState extends State<MainPage> {
                         Text(
                           '今日阅读: 30分钟',
                           style: TextStyle(
-                            fontSize: 14,
+                            fontSize: DesignTokens.fontBody,
                             color: colorScheme.onSurfaceVariant,
                           ),
                         ),
@@ -569,7 +570,7 @@ class _MainPageState extends State<MainPage> {
             // 导航项
             Expanded(
               child: ListView(
-                padding: const EdgeInsets.symmetric(vertical: 8),
+                padding: const EdgeInsets.symmetric(vertical: DesignTokens.spacingSm),
                 children: [
                   _buildSidebarItem(0, Icons.menu_book, '书架'),
                   _buildSidebarItem(1, Icons.explore, '发现'),
@@ -583,22 +584,22 @@ class _MainPageState extends State<MainPage> {
             ),
             // 底部搜索
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(DesignTokens.spacingLg),
               child: Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
+                  horizontal: DesignTokens.spacingLg,
+                  vertical: DesignTokens.spacingMd,
                 ),
                 decoration: BoxDecoration(
                   color: isDark
                       ? Colors.white.withOpacity(0.1)
                       : Colors.black.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
                 ),
                 child: Row(
                   children: [
                     Icon(Icons.search, color: colorScheme.onSurfaceVariant),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: DesignTokens.spacingMd),
                     Text(
                       '搜索',
                       style: TextStyle(color: colorScheme.onSurfaceVariant),
@@ -641,7 +642,7 @@ class _MainPageState extends State<MainPage> {
         ),
         selected: isSelected,
         selectedTileColor: colorScheme.secondary.withOpacity(0.12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DesignTokens.panelRadius)),
         onTap: () {
           if (index < 4) {
             _pageController.animateToPage(

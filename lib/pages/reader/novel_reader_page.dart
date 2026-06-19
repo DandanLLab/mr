@@ -741,8 +741,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             curve: Curves.easeOut,
           );
         } else {
-          setState(() => _currentPage--);
+          // PageController 未挂载，重建控制器以跳转到目标页
+          _currentPage--;
+          _pageController?.dispose();
+          _pageController = PageController(
+            initialPage: _currentPage + _pagedLeadingCount,
+          );
           _scheduleProgressSave(pos: _currentPage);
+          setState(() {});
         }
       } else {
         _previousChapter(toLastPage: true);
@@ -775,8 +781,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             curve: Curves.easeOut,
           );
         } else {
-          setState(() => _currentPage++);
+          // PageController 未挂载，重建控制器以跳转到目标页
+          _currentPage++;
+          _pageController?.dispose();
+          _pageController = PageController(
+            initialPage: _currentPage + _pagedLeadingCount,
+          );
           _scheduleProgressSave(pos: _currentPage);
+          setState(() {});
         }
       } else {
         _nextChapter();
@@ -992,21 +1004,23 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           horizontal: provider.horizontalPadding,
           vertical: provider.verticalPadding,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildChapterContent(provider, _content, _chapterTitle),
-            if (_nextContent != null &&
-                _nextContentChapterIndex != null &&
-                _nextContentChapterIndex! < _chapters.length &&
-                _nextContentChapterIndex ==
-                    _nextReadableChapterIndex(_currentChapterIndex))
-              _buildAdjacentChapterContent(
-                provider,
-                _nextContent!,
-                _chapters[_nextContentChapterIndex!].title,
-              ),
-          ],
+        child: RepaintBoundary(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildChapterContent(provider, _content, _chapterTitle),
+              if (_nextContent != null &&
+                  _nextContentChapterIndex != null &&
+                  _nextContentChapterIndex! < _chapters.length &&
+                  _nextContentChapterIndex ==
+                      _nextReadableChapterIndex(_currentChapterIndex))
+                _buildAdjacentChapterContent(
+                  provider,
+                  _nextContent!,
+                  _chapters[_nextContentChapterIndex!].title,
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -1335,10 +1349,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               },
               child: Stack(
                 children: [
-                  _buildPageContent(
-                    provider,
-                    _pages[_currentPage.clamp(0, _pages.length - 1)],
-                    pageIndex: _currentPage,
+                  RepaintBoundary(
+                    child: _buildPageContent(
+                      provider,
+                      _pages[_currentPage.clamp(0, _pages.length - 1)],
+                      pageIndex: _currentPage,
+                    ),
                   ),
                   if (_isDragging) _buildCurlEffect(provider),
                 ],

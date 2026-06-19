@@ -3,7 +3,11 @@
 // @group JS书源
 // @type 0
 // @searchUrl /search?q={{key}}&p={{page}}
+var searchUrl = '/search?q={{key}}&p={{page}}';
 // @exploreUrl [{"title":"分类1","url":"/category/1/{{page}}.html","style":{"layout_flexBasisPercent":0.25,"layout_flexGrow":1}}]
+var exploreUrl = JSON.stringify([
+  {title:"分类1", url:"/category/1/{{page}}.html", style:{layout_flexBasisPercent:0.25, layout_flexGrow:1}}
+]);
 // @header
 
 // ═══════════════════════════════════════════════
@@ -25,23 +29,26 @@
 //   bookInfo(result)             result=详情页HTML
 //   toc(result)                  result=目录页HTML
 //   content(result)              result=正文页HTML
+//   nextTocUrl(result)           result=目录页HTML（可选，多页目录）
+//   nextContentUrl(result)       result=正文页HTML（可选，多页正文）
 //
 //   注意：函数参数由框架自动注入，也可通过 globalThis 访问：
 //     globalThis.key / globalThis.page / globalThis.result / globalThis.baseUrl
 //
 // 【返回值格式】
-//   search()   → [{name, author, bookUrl, coverUrl, kind, lastChapter, intro}, ...]
-//   explore()  → [{name, author, bookUrl, coverUrl, kind, lastChapter}, ...]
-//   bookInfo() → {name, author, coverUrl, intro, kind, lastChapter, tocUrl, wordCount}
-//   toc()      → [{name, url, isVolume}, ...]
-//   content()  → "正文文本"（纯文本或HTML）
+//   search()        → [{name, author, bookUrl, coverUrl, kind, lastChapter, intro}, ...]
+//   explore()       → [{name, author, bookUrl, coverUrl, kind, lastChapter}, ...]
+//   bookInfo()      → {name, author, coverUrl, intro, kind, lastChapter, tocUrl, wordCount}
+//   toc()           → [{name, url, isVolume}, ...]
+//   content()       → "正文文本"（纯文本或HTML）
+//   nextTocUrl()    → "下一页URL" 或 ""（空字符串表示没有下一页）
+//   nextContentUrl() → "下一页URL" 或 ""（空字符串表示没有下一页）
 //
 // 【可用API】
 //   selectFirst(html, selector)             提取首个元素文本
 //   select(html, selector)                  提取元素列表（返回HTML数组）
 //   getAttr(html, selector, attr)           提取属性值
 //   clean(html)                             清理HTML标签
-//   getString(content, rule)                应用规则
 //   put(key, value) / getStr(key)           变量存取
 //   base64Encode/Decode(str)                Base64编解码
 //   md5Encode(str) / sha256Encode(str)      哈希
@@ -49,7 +56,6 @@
 //   CryptoJS.AES/MD5/SHA256/HmacSHA256      加密库
 //   console.log/warn/error/info             日志输出（调试用，不影响结果）
 //   JSON.parse/stringify                    JSON操作
-//   btoa/atob(str)                          Base64编解码
 //   fetch(url) / fetch(url, {method:'POST',body})  HTTP请求
 //
 // 【调试技巧】
@@ -122,14 +128,16 @@ function bookInfo(result) {
 function toc(result) {
   var html = result;
   // 替换为实际网站的CSS选择器
-  var links = select(html, ".chapter-list a");
+  // 注意：select 返回的是 HTML 字符串数组，不是 DOM 节点
+  // 对每个 item 用 selectFirst(item, "a") 取文本，getAttr(item, "a", "href") 取链接
+  var items = select(html, ".chapter-list li");
   var chapters = [];
 
-  for (var i = 0; i < links.length; i++) {
-    var link = links[i];
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
     chapters.push({
-      name: selectFirst(link, "a") || "",
-      url: getAttr(link, "a", "href") || "",
+      name: selectFirst(item, "a") || "",
+      url: getAttr(item, "a", "href") || "",
       isVolume: false
     });
   }
@@ -137,10 +145,44 @@ function toc(result) {
   return chapters;
 }
 
+// ===== 目录下一页（可选，没有多页目录可删除）=====
+function nextTocUrl(result) {
+  var html = result;
+  // 方式1：从分页链接提取
+  var next = getAttr(html, "a.next-page", "href") || "";
+  // 方式2：从下拉框提取（如 <option value="/book/xxx_2/">第21-40章</option>）
+  // var options = select(html, "option");
+  // for (var i = 0; i < options.length; i++) {
+  //   var val = getAttr(options[i], "", "value") || "";
+  //   if (val && !val.match(/\/\d+\/$/)) return val;
+  // }
+  return next;
+}
+
 // ===== 正文内容 =====
 function content(result) {
   var html = result;
   // 替换为实际网站的CSS选择器
   var text = selectFirst(html, "#content");
+  if (text) {
+    text = text
+      .replace(/.*最新网址.*/g, "")
+      .replace(/上一章|下一章|返回目录|加入书签|下一页|上一页/g, "")
+      .replace(/.*本章未完.*/g, "")
+      .trim();
+  }
   return text || "";
+}
+
+// ===== 正文下一页（可选，没有多页正文可删除）=====
+function nextContentUrl(result) {
+  var html = result;
+  var links = select(html, "a");
+  for (var i = 0; i < links.length; i++) {
+    var text = selectFirst(links[i], "") || "";
+    if (text.indexOf("下一页") >= 0) {
+      return getAttr(links[i], "", "href") || "";
+    }
+  }
+  return "";
 }

@@ -66,8 +66,10 @@ class _JsSourceEditPageState extends State<JsSourceEditPage> {
 // @url https://www.example.com
 // @group JS书源
 // @type 0
-// @searchUrl /search?q={{key}}&p={{page}}
-// @exploreUrl [{"title":"分类1","url":"/category/1/{{page}}.html","style":{"layout_flexBasisPercent":0.25,"layout_flexGrow":1}}]
+var searchUrl = '/search?q={{key}}&p={{page}}';
+var exploreUrl = JSON.stringify([
+  {title:"分类1", url:"/category/1/{{page}}.html", style:{layout_flexBasisPercent:0.25, layout_flexGrow:1}}
+]);
 
 // ===== 搜索 =====
 // key=搜索词, page=页码, result=搜索页HTML（框架自动请求并传入）
@@ -133,14 +135,14 @@ function bookInfo(result) {
 // ===== 章节目录 =====
 function toc(result) {
   var html = result;
-  var links = select(html, ".chapter-list a");
+  var items = select(html, ".chapter-list li");
   var chapters = [];
 
-  for (var i = 0; i < links.length; i++) {
-    var link = links[i];
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
     chapters.push({
-      name: selectFirst(link, "a") || "",
-      url: getAttr(link, "a", "href") || "",
+      name: selectFirst(item, "a") || "",
+      url: getAttr(item, "a", "href") || "",
       isVolume: false
     });
   }
@@ -148,32 +150,68 @@ function toc(result) {
   return chapters;
 }
 
+// ===== 目录下一页（可选，没有多页目录可删除）=====
+function nextTocUrl(result) {
+  var html = result;
+  // 方式1：从分页链接提取
+  var next = getAttr(html, "a.next-page", "href") || "";
+  // 方式2：从下拉框提取（如 <option value="/book/xxx_2/">第21-40章</option>）
+  // var options = select(html, "option");
+  // for (var i = 0; i < options.length; i++) {
+  //   var val = getAttr(options[i], "", "value") || "";
+  //   if (val && !val.match(/\/\d+\/$/)) return val;
+  // }
+  return next;
+}
+
 // ===== 正文内容 =====
 function content(result) {
   var html = result;
   var text = selectFirst(html, "#content");
+  if (text) {
+    text = text
+      .replace(/.*最新网址.*/g, "")
+      .replace(/上一章|下一章|返回目录/g, "")
+      .trim();
+  }
   return text || "";
+}
+
+// ===== 正文下一页（可选，没有多页正文可删除）=====
+function nextContentUrl(result) {
+  var html = result;
+  var links = select(html, "a");
+  for (var i = 0; i < links.length; i++) {
+    var text = selectFirst(links[i], "") || "";
+    if (text.indexOf("下一页") >= 0) {
+      return getAttr(links[i], "", "href") || "";
+    }
+  }
+  return "";
 }
 ''';
 
-  /// 从 JS 代码中动态提取元数据（借鉴 legado 的注释约定）
+  /// 从 JS 代码中动态提取元数据
+  /// 支持两种格式：
+  ///   1. 注释格式：// @name 书源名称
+  ///   2. JS 变量格式：var bookSourceName = "书源名称" 或 var name = "书源名称"
   void _tryExtractMetadata() {
     final code = _jsController.text;
     var name = _extractMeta(code, 'name');
     var url = _extractMeta(code, 'url');
     var group = _extractMeta(code, 'group');
 
-    // 也支持 var bookSourceName = "xxx" 格式
+    // 也支持 JS 变量声明格式
     if (name == null) {
-      final m = RegExp(r'''var\s+bookSourceName\s*=\s*["']([^"']+)["']''').firstMatch(code);
+      final m = RegExp(r'''var\s+(?:bookSource)?[Nn]ame\s*=\s*["']([^"']+)["']''').firstMatch(code);
       name = m?.group(1);
     }
     if (url == null) {
-      final m = RegExp(r'''var\s+bookSourceUrl\s*=\s*["']([^"']+)["']''').firstMatch(code);
+      final m = RegExp(r'''var\s+(?:bookSource)?[Uu]rl\s*=\s*["']([^"']+)["']''').firstMatch(code);
       url = m?.group(1);
     }
     if (group == null) {
-      final m = RegExp(r'''var\s+bookSourceGroup\s*=\s*["']([^"']+)["']''').firstMatch(code);
+      final m = RegExp(r'''var\s+(?:bookSource)?[Gg]roup\s*=\s*["']([^"']+)["']''').firstMatch(code);
       group = m?.group(1);
     }
 
@@ -219,6 +257,28 @@ function content(result) {
     return result.isEmpty ? null : result;
   }
 
+  /// 从 JS 变量声明中提取元数据
+  /// 支持：var searchUrl = "xxx" 或 var searchUrl = 'xxx'
+  /// 对于 JS 表达式（如 JSON.stringify(...)），自动添加 @js: 前缀
+  static String? _extractJsVar(String code, String key) {
+    // 简单字符串赋值：var xxx = "value" 或 var xxx = 'value'
+    final simpleMatch = RegExp('''var\\s+$key\\s*=\\s*["']([^"']+)["']''').firstMatch(code);
+    if (simpleMatch != null) return simpleMatch.group(1);
+
+    // JS 表达式赋值：var xxx = JSON.stringify({...}) 等
+    // 提取到下一个 var/function/@注释 为止
+    final multiLineMatch = RegExp('var\\s+$key\\s*=\\s*(.*?)(?=\\nvar\\s|\\nfunction\\s|\\n//\\s*@)', dotAll: true).firstMatch(code);
+    if (multiLineMatch != null) {
+      var value = multiLineMatch.group(1)?.trim() ?? '';
+      if (value.isNotEmpty) {
+        // JS 表达式需要 @js: 前缀，运行时才知道要执行
+        return '@js:$value';
+      }
+    }
+
+    return null;
+  }
+
   Future<void> _loadExistingSource() async {
     final storage = StorageService.instance;
     final sourceData = storage.getBookSource(widget.sourceUrl!);
@@ -242,14 +302,13 @@ function content(result) {
   BookSource _buildSource() {
     final code = _jsController.text;
 
-    // 从JS代码提取 @type 元数据
-    final typeStr = _extractMeta(code, 'type');
+    // 从JS代码提取元数据（支持注释格式和 JS 变量格式）
+    final typeStr = _extractMeta(code, 'type') ?? _extractJsVar(code, 'type');
     final sourceType = typeStr != null ? int.tryParse(typeStr) ?? 0 : 0;
 
-    // 从JS代码提取 searchUrl 和 exploreUrl（可选）
-    final searchUrlMeta = _extractMeta(code, 'searchUrl');
-    final exploreUrlMeta = _extractMeta(code, 'exploreUrl');
-    final headerMeta = _extractMeta(code, 'header');
+    var searchUrlMeta = _extractMeta(code, 'searchUrl') ?? _extractJsVar(code, 'searchUrl');
+    var exploreUrlMeta = _extractMeta(code, 'exploreUrl') ?? _extractJsVar(code, 'exploreUrl');
+    var headerMeta = _extractMeta(code, 'header') ?? _extractJsVar(code, 'header');
 
     // 检测JS代码中定义了哪些函数
     final hasSearch = RegExp(r'function\s+search\s*\(').hasMatch(code);
@@ -572,12 +631,14 @@ function content(result) {
 
   void _showSnippetPanel() {
     final snippets = [
-      ('元数据', '// @name 书源名称\n// @url https://\n// @group JS书源\n// @type 0\n// @searchUrl /search?q={{key}}&p={{page}}\n'),
-      ('搜索', 'function search(key, page, result) {\n  var html = result;\n  var items = select(html, ".item");\n  return [];\n}\n'),
-      ('发现', 'function explore(baseUrl, result) {\n  var html = result;\n  var items = select(html, ".item");\n  return [];\n}\n'),
-      ('详情', 'function bookInfo(result) {\n  var html = result;\n  return {};\n}\n'),
-      ('目录', 'function toc(result) {\n  var html = result;\n  return [];\n}\n'),
-      ('正文', 'function content(result) {\n  var html = result;\n  return "";\n}\n'),
+      ('元数据', '// @name 书源名称\n// @url https://\n// @group JS书源\n// @type 0\nvar searchUrl = \'/search?q={{key}}&p={{page}}\';\nvar exploreUrl = \'[]\';\n'),
+      ('搜索', 'function search(key, page, result) {\n  var html = result;\n  var items = select(html, ".item");\n  var results = [];\n  for (var i = 0; i < items.length; i++) {\n    var item = items[i];\n    results.push({\n      name: selectFirst(item, "a") || "",\n      author: selectFirst(item, ".author") || "",\n      bookUrl: getAttr(item, "a", "href") || "",\n      coverUrl: getAttr(item, "img", "src") || "",\n      kind: "",\n      lastChapter: "",\n      intro: ""\n    });\n  }\n  return results;\n}\n'),
+      ('发现', 'function explore(baseUrl, result) {\n  var html = result;\n  var items = select(html, ".item");\n  var results = [];\n  for (var i = 0; i < items.length; i++) {\n    var item = items[i];\n    results.push({\n      name: selectFirst(item, "a") || "",\n      author: selectFirst(item, ".author") || "",\n      bookUrl: getAttr(item, "a", "href") || "",\n      coverUrl: getAttr(item, "img", "src") || "",\n      kind: "",\n      lastChapter: ""\n    });\n  }\n  return results;\n}\n'),
+      ('详情', 'function bookInfo(result) {\n  var html = result;\n  return {\n    name: selectFirst(html, "h1") || "",\n    author: selectFirst(html, ".author") || "",\n    coverUrl: getAttr(html, "img", "src") || "",\n    intro: selectFirst(html, ".intro") || "",\n    kind: "",\n    lastChapter: "",\n    tocUrl: "",\n    wordCount: ""\n  };\n}\n'),
+      ('目录', 'function toc(result) {\n  var html = result;\n  var items = select(html, ".chapter-list li");\n  var chapters = [];\n  for (var i = 0; i < items.length; i++) {\n    var item = items[i];\n    chapters.push({\n      name: selectFirst(item, "a") || "",\n      url: getAttr(item, "a", "href") || "",\n      isVolume: false\n    });\n  }\n  return chapters;\n}\n'),
+      ('正文', 'function content(result) {\n  var html = result;\n  var text = selectFirst(html, "#content");\n  if (text) {\n    text = text.replace(/上一章|下一章|返回目录/g, "").trim();\n  }\n  return text || "";\n}\n'),
+      ('目录翻页', 'function nextTocUrl(result) {\n  var html = result;\n  var next = getAttr(html, "a.next-page", "href") || "";\n  return next;\n}\n'),
+      ('正文翻页', 'function nextContentUrl(result) {\n  var html = result;\n  var links = select(html, "a");\n  for (var i = 0; i < links.length; i++) {\n    var text = selectFirst(links[i], "") || "";\n    if (text.indexOf("下一页") >= 0) {\n      return getAttr(links[i], "", "href") || "";\n    }\n  }\n  return "";\n}\n'),
       ('select', 'select(html, "CSS选择器")\n'),
       ('selectFirst', 'selectFirst(html, "CSS选择器")\n'),
       ('getAttr', 'getAttr(html, "CSS选择器", "属性名")\n'),

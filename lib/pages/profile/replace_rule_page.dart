@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../services/storage_service.dart';
+import '../../utils/design_tokens.dart';
 
 /// 替换规则模型
 class ReplaceRule {
@@ -118,29 +119,29 @@ class _ReplaceRulePageState extends State<ReplaceRulePage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: '规则名称',
-                    hintText: '如：去除广告',
-                  ),
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: '规则名称',
+                  hintText: '如：去除广告',
                 ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: patternController,
-                  decoration: const InputDecoration(
-                    labelText: '匹配模式',
-                    hintText: '要替换的文本或正则表达式',
-                  ),
+              ),
+              const SizedBox(height: DesignTokens.spacingLg),
+              TextField(
+                controller: patternController,
+                decoration: const InputDecoration(
+                  labelText: '匹配模式',
+                  hintText: '要替换的文本或正则表达式',
                 ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: replacementController,
-                  decoration: const InputDecoration(
-                    labelText: '替换为',
-                    hintText: '留空则删除匹配内容',
-                  ),
+              ),
+              const SizedBox(height: DesignTokens.spacingLg),
+              TextField(
+                controller: replacementController,
+                decoration: const InputDecoration(
+                  labelText: '替换为',
+                  hintText: '留空则删除匹配内容',
                 ),
-                const SizedBox(height: 16),
+              ),
+              const SizedBox(height: DesignTokens.spacingLg),
                 SwitchListTile(
                   title: const Text('使用正则表达式'),
                   value: isRegex,
@@ -245,10 +246,10 @@ class _ReplaceRulePageState extends State<ReplaceRulePage> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.find_replace, size: 64, color: Colors.grey[400]),
-                      const SizedBox(height: 16),
-                      const Text('暂无替换规则', style: TextStyle(color: Colors.grey)),
-                      const SizedBox(height: 8),
+                      Icon(Icons.find_replace, size: 64, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      const SizedBox(height: DesignTokens.spacingLg),
+                      Text('暂无替换规则', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                      const SizedBox(height: DesignTokens.spacingSm),
                       TextButton.icon(
                         onPressed: _addRule,
                         icon: const Icon(Icons.add),
