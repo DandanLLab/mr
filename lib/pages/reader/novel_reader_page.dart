@@ -1144,8 +1144,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }) {
     // 如果内容包含 HTML 标签，使用 Html 组件渲染
     if (_containsHtml(content)) {
+      // 全角空格宽度等于字号本身，两个全角空格 = 2 * fontSize
       final indentWidth = provider.paragraphIndent.isNotEmpty
-          ? provider.paragraphIndent.length * provider.fontSize * 0.5
+          ? provider.paragraphIndent.length * provider.fontSize
           : 0.0;
       return Html(
         data: content,
@@ -1159,6 +1160,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             textAlign: TextAlign.justify,
           ),
           'p': Style(
+            margin: Margins.only(bottom: provider.paragraphSpacing),
+            padding: HtmlPaddings.only(left: indentWidth),
+          ),
+          'div': Style(
             margin: Margins.only(bottom: provider.paragraphSpacing),
             padding: HtmlPaddings.only(left: indentWidth),
           ),

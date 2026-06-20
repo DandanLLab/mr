@@ -231,13 +231,29 @@ class ReaderProvider extends ChangeNotifier {
 
   void setBackgroundColor(Color color) {
     _backgroundColor = color;
+    // 根据背景色亮度自动适应文字色
+    _autoAdaptTextColor(color);
     _saveToStorage();
     notifyListeners();
   }
 
   void setTextColor(Color color) {
     _textColor = color;
+    _saveToStorage();
     notifyListeners();
+  }
+
+  /// 根据背景色亮度自动设置文字色（深色背景→白字，浅色背景→黑字）
+  void _autoAdaptTextColor(Color bgColor) {
+    // 计算亮度：0.0 全黑，1.0 全白
+    final brightness = bgColor.computeLuminance();
+    if (brightness < 0.5) {
+      // 深色背景 → 白色文字
+      _textColor = Colors.white70;
+    } else {
+      // 浅色背景 → 黑色文字
+      _textColor = Colors.black87;
+    }
   }
 
   void setBrightness(double value) {
