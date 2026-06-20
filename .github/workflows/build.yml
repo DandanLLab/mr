@@ -119,9 +119,9 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
-      # 9. 构建 Release APK
+      # 9. 构建 Release APK（分架构打包，体积更小）
       - name: Build APK
-        run: flutter build apk --release --no-tree-shake-icons
+        run: flutter build apk --release --no-tree-shake-icons --split-per-abi
 
       # 10. 重命名 APK 文件
       - name: Rename APK
@@ -130,12 +130,15 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           TYPE="${{ steps.release_type.outputs.type }}"
           BUILD_DATE="${{ steps.version.outputs.build_date }}"
-          # 文件名格式: mr_v26.0620.3_dev_2026-06-20.apk
-          APK_NAME="mr_v${VERSION}_${TYPE}_${BUILD_DATE}.apk"
-          cp build/app/outputs/flutter-apk/app-release.apk "${APK_NAME}"
+          # 分架构打包后生成 app-arm64-v8a-release.apk
+          SRC_APK="build/app/outputs/flutter-apk/app-arm64-v8a-release.apk"
+          APK_NAME="mr_v${VERSION}_${TYPE}_${BUILD_DATE}_arm64.apk"
+          cp "${SRC_APK}" "${APK_NAME}"
           echo "apk_name=$APK_NAME" >> $GITHUB_OUTPUT
           echo "apk_path=${APK_NAME}" >> $GITHUB_OUTPUT
           ls -lh "${APK_NAME}"
+          echo "=== APK 体积 ==="
+          du -h "${APK_NAME}"
 
       # 11. 压缩打包（zip）
       - name: Compress APK

@@ -28,9 +28,9 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // 只保留 ARM 架构，移除 x86/x86_64（模拟器用，减少约 40% .so 体积）
+        // 只保留 arm64-v8a（minSdk=29 设备均为 arm64，移除 armeabi-v7a 减半体积）
         ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+            abiFilters += listOf("arm64-v8a")
         }
     }
 
