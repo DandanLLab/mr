@@ -974,6 +974,28 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
     );
   }
 
+  // 对话框列表项构建器
+  Widget _buildDialogItem(String text, VoidCallback onTap, {bool isDestructive = false}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryTextColor = isDark
+        ? const Color(0xDEFFFFFF)  // 夜间：87%白
+        : const Color(0xDE000000); // 日间：87%黑
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+        child: Text(
+          text,
+          style: TextStyle(
+            fontSize: 16,
+            color: isDestructive ? Theme.of(context).colorScheme.error : primaryTextColor,
+          ),
+        ),
+      ),
+    );
+  }
+
   void _exportTheme(ThemeConfig theme) {
     final json = theme.toJson();
     Share.share(json, subject: '主题分享');
