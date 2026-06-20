@@ -117,6 +117,36 @@ class SearchProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 选中指定分组的所有书源
+  void selectGroupSources(String groupName) {
+    _selectedSourceUrls = _bookSources
+        .where((s) => (s.bookSourceGroup ?? '默认分组') == groupName)
+        .map((s) => s.bookSourceUrl)
+        .toSet();
+    notifyListeners();
+  }
+
+  /// 切换分组选中状态（全选/取消全选）
+  void toggleGroupSelection(String groupName) {
+    final groupSources = _bookSources
+        .where((s) => (s.bookSourceGroup ?? '默认分组') == groupName)
+        .toList();
+    final allSelected = groupSources
+        .every((s) => _selectedSourceUrls.contains(s.bookSourceUrl));
+    if (allSelected) {
+      // 取消选中该组
+      for (final s in groupSources) {
+        _selectedSourceUrls.remove(s.bookSourceUrl);
+      }
+    } else {
+      // 选中该组
+      for (final s in groupSources) {
+        _selectedSourceUrls.add(s.bookSourceUrl);
+      }
+    }
+    notifyListeners();
+  }
+
   Future<void> search(String keyword, {bool precisionSearch = false}) async {
     if (keyword.isEmpty) return;
 

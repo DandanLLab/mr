@@ -18,3 +18,8 @@ coverage/
 *.lock
 android_sdk/
 /local.properties
+
+# JVM crash logs
+hs_err_pid*.log
+replay_pid*.log
+*.log

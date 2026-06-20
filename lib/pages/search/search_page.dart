@@ -887,26 +887,26 @@ class _SearchPageState extends State<SearchPage> {
                                     .onSurfaceVariant,
                               ),
                             ),
-                            trailing: Checkbox(
-                              value: allInGroupSelected,
-                              onChanged: (checked) {
-                                for (final source in sources) {
-                                  if (checked == true) {
-                                    if (!provider.selectedSourceUrls
-                                        .contains(source.bookSourceUrl)) {
-                                      provider.toggleSourceSelection(
-                                          source.bookSourceUrl);
-                                    }
-                                  } else {
-                                    if (provider.selectedSourceUrls
-                                        .contains(source.bookSourceUrl)) {
-                                      provider.toggleSourceSelection(
-                                          source.bookSourceUrl);
-                                    }
-                                  }
-                                }
-                                setDialogState(() {});
-                              },
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // 仅搜此组按钮
+                                TextButton(
+                                  onPressed: () {
+                                    provider.selectGroupSources(group);
+                                    setDialogState(() {});
+                                  },
+                                  child: const Text('仅搜此组',
+                                      style: TextStyle(fontSize: 11)),
+                                ),
+                                Checkbox(
+                                  value: allInGroupSelected,
+                                  onChanged: (checked) {
+                                    provider.toggleGroupSelection(group);
+                                    setDialogState(() {});
+                                  },
+                                ),
+                              ],
                             ),
                             onTap: () {
                               setDialogState(() {
@@ -971,7 +971,14 @@ class _SearchPageState extends State<SearchPage> {
                   child: const Text('清空'),
                 ),
                 TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    // 选中书源后，如果有当前关键词，自动开始并发搜索
+                    if (provider.currentKeyword.isNotEmpty &&
+                        provider.selectedSourceUrls.isNotEmpty) {
+                      provider.search(provider.currentKeyword);
+                    }
+                  },
                   child: const Text('确定'),
                 ),
               ],

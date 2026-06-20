@@ -590,80 +590,19 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
             ),
             child: InkWell(
               borderRadius: BorderRadius.circular(8),
-              onTap: _showAddOptions,
-              child: Center(
+              onTap: _addTheme,
+              child: const Center(
                 child: Text(
                   '添加主题',
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.bold,
-                    color: isDark 
-                        ? const Color(0xDEFFFFFF)  // 夜间：87%白
-                        : const Color(0xDE000000), // 日间：87%黑
                   ),
                 ),
               ),
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  void _showAddOptions() {
-    // 使用中间显示的选择对话框，匹配原版 legado-main 的 selector 样式
-    // 原版使用 AlertDialog.setItems() 显示简单列表
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('添加主题'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildDialogItem('手动配置', () {
-              Navigator.pop(ctx);
-              _addTheme();
-            }),
-            _buildDialogItem('导入主题包', () async {
-              Navigator.pop(ctx);
-              final result = await FilePicker.platform.pickFiles(
-                type: FileType.custom,
-                allowedExtensions: ['zip'],
-                allowCompression: false,
-              );
-              if (result != null && result.files.isNotEmpty) {
-                final path = result.files.first.path;
-                if (path != null) {
-                  // TODO: 实现导入主题包功能
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('选择文件: $path')),
-                  );
-                }
-              }
-            }),
-          ],
-        ),
-      ),
-    );
-  }
-  
-  Widget _buildDialogItem(String text, VoidCallback onTap, {bool isDestructive = false}) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final primaryTextColor = isDark 
-        ? const Color(0xDEFFFFFF)  // 夜间：87%白
-        : const Color(0xDE000000); // 日间：87%黑
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
-        child: Text(
-          text,
-          style: TextStyle(
-            fontSize: 16,
-            color: isDestructive ? Theme.of(context).colorScheme.error : primaryTextColor,
-          ),
-        ),
       ),
     );
   }
