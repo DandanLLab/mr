@@ -22,7 +22,7 @@ permissions:
   contents: write
 
 env:
-  FLUTTER_VERSION: '3.41.7'
+  FLUTTER_VERSION: '3.44.2'
   JAVA_VERSION: '21'
 
 jobs:
