@@ -73,6 +73,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   // Scroll mode controller
   final ScrollController _scrollController = ScrollController();
+  // 标记当前章节内容的边界，用于检测滚动到下一章
+  final GlobalKey _currentChapterKey = GlobalKey();
 
   // Highlight selection state
   String _selectedText = '';
@@ -249,6 +251,23 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final currentScroll = _scrollController.position.pixels;
     _scheduleProgressSave(pos: currentScroll.round());
 
+    // 检测是否已滚动到下一章内容区域
+    if (_nextContent != null && _nextContentChapterIndex != null) {
+      final chapterContext = _currentChapterKey.currentContext;
+      if (chapterContext != null) {
+        final renderBox = chapterContext.findRenderObject() as RenderBox;
+        // 获取当前章节内容的底部在视口中的位置
+        final chapterBottom = renderBox.localToGlobal(
+          Offset(0, renderBox.size.height),
+        );
+        // 如果当前章节底部已在视口顶部上方，说明用户已滚动到下一章
+        if (chapterBottom.dy < 100) {
+          _switchToPreloadedChapter();
+          return;
+        }
+      }
+    }
+
     // Auto-load next chapter when near bottom
     // 阈值基于视口尺寸，确保用户接近底部时预加载已完成
     final viewport = _scrollController.position.viewportDimension;
@@ -256,6 +275,45 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     if (maxScroll - currentScroll < preloadThreshold && _nextContent == null) {
       _preloadNextChapter();
     }
+  }
+
+  /// 滚动模式下无缝切换到预加载的下一章
+  void _switchToPreloadedChapter() {
+    if (_nextContent == null || _nextContentChapterIndex == null) return;
+
+    // 获取旧章节内容的高度（用于调整滚动位置）
+    double oldChapterHeight = 0;
+    final oldContext = _currentChapterKey.currentContext;
+    if (oldContext != null) {
+      final renderBox = oldContext.findRenderObject() as RenderBox;
+      oldChapterHeight = renderBox.size.height;
+    }
+
+    // 更新状态：将下一章设为当前章
+    setState(() {
+      _currentChapterIndex = _nextContentChapterIndex!;
+      _chapterTitle = _chapters[_currentChapterIndex].title;
+      _content = _nextContent!;
+      _nextContent = null;
+      _nextContentChapterIndex = null;
+      _sliderValue = _currentChapterIndex.toDouble();
+    });
+
+    // 在下一帧调整滚动位置（减去旧章节高度，保持视觉位置不变）
+    if (oldChapterHeight > 0 && _scrollController.hasClients) {
+      final newOffset =
+          max(0.0, _scrollController.offset - oldChapterHeight);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          _scrollController.jumpTo(newOffset);
+        }
+      });
+    }
+
+    // 预加载新的下一章
+    _preloadNextChapter();
+    // 保存进度
+    _scheduleProgressSave(pos: 0);
   }
 
   Future<void> _loadBookAndChapters() async {
@@ -1075,7 +1133,15 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildChapterContent(provider, _content, _chapterTitle),
+              // 当前章节内容，用 GlobalKey 包裹以便检测滚动位置
+              Container(
+                key: _currentChapterKey,
+                child: _buildChapterContent(
+                  provider,
+                  _content,
+                  _chapterTitle,
+                ),
+              ),
               if (_nextContent != null &&
                   _nextContentChapterIndex != null &&
                   _nextContentChapterIndex! < _chapters.length &&
