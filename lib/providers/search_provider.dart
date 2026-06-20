@@ -110,6 +110,13 @@ class SearchProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void selectSingleSource(String sourceUrl) {
+    _selectedSourceUrls = {
+      if (_bookSources.any((s) => s.bookSourceUrl == sourceUrl)) sourceUrl,
+    };
+    notifyListeners();
+  }
+
   Future<void> search(String keyword, {bool precisionSearch = false}) async {
     if (keyword.isEmpty) return;
 

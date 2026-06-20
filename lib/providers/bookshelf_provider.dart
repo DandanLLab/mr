@@ -135,6 +135,11 @@ class BookshelfProvider extends ChangeNotifier {
     final bookDataList = StorageService.instance.getAllBooks();
     _books = bookDataList.map((data) => Book.fromJson(data)).toList();
     _applyFilterAndSort();
+    // 钳制选中分组索引，防止可见分组缩减后越界
+    final visibleCount = getVisibleGroups().length;
+    if (visibleCount > 0) {
+      _selectedGroupIndex = _selectedGroupIndex.clamp(0, visibleCount - 1);
+    }
     notifyListeners();
   }
 
@@ -179,7 +184,10 @@ class BookshelfProvider extends ChangeNotifier {
   }
 
   void setSelectedGroupIndex(int index) {
-    _selectedGroupIndex = index;
+    // 钳制索引，防止可见分组缩减后 PageView 越界崩溃
+    final visibleCount = getVisibleGroups().length;
+    _selectedGroupIndex =
+        visibleCount > 0 ? index.clamp(0, visibleCount - 1) : 0;
     notifyListeners();
   }
 

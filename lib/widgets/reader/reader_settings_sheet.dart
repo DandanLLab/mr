@@ -133,7 +133,6 @@ class ReaderSettingsSheet extends StatefulWidget {
     1: '滑动',
     3: '仿真',
     0: '滚动',
-    4: '无',
   };
 
   @override
@@ -496,26 +495,12 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
   Widget _styleHeader() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              '背景样式',
-              style: TextStyle(color: _subColor, fontSize: 12),
-            ),
-          ),
-          Text('共享排版', style: TextStyle(color: _textColor, fontSize: 14)),
-          const SizedBox(width: 6),
-          SizedBox(
-            width: 20,
-            height: 20,
-            child: Checkbox(
-              value: false,
-              onChanged: (_) {},
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-          ),
-        ],
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          '背景样式',
+          style: TextStyle(color: _subColor, fontSize: 12),
+        ),
       ),
     );
   }
@@ -681,19 +666,11 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
             mainAxisSize: MainAxisSize.min,
             children: [
               _dialogTitle('正文边距'),
-              _dialogSlider('上', _verticalPadding, 0, 60, (v) {
+              _dialogSlider('上下边距', _verticalPadding, 0, 60, (v) {
                 setState(() => _verticalPadding = v);
                 widget.onVerticalPaddingChanged(v);
               }),
-              _dialogSlider('下', _verticalPadding, 0, 60, (v) {
-                setState(() => _verticalPadding = v);
-                widget.onVerticalPaddingChanged(v);
-              }),
-              _dialogSlider('左', _horizontalPadding, 0, 60, (v) {
-                setState(() => _horizontalPadding = v);
-                widget.onHorizontalPaddingChanged(v);
-              }),
-              _dialogSlider('右', _horizontalPadding, 0, 60, (v) {
+              _dialogSlider('左右边距', _horizontalPadding, 0, 60, (v) {
                 setState(() => _horizontalPadding = v);
                 widget.onHorizontalPaddingChanged(v);
               }),

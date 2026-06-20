@@ -11,8 +11,9 @@ import '../../utils/design_tokens.dart';
 
 class SearchPage extends StatefulWidget {
   final String? initialKeyword;
+  final String? sourceUrl;
 
-  const SearchPage({super.key, this.initialKeyword});
+  const SearchPage({super.key, this.initialKeyword, this.sourceUrl});
 
   @override
   State<SearchPage> createState() => _SearchPageState();
@@ -34,6 +35,10 @@ class _SearchPageState extends State<SearchPage> {
       // 清空上次搜索结果
       provider.clearResults();
       await provider.loadBookSources();
+      // 限定单书源搜索（来自发现页/书源编辑页的"搜索书籍"入口）
+      if (widget.sourceUrl != null && widget.sourceUrl!.isNotEmpty) {
+        provider.selectSingleSource(widget.sourceUrl!);
+      }
       await provider.loadSearchHistory();
       if (!mounted) return;
       if (_searchController.text.trim().isNotEmpty) {
@@ -266,7 +271,7 @@ class _SearchPageState extends State<SearchPage> {
       // 停止搜索按钮（参考原版 FloatingActionButton）
       floatingActionButton: Consumer<SearchProvider>(
         builder: (context, provider, child) {
-          if (!provider.isLoading || provider.searchResults.isEmpty) {
+          if (!provider.isLoading) {
             return const SizedBox.shrink();
           }
           return FloatingActionButton.small(

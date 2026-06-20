@@ -12,6 +12,7 @@ import '../../models/rules/toc_rule.dart';
 import '../../models/rules/content_rule.dart';
 import '../../services/storage_service.dart';
 import '../../services/cookie_service.dart';
+import '../../services/app_logger.dart';
 import '../../routes/app_routes.dart';
 import '../../widgets/keyboard_assist_toolbar.dart';
 
@@ -105,6 +106,15 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
       bookSourceUrl: '',
       bookSourceName: '',
     );
+
+    // 从已有书源加载开关状态
+    _enabled = _source.enabled;
+    _enabledExplore = _source.enabledExplore;
+    _enabledCookieJar = _source.enabledCookieJar;
+    _eventListener = _source.eventListener;
+    _customButton = _source.customButton;
+    _nextPageLazyLoad = _source.nextPageLazyLoad;
+    _sourceType = _source.bookSourceType.index;
 
     _initEntities();
     setState(() {});
@@ -303,6 +313,13 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
         payAction: contentMap['payAction']?.isNotEmpty == true ? contentMap['payAction'] : null,
         callBackJs: contentMap['callBackJs']?.isNotEmpty == true ? contentMap['callBackJs'] : null,
       ),
+      eventListener: _eventListener,
+      customButton: _customButton,
+      nextPageLazyLoad: _nextPageLazyLoad,
+      // 保留原始书源的 variable/engine/sourceFormat 字段，避免保存时丢失
+      variable: _source.variable,
+      engine: _source.engine,
+      sourceFormat: _source.sourceFormat,
     );
   }
 
@@ -491,7 +508,8 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
   }
 
   void _showSourceVariable() {
-    final controller = TextEditingController();
+    final currentVariable = _source.variable ?? '';
+    final controller = TextEditingController(text: currentVariable);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -502,7 +520,7 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
             hintText: '源变量可在JS中通过source.getVariable()获取',
             border: OutlineInputBorder(),
           ),
-          maxLines: 3,
+          maxLines: 5,
         ),
         actions: [
           TextButton(
@@ -511,7 +529,15 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
           ),
           TextButton(
             onPressed: () {
+              final value = controller.text;
               Navigator.pop(context);
+              setState(() {
+                _source = _source.copyWith(variable: value);
+                _hasChanges = true;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('源变量已设置')),
+              );
             },
             child: const Text('确定'),
           ),
@@ -616,18 +642,46 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
   }
 
   void _showLog() {
+    final logs = AppLogger.instance.logs;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('日志'),
-        content: const SizedBox(
+        content: SizedBox(
           width: double.maxFinite,
-          height: 300,
-          child: SingleChildScrollView(
-            child: Text('暂无日志'),
-          ),
+          height: 400,
+          child: logs.isEmpty
+              ? const Center(child: Text('暂无日志'))
+              : ListView.builder(
+                  itemCount: logs.length,
+                  itemBuilder: (context, index) {
+                    final log = logs[index];
+                    return ListTile(
+                      dense: true,
+                      leading: Text(log.levelIcon),
+                      title: Text(
+                        log.message,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                      subtitle: Text(
+                        '${log.category.label} ${log.time.hour}:${log.time.minute.toString().padLeft(2, '0')}:${log.time.second.toString().padLeft(2, '0')}',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                    );
+                  },
+                ),
         ),
         actions: [
+          if (logs.isNotEmpty)
+            TextButton(
+              onPressed: () {
+                AppLogger.instance.clear();
+                Navigator.pop(context);
+              },
+              child: const Text('清空'),
+            ),
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('关闭'),
@@ -637,7 +691,7 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
     );
   }
 
-  Future<bool> _onWillPop() async {
+  Future<bool> _confirmExit() async {
     if (!_hasChanges) return true;
 
     final result = await showDialog<bool>(
@@ -655,9 +709,9 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
             child: const Text('不保存'),
           ),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context, false);
-              _saveSource();
+              await _saveSource();
             },
             child: const Text('保存'),
           ),
@@ -675,8 +729,15 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
       orElse: () => EditEntity(key: 'loginUrl', value: '', hint: ''),
     ).value;
 
-    return WillPopScope(
-      onWillPop: _onWillPop,
+    return PopScope(
+      canPop: !_hasChanges,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final shouldPop = await _confirmExit();
+        if (shouldPop && context.mounted) {
+          Navigator.pop(context);
+        }
+      },
       child: Scaffold(
         // 设置为 false，让键盘覆盖内容
         // 辅助按键工具栏使用 Positioned 定位在键盘上方
@@ -708,6 +769,12 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
               offset: const Offset(0, 48),
               onSelected: (value) {
                 switch (value) {
+                  case 'save':
+                    _saveSource();
+                    break;
+                  case 'debug':
+                    _debugSource();
+                    break;
                   case 'login':
                     _loginWithSource();
                     break;
@@ -811,13 +878,25 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
                   value: 'qr_share',
                   padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   height: 48,
-                  child: Row(children: [Icon(Icons.qr_code, size: 18), SizedBox(width: 12), Text('二维码分享')]),
+                  child: Row(children: [Icon(Icons.copy, size: 18), SizedBox(width: 12), Text('复制书源JSON')]),
                 ),
                 const PopupMenuItem(
                   value: 'share',
                   padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   height: 48,
                   child: Row(children: [Icon(Icons.share, size: 18), SizedBox(width: 12), Text('字符串分享')]),
+                ),
+                const PopupMenuItem(
+                  value: 'save',
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.save, size: 18), SizedBox(width: 12), Text('保存')]),
+                ),
+                const PopupMenuItem(
+                  value: 'debug',
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  height: 48,
+                  child: Row(children: [Icon(Icons.bug_report, size: 18), SizedBox(width: 12), Text('调试')]),
                 ),
                 const PopupMenuItem(
                   value: 'log',

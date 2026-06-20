@@ -1115,7 +1115,8 @@ class _BookshelfPageState extends State<BookshelfPage>
                         child: Slider(
                           value: _margin,
                           min: 0,
-                          max: 60,
+                          // 根据列数动态限制最大间距，防止负宽度崩溃
+                          max: _maxMarginForColumns(),
                           divisions: 12,
                           onChanged: (v) {
                             setDialogState(() => _margin = v);
@@ -1243,10 +1244,39 @@ class _BookshelfPageState extends State<BookshelfPage>
     }
   }
 
+  /// 根据屏幕宽度和列数计算最大安全间距，防止网格单元格宽度为负
+  double _maxMarginForColumns() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final n = _gridColumnCount;
+    if (n <= 1) return 60;
+    // 单元格宽度 = (W - 2*margin - (N-1)*margin) / N > 0
+    // => margin < W / (N + 1)
+    final maxSafe = screenWidth / (n + 1) * 0.8;
+    return maxSafe.clamp(0.0, 60.0);
+  }
+
+  /// 钳制后的实际间距，防止用户在切换列数后仍保留过大的间距值
+  double get _safeMargin {
+    final maxMargin = _maxMarginForColumns();
+    return _margin.clamp(0.0, maxMargin);
+  }
+
   Widget _buildMainView(BookshelfProvider provider, List<String> groups) {
     final isList =
         _layout == BookshelfLayout.list ||
         _layout == BookshelfLayout.listCompact;
+
+    // 防止分组缩减后 PageView 越界：钳制控制器页码
+    if (groups.isNotEmpty &&
+        _pageController.hasClients &&
+        _pageController.page != null &&
+        _pageController.page! >= groups.length) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && groups.isNotEmpty) {
+          _pageController.jumpToPage(groups.length - 1);
+        }
+      });
+    }
 
     // 参考原版：使用 PageView 支持左右滑动切换分组
     return PageView.builder(
@@ -1294,14 +1324,15 @@ class _BookshelfPageState extends State<BookshelfPage>
   }
 
   Widget _buildGridViewWithBooks(List<Book> books, BookshelfProvider provider) {
+    final margin = _safeMargin;
     final gridView = GridView.builder(
       cacheExtent: 500,
-      padding: EdgeInsets.all(_margin),
+      padding: EdgeInsets.all(margin),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: _gridColumnCount,
         childAspectRatio: 0.65,
-        crossAxisSpacing: _margin,
-        mainAxisSpacing: _margin,
+        crossAxisSpacing: margin,
+        mainAxisSpacing: margin,
       ),
       itemCount: books.length,
       itemBuilder: (context, index) {
@@ -1925,7 +1956,7 @@ class _BookshelfPageState extends State<BookshelfPage>
           ),
           const SizedBox(height: DesignTokens.spacingSm),
           Text(
-            '点击右下角按钮导入书籍',
+            '点击右上角菜单导入书籍',
             style: TextStyle(
               fontSize: DesignTokens.fontBody,
               color: Theme.of(context).colorScheme.onSurfaceVariant,

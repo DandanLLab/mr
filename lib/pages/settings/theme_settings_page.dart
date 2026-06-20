@@ -39,7 +39,9 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<AppProvider>();
-    final isDark = provider.themeMode == ThemeMode.dark;
+    final isDark = provider.themeMode == ThemeMode.dark ||
+        (provider.themeMode == ThemeMode.system &&
+            MediaQuery.platformBrightnessOf(context) == Brightness.dark);
 
     return Scaffold(
       appBar: AppBar(

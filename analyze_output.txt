@@ -1,0 +1,290 @@
+﻿flutter : Flutter assets will be downloaded from https://storage.flutter-io.cn. Make sure you trust this source!
+所在位置 行:1 字符: 71
++ ... ws_3.41.7-stable\flutter\bin;$env:Path"; flutter analyze 2>&1 | Out-F ...
++                                              ~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Flutter assets ...st this source!:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Resolving dependencies...
+Downloading packages...
+  archive 3.6.1 (4.0.9 available)
+  connectivity_plus 5.0.2 (7.1.1 available)
+  connectivity_plus_platform_interface 1.2.4 (2.1.0 available)
+  dbus 0.7.13 (0.7.14 available)
+  file_picker 8.3.7 (11.0.2 available)
+  flutter_lints 3.0.2 (6.0.0 available)
+  flutter_slidable 3.1.2 (4.0.3 available)
+  flutter_tts 3.8.5 (4.2.5 available)
+  js 0.6.7 (0.7.2 available)
+  lints 3.0.0 (6.1.0 available)
+  matcher 0.12.19 (0.12.20 available)
+  meta 1.18.0 (1.18.3 available)
+  mime 1.0.6 (2.0.0 available)
+  mobile_scanner 6.0.11 (7.2.0 available)
+  package_config 2.2.0 (3.0.0 available)
+  package_info_plus 9.0.1 (10.1.0 available)
+  package_info_plus_platform_interface 3.2.1 (4.1.0 available)
+  path_provider 2.1.5 (2.1.6 available)
+  path_provider_platform_interface 2.1.2 (2.1.3 available)
+  permission_handler 11.4.0 (12.0.3 available)
+  permission_handler_android 12.1.0 (13.0.1 available)
+  permission_handler_apple 9.4.9 (9.4.10 available)
+  photo_view 0.14.0 (0.15.0 available)
+  pointycastle 3.9.1 (4.0.0 available)
+  share_plus 7.2.2 (13.1.0 available)
+  share_plus_platform_interface 3.4.0 (7.1.0 available)
+  sqflite_common 2.5.10+1 (2.5.11 available)
+  test_api 0.7.11 (0.7.12 available)
+  vector_math 2.2.0 (2.4.0 available)
+  wakelock_plus 1.5.2 (1.6.1 available)
+  win32 5.15.0 (6.3.0 available)
+Got dependencies!
+31 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Analyzing mr...                                                 
+
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\bookshelf\bookshelf_page.dart:727:31 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check. Guard a 'State.context' use with a 'mounted' check on the State, and other BuildContext use with a 'mounted' check on the BuildContext - lib\pages\bookshelf\bookshelf_page.dart:729:40 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\bookshelf\bookshelf_page.dart:765:31 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check. Guard a 'State.context' use with a 'mounted' check on the State, and other BuildContext use with a 'mounted' check on the BuildContext - lib\pages\bookshelf\bookshelf_page.dart:768:21 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\bookshelf\bookshelf_page.dart:796:29 - use_build_context_synchronously
+   info - 'groupValue' is deprecated and shouldn't be used. Use a RadioGroup ancestor to manage group value instead. This feature was deprecated after v3.32.0-0.0.pre. Try replacing the use of the deprecated member with the replacement - lib\pages\bookshelf\bookshelf_page.dart:1195:13 - deprecated_member_use
+   info - 'onChanged' is deprecated and shouldn't be used. Use RadioGroup to handle value change instead. This feature was deprecated after v3.32.0-0.0.pre. Try replacing the use of the deprecated member with the replacement - lib\pages\bookshelf\bookshelf_page.dart:1196:13 - deprecated_member_use
+   info - 'cacheExtent' is deprecated and shouldn't be used. Use scrollCacheExtent instead. This feature was deprecated after v3.41.0-0.0.pre. Try replacing the use of the deprecated member with the replacement - lib\pages\bookshelf\bookshelf_page.dart:1280:7 - deprecated_member_use
+   info - 'cacheExtent' is deprecated and shouldn't be used. Use scrollCacheExtent instead. This feature was deprecated after v3.41.0-0.0.pre. Try replacing the use of the deprecated member with the replacement - lib\pages\bookshelf\bookshelf_page.dart:1298:7 - deprecated_member_use
+   info - Local variables should be final. Try making the variable final - lib\pages\bookshelf\bookshelf_page.dart:1974:7 - prefer_final_locals
+   info - Local variables should be final. Try making the variable final - lib\pages\bookshelf\bookshelf_page.dart:2004:7 - prefer_final_locals
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\bookshelf\bookshelf_page.dart:2015:21 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\bookshelf\bookshelf_page.dart:2232:31 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check. Guard a 'State.context' use with a 'mounted' check on the State, and other BuildContext use with a 'mounted' check on the BuildContext - lib\pages\bookshelf\bookshelf_page.dart:2234:40 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\bookshelf\bookshelf_page.dart:2289:31 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check. Guard a 'State.context' use with a 'mounted' check on the State, and other BuildContext use with a 'mounted' check on the BuildContext - lib\pages\bookshelf\bookshelf_page.dart:2292:21 - use_build_context_synchronously
+   info - The import of 'package:flutter/foundation.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/material.dart'. Try removing the import directive - lib\pages\debug\book_source_debug_page.dart:4:8 - unnecessary_import
+   info - Local variables should be final. Try making the variable final - lib\pages\detail\chapter_list_page.dart:187:5 - prefer_final_locals
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\pages\detail\chapter_list_page.dart:784:9 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\pages\detail\chapter_list_page.dart:786:9 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\pages\detail\chapter_list_page.dart:788:9 - curly_braces_in_flow_control_structures
+   info - The import of 'package:flutter/foundation.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/material.dart'. Try removing the import directive - lib\pages\detail\detail_page.dart:3:8 - unnecessary_import
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\detail\detail_page.dart:546:32 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\detail\detail_page.dart:665:23 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\detail\detail_page.dart:737:13 - prefer_const_constructors
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\detail\detail_page.dart:914:30 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\detail\detail_page.dart:1110:31 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check. Guard a 'State.context' use with a 'mounted' check on the State, and other BuildContext use with a 'mounted' check on the BuildContext - lib\pages\detail\detail_page.dart:1112:40 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\detail\detail_page.dart:1163:31 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check. Guard a 'State.context' use with a 'mounted' check on the State, and other BuildContext use with a 'mounted' check on the BuildContext - lib\pages\detail\detail_page.dart:1166:21 - use_build_context_synchronously
+   info - Unnecessary braces in a string interpolation. Try removing the braces - lib\pages\detail\detail_page.dart:1229:13 - unnecessary_brace_in_string_interps
+   info - 'cacheExtent' is deprecated and shouldn't be used. Use scrollCacheExtent instead. This feature was deprecated after v3.41.0-0.0.pre. Try replacing the use of the deprecated member with the replacement - lib\pages\explore\explore_show_page.dart:88:15 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\main\main_page.dart:77:13 - use_build_context_synchronously
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\main\main_page.dart:107:14 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\main\main_page.dart:108:15 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\main\main_page.dart:109:18 - prefer_const_constructors
+   info - Use 'const' literals as arguments to constructors of '@immutable' classes. Try adding 'const' before the literal - lib\pages\main\main_page.dart:111:23 - prefer_const_literals_to_create_immutables
+   info - 'cacheExtent' is deprecated and shouldn't be used. Use scrollCacheExtent instead. This feature was deprecated after v3.41.0-0.0.pre. Try replacing the use of the deprecated member with the replacement - lib\pages\miniprogram\miniprogram_page.dart:176:7 - deprecated_member_use
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\player\audio_player_page.dart:333:17 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\profile\book_source_edit_page.dart:104:59 - prefer_const_constructors
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\profile\book_source_edit_page.dart:451:30 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\profile\book_source_edit_page.dart:455:30 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\profile\book_source_edit_page.dart:487:27 - use_build_context_synchronously
+   info - 'WillPopScope' is deprecated and shouldn't be used. Use PopScope instead. The Android predictive back feature will not work with WillPopScope. This feature was deprecated after v3.12.0-1.0.pre. Try replacing the use of the deprecated member with the replacement - lib\pages\profile\book_source_edit_page.dart:678:12 - deprecated_member_use
+   info - Use 'const' for final variables initialized to a constant value. Try replacing 'final' with 'const' - lib\pages\profile\book_source_edit_page.dart:1644:5 - prefer_const_declarations
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\profile\book_source_edit_page.dart:1852:35 - prefer_const_constructors
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check. Guard a 'State.context' use with a 'mounted' check on the State, and other BuildContext use with a 'mounted' check on the BuildContext - lib\pages\profile\book_source_edit_page.dart:2218:33 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\profile\book_source_manage_page.dart:1163:33 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\profile\book_source_manage_page.dart:1171:33 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\profile\dict_rule_page.dart:171:29 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\profile\dict_rule_page.dart:195:29 - use_build_context_synchronously
+   info - Use interpolation to compose strings and values. Try using string interpolation to build the composite string - lib\pages\profile\js_source_edit_page.dart:238:26 - prefer_interpolation_to_compose_strings
+   info - Local variables should be final. Try making the variable final - lib\pages\profile\js_source_edit_page.dart:272:7 - prefer_final_locals
+   info - Local variables should be final. Try making the variable final - lib\pages\profile\js_source_edit_page.dart:309:5 - prefer_final_locals
+   info - Local variables should be final. Try making the variable final - lib\pages\profile\js_source_edit_page.dart:310:5 - prefer_final_locals
+   info - Local variables should be final. Try making the variable final - lib\pages\profile\js_source_edit_page.dart:311:5 - prefer_final_locals
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\profile\js_source_edit_page.dart:339:31 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\profile\js_source_edit_page.dart:349:33 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\profile\js_source_edit_page.dart:359:35 - prefer_const_constructors
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check. Guard a 'State.context' use with a 'mounted' check on the State, and other BuildContext use with a 'mounted' check on the BuildContext - lib\pages\profile\js_source_edit_page.dart:525:49 - use_build_context_synchronously
+   info - Unnecessary use of double quotes. Try using single quotes unless the string contains single quotes - lib\pages\profile\js_source_edit_page.dart:646:15 - prefer_single_quotes
+   info - 'groupValue' is deprecated and shouldn't be used. Use a RadioGroup ancestor to manage group value instead. This feature was deprecated after v3.32.0-0.0.pre. Try replacing the use of the deprecated member with the replacement - lib\pages\profile\profile_page.dart:454:17 - deprecated_member_use
+   info - 'onChanged' is deprecated and shouldn't be used. Use RadioGroup to handle value change instead. This feature was deprecated after v3.32.0-0.0.pre. Try replacing the use of the deprecated member with the replacement - lib\pages\profile\profile_page.dart:455:17 - deprecated_member_use
+   info - 'groupValue' is deprecated and shouldn't be used. Use a RadioGroup ancestor to manage group value instead. This feature was deprecated after v3.32.0-0.0.pre. Try replacing the use of the deprecated member with the replacement - lib\pages\profile\profile_page.dart:463:17 - deprecated_member_use
+   info - 'onChanged' is deprecated and shouldn't be used. Use RadioGroup to handle value change instead. This feature was deprecated after v3.32.0-0.0.pre. Try replacing the use of the deprecated member with the replacement - lib\pages\profile\profile_page.dart:464:17 - deprecated_member_use
+   info - 'groupValue' is deprecated and shouldn't be used. Use a RadioGroup ancestor to manage group value instead. This feature was deprecated after v3.32.0-0.0.pre. Try replacing the use of the deprecated member with the replacement - lib\pages\profile\profile_page.dart:472:17 - deprecated_member_use
+   info - 'onChanged' is deprecated and shouldn't be used. Use RadioGroup to handle value change instead. This feature was deprecated after v3.32.0-0.0.pre. Try replacing the use of the deprecated member with the replacement - lib\pages\profile\profile_page.dart:473:17 - deprecated_member_use
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\profile\profile_page.dart:499:16 - prefer_const_constructors
+   info - Use 'const' literals as arguments to constructors of '@immutable' classes. Try adding 'const' before the literal - lib\pages\profile\profile_page.dart:503:21 - prefer_const_literals_to_create_immutables
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\profile\profile_page.dart:649:15 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\profile\profile_page.dart:770:11 - prefer_const_constructors
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\profile\read_record_page.dart:181:31 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\profile\read_record_page.dart:240:31 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\profile\read_record_page.dart:1010:31 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\profile\replace_rule_page.dart:185:31 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\profile\replace_rule_page.dart:210:29 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\profile\txt_toc_rule_page.dart:177:29 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\profile\txt_toc_rule_page.dart:201:29 - use_build_context_synchronously
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\profile\txt_toc_rule_page.dart:268:32 - prefer_const_constructors
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\reader\comic_reader_page.dart:1830:11 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\reader\comic_reader_page.dart:2081:17 - use_build_context_synchronously
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\pages\reader\comic_reader_page.dart:3210:7 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\pages\reader\comic_reader_page.dart:3281:9 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\pages\reader\comic_reader_page.dart:3283:9 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\pages\reader\comic_reader_page.dart:3285:9 - curly_braces_in_flow_control_structures
+   info - Local variables should be final. Try making the variable final - lib\pages\reader\novel_reader_page.dart:401:5 - prefer_final_locals
+   info - Use 'const' for final variables initialized to a constant value. Try replacing 'final' with 'const' - lib\pages\reader\novel_reader_page.dart:1508:5 - prefer_const_declarations
+   info - Use 'const' for final variables initialized to a constant value. Try replacing 'final' with 'const' - lib\pages\reader\novel_reader_page.dart:1554:5 - prefer_const_declarations
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\reader\novel_reader_page.dart:1770:21 - prefer_const_constructors
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\reader\novel_reader_page.dart:1975:11 - use_build_context_synchronously
+   info - Use 'const' for final variables initialized to a constant value. Try replacing 'final' with 'const' - lib\pages\reader\novel_reader_page.dart:2330:5 - prefer_const_declarations
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\pages\reader\novel_reader_page.dart:3038:23 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\pages\reader\novel_reader_page.dart:3359:7 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\pages\reader\novel_reader_page.dart:3429:9 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\pages\reader\novel_reader_page.dart:3431:9 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\pages\reader\novel_reader_page.dart:3433:9 - curly_braces_in_flow_control_structures
+   info - 'groupValue' is deprecated and shouldn't be used. Use a RadioGroup ancestor to manage group value instead. This feature was deprecated after v3.32.0-0.0.pre. Try replacing the use of the deprecated member with the replacement - lib\pages\search\search_page.dart:800:21 - deprecated_member_use
+   info - 'onChanged' is deprecated and shouldn't be used. Use RadioGroup to handle value change instead. This feature was deprecated after v3.32.0-0.0.pre. Try replacing the use of the deprecated member with the replacement - lib\pages\search\search_page.dart:803:21 - deprecated_member_use
+   info - The import of 'package:flutter/cupertino.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/material.dart'. Try removing the import directive - lib\pages\settings\theme_settings_page.dart:2:8 - unnecessary_import
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:636:40 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:1189:36 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:1212:29 - use_build_context_synchronously
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\settings\theme_settings_page.dart:1463:37 - prefer_const_constructors
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:1545:39 - use_build_context_synchronously
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:1704:32 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:1801:30 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:1812:46 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:2610:58 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:2610:79 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:2610:104 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:2610:125 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:2610:272 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:2833:50 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:3021:40 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:3311:29 - use_build_context_synchronously
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:3448:69 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:3526:39 - use_build_context_synchronously
+   info - Local variables should be final. Try making the variable final - lib\pages\settings\theme_settings_page.dart:3598:5 - prefer_final_locals
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:3634:21 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:4059:30 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:4069:46 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:4685:40 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:4956:29 - use_build_context_synchronously
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:5076:75 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:5102:69 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:5119:74 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:5177:39 - use_build_context_synchronously
+   info - Local variables should be final. Try making the variable final - lib\pages\settings\theme_settings_page.dart:5249:5 - prefer_final_locals
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:5284:32 - deprecated_member_use
+   info - The 'if' statement could be replaced by a null-aware assignment. Try using the '??=' operator to conditionally assign a value - lib\pages\settings\theme_settings_page.dart:5362:19 - prefer_conditional_assignment
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:5363:95 - deprecated_member_use
+   info - The 'if' statement could be replaced by a null-aware assignment. Try using the '??=' operator to conditionally assign a value - lib\pages\settings\theme_settings_page.dart:5365:19 - prefer_conditional_assignment
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:5366:56 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:5505:30 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:5515:46 - deprecated_member_use
+   info - Statements in a for should be enclosed in a block. Try wrapping the statement in a block - lib\pages\settings\theme_settings_page.dart:5847:40 - curly_braces_in_flow_control_structures
+   info - 'onReorder' is deprecated and shouldn't be used. Use the onReorderItem callback instead. The onReorderItem callback adjusts the newIndex parameter for a removed item at the oldIndex. This feature was deprecated after v3.41.0-0.0.pre. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:5854:9 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:5918:52 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\pages\settings\theme_settings_page.dart:5919:56 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:6549:41 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:6550:48 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:6586:45 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:6587:52 - use_build_context_synchronously
+   info - Local variables should be final. Try making the variable final - lib\pages\settings\theme_settings_page.dart:6617:5 - prefer_final_locals
+   info - Local variables should be final. Try making the variable final - lib\pages\settings\theme_settings_page.dart:6667:5 - prefer_final_locals
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:7126:38 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:7149:32 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:7155:28 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:7223:38 - use_build_context_synchronously
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\settings\theme_settings_page.dart:7238:7 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\pages\settings\theme_settings_page.dart:7238:25 - prefer_const_constructors
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:7270:30 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:7420:30 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check - lib\pages\settings\theme_settings_page.dart:7461:30 - use_build_context_synchronously
+   info - 'background' is deprecated and shouldn't be used. Use surface instead. This feature was deprecated after v3.18.0-0.1.pre. Try replacing the use of the deprecated member with the replacement - lib\providers\app_provider.dart:203:9 - deprecated_member_use
+   info - 'onBackground' is deprecated and shouldn't be used. Use onSurface instead. This feature was deprecated after v3.18.0-0.1.pre. Try replacing the use of the deprecated member with the replacement - lib\providers\app_provider.dart:208:9 - deprecated_member_use
+   info - 'background' is deprecated and shouldn't be used. Use surface instead. This feature was deprecated after v3.18.0-0.1.pre. Try replacing the use of the deprecated member with the replacement - lib\providers\app_provider.dart:305:9 - deprecated_member_use
+   info - 'onBackground' is deprecated and shouldn't be used. Use onSurface instead. This feature was deprecated after v3.18.0-0.1.pre. Try replacing the use of the deprecated member with the replacement - lib\providers\app_provider.dart:310:9 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\providers\app_provider.dart:518:60 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\providers\app_provider.dart:519:58 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\providers\app_provider.dart:520:66 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\providers\app_provider.dart:521:60 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\providers\app_provider.dart:522:58 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\providers\app_provider.dart:602:64 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\providers\app_provider.dart:603:62 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\providers\app_provider.dart:604:70 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\providers\app_provider.dart:605:64 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\providers\app_provider.dart:606:62 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\providers\app_provider.dart:711:62 - deprecated_member_use
+   info - Local variables should be final. Try making the variable final - lib\providers\bookshelf_provider.dart:142:5 - prefer_final_locals
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement - lib\providers\reader_provider.dart:181:43 - deprecated_member_use
+   info - Parameters ''settings', 'maintainState', and 'fullscreenDialog'' could be super parameters. Trying converting ''settings', 'maintainState', and 'fullscreenDialog'' to super parameters - lib\routes\app_routes.dart:30:3 - use_super_parameters
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\services\book_source_import_service.dart:140:31 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\services\book_source_import_service.dart:150:33 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\services\book_source_import_service.dart:160:35 - prefer_const_constructors
+   info - Use interpolation to compose strings and values. Try using string interpolation to build the composite string - lib\services\book_source_import_service.dart:312:26 - prefer_interpolation_to_compose_strings
+   info - Local variables should be final. Try making the variable final - lib\services\book_source_import_service.dart:349:7 - prefer_final_locals
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\services\cookie_service.dart:113:13 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\services\cookie_service.dart:119:13 - prefer_const_constructors
+   info - Local variables should be final. Try making the variable final - lib\services\cookie_service.dart:447:11 - prefer_final_locals
+   info - Local variables should be final. Try making the variable final - lib\services\cookie_service.dart:469:15 - prefer_final_locals
+   info - Local variables should be final. Try making the variable final - lib\services\cookie_service.dart:549:7 - prefer_final_locals
+   info - The imported package 'uuid' isn't a dependency of the importing package. Try adding a dependency for 'uuid' in the 'pubspec.yaml' file - lib\services\cover_config_service.dart:7:8 - depend_on_referenced_packages
+   info - Unnecessary escape in string literal. Remove the '\' escape - lib\services\cover_config_service.dart:36:58 - unnecessary_string_escapes
+   info - Unnecessary escape in string literal. Remove the '\' escape - lib\services\cover_config_service.dart:36:64 - unnecessary_string_escapes
+   info - Unnecessary escape in string literal. Remove the '\' escape - lib\services\cover_config_service.dart:36:67 - unnecessary_string_escapes
+   info - Unnecessary escape in string literal. Remove the '\' escape - lib\services\cover_config_service.dart:36:72 - unnecessary_string_escapes
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\services\cover_config_service.dart:433:20 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\services\cover_config_service.dart:434:12 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\services\cover_config_service.dart:441:20 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\services\cover_config_service.dart:442:12 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\services\cover_config_service.dart:445:20 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\services\cover_config_service.dart:446:12 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\services\cover_config_service.dart:463:18 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block. Try wrapping the statement in a block - lib\services\cover_config_service.dart:464:10 - curly_braces_in_flow_control_structures
+   info - Use 'const' for final variables initialized to a constant value. Try replacing 'final' with 'const' - lib\services\cover_config_service.dart:472:5 - prefer_const_declarations
+   info - Invalid use of a private type in a public API. Try making the private type public, or making the API that uses the private type also be private - lib\services\native\js_engine.dart:361:3 - library_private_types_in_public_api
+   info - Empty catch block. Try adding statements to the block, adding a comment to the block, or removing the 'catch' clause - lib\services\native\js_engine.dart:1033:17 - empty_catches
+   info - Empty catch block. Try adding statements to the block, adding a comment to the block, or removing the 'catch' clause - lib\services\native\js_engine.dart:1172:17 - empty_catches
+   info - Use 'const' for final variables initialized to a constant value. Try replacing 'final' with 'const' - lib\services\native\js_engine.dart:1199:5 - prefer_const_declarations
+   info - Use 'const' for final variables initialized to a constant value. Try replacing 'final' with 'const' - lib\services\native\js_engine.dart:1605:5 - prefer_const_declarations
+   info - Unnecessary escape in string literal. Remove the '\' escape - lib\services\native\js_engine.dart:1727:63 - unnecessary_string_escapes
+   info - Empty catch block. Try adding statements to the block, adding a comment to the block, or removing the 'catch' clause - lib\services\native\js_engine.dart:2359:17 - empty_catches
+   info - Use 'const' for final variables initialized to a constant value. Try replacing 'final' with 'const' - lib\services\native\js_engine.dart:2410:5 - prefer_const_declarations
+   info - Empty catch block. Try adding statements to the block, adding a comment to the block, or removing the 'catch' clause - lib\services\native\js_engine.dart:2502:17 - empty_catches
+   info - Unnecessary escape in string literal. Remove the '\' escape - lib\services\native\js_engine.dart:3454:44 - unnecessary_string_escapes
+   info - Empty catch block. Try adding statements to the block, adding a comment to the block, or removing the 'catch' clause - lib\services\native\js_engine.dart:3522:17 - empty_catches
+   info - Empty catch block. Try adding statements to the block, adding a comment to the block, or removing the 'catch' clause - lib\services\native\js_engine.dart:3533:17 - empty_catches
+   info - Unnecessary braces in a string interpolation. Try removing the braces - lib\services\native\js_engine.dart:3590:23 - unnecessary_brace_in_string_interps
+   info - Unnecessary braces in a string interpolation. Try removing the braces - lib\services\native\js_engine.dart:3590:33 - unnecessary_brace_in_string_interps
+   info - Unnecessary use of string interpolation. Try replacing the string literal with the variable name - lib\services\source_debug_service.dart:335:20 - unnecessary_string_interpolations
+   info - Unnecessary use of string interpolation. Try replacing the string literal with the variable name - lib\services\source_debug_service.dart:338:25 - unnecessary_string_interpolations
+   info - Unnecessary use of string interpolation. Try replacing the string literal with the variable name - lib\services\source_debug_service.dart:341:27 - unnecessary_string_interpolations
+   info - Import of a library in the 'lib/src' directory of another package. Try importing a public library that exports this library, or removing the import - lib\services\source_engine\analyze_rule.dart:6:8 - implementation_imports
+   info - Local variables should be final. Try making the variable final - lib\services\source_engine\analyze_rule.dart:1281:7 - prefer_final_locals
+   info - Local variables should be final. Try making the variable final - lib\services\source_engine\analyze_rule.dart:1282:7 - prefer_final_locals
+   info - Local variables should be final. Try making the variable final - lib\services\source_engine\analyze_url.dart:238:9 - prefer_final_locals
+   info - Local variables should be final. Try making the variable final - lib\services\source_engine\web_book.dart:1003:7 - prefer_final_locals
+   info - Local variables should be final. Try making the variable final - lib\services\source_engine\web_book.dart:1018:7 - prefer_final_locals
+   info - Local variables should be final. Try making the variable final - lib\services\source_engine\web_book.dart:1232:7 - prefer_final_locals
+   info - The local variable '_beforeFmtLen' starts with an underscore. Try renaming the variable to not start with an underscore - lib\services\source_engine\web_book.dart:1471:15 - no_leading_underscores_for_local_identifiers
+   info - Local variables should be final. Try making the variable final - lib\services\source_engine\web_book.dart:2316:5 - prefer_final_locals
+   info - Local variables should be final. Try making the variable final - lib\services\source_engine\web_book.dart:2359:5 - prefer_final_locals
+   info - Local variables should be final. Try making the variable final - lib\services\source_engine\web_book.dart:2382:5 - prefer_final_locals
+   info - Local variables should be final. Try making the variable final - lib\services\source_engine\web_book.dart:2388:5 - prefer_final_locals
+   info - 'dart:html' is deprecated and shouldn't be used. Use package:web and dart:js_interop instead. Try replacing the use of the deprecated member with the replacement - lib\services\source_engine\web_proxy_web.dart:2:1 - deprecated_member_use
+   info - Don't use web-only libraries outside Flutter web plugins. Try finding a different library for your needs - lib\services\source_engine\web_proxy_web.dart:2:1 - avoid_web_libraries_in_flutter
+   info - Use 'whereType' to select elements of a given type. Try rewriting the expression to use 'whereType' - lib\services\storage_service.dart:191:10 - prefer_iterable_wheretype
+   info - Use 'whereType' to select elements of a given type. Try rewriting the expression to use 'whereType' - lib\services\storage_service.dart:298:10 - prefer_iterable_wheretype
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\themes\app_theme.dart:86:25 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\themes\app_theme.dart:236:22 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\themes\app_theme.dart:245:22 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\themes\app_theme.dart:255:22 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\themes\app_theme.dart:332:11 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\themes\app_theme.dart:397:21 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\themes\app_theme.dart:399:31 - prefer_const_constructors
+   info - Use 'isNotEmpty' instead of 'length' to test whether the collection is empty. Try rewriting the expression to use 'isNotEmpty' - lib\widgets\change_source_sheet.dart:159:9 - prefer_is_empty
+   info - Use 'isNotEmpty' instead of 'length' to test whether the collection is empty. Try rewriting the expression to use 'isNotEmpty' - lib\widgets\change_source_sheet.dart:159:26 - prefer_is_empty
+   info - Use 'const' for final variables initialized to a constant value. Try replacing 'final' with 'const' - lib\widgets\liquid_glass_view.dart:286:5 - prefer_const_declarations
+   info - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation - lib\widgets\liquid_glass_view.dart:290:22 - prefer_const_constructors
+   info - The private field _position could be 'final'. Try making the field 'final' - lib\widgets\liquid_glass_view.dart:385:10 - prefer_final_fields
+   info - Local variables should be final. Try making the variable final - lib\widgets\swipe_action_container.dart:78:5 - prefer_final_locals
+   info - Local variables should be final. Try making the variable final - lib\widgets\swipe_action_container.dart:79:5 - prefer_final_locals
+
+243 issues found. (ran in 35.5s)

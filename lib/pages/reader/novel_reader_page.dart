@@ -249,7 +249,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     _scheduleProgressSave(pos: currentScroll.round());
 
     // Auto-load next chapter when near bottom
-    if (maxScroll - currentScroll < 500 && _nextContent == null) {
+    // 阈值基于视口尺寸，确保用户接近底部时预加载已完成
+    final viewport = _scrollController.position.viewportDimension;
+    final preloadThreshold = viewport * 1.5;
+    if (maxScroll - currentScroll < preloadThreshold && _nextContent == null) {
       _preloadNextChapter();
     }
   }
@@ -295,6 +298,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   Future<void> _loadChapterContent() async {
     if (_book == null || _chapters.isEmpty) {
+      _isChangingChapterByPageView = false;
       setState(() {
         _isLoading = false;
         _content = '无法加载内容';
@@ -316,6 +320,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         : null;
 
     if (chapter == null || chapter.isVolume) {
+      _isChangingChapterByPageView = false;
       setState(() {
         _isLoading = false;
         _content = '章节不存在';
@@ -323,76 +328,101 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       return;
     }
 
-    // 优先从缓存读取
-    String? content;
-    if (_book!.originType == BookOriginType.online) {
-      content = await ChapterCacheService.instance.readChapterContent(
-        _book!,
-        chapter,
-      );
-    }
-
-    // 缓存没有则从网络获取
-    if (content == null || content.isEmpty) {
-      content = await _dataProvider!.getContent(
-        _book!,
-        chapter,
-        allChapters: _chapters,
-      );
-      // 保存到缓存
-      if (content != null &&
-          content.isNotEmpty &&
-          _book!.originType == BookOriginType.online) {
-        unawaited(
-          ChapterCacheService.instance.saveChapterContent(
-            _book!,
-            chapter,
-            content,
-          ),
+    try {
+      // 优先从缓存读取
+      String? content;
+      if (_book!.originType == BookOriginType.online) {
+        content = await ChapterCacheService.instance.readChapterContent(
+          _book!,
+          chapter,
         );
       }
-    }
 
-    if (mounted &&
-        loadToken == _chapterLoadToken &&
-        chapterIndex == _currentChapterIndex) {
-      setState(() {
-        _chapterTitle = chapter.title;
-        _chapterUrl = chapter.url?.split(',{').first.trim();
-        _content = content ?? '内容加载失败';
-        _isLoading = false;
-      });
-
-      // 更新TTS内容
-      context.read<ReaderProvider>().setTtsChapterContent(_content);
-
-      // 检查书签
-      _checkBookmark();
-
-      final provider = context.read<ReaderProvider>();
-      final restorePos = _pendingInitialPageToEnd
-          ? 1 << 30
-          : _pendingInitialPage ??
-                (_restoreInitialPosition ? _initialChapterPos : 0);
-      _restoreInitialPosition = false;
-      _pendingInitialPage = null;
-      _pendingInitialPageToEnd = false;
-      _repaginate(initialPage: restorePos);
-
-      // 滚动模式下重置滚动位置到顶部
-      if (provider.pageMode == PageMode.scroll) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && _scrollController.hasClients) {
-            final target = restorePos > 0 ? restorePos.toDouble() : 0.0;
-            _scrollController.jumpTo(
-              target.clamp(0.0, _scrollController.position.maxScrollExtent),
-            );
-          }
-        });
+      // 缓存没有则从网络获取
+      if (content == null || content.isEmpty) {
+        content = await _dataProvider!.getContent(
+          _book!,
+          chapter,
+          allChapters: _chapters,
+        );
+        // 保存到缓存
+        if (content != null &&
+            content.isNotEmpty &&
+            _book!.originType == BookOriginType.online) {
+          unawaited(
+            ChapterCacheService.instance.saveChapterContent(
+              _book!,
+              chapter,
+              content,
+            ),
+          );
+        }
       }
 
-      unawaited(_saveCurrentProgress(chapter: chapter, pos: restorePos));
-      unawaited(_preloadAdjacentChapters(_currentChapterIndex));
+      if (mounted &&
+          loadToken == _chapterLoadToken &&
+          chapterIndex == _currentChapterIndex) {
+        setState(() {
+          _chapterTitle = chapter.title;
+          _chapterUrl = chapter.url?.split(',{').first.trim();
+          _content = content ?? '内容加载失败';
+          _isLoading = false;
+        });
+
+        // 更新TTS内容
+        context.read<ReaderProvider>().setTtsChapterContent(_content);
+
+        // 检查书签
+        _checkBookmark();
+
+        final provider = context.read<ReaderProvider>();
+        final restorePos = _pendingInitialPageToEnd
+            ? 1 << 30
+            : _pendingInitialPage ??
+                  (_restoreInitialPosition ? _initialChapterPos : 0);
+        _restoreInitialPosition = false;
+        _pendingInitialPage = null;
+        _pendingInitialPageToEnd = false;
+        _repaginate(initialPage: restorePos);
+
+        // 滚动模式下重置滚动位置到顶部
+        if (provider.pageMode == PageMode.scroll) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _scrollController.hasClients) {
+              final target = restorePos > 0 ? restorePos.toDouble() : 0.0;
+              _scrollController.jumpTo(
+                target.clamp(0.0, _scrollController.position.maxScrollExtent),
+              );
+            }
+          });
+        }
+
+        unawaited(_saveCurrentProgress(chapter: chapter, pos: restorePos));
+        unawaited(_preloadAdjacentChapters(_currentChapterIndex));
+      }
+    } catch (e) {
+      if (mounted) {
+        final provider = context.read<ReaderProvider>();
+        setState(() {
+          _content = '加载失败：$e';
+          _chapterTitle = '加载失败';
+          _isLoading = false;
+          if (provider.pageMode != PageMode.scroll) {
+            // 重建分页，避免翻页/仿真模式显示旧章节内容
+            _pages = [_content];
+            _currentPage = 0;
+          }
+        });
+        if (provider.pageMode != PageMode.scroll) {
+          _pageController?.dispose();
+          _pageController = PageController(
+            initialPage: _currentPage + _pagedLeadingCount,
+          );
+        }
+      }
+    } finally {
+      // 始终释放翻页导航锁，防止阅读器卡死无法翻页
+      _isChangingChapterByPageView = false;
     }
   }
 
@@ -591,10 +621,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           paragraph,
           textStyle,
           metrics.width,
-          max(metrics.height - provider.paragraphSpacing, provider.fontSize),
+          max(metrics.height - usedHeight - provider.paragraphSpacing,
+              provider.fontSize),
         );
         pages.add(paragraph.substring(0, splitIndex).trimRight());
         paragraph = paragraph.substring(splitIndex).trimLeft();
+        // 续页不再渲染标题，重置已用高度
+        usedHeight = 0;
       }
     }
 
@@ -607,7 +640,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   ({double width, double height}) _pageMetrics(ReaderProvider provider) {
     final mq = MediaQuery.of(context);
-    final width = max(80.0, mq.size.width - provider.horizontalPadding * 2);
+    final width = max(
+      80.0,
+      mq.size.width -
+          mq.padding.left -
+          mq.padding.right -
+          provider.horizontalPadding * 2,
+    );
     final height = max(
       120.0,
       mq.size.height -
@@ -670,10 +709,15 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     return best.clamp(1, text.length);
   }
 
+  static final _asciiEdgeWhitespace = RegExp(r'^[\t \r\f]+|[\t \r\f]+$');
+
   List<String> _splitToParagraphs(String content) {
+    // 不能用 String.trim()：它会剥离全角空格 \u3000（首行缩进）。
+    // 仅剥离 ASCII 边缘空白；空行判断时把 \u3000 也视作空白。
     return content
-        .split(RegExp(r'\n'))
-        .where((line) => line.trim().isNotEmpty)
+        .split(RegExp(r'\r\n|\r|\n'))
+        .map((line) => line.replaceAll(_asciiEdgeWhitespace, ''))
+        .where((line) => line.replaceAll('\u3000', '').isNotEmpty)
         .toList();
   }
 
@@ -762,6 +806,17 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     if (provider.pageMode == PageMode.scroll) {
       if (!_scrollController.hasClients) return;
       final maxScroll = _scrollController.position.maxScrollExtent;
+      // 如果已追加下一章内容，让用户继续滚动即可，不需要调用 _nextChapter()
+      if (_nextContent != null) {
+        // 下一章内容已追加到滚动列表，继续滚动
+        _scrollController.animateTo(
+          min(_scrollController.offset + _scrollPageExtent(), maxScroll),
+          duration: _pageAnimationDuration(provider),
+          curve: Curves.easeOut,
+        );
+        return;
+      }
+      // 只有当下一章未预加载时，才在接近底部时加载下一章
       if (_scrollController.offset >= maxScroll - 8) {
         _nextChapter();
         return;
@@ -942,7 +997,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   onToggleNightMode: () {
                     provider.toggleNightMode();
                   },
-                  onOpenReplaceRules: () {},
+                  onOpenReplaceRules: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('替换规则功能暂未开放'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
                   onShowDirectory: () {
                     _hideMenu();
                     _showChapterList();
@@ -1048,7 +1110,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       children: [
         // 章节标题
         if (provider.showChapterTitle)
-          Text(title, style: _titleTextStyle(provider)),
+          Text(
+            title,
+            style: _titleTextStyle(provider),
+            textAlign: TextAlign.center,
+          ),
         SizedBox(height: provider.paragraphSpacing),
         _buildRichContent(provider, content),
       ],
@@ -1079,7 +1145,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   String _applyIndent(String paragraph, ReaderProvider provider) {
-    final trimmed = paragraph.trimLeft();
+    // 去除源内容自带的全角空格缩进 + ASCII 左空白，再统一加上配置缩进
+    final trimmed = paragraph.replaceAll(RegExp(r'^[\u3000\t ]+'), '');
     if (provider.paragraphIndent.isEmpty) return trimmed;
     return '${provider.paragraphIndent}$trimmed';
   }
@@ -1094,6 +1161,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     return Text.rich(
       TextSpan(children: spans),
       style: _readerTextStyle(provider),
+      textAlign: TextAlign.justify,
+      softWrap: true,
     );
   }
 
@@ -1398,17 +1467,20 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         horizontal: provider.horizontalPadding,
         vertical: provider.verticalPadding,
       ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 章节标题
-            if (showTitle)
-              Text(_chapterTitle, style: _titleTextStyle(provider)),
-            if (showTitle) SizedBox(height: provider.paragraphSpacing),
-            _buildRichContent(provider, pageText, applyIndent: false),
-          ],
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (showTitle)
+            Text(
+              _chapterTitle,
+              style: _titleTextStyle(provider),
+              textAlign: TextAlign.center,
+            ),
+          if (showTitle) SizedBox(height: provider.paragraphSpacing),
+          Expanded(
+            child: _buildRichContent(provider, pageText, applyIndent: false),
+          ),
+        ],
       ),
     );
   }
@@ -1782,7 +1854,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   });
                 },
                 onChangeEnd: (value) {
-                  _currentChapterIndex = value.round();
+                  _currentChapterIndex = _readableChapterIndex(value.round());
                   _loadChapterContent();
                 },
               ),

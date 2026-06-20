@@ -86,6 +86,19 @@ class DiscoveryProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> pinSource(String sourceUrl) async {
+    final index = _bookSources.indexWhere((s) => s.bookSourceUrl == sourceUrl);
+    if (index == -1) return;
+    final source = _bookSources.removeAt(index);
+    final minOrder = _bookSources.isEmpty
+        ? 0
+        : _bookSources.map((s) => s.customOrder).reduce((a, b) => a < b ? a : b);
+    final pinned = source.copyWith(customOrder: minOrder - 1);
+    _bookSources.insert(0, pinned);
+    await StorageService.instance.saveBookSource(pinned.toJson());
+    notifyListeners();
+  }
+
   void toggleSourceSelection(String sourceId) {
     if (_selectedSourceIds.contains(sourceId)) {
       _selectedSourceIds.remove(sourceId);

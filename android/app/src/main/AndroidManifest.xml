@@ -81,6 +81,21 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- 允许其他App分享文本/URL到本App（导入书源） -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/*"/>
+            </intent-filter>
+            <!-- 允许其他App通过View打开JSON/JS文件导入书源 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="application/json"/>
+                <data android:mimeType="text/plain"/>
+                <data android:scheme="file"/>
+                <data android:scheme="content"/>
+            </intent-filter>
         </activity>
 
         <!-- 前台服务（TTS朗读） -->

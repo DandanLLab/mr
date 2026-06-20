@@ -259,6 +259,11 @@ class ReaderProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setNightMode(bool value) {
+    if (_isNightMode == value) return;
+    toggleNightMode();
+  }
+
   void setFontFamily(String family) {
     _fontFamily = family;
     _saveToStorage();
@@ -311,6 +316,8 @@ class ReaderProvider extends ChangeNotifier {
 
   void setTextIndent(double value) {
     _textIndent = value;
+    // 同步更新缩进字符串，使缩进滑块生效
+    _paragraphIndent = '\u3000' * value.round().clamp(0, 8);
     _saveToStorage();
     notifyListeners();
   }

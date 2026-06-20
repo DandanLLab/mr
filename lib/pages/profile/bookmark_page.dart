@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/reader_bookmark_service.dart';
 import '../../services/storage_service.dart';
 import '../../models/book.dart';
+import '../../routes/app_routes.dart';
 import '../../utils/design_tokens.dart';
 
 class BookmarkPage extends StatefulWidget {
@@ -169,11 +170,28 @@ class _BookmarkPageState extends State<BookmarkPage> {
           ),
         ),
         onTap: () {
-          // TODO: 跳转到阅读页面指定位置
-          Navigator.pop(context, {
+          final routeName = switch (book.mediaType) {
+            MediaType.video => AppRoutes.videoPlayer,
+            MediaType.audio => AppRoutes.audioPlayer,
+            MediaType.comic => AppRoutes.comicReader,
+            MediaType.novel => AppRoutes.novelReader,
+          };
+          final args = <String, dynamic>{
             'bookUrl': book.bookUrl,
-            'chapterIndex': bookmark.chapterIndex,
-          });
+            'bookId': book.bookUrl,
+            'bookData': book,
+            'resumeProgress': false,
+          };
+          switch (book.mediaType) {
+            case MediaType.audio:
+              args['trackId'] = bookmark.chapterIndex.toString();
+            case MediaType.video:
+              args['episodeId'] = bookmark.chapterIndex.toString();
+            case MediaType.comic:
+            case MediaType.novel:
+              args['chapterIndex'] = bookmark.chapterIndex;
+          }
+          Navigator.pushNamed(context, routeName, arguments: args);
         },
       ),
     );
