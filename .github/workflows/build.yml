@@ -105,6 +105,16 @@ jobs:
           echo "pubspec.yaml version 已更新为: ${VERSION}+${{ steps.version.outputs.commit_count }}"
           grep "^version:" pubspec.yaml
 
+      # 7.5 移除阿里云镜像（GitHub Actions 在国外，使用官方仓库更稳定）
+      - name: Remove Aliyun Mirrors
+        run: |
+          sed -i '/maven.aliyun.com/d' android/settings.gradle.kts
+          sed -i '/maven.aliyun.com/d' android/build.gradle.kts
+          echo "=== settings.gradle.kts repositories ==="
+          grep -A5 "repositories" android/settings.gradle.kts | head -8
+          echo "=== build.gradle.kts repositories ==="
+          grep -A5 "repositories" android/build.gradle.kts | head -12
+
       # 8. 安装依赖
       - name: Install Dependencies
         run: flutter pub get
