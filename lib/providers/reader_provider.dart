@@ -73,6 +73,48 @@ class ReaderProvider extends ChangeNotifier {
   String _paragraphIndent = '\u3000\u3000';
   int _fontWeightIndex = 1;
   String? _backgroundImagePath;
+  // 繁简转换 0:不转换 1:简转繁 2:繁转简
+  int _chineseConverterType = 0;
+  // 字重精细模式
+  bool _fontWeightFine = false;
+  int _textBoldFine = 400;
+  int _titleBoldFine = 700;
+  // 标题设置
+  int _titleMode = 0;
+  int _titleSize = 0;
+  int _titleTopSpacing = 0;
+  int _titleBottomSpacing = 0;
+  // 正文边距（四向独立）
+  double _paddingTop = 6.0;
+  double _paddingBottom = 6.0;
+  double _paddingLeft = 16.0;
+  double _paddingRight = 16.0;
+  // 页眉边距
+  double _headerPaddingTop = 0.0;
+  double _headerPaddingBottom = 0.0;
+  double _headerPaddingLeft = 16.0;
+  double _headerPaddingRight = 16.0;
+  // 页脚边距
+  double _footerPaddingTop = 6.0;
+  double _footerPaddingBottom = 6.0;
+  double _footerPaddingLeft = 16.0;
+  double _footerPaddingRight = 16.0;
+  // 分隔线
+  bool _showHeaderLine = false;
+  bool _showFooterLine = true;
+  // 信息(页眉页脚)配置
+  int _headerMode = 1;
+  int _footerMode = 0;
+  int _tipHeaderLeft = 2;
+  int _tipHeaderMiddle = 0;
+  int _tipHeaderRight = 3;
+  int _tipFooterLeft = 1;
+  int _tipFooterMiddle = 0;
+  int _tipFooterRight = 6;
+  int _headerFontSize = 12;
+  int _footerFontSize = 12;
+  int _tipColor = 0;
+  int _tipDividerColor = -1;
 
   PageMode get pageMode => _pageMode;
   double get fontSize => _fontSize;
@@ -155,6 +197,44 @@ class ReaderProvider extends ChangeNotifier {
       _paragraphIndent = config['paragraphIndent'] as String? ?? '\u3000\u3000';
       _fontWeightIndex = config['fontWeightIndex'] as int? ?? 1;
       _backgroundImagePath = config['backgroundImagePath'] as String?;
+      _chineseConverterType = config['chineseConverterType'] as int? ?? 0;
+      _fontWeightFine = config['fontWeightFine'] as bool? ?? false;
+      _textBoldFine = config['textBoldFine'] as int? ?? 400;
+      _titleBoldFine = config['titleBoldFine'] as int? ?? 700;
+      _titleMode = config['titleMode'] as int? ?? 0;
+      _titleSize = config['titleSize'] as int? ?? 0;
+      _titleTopSpacing = config['titleTopSpacing'] as int? ?? 0;
+      _titleBottomSpacing = config['titleBottomSpacing'] as int? ?? 0;
+      _paddingTop = (config['paddingTop'] as num?)?.toDouble() ??
+          (config['verticalPadding'] as num?)?.toDouble() ?? 6.0;
+      _paddingBottom = (config['paddingBottom'] as num?)?.toDouble() ??
+          (config['verticalPadding'] as num?)?.toDouble() ?? 6.0;
+      _paddingLeft = (config['paddingLeft'] as num?)?.toDouble() ??
+          (config['horizontalPadding'] as num?)?.toDouble() ?? 16.0;
+      _paddingRight = (config['paddingRight'] as num?)?.toDouble() ??
+          (config['horizontalPadding'] as num?)?.toDouble() ?? 16.0;
+      _headerPaddingTop = (config['headerPaddingTop'] as num?)?.toDouble() ?? 0.0;
+      _headerPaddingBottom = (config['headerPaddingBottom'] as num?)?.toDouble() ?? 0.0;
+      _headerPaddingLeft = (config['headerPaddingLeft'] as num?)?.toDouble() ?? 16.0;
+      _headerPaddingRight = (config['headerPaddingRight'] as num?)?.toDouble() ?? 16.0;
+      _footerPaddingTop = (config['footerPaddingTop'] as num?)?.toDouble() ?? 6.0;
+      _footerPaddingBottom = (config['footerPaddingBottom'] as num?)?.toDouble() ?? 6.0;
+      _footerPaddingLeft = (config['footerPaddingLeft'] as num?)?.toDouble() ?? 16.0;
+      _footerPaddingRight = (config['footerPaddingRight'] as num?)?.toDouble() ?? 16.0;
+      _showHeaderLine = config['showHeaderLine'] as bool? ?? false;
+      _showFooterLine = config['showFooterLine'] as bool? ?? true;
+      _headerMode = config['headerMode'] as int? ?? 1;
+      _footerMode = config['footerMode'] as int? ?? 0;
+      _tipHeaderLeft = config['tipHeaderLeft'] as int? ?? 2;
+      _tipHeaderMiddle = config['tipHeaderMiddle'] as int? ?? 0;
+      _tipHeaderRight = config['tipHeaderRight'] as int? ?? 3;
+      _tipFooterLeft = config['tipFooterLeft'] as int? ?? 1;
+      _tipFooterMiddle = config['tipFooterMiddle'] as int? ?? 0;
+      _tipFooterRight = config['tipFooterRight'] as int? ?? 6;
+      _headerFontSize = config['headerFontSize'] as int? ?? 12;
+      _footerFontSize = config['footerFontSize'] as int? ?? 12;
+      _tipColor = config['tipColor'] as int? ?? 0;
+      _tipDividerColor = config['tipDividerColor'] as int? ?? -1;
       final highlightRulesJson = config['highlightRules'] as List?;
       if (highlightRulesJson != null) {
         _highlightRules = highlightRulesJson
@@ -208,6 +288,40 @@ class ReaderProvider extends ChangeNotifier {
       'paragraphIndent': _paragraphIndent,
       'fontWeightIndex': _fontWeightIndex,
       'backgroundImagePath': _backgroundImagePath,
+      'chineseConverterType': _chineseConverterType,
+      'fontWeightFine': _fontWeightFine,
+      'textBoldFine': _textBoldFine,
+      'titleBoldFine': _titleBoldFine,
+      'titleMode': _titleMode,
+      'titleSize': _titleSize,
+      'titleTopSpacing': _titleTopSpacing,
+      'titleBottomSpacing': _titleBottomSpacing,
+      'paddingTop': _paddingTop,
+      'paddingBottom': _paddingBottom,
+      'paddingLeft': _paddingLeft,
+      'paddingRight': _paddingRight,
+      'headerPaddingTop': _headerPaddingTop,
+      'headerPaddingBottom': _headerPaddingBottom,
+      'headerPaddingLeft': _headerPaddingLeft,
+      'headerPaddingRight': _headerPaddingRight,
+      'footerPaddingTop': _footerPaddingTop,
+      'footerPaddingBottom': _footerPaddingBottom,
+      'footerPaddingLeft': _footerPaddingLeft,
+      'footerPaddingRight': _footerPaddingRight,
+      'showHeaderLine': _showHeaderLine,
+      'showFooterLine': _showFooterLine,
+      'headerMode': _headerMode,
+      'footerMode': _footerMode,
+      'tipHeaderLeft': _tipHeaderLeft,
+      'tipHeaderMiddle': _tipHeaderMiddle,
+      'tipHeaderRight': _tipHeaderRight,
+      'tipFooterLeft': _tipFooterLeft,
+      'tipFooterMiddle': _tipFooterMiddle,
+      'tipFooterRight': _tipFooterRight,
+      'headerFontSize': _headerFontSize,
+      'footerFontSize': _footerFontSize,
+      'tipColor': _tipColor,
+      'tipDividerColor': _tipDividerColor,
     });
   }
 
@@ -511,6 +625,40 @@ class ReaderProvider extends ChangeNotifier {
   String get paragraphIndent => _paragraphIndent;
   int get fontWeightIndex => _fontWeightIndex;
   String? get backgroundImagePath => _backgroundImagePath;
+  int get chineseConverterType => _chineseConverterType;
+  bool get fontWeightFine => _fontWeightFine;
+  int get textBoldFine => _textBoldFine;
+  int get titleBoldFine => _titleBoldFine;
+  int get titleMode => _titleMode;
+  int get titleSize => _titleSize;
+  int get titleTopSpacing => _titleTopSpacing;
+  int get titleBottomSpacing => _titleBottomSpacing;
+  double get paddingTop => _paddingTop;
+  double get paddingBottom => _paddingBottom;
+  double get paddingLeft => _paddingLeft;
+  double get paddingRight => _paddingRight;
+  double get headerPaddingTop => _headerPaddingTop;
+  double get headerPaddingBottom => _headerPaddingBottom;
+  double get headerPaddingLeft => _headerPaddingLeft;
+  double get headerPaddingRight => _headerPaddingRight;
+  double get footerPaddingTop => _footerPaddingTop;
+  double get footerPaddingBottom => _footerPaddingBottom;
+  double get footerPaddingLeft => _footerPaddingLeft;
+  double get footerPaddingRight => _footerPaddingRight;
+  bool get showHeaderLine => _showHeaderLine;
+  bool get showFooterLine => _showFooterLine;
+  int get headerMode => _headerMode;
+  int get footerMode => _footerMode;
+  int get tipHeaderLeft => _tipHeaderLeft;
+  int get tipHeaderMiddle => _tipHeaderMiddle;
+  int get tipHeaderRight => _tipHeaderRight;
+  int get tipFooterLeft => _tipFooterLeft;
+  int get tipFooterMiddle => _tipFooterMiddle;
+  int get tipFooterRight => _tipFooterRight;
+  int get headerFontSize => _headerFontSize;
+  int get footerFontSize => _footerFontSize;
+  int get tipColor => _tipColor;
+  int get tipDividerColor => _tipDividerColor;
 
   void setShowReadingInfo(bool value) {
     _showReadingInfo = value;
@@ -622,6 +770,177 @@ class ReaderProvider extends ChangeNotifier {
 
   void setBackgroundImagePath(String? value) {
     _backgroundImagePath = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setChineseConverterType(int value) {
+    _chineseConverterType = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setFontWeightFine(bool value) {
+    _fontWeightFine = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setTextBoldFine(int value) {
+    _textBoldFine = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setTitleBoldFine(int value) {
+    _titleBoldFine = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setTitleMode(int value) {
+    _titleMode = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setTitleSize(int value) {
+    _titleSize = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setTitleTopSpacing(int value) {
+    _titleTopSpacing = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setTitleBottomSpacing(int value) {
+    _titleBottomSpacing = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setPaddingTop(double value) {
+    _paddingTop = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setPaddingBottom(double value) {
+    _paddingBottom = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setPaddingLeft(double value) {
+    _paddingLeft = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setPaddingRight(double value) {
+    _paddingRight = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setHeaderPaddingTop(double value) {
+    _headerPaddingTop = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setHeaderPaddingBottom(double value) {
+    _headerPaddingBottom = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setHeaderPaddingLeft(double value) {
+    _headerPaddingLeft = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setHeaderPaddingRight(double value) {
+    _headerPaddingRight = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setFooterPaddingTop(double value) {
+    _footerPaddingTop = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setFooterPaddingBottom(double value) {
+    _footerPaddingBottom = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setFooterPaddingLeft(double value) {
+    _footerPaddingLeft = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setFooterPaddingRight(double value) {
+    _footerPaddingRight = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setShowHeaderLine(bool value) {
+    _showHeaderLine = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setShowFooterLine(bool value) {
+    _showFooterLine = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setHeaderMode(int value) {
+    _headerMode = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setFooterMode(int value) {
+    _footerMode = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setTipHeaderLeft(int value) {
+    _tipHeaderLeft = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setTipHeaderMiddle(int value) {
+    _tipHeaderMiddle = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setTipHeaderRight(int value) {
+    _tipHeaderRight = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setTipFooterLeft(int value) {
+    _tipFooterLeft = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setTipFooterMiddle(int value) {
+    _tipFooterMiddle = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setTipFooterRight(int value) {
+    _tipFooterRight = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setHeaderFontSize(int value) {
+    _headerFontSize = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setFooterFontSize(int value) {
+    _footerFontSize = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setTipColor(int value) {
+    _tipColor = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+  void setTipDividerColor(int value) {
+    _tipDividerColor = value;
     _saveToStorage();
     notifyListeners();
   }
