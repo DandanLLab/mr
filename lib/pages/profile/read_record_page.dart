@@ -50,6 +50,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() {
       _enableReadRecord = prefs.getBool('enable_read_record') ?? true;
       _skipDeleteConfirm = prefs.getBool('skip_delete_confirm') ?? false;
@@ -61,6 +62,7 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
 
   Future<void> _toggleReadRecord() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() {
       _enableReadRecord = !_enableReadRecord;
     });
@@ -837,6 +839,14 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
       onTap: () {
         Navigator.pushNamed(context, AppRoutes.detail, arguments: {
           'bookUrl': record.bookUrl,
+          'bookData': {
+            'bookUrl': record.bookUrl,
+            'name': record.bookName,
+            'author': record.bookAuthor,
+            'coverUrl': record.coverUrl,
+            'durChapterIndex': record.lastChapterIndex,
+            'durChapterTitle': record.lastChapterTitle,
+          },
         });
       },
       child: Padding(
@@ -1060,6 +1070,14 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
       onTap: () {
         Navigator.pushNamed(context, AppRoutes.detail, arguments: {
           'bookUrl': record.bookUrl,
+          'bookData': {
+            'bookUrl': record.bookUrl,
+            'name': record.bookName,
+            'author': record.bookAuthor,
+            'coverUrl': record.coverUrl,
+            'durChapterIndex': record.lastChapterIndex,
+            'durChapterTitle': record.lastChapterTitle,
+          },
         });
       },
       onLongPress: () => _deleteRecord(record),
@@ -1171,6 +1189,14 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
       onTap: () {
         Navigator.pushNamed(context, AppRoutes.detail, arguments: {
           'bookUrl': record.bookUrl,
+          'bookData': {
+            'bookUrl': record.bookUrl,
+            'name': record.bookName,
+            'author': record.bookAuthor,
+            'coverUrl': record.coverUrl,
+            'durChapterIndex': record.chapterIndex,
+            'durChapterTitle': record.chapterTitle,
+          },
         });
       },
       child: Padding(

@@ -8,9 +8,9 @@ import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/book_source.dart';
+import '../../routes/app_routes.dart';
 import '../../services/app_logger.dart';
 import '../../services/source_debug_service.dart';
 import '../../services/storage_service.dart';
@@ -80,6 +80,10 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
       if (!mounted) return;
       setState(() {
         _appLogs.add(entry);
+        // 限制日志数量，防止内存无限增长
+        if (_appLogs.length > 500) {
+          _appLogs.removeRange(0, _appLogs.length - 500);
+        }
       });
     });
 
@@ -100,6 +104,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
     _searchController.dispose();
     _searchFocusNode.dispose();
     _scrollController.dispose();
+    _logScrollController.dispose();
     super.dispose();
   }
 
@@ -473,6 +478,9 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
                 }
                 setState(() {});
                 break;
+              case 'import':
+                Navigator.pushNamed(context, AppRoutes.bookSourceImport);
+                break;
               case 'help':
                 _showHelpDialog();
                 break;
@@ -503,6 +511,11 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
               value: 'refresh_explore',
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Text('刷新发现', style: TextStyle(color: textColor)),
+            ),
+            PopupMenuItem(
+              value: 'import',
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Text('导入书源', style: TextStyle(color: textColor)),
             ),
             PopupMenuItem(
               value: 'help',
@@ -919,9 +932,12 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
   }
 
   String _protectUrl(String url) {
-    // 在 URL 的 / . - : ? & = # 等字符与其后继字符之间插入 WORD JOINER (U+2060)
+    // 在 URL 的 / . - : ? & = # 等字符后插入 WORD JOINER (U+2060)
     // 阻止 Flutter ICU 引擎在这些字符后断行
-    return url;
+    return url.replaceAllMapped(
+      RegExp(r'([/.:\?&=#])'),
+      (m) => '${m[1]}\u2060',
+    );
   }
 
   void _showDebugLogDetail(String fullLine, String body) {
@@ -972,7 +988,17 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
   void _onUrlTap(String url) async {
     final uri = Uri.tryParse(url);
     if (uri == null) return;
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    // 默认使用内置浏览器打开链接
+    Navigator.pushNamed(
+      context,
+      AppRoutes.internalBrowser,
+      arguments: {
+        'url': url,
+        'title': '',
+        'sourceUrl': _source?.bookSourceUrl ?? '',
+        'sourceName': _source?.bookSourceName ?? '',
+      },
+    );
   }
 
   /// 扫描二维码

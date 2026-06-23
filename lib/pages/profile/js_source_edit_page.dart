@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import '../../models/book_source.dart';
 import '../../models/rules/search_rule.dart';
 import '../../models/rules/explore_rule.dart';
@@ -45,6 +46,8 @@ class _JsSourceEditPageState extends State<JsSourceEditPage> {
     _jsController.addListener(() {
       _isModified = true;
       _tryExtractMetadata();
+      // 刷新行号和元数据显示
+      if (mounted) setState(() {});
     });
 
     if (widget.sourceUrl != null) {
@@ -488,17 +491,33 @@ function nextContentUrl(result) {
 
   /// 调试书源
   void _debugSource() {
-    if (_sourceUrl.isEmpty) {
-      // 先保存再调试
+    final source = _buildSource();
+    if (source.bookSourceUrl.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先保存书源再调试')),
+        const SnackBar(content: Text('请先填写书源URL（// @url）再调试')),
       );
       return;
     }
-    final source = _buildSource();
     Navigator.pushNamed(context, AppRoutes.bookSourceDebug, arguments: {
       'sourceUrl': source.bookSourceUrl,
       'source': source,
+    });
+  }
+
+  /// 搜索测试（保存后跳转搜索页）
+  void _searchWithSource() {
+    final source = _buildSource();
+    if (source.bookSourceUrl.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先填写书源URL（// @url）再搜索测试')),
+      );
+      return;
+    }
+    StorageService.instance.saveBookSource(source.toJson()).then((_) {
+      if (!mounted) return;
+      Navigator.pushNamed(context, AppRoutes.search, arguments: {
+        'sourceUrl': source.bookSourceUrl,
+      });
     });
   }
 
@@ -513,6 +532,31 @@ function nextContentUrl(result) {
     _jsController.selection = TextSelection.collapsed(
       offset: start + snippet.length,
     );
+  }
+
+  /// 从剪贴板粘贴代码
+  Future<void> _pasteFromClipboard() async {
+    final data = await Clipboard.getData('text/plain');
+    final text = data?.text;
+    if (text == null || text.trim().isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('剪贴板为空')),
+        );
+      }
+      return;
+    }
+    _insertSnippet(text);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已粘贴剪贴板内容')),
+      );
+    }
+  }
+
+  /// 二维码导入（跳转到导入页面）
+  void _importFromQr() {
+    Navigator.pushNamed(context, AppRoutes.bookSourceImport);
   }
 
   @override
@@ -559,6 +603,9 @@ function nextContentUrl(result) {
                       builder: (context) => const _JsHelpPage(),
                     ));
                     break;
+                  case 'search':
+                    _searchWithSource();
+                    break;
                   case 'info':
                     _showSourceInfoDialog().then((r) {
                       if (r != null) {
@@ -578,6 +625,12 @@ function nextContentUrl(result) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('已复制到剪贴板')),
                     );
+                    break;
+                  case 'paste':
+                    _pasteFromClipboard();
+                    break;
+                  case 'qr':
+                    _importFromQr();
                     break;
                   case 'clear':
                     _jsController.clear();
@@ -601,6 +654,11 @@ function nextContentUrl(result) {
                   child: Text('帮助文档'),
                 ),
                 const PopupMenuItem(
+                  value: 'search',
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Text('搜索测试'),
+                ),
+                const PopupMenuItem(
                   value: 'info',
                   padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   child: Text('书源信息'),
@@ -614,6 +672,16 @@ function nextContentUrl(result) {
                   value: 'copy',
                   padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   child: Text('复制全部代码'),
+                ),
+                const PopupMenuItem(
+                  value: 'paste',
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Text('粘贴代码'),
+                ),
+                const PopupMenuItem(
+                  value: 'qr',
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Text('二维码导入'),
                 ),
                 const PopupMenuItem(
                   value: 'clear',
@@ -744,6 +812,8 @@ function nextContentUrl(result) {
   }
 
   void _formatCode() {
+    // 仅做安全的基础格式化：统一缩进并保留块结构
+    // 不做激进重排，避免破坏多行字符串和正则
     final code = _jsController.text;
     final lines = code.split('\n');
     final formatted = <String>[];
@@ -754,12 +824,16 @@ function nextContentUrl(result) {
         formatted.add('');
         continue;
       }
-      if (trimmed.startsWith('}') || trimmed.startsWith(']') || trimmed.startsWith(')')) {
-        indent = (indent - 1).clamp(0, 100);
+      // 计算闭合括号减缩进
+      final closingCount = RegExp(r'^[}\])]').allMatches(trimmed).length;
+      if (closingCount > 0) {
+        indent = (indent - closingCount).clamp(0, 100);
       }
       formatted.add('  ' * indent + trimmed);
-      if (trimmed.endsWith('{') || trimmed.endsWith('[') || trimmed.endsWith('(')) {
-        indent = (indent + 1).clamp(0, 100);
+      // 计算开括号加缩进（行尾的 { [ ( ）
+      final openingCount = RegExp(r'[{\[(]\s*$').allMatches(trimmed).length;
+      if (openingCount > 0) {
+        indent = (indent + openingCount).clamp(0, 100);
       }
     }
     _jsController.text = formatted.join('\n');
@@ -872,9 +946,9 @@ class _JsHelpPageState extends State<_JsHelpPage> with SingleTickerProviderState
   Widget _buildMarkdownView(String content) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
-      child: SelectableText(
-        content,
-        style: const TextStyle(fontFamily: 'Consolas', fontSize: 12, height: 1.6),
+      child: Markdown(
+        data: content,
+        padding: EdgeInsets.zero,
       ),
     );
   }

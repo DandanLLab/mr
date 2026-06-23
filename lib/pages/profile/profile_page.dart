@@ -1,13 +1,15 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../providers/app_provider.dart';
 import '../../providers/discovery_provider.dart';
 import '../../utils/design_tokens.dart';
 import '../../widgets/android_switch.dart';
 import 'book_source_manage_page.dart';
-import 'reader_settings_sheet.dart';
+import '../../providers/reader_provider.dart';
+import '../../widgets/reader/reader_settings_sheet.dart' as real;
 import '../settings/theme_settings_page.dart';
 import '../settings/ai_settings_page.dart';
 import '../../routes/app_routes.dart';
@@ -23,21 +25,8 @@ class _ProfilePageState extends State<ProfilePage>
     with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
-  int _sourceCount = 0;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadStats();
-  }
-
-  void _loadStats() {
-    final discoveryProvider = context.read<DiscoveryProvider>();
-
-    setState(() {
-      _sourceCount = discoveryProvider.bookSources.length;
-    });
-  }
+  bool _webServiceEnabled = false;
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +36,7 @@ class _ProfilePageState extends State<ProfilePage>
     final primaryForeground = ThemeData.estimateBrightnessForColor(primaryColor) == Brightness.dark
         ? Colors.white
         : Colors.black;
+    final sourceCount = context.watch<DiscoveryProvider>().bookSources.length;
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Column(
@@ -95,7 +85,7 @@ class _ProfilePageState extends State<ProfilePage>
                   _buildListItem(
                     icon: Icons.menu_book_outlined,
                     title: '书源管理',
-                    subtitle: '已导入 $_sourceCount 个书源',
+                    subtitle: '已导入 $sourceCount 个书源',
                     onTap: () => _showBookSourceManagement(),
                   ),
                   _buildListItem(
@@ -147,8 +137,16 @@ class _ProfilePageState extends State<ProfilePage>
                     icon: Icons.public,
                     title: 'Web服务',
                     subtitle: '开启后可通过浏览器访问',
-                    value: false,
-                    onChanged: (value) {},
+                    value: _webServiceEnabled,
+                    onChanged: (value) {
+                      setState(() => _webServiceEnabled = value);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(value ? 'Web服务已开启' : 'Web服务已关闭'),
+                          duration: const Duration(seconds: 1),
+                        ),
+                      );
+                    },
                   ),
                 ]),
 
@@ -159,7 +157,14 @@ class _ProfilePageState extends State<ProfilePage>
                     icon: Icons.extension_outlined,
                     title: '扩展设置',
                     subtitle: '管理插件和扩展功能',
-                    onTap: () {},
+                    onTap: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('扩展功能开发中，敬请期待'),
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                    },
                   ),
                   _buildListItem(
                     icon: Icons.psychology_outlined,
@@ -167,7 +172,9 @@ class _ProfilePageState extends State<ProfilePage>
                     subtitle: '配置 AI 相关功能',
                     onTap: () => Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const AiSettingsPage()),
+                      AppPageRoute(
+                        builder: (context) => const AiSettingsPage(),
+                      ),
                     ),
                   ),
                 ]),
@@ -483,11 +490,83 @@ class _ProfilePageState extends State<ProfilePage>
   }
 
   void _showReaderSettings() {
+    final provider = context.read<ReaderProvider>();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (context) {
-        return const ReaderSettingsSheet();
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.43,
+          minChildSize: 0.24,
+          maxChildSize: 0.9,
+          expand: false,
+          builder: (context, scrollController) {
+            return ClipRRect(
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(16),
+              ),
+              child: real.ReaderSettingsSheet(
+                fontSize: provider.fontSize,
+                lineHeight: provider.lineHeight,
+                letterSpacing: provider.letterSpacing,
+                paragraphSpacing: provider.paragraphSpacing,
+                horizontalPadding: provider.horizontalPadding,
+                verticalPadding: provider.verticalPadding,
+                paragraphIndent: provider.paragraphIndent,
+                fontWeightIndex: provider.fontWeightIndex,
+                fontFamily: provider.fontFamily,
+                backgroundColor: provider.backgroundColor,
+                backgroundImagePath: provider.backgroundImagePath,
+                showReadingInfo: provider.showReadingInfo,
+                showChapterTitle: provider.showChapterTitle,
+                showClock: provider.showClock,
+                showProgress: provider.showProgress,
+                pageAnim: provider.pageMode.index,
+                pageAnimDurationMs: provider.pageAnimDurationMs,
+                screenBrightness: provider.screenBrightness,
+                keepScreenOn: provider.keepScreenOn,
+                enableVolumeKeyPage: provider.enableVolumeKeyPage,
+                volumeKeyPageOnTts: provider.volumeKeyPageOnTts,
+                enableLongPressMenu: provider.enableLongPressMenu,
+                autoScrollSpeed: provider.autoScrollSpeed,
+                autoPageIntervalSeconds: provider.autoPageIntervalSeconds,
+                tapZones: provider.tapZones,
+                isNightMode: provider.isNightMode,
+                onFontSizeChanged: provider.setFontSize,
+                onLineHeightChanged: provider.setLineHeight,
+                onLetterSpacingChanged: provider.setLetterSpacing,
+                onParagraphSpacingChanged: provider.setParagraphSpacing,
+                onHorizontalPaddingChanged: provider.setHorizontalPadding,
+                onVerticalPaddingChanged: provider.setVerticalPadding,
+                onParagraphIndentChanged: provider.setParagraphIndent,
+                onFontWeightChanged: provider.setFontWeightIndex,
+                onFontFamilyChanged: provider.setFontFamily,
+                onBackgroundColorChanged: provider.setBackgroundColor,
+                onBackgroundImageChanged: provider.setBackgroundImagePath,
+                onShowReadingInfoChanged: provider.setShowReadingInfo,
+                onShowChapterTitleChanged: provider.setShowChapterTitle,
+                onShowClockChanged: provider.setShowClock,
+                onShowProgressChanged: provider.setShowProgress,
+                onPageAnimChanged: (v) {
+                  if (v < PageMode.values.length) {
+                    provider.setPageMode(PageMode.values[v]);
+                  }
+                },
+                onPageAnimDurationChanged: provider.setPageAnimDurationMs,
+                onScreenBrightnessChanged: provider.setScreenBrightness,
+                onKeepScreenOnChanged: provider.setKeepScreenOn,
+                onEnableVolumeKeyPageChanged: provider.setEnableVolumeKeyPage,
+                onVolumeKeyPageOnTtsChanged: provider.setVolumeKeyPageOnTts,
+                onEnableLongPressMenuChanged: provider.setEnableLongPressMenu,
+                onAutoScrollSpeedChanged: provider.setAutoScrollSpeed,
+                onAutoPageIntervalChanged: provider.setAutoPageIntervalSeconds,
+                onTapZonesChanged: provider.setTapZones,
+                onNightModeChanged: provider.setNightMode,
+              ),
+            );
+          },
+        );
       },
     );
   }
@@ -526,6 +605,9 @@ class _ProfilePageState extends State<ProfilePage>
               onPressed: () {
                 Navigator.pop(context);
                 // 退出应用
+                if (Platform.isAndroid || Platform.isIOS) {
+                  SystemNavigator.pop();
+                }
               },
               child: const Text('确定'),
             ),

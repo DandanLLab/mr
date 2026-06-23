@@ -92,19 +92,40 @@ class _MiniprogramPageState extends State<MiniprogramPage>
                       IconButton(
                         icon: Icon(Icons.history, size: 20, color: appBarForeground),
                         tooltip: '历史记录',
-                        onPressed: () {},
+                        onPressed: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('历史记录功能开发中'),
+                              duration: Duration(seconds: 1),
+                            ),
+                          );
+                        },
                       ),
                       // 收藏分组
                       IconButton(
                         icon: Icon(Icons.folder_outlined, size: 20, color: appBarForeground),
                         tooltip: '收藏分组',
-                        onPressed: () {},
+                        onPressed: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('收藏分组功能开发中'),
+                              duration: Duration(seconds: 1),
+                            ),
+                          );
+                        },
                       ),
                       // 设置
                       IconButton(
                         icon: Icon(Icons.settings, size: 20, color: appBarForeground),
                         tooltip: '设置',
-                        onPressed: () {},
+                        onPressed: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('设置功能开发中'),
+                              duration: Duration(seconds: 1),
+                            ),
+                          );
+                        },
                       ),
                       // 更多菜单
                       PopupMenuButton<String>(

@@ -13,6 +13,7 @@ import '../../providers/discovery_provider.dart';
 import '../../providers/app_provider.dart';
 import '../../utils/design_tokens.dart';
 import '../../routes/app_routes.dart';
+import '../../services/share_service.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -24,8 +25,7 @@ class MainPage extends StatefulWidget {
 class _MainPageState extends State<MainPage> {
   int _currentIndex = 0;
   bool _isLoading = true;
-  String? _error;
-  late PageController _pageController;
+    String? _error;
   late final List<Widget> _pages;
 
   // 侧边栏状态
@@ -34,7 +34,6 @@ class _MainPageState extends State<MainPage> {
   @override
   void initState() {
     super.initState();
-    _pageController = PageController(initialPage: 0);
     _pages = [
       BookshelfPage(onSwipeToNext: _navigateToDiscovery),
       const DiscoveryPage(),
@@ -43,22 +42,30 @@ class _MainPageState extends State<MainPage> {
     ];
     _loadData();
     _requestPermissions();
+    _checkSharedText();
+  }
+
+  /// 检查其他App分享来的文本，跳转到导入页面
+  Future<void> _checkSharedText() async {
+    final sharedText = await ShareService.instance.getSharedText();
+    if (sharedText != null && sharedText.isNotEmpty && mounted) {
+      Navigator.pushNamed(
+        context,
+        AppRoutes.bookSourceImport,
+        arguments: sharedText,
+      );
+    }
   }
 
   @override
   void dispose() {
-    _pageController.dispose();
     super.dispose();
   }
 
   void _navigateToDiscovery() {
-    if (_pageController.hasClients) {
-      _pageController.animateToPage(
-        1,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-      );
-    }
+    setState(() {
+      _currentIndex = 1;
+    });
   }
 
   Future<void> _requestPermissions() async {
@@ -92,6 +99,14 @@ class _MainPageState extends State<MainPage> {
     if (_sidebarOpen) {
       setState(() {
         _sidebarOpen = false;
+      });
+    }
+  }
+
+  void _openSidebar() {
+    if (!_sidebarOpen) {
+      setState(() {
+        _sidebarOpen = true;
       });
     }
   }
@@ -168,17 +183,14 @@ class _MainPageState extends State<MainPage> {
     return Scaffold(
       body: Stack(
         children: [
-          // 主内容
+          // 主内容 - 使用 IndexedStack 避免切换时页面重建闪现
           Positioned.fill(
             bottom: contentBottomInset,
-            child: PageView(
-              controller: _pageController,
-              onPageChanged: (index) {
-                setState(() {
-                  _currentIndex = index;
-                });
-              },
-              children: _pages,
+            child: RepaintBoundary(
+              child: IndexedStack(
+                index: _currentIndex,
+                children: _pages,
+              ),
             ),
           ),
           // 底部导航栏
@@ -355,41 +367,39 @@ class _MainPageState extends State<MainPage> {
         child: GestureDetector(
           onTap: () {
             if (_currentIndex != index) {
-              if (_pageController.hasClients) {
-                _pageController.animateToPage(
-                  index,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeInOut,
-                );
-              }
+              setState(() {
+                _currentIndex = index;
+              });
             }
           },
           behavior: HitTestBehavior.opaque,
-          child: Container(
+          child: SizedBox(
             height: DesignTokens.bottomBarHeight,
-            alignment: Alignment.center,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 320),
-              curve: Curves.easeOutBack,
-              width: isSelected ? DesignTokens.bottomIndicatorWidth : 0,
-              height: isSelected ? DesignTokens.bottomIndicatorHeight : 0,
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? colorScheme.primary.withValues(alpha: 0.15)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(
-                  DesignTokens.bottomIndicatorCornerRadius,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOut,
+                  width: isSelected ? DesignTokens.bottomIndicatorWidth : 0,
+                  height: isSelected ? DesignTokens.bottomIndicatorHeight : 0,
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? colorScheme.primary.withValues(alpha: 0.15)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(
+                      DesignTokens.bottomIndicatorCornerRadius,
+                    ),
+                  ),
                 ),
-              ),
-              child: Center(
-                child: Icon(
+                Icon(
                   isSelected ? activeIcon : icon,
                   size: iconSize,
                   color: isSelected
                       ? colorScheme.secondary
                       : _navBarContentColor(navBarColor),
                 ),
-              ),
+              ],
             ),
           ),
         ),
@@ -408,45 +418,65 @@ class _MainPageState extends State<MainPage> {
         : null;
 
     return Scaffold(
-      body: PageView(
-        controller: _pageController,
-        onPageChanged: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
-        children: _pages,
-      ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: navBarColor.withValues(alpha:opacity),
-          border: borderColor != null
-              ? Border(top: BorderSide(color: borderColor, width: 1))
-              : null,
+      body: RepaintBoundary(
+        child: IndexedStack(
+          index: _currentIndex,
+          children: _pages,
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            _buildStandardNavItem(
-              0,
-              Icons.menu_book_outlined,
-              Icons.menu_book,
-              '书架',
-            ),
-            _buildStandardNavItem(
-              1,
-              Icons.explore_outlined,
-              Icons.explore,
-              '发现',
-            ),
-            _buildStandardNavItem(
-              2,
-              Icons.rss_feed_outlined,
-              Icons.rss_feed,
-              '订阅',
-            ),
-            _buildStandardNavItem(3, Icons.person_outline, Icons.person, '我的'),
-          ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () =>
+            Navigator.pushNamed(context, AppRoutes.search),
+        child: const Icon(Icons.search),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: RepaintBoundary(
+          child: Container(
+          height: DesignTokens.bottomStandardHeight,
+          decoration: BoxDecoration(
+            color: navBarColor.withValues(alpha:opacity),
+            border: borderColor != null
+                ? Border(top: BorderSide(color: borderColor, width: 1))
+                : null,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: _buildStandardNavItem(
+                  0,
+                  Icons.menu_book_outlined,
+                  Icons.menu_book,
+                  '书架',
+                ),
+              ),
+              Expanded(
+                child: _buildStandardNavItem(
+                  1,
+                  Icons.explore_outlined,
+                  Icons.explore,
+                  '发现',
+                ),
+              ),
+              Expanded(
+                child: _buildStandardNavItem(
+                  2,
+                  Icons.rss_feed_outlined,
+                  Icons.rss_feed,
+                  '订阅',
+                ),
+              ),
+              Expanded(
+                child: _buildStandardNavItem(
+                  3,
+                  Icons.person_outline,
+                  Icons.person,
+                  '我的',
+                ),
+              ),
+            ],
+          ),
+        ),
         ),
       ),
     );
@@ -465,12 +495,10 @@ class _MainPageState extends State<MainPage> {
       message: label,
       child: GestureDetector(
         onTap: () {
-          if (_pageController.hasClients) {
-            _pageController.animateToPage(
-              index,
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeInOut,
-            );
+          if (_currentIndex != index) {
+            setState(() {
+              _currentIndex = index;
+            });
           }
         },
         behavior: HitTestBehavior.opaque,
@@ -479,21 +507,24 @@ class _MainPageState extends State<MainPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 320),
-                curve: Curves.easeOutBack,
-                width: isSelected ? DesignTokens.bottomIndicatorWidth : 0,
-                height: isSelected ? DesignTokens.bottomIndicatorHeight : 0,
-                decoration: BoxDecoration(
-                  color: isSelected
-                      ? colorScheme.primary.withValues(alpha: 0.15)
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(
-                    DesignTokens.bottomIndicatorCornerRadius,
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOut,
+                    width: isSelected ? DesignTokens.bottomIndicatorWidth : 0,
+                    height: isSelected ? DesignTokens.bottomIndicatorHeight : 0,
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? colorScheme.primary.withValues(alpha: 0.15)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(
+                        DesignTokens.bottomIndicatorCornerRadius,
+                      ),
+                    ),
                   ),
-                ),
-                child: Center(
-                  child: Icon(
+                  Icon(
                     isSelected ? activeIcon : icon,
                     size: 24,
                     color: isSelected
@@ -502,7 +533,7 @@ class _MainPageState extends State<MainPage> {
                             context.read<AppProvider>().currentNavBarColor,
                           ),
                   ),
-                ),
+                ],
               ),
               const SizedBox(height: DesignTokens.spacingXs),
               Text(
@@ -526,18 +557,33 @@ class _MainPageState extends State<MainPage> {
 
   /// 侧边栏模式布局
   Widget _buildSidebarLayout(String sidebarGravity) {
+    final sidebarIsEnd = sidebarGravity == 'end';
     return Scaffold(
       body: Stack(
         children: [
-          // 主内容
-          PageView(
-            controller: _pageController,
-            onPageChanged: (index) {
-              setState(() {
-                _currentIndex = index;
-              });
-            },
-            children: _pages,
+          // 主内容 - 使用 IndexedStack 避免切换时页面重建闪现
+          RepaintBoundary(
+            child: IndexedStack(
+              index: _currentIndex,
+              children: _pages,
+            ),
+          ),
+          // 侧边栏开启按钮
+          Positioned(
+            top: MediaQuery.paddingOf(context).top + 4,
+            left: sidebarIsEnd ? null : 8,
+            right: sidebarIsEnd ? 8 : null,
+            child: Material(
+              color: Colors.transparent,
+              child: IconButton(
+                icon: Icon(
+                  Icons.menu,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                onPressed: _openSidebar,
+                tooltip: '打开菜单',
+              ),
+            ),
           ),
           // 侧边栏遮罩
           if (_sidebarOpen)
@@ -632,7 +678,7 @@ class _MainPageState extends State<MainPage> {
                   _buildSidebarItem(2, Icons.rss_feed, '订阅'),
                   _buildSidebarItem(3, Icons.person, '我的'),
                   const Divider(),
-                  _buildSidebarItem(4, Icons.settings, '设置'),
+                  _buildSidebarItem(4, Icons.settings, '我的设置'),
                   _buildSidebarItem(5, Icons.info, '关于'),
                 ],
               ),
@@ -640,26 +686,33 @@ class _MainPageState extends State<MainPage> {
             // 底部搜索
             Container(
               padding: const EdgeInsets.all(DesignTokens.spacingLg),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: DesignTokens.spacingLg,
-                  vertical: DesignTokens.spacingMd,
-                ),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? Colors.white.withValues(alpha:0.1)
-                      : Colors.black.withValues(alpha:0.05),
-                  borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.search, color: colorScheme.onSurfaceVariant),
-                    const SizedBox(width: DesignTokens.spacingMd),
-                    Text(
-                      '搜索',
-                      style: TextStyle(color: colorScheme.onSurfaceVariant),
-                    ),
-                  ],
+              child: GestureDetector(
+                onTap: () {
+                  _closeSidebar();
+                  Navigator.pushNamed(context, AppRoutes.search);
+                },
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: DesignTokens.spacingLg,
+                    vertical: DesignTokens.spacingMd,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha:0.1)
+                        : Colors.black.withValues(alpha:0.05),
+                    borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.search, color: colorScheme.onSurfaceVariant),
+                      const SizedBox(width: DesignTokens.spacingMd),
+                      Text(
+                        '搜索',
+                        style: TextStyle(color: colorScheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -700,28 +753,20 @@ class _MainPageState extends State<MainPage> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DesignTokens.panelRadius)),
         onTap: () {
           if (index < 4) {
-            if (_pageController.hasClients) {
-              _pageController.animateToPage(
-                index,
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeInOut,
-              );
-            }
+            setState(() {
+              _currentIndex = index;
+            });
             _closeSidebar();
           } else if (index == 4) {
-            if (_pageController.hasClients) {
-              _pageController.animateToPage(
-                3,
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeInOut,
-              );
-            }
+            setState(() {
+              _currentIndex = 3;
+            });
             _closeSidebar();
           } else if (index == 5) {
             _closeSidebar();
             showAboutDialog(
               context: context,
-              applicationName: 'Legado Max',
+              applicationName: '蛋的神器',
               applicationVersion: '1.0.0',
             );
           }

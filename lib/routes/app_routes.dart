@@ -8,6 +8,7 @@ import '../pages/miniprogram/miniprogram_page.dart';
 import '../pages/profile/profile_page.dart';
 import '../pages/profile/book_source_manage_page.dart';
 import '../pages/profile/book_source_edit_page.dart';
+import '../pages/profile/book_source_import_page.dart';
 import '../pages/profile/read_record_page.dart';
 import '../pages/profile/bookmark_page.dart';
 import '../pages/profile/storage_manage_page.dart';
@@ -33,25 +34,32 @@ class AppPageRoute<T> extends PageRouteBuilder<T> {
     bool maintainState = true,
     bool fullscreenDialog = false,
   }) : super(
-         settings: settings,
-         maintainState: maintainState,
-         fullscreenDialog: fullscreenDialog,
-         allowSnapshotting: false,
-         transitionDuration: Duration.zero,
-         reverseTransitionDuration: Duration.zero,
-         pageBuilder: (context, animation, secondaryAnimation) =>
-             builder(context),
-       );
-
-  @override
-  Widget buildTransitions(
-    BuildContext context,
-    Animation<double> animation,
-    Animation<double> secondaryAnimation,
-    Widget child,
-  ) {
-    return child;
-  }
+          settings: settings,
+          maintainState: maintainState,
+          fullscreenDialog: fullscreenDialog,
+          allowSnapshotting: false,
+          transitionDuration: const Duration(milliseconds: 250),
+          reverseTransitionDuration: const Duration(milliseconds: 250),
+          pageBuilder: (context, animation, secondaryAnimation) =>
+              builder(context),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            final curve = CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+              reverseCurve: Curves.easeInCubic,
+            );
+            return FadeTransition(
+              opacity: curve,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0.0, 0.08),
+                  end: Offset.zero,
+                ).animate(curve),
+                child: child,
+              ),
+            );
+          },
+        );
 }
 
 class AppRoutes {
@@ -62,6 +70,7 @@ class AppRoutes {
   static const String profile = '/profile';
   static const String bookSourceManage = '/book-source-manage';
   static const String bookSourceEdit = '/book-source-edit';
+  static const String bookSourceImport = '/book-source-import';
   static const String readRecord = '/read-record';
   static const String bookmark = '/bookmark';
   static const String storageManage = '/storage-manage';
@@ -119,7 +128,10 @@ class AppRoutes {
       case search:
         final args = settings.arguments as Map<String, dynamic>?;
         return AppPageRoute(
-          builder: (_) => SearchPage(initialKeyword: args?['keyword']),
+          builder: (_) => SearchPage(
+            initialKeyword: args?['keyword'],
+            sourceUrl: args?['sourceUrl'],
+          ),
         );
       case detail:
         final args = settings.arguments;
@@ -264,6 +276,17 @@ class AppRoutes {
             currentChapterIndex: argsMap?['currentChapterIndex'] ?? 0,
             initialBook: initialBook,
           ),
+        );
+      case bookSourceImport:
+        final args = settings.arguments;
+        String? initialText;
+        if (args is String) {
+          initialText = args;
+        } else if (args is Map) {
+          initialText = args['text']?.toString();
+        }
+        return AppPageRoute(
+          builder: (_) => BookSourceImportPage(initialText: initialText),
         );
       case internalBrowser:
         final args = settings.arguments as Map<String, dynamic>?;

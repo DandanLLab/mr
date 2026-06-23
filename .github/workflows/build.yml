@@ -1,0 +1,193 @@
+name: Build & Release APK
+
+# 触发条件：
+# 1. push 到 master → 自动打包测试版（dev）
+# 2. 手动触发 → 可选正式版(stable)或测试版(dev)
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: '打包类型'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - stable
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_CHANNEL: 'stable'
+  JAVA_VERSION: '21'
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 拉取代码（全历史，用于计算今日提交数）
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2. 计算版本号：YY.MMDD.今日提交数
+      #    例如 2026年6月20日第3次提交 → 26.0620.3
+      - name: Generate Version
+        id: version
+        run: |
+          YY=$(date -u +%y)
+          MMDD=$(date -u +%m%d)
+          TODAY=$(date -u +%Y-%m-%d)
+          # 统计今天（UTC）的提交次数作为构建序号
+          COMMIT_COUNT_TODAY=$(git log --oneline --since="${TODAY}T00:00:00Z" --until="${TODAY}T23:59:59Z" | wc -l | tr -d ' ')
+          # 至少为1，避免0
+          if [ "$COMMIT_COUNT_TODAY" -eq 0 ]; then
+            COMMIT_COUNT_TODAY=1
+          fi
+          VERSION="${YY}.${MMDD}.${COMMIT_COUNT_TODAY}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "commit_count=$COMMIT_COUNT_TODAY" >> $GITHUB_OUTPUT
+          echo "build_date=$(date -u +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          echo "=========================================="
+          echo "  版本号: $VERSION"
+          echo "  今日提交数: $COMMIT_COUNT_TODAY"
+          echo "  构建日期: $(date -u +%Y-%m-%d)"
+          echo "=========================================="
+
+      # 3. 判断打包类型（push 到 master 默认 dev，手动触发按选择）
+      - name: Determine Release Type
+        id: release_type
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "type=${{ inputs.release_type }}" >> $GITHUB_OUTPUT
+          else
+            echo "type=dev" >> $GITHUB_OUTPUT
+          fi
+
+      # 4. 设置 Java 21
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      # 5. 设置 Flutter（使用 stable channel，和本地保持一致）
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+
+      # 6. 缓存 Gradle 加速构建
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      # 7. 更新 pubspec.yaml 版本号
+      - name: Update Version
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Flutter version 格式: x.y.z+buildNumber
+          # 用日期版本号作为 versionName，构建序号作为 versionCode
+          sed -i "s/^version:.*/version: ${VERSION}+${{ steps.version.outputs.commit_count }}/" pubspec.yaml
+          echo "pubspec.yaml version 已更新为: ${VERSION}+${{ steps.version.outputs.commit_count }}"
+          grep "^version:" pubspec.yaml
+
+      # 7.5 移除阿里云镜像（GitHub Actions 在国外，使用官方仓库更稳定）
+      - name: Remove Aliyun Mirrors
+        run: |
+          sed -i '/maven.aliyun.com/d' android/settings.gradle.kts
+          sed -i '/maven.aliyun.com/d' android/build.gradle.kts
+          echo "=== settings.gradle.kts repositories ==="
+          grep -A5 "repositories" android/settings.gradle.kts | head -8
+          echo "=== build.gradle.kts repositories ==="
+          grep -A5 "repositories" android/build.gradle.kts | head -12
+
+      # 8. 安装依赖
+      - name: Install Dependencies
+        run: flutter pub get
+
+      # 9. 构建 Release APK（只构建 arm64-v8a，体积更小）
+      - name: Build APK
+        run: flutter build apk --release --no-tree-shake-icons
+
+      # 10. 重命名 APK 文件
+      - name: Rename APK
+        id: apk
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TYPE="${{ steps.release_type.outputs.type }}"
+          BUILD_DATE="${{ steps.version.outputs.build_date }}"
+          APK_NAME="mr_v${VERSION}_${TYPE}_${BUILD_DATE}_arm64.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "${APK_NAME}"
+          echo "apk_name=$APK_NAME" >> $GITHUB_OUTPUT
+          echo "apk_path=${APK_NAME}" >> $GITHUB_OUTPUT
+          ls -lh "${APK_NAME}"
+          echo "=== APK 体积 ==="
+          du -h "${APK_NAME}"
+
+      # 11. 压缩打包（zip）
+      - name: Compress APK
+        run: |
+          APK_NAME="${{ steps.apk.outputs.apk_name }}"
+          ZIP_NAME="${APK_NAME%.apk}.zip"
+          zip -j "${ZIP_NAME}" "${APK_NAME}"
+          echo "zip_name=${ZIP_NAME}" >> $GITHUB_ENV
+          ls -lh "${ZIP_NAME}"
+
+      # 12. 上传构建产物到 Artifacts（每次都上传）
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mr-apk-${{ steps.version.outputs.version }}
+          path: |
+            ${{ steps.apk.outputs.apk_name }}
+            ${{ env.zip_name }}
+          retention-days: 30
+
+      # 13. 创建 GitHub Release
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}-${{ steps.release_type.outputs.type }}
+          name: MR ${{ steps.version.outputs.version }} (${{ steps.release_type.outputs.type == 'stable' && '正式版' || '测试版' }})
+          body: |
+            ## MR ${{ steps.version.outputs.version }}
+
+            **打包类型**: ${{ steps.release_type.outputs.type == 'stable' && '正式版 (stable)' || '测试版 (dev)' }}
+
+            **构建日期**: ${{ steps.version.outputs.build_date }}
+
+            **今日提交数**: ${{ steps.version.outputs.commit_count }}
+
+            **版本号规则**: YY.MMDD.今日提交数
+
+            ---
+
+            ### 下载说明
+            - `.apk` 文件直接安装
+            - `.zip` 文件为压缩包，解压后安装
+
+            ### 安装方法
+            1. 下载 APK 文件
+            2. 允许"未知来源"安装
+            3. 点击安装
+          files: |
+            ${{ steps.apk.outputs.apk_name }}
+            ${{ env.zip_name }}
+          prerelease: ${{ steps.release_type.outputs.type != 'stable' }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

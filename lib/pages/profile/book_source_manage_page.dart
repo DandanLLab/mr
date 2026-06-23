@@ -681,49 +681,49 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
     showModalBottomSheet(
       context: context,
       builder: (context) => SafeArea(
-        child: RadioGroup<BookSourceSort>(
-          groupValue: _sortType,
-          onChanged: (value) {
-            Navigator.pop(context);
-            _setSortType(value!);
-          },
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(DesignTokens.spacingLg),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('排序方式', style: Theme.of(context).textTheme.titleLarge),
-                    TextButton.icon(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _toggleSortOrder();
-                      },
-                      icon: Icon(_isSortAscending
-                          ? Icons.arrow_upward
-                          : Icons.arrow_downward),
-                      label: Text(_isSortAscending ? '升序' : '降序'),
-                    ),
-                  ],
-                ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(DesignTokens.spacingLg),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('排序方式', style: Theme.of(context).textTheme.titleLarge),
+                  TextButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _toggleSortOrder();
+                    },
+                    icon: Icon(_isSortAscending
+                        ? Icons.arrow_upward
+                        : Icons.arrow_downward),
+                    label: Text(_isSortAscending ? '升序' : '降序'),
+                  ),
+                ],
               ),
-              const Divider(height: 1),
-              ...[
-                (BookSourceSort.manual, '手动排序'),
-                (BookSourceSort.weight, '按权重'),
-                (BookSourceSort.name, '按名称'),
-                (BookSourceSort.url, '按URL'),
-                (BookSourceSort.update, '按更新时间'),
-                (BookSourceSort.respond, '按响应时间'),
-                (BookSourceSort.enable, '按启用状态'),
-              ].map((item) => RadioListTile<BookSourceSort>(
-                    title: Text(item.$2),
-                    value: item.$1,
-                  )),
-            ],
-          ),
+            ),
+            const Divider(height: 1),
+            ...[
+              (BookSourceSort.manual, '手动排序'),
+              (BookSourceSort.weight, '按权重'),
+              (BookSourceSort.name, '按名称'),
+              (BookSourceSort.url, '按URL'),
+              (BookSourceSort.update, '按更新时间'),
+              (BookSourceSort.respond, '按响应时间'),
+              (BookSourceSort.enable, '按启用状态'),
+            ].map((item) => RadioListTile<BookSourceSort>(
+                  title: Text(item.$2),
+                  value: item.$1,
+                  groupValue: _sortType,
+                  onChanged: (value) {
+                    if (value != null) {
+                      Navigator.pop(context);
+                      _setSortType(value);
+                    }
+                  },
+                )),
+          ],
         ),
       ),
     );

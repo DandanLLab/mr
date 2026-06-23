@@ -11,8 +11,9 @@ import '../../utils/design_tokens.dart';
 
 class SearchPage extends StatefulWidget {
   final String? initialKeyword;
+  final String? sourceUrl;
 
-  const SearchPage({super.key, this.initialKeyword});
+  const SearchPage({super.key, this.initialKeyword, this.sourceUrl});
 
   @override
   State<SearchPage> createState() => _SearchPageState();
@@ -34,6 +35,10 @@ class _SearchPageState extends State<SearchPage> {
       // 清空上次搜索结果
       provider.clearResults();
       await provider.loadBookSources();
+      // 限定单书源搜索（来自发现页/书源编辑页的"搜索书籍"入口）
+      if (widget.sourceUrl != null && widget.sourceUrl!.isNotEmpty) {
+        provider.selectSingleSource(widget.sourceUrl!);
+      }
       await provider.loadSearchHistory();
       if (!mounted) return;
       if (_searchController.text.trim().isNotEmpty) {
@@ -266,7 +271,7 @@ class _SearchPageState extends State<SearchPage> {
       // 停止搜索按钮（参考原版 FloatingActionButton）
       floatingActionButton: Consumer<SearchProvider>(
         builder: (context, provider, child) {
-          if (!provider.isLoading || provider.searchResults.isEmpty) {
+          if (!provider.isLoading) {
             return const SizedBox.shrink();
           }
           return FloatingActionButton.small(
@@ -747,6 +752,8 @@ class _SearchPageState extends State<SearchPage> {
   void _performSearch() {
     final keyword = _searchController.text.trim();
     if (keyword.isEmpty) return;
+    // 收起键盘
+    FocusScope.of(context).unfocus();
     context.read<SearchProvider>().search(
       keyword,
       precisionSearch: _precisionSearch,
@@ -783,67 +790,200 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   void _showSearchScopeDialog(SearchProvider provider) {
+    // 按分组聚合书源
+    final Map<String, List<BookSource>> groupedSources = {};
+    for (final source in provider.bookSources) {
+      final group = source.bookSourceGroup ?? '默认分组';
+      groupedSources.putIfAbsent(group, () => []).add(source);
+    }
+
+    // 记录展开状态
+    final expandedGroups = <String>{};
+
     showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('选择搜索范围'),
-          content: SizedBox(
-            width: double.maxFinite,
-            height: 300,
-            child: ListView(
-              children: [
-                ListTile(
-                  title: const Text('全部书源'),
-                  trailing: Radio<bool>(
-                    value: true,
-                    groupValue:
-                        provider.selectedSourceUrls.length ==
-                        provider.bookSources.length,
-                    onChanged: (_) {
-                      provider.selectAllSources();
-                      Navigator.pop(context);
-                    },
-                  ),
-                  onTap: () {
-                    provider.selectAllSources();
-                    Navigator.pop(context);
-                  },
-                ),
-                const Divider(),
-                ...provider.bookSources.map((source) {
-                  final isSelected = provider.selectedSourceUrls.contains(
-                    source.bookSourceUrl,
-                  );
-                  return ListTile(
-                    title: Text(source.bookSourceName),
-                    subtitle: Text(
-                      source.bookSourceGroup ?? '默认分组',
-                      style: TextStyle(
-                        fontSize: DesignTokens.fontCaption,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final allSelected = provider.selectedSourceUrls.length ==
+                provider.bookSources.length;
+            return AlertDialog(
+              title: Row(
+                children: [
+                  const Text('选择搜索范围'),
+                  const Spacer(),
+                  Text(
+                    '${provider.selectedSourceUrls.length}/${provider.bookSources.length}',
+                    style: TextStyle(
+                      fontSize: DesignTokens.fontSummary,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
-                    trailing: Checkbox(
-                      value: isSelected,
-                      onChanged: (checked) {
-                        provider.toggleSourceSelection(source.bookSourceUrl);
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                height: 400,
+                child: ListView(
+                  children: [
+                    // 全部书源
+                    ListTile(
+                      leading: Icon(
+                        allSelected
+                            ? Icons.check_circle
+                            : Icons.radio_button_unchecked,
+                        color: allSelected
+                            ? Theme.of(context).colorScheme.primary
+                            : null,
+                      ),
+                      title: const Text('全部书源'),
+                      onTap: () {
+                        if (allSelected) {
+                          provider.deselectAllSources();
+                        } else {
+                          provider.selectAllSources();
+                        }
+                        setDialogState(() {});
                       },
                     ),
-                    onTap: () {
-                      provider.toggleSourceSelection(source.bookSourceUrl);
-                    },
-                  );
-                }),
+                    const Divider(),
+                    // 按分组展示
+                    ...groupedSources.entries.map((entry) {
+                      final group = entry.key;
+                      final sources = entry.value;
+                      final selectedInGroup = sources
+                          .where((s) =>
+                              provider.selectedSourceUrls.contains(s.bookSourceUrl))
+                          .length;
+                      final allInGroupSelected = selectedInGroup == sources.length;
+                      final isExpanded = expandedGroups.contains(group);
+
+                      return Column(
+                        children: [
+                          ListTile(
+                            leading: IconButton(
+                              icon: Icon(
+                                isExpanded
+                                    ? Icons.expand_less
+                                    : Icons.expand_more,
+                              ),
+                              onPressed: () {
+                                setDialogState(() {
+                                  if (isExpanded) {
+                                    expandedGroups.remove(group);
+                                  } else {
+                                    expandedGroups.add(group);
+                                  }
+                                });
+                              },
+                            ),
+                            title: Text(group),
+                            subtitle: Text(
+                              '$selectedInGroup / ${sources.length}',
+                              style: TextStyle(
+                                fontSize: DesignTokens.fontCaption,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // 仅搜此组按钮
+                                TextButton(
+                                  onPressed: () {
+                                    provider.selectGroupSources(group);
+                                    setDialogState(() {});
+                                  },
+                                  child: const Text('仅搜此组',
+                                      style: TextStyle(fontSize: 11)),
+                                ),
+                                Checkbox(
+                                  value: allInGroupSelected,
+                                  onChanged: (checked) {
+                                    provider.toggleGroupSelection(group);
+                                    setDialogState(() {});
+                                  },
+                                ),
+                              ],
+                            ),
+                            onTap: () {
+                              setDialogState(() {
+                                if (isExpanded) {
+                                  expandedGroups.remove(group);
+                                } else {
+                                  expandedGroups.add(group);
+                                }
+                              });
+                            },
+                          ),
+                          if (isExpanded)
+                            ...sources.map((source) {
+                              final isSelected = provider.selectedSourceUrls
+                                  .contains(source.bookSourceUrl);
+                              return Padding(
+                                padding: const EdgeInsets.only(left: 32),
+                                child: ListTile(
+                                  leading: Icon(
+                                    _buildSourceTypeIcon(source).icon,
+                                    size: DesignTokens.listItemIconSize * 0.67,
+                                    color: isSelected
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                  ),
+                                  title: Text(
+                                    source.bookSourceName,
+                                    style: TextStyle(
+                                      fontSize: DesignTokens.fontBody,
+                                    ),
+                                  ),
+                                  trailing: Checkbox(
+                                    value: isSelected,
+                                    onChanged: (checked) {
+                                      provider.toggleSourceSelection(
+                                          source.bookSourceUrl);
+                                      setDialogState(() {});
+                                    },
+                                  ),
+                                  onTap: () {
+                                    provider.toggleSourceSelection(
+                                        source.bookSourceUrl);
+                                    setDialogState(() {});
+                                  },
+                                ),
+                              );
+                            }),
+                        ],
+                      );
+                    }),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    provider.deselectAllSources();
+                    setDialogState(() {});
+                  },
+                  child: const Text('清空'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    // 选中书源后，如果有当前关键词，自动开始并发搜索
+                    if (provider.currentKeyword.isNotEmpty &&
+                        provider.selectedSourceUrls.isNotEmpty) {
+                      provider.search(provider.currentKeyword);
+                    }
+                  },
+                  child: const Text('确定'),
+                ),
               ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('确定'),
-            ),
-          ],
+            );
+          },
         );
       },
     );
@@ -988,4 +1128,8 @@ class _SearchPageState extends State<SearchPage> {
     }
     return Icon(icon, size: DesignTokens.listItemIconSize);
   }
+}
+
+extension on Widget {
+  IconData? get icon => null;
 }

@@ -26,8 +26,6 @@ class _AudioPlayerPageState extends State<AudioPlayerPage>
   final Duration _totalDuration = const Duration(minutes: 5);
   double _volume = 1.0;
   int _timerMinutes = 0;
-  // ignore: unused_field
-  bool _isTimerActive = false;
 
   @override
   void initState() {
@@ -146,16 +144,22 @@ class _AudioPlayerPageState extends State<AudioPlayerPage>
   }
 
   Widget _buildProgressBar() {
+    final maxSeconds = _totalDuration.inSeconds.toDouble();
+    final currentSeconds = _currentPosition.inSeconds.toDouble().clamp(0.0, maxSeconds).toDouble();
     return Column(
       children: [
         Slider(
-          value: _currentPosition.inSeconds.toDouble(),
+          value: currentSeconds,
           min: 0,
-          max: _totalDuration.inSeconds.toDouble(),
+          max: maxSeconds > 0 ? maxSeconds : 1,
           onChanged: (value) {
             setState(() {
               _currentPosition = Duration(seconds: value.toInt());
             });
+          },
+          onChangeEnd: (value) {
+            // TODO: 接入音频播放器seek功能
+            debugPrint('Seek to: $value seconds');
           },
         ),
         Padding(
@@ -234,17 +238,38 @@ class _AudioPlayerPageState extends State<AudioPlayerPage>
         _buildActionButton(
           icon: Icons.download,
           label: '缓存',
-          onTap: () {},
+          onTap: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('缓存功能开发中'),
+                duration: Duration(seconds: 1),
+              ),
+            );
+          },
         ),
         _buildActionButton(
           icon: Icons.share,
           label: '分享',
-          onTap: () {},
+          onTap: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('分享功能开发中'),
+                duration: Duration(seconds: 1),
+              ),
+            );
+          },
         ),
         _buildActionButton(
           icon: Icons.favorite_border,
           label: '收藏',
-          onTap: () {},
+          onTap: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('收藏功能开发中'),
+                duration: Duration(seconds: 1),
+              ),
+            );
+          },
         ),
       ],
     );
@@ -312,30 +337,38 @@ class _AudioPlayerPageState extends State<AudioPlayerPage>
       builder: (context) {
         return AlertDialog(
           title: const Text('定时停止'),
-          content: RadioGroup<int>(
-            groupValue: _timerMinutes,
-            onChanged: (value) {
-              setState(() {
-                _timerMinutes = value!;
-                _isTimerActive = value != 0;
-              });
-              Navigator.pop(context);
-            },
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ...options.map((minutes) {
-                  return RadioListTile<int>(
-                    title: Text('$minutes 分钟'),
-                    value: minutes,
-                  );
-                }),
-                RadioListTile<int>(
-                  title: const Text('关闭'),
-                  value: 0,
-                ),
-              ],
-            ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ...options.map((minutes) {
+                return RadioListTile<int>(
+                  title: Text('$minutes 分钟'),
+                  value: minutes,
+                  groupValue: _timerMinutes,
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() {
+                        _timerMinutes = value;
+                      });
+                      Navigator.pop(context);
+                    }
+                  },
+                );
+              }),
+              RadioListTile<int>(
+                title: const Text('关闭'),
+                value: 0,
+                groupValue: _timerMinutes,
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() {
+                      _timerMinutes = value;
+                    });
+                    Navigator.pop(context);
+                  }
+                },
+              ),
+            ],
           ),
         );
       },
@@ -365,7 +398,14 @@ class _AudioPlayerPageState extends State<AudioPlayerPage>
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                       TextButton(
-                        onPressed: () {},
+                        onPressed: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('缓存全部功能开发中'),
+                              duration: Duration(seconds: 1),
+                            ),
+                          );
+                        },
                         child: const Text('缓存全部'),
                       ),
                     ],
@@ -386,7 +426,7 @@ class _AudioPlayerPageState extends State<AudioPlayerPage>
                               )
                             : const Icon(Icons.music_note),
                         title: Text('第${index + 1}首 - 音频标题'),
-                        subtitle: const Text('05:00'),
+                        subtitle: Text(_formatDuration(_totalDuration)),
                         selected: isSelected,
                         onTap: () {
                           setState(() {

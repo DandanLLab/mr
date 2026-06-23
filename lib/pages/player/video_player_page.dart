@@ -190,23 +190,40 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          const Text(
-            '00:00',
-            style: TextStyle(color: Colors.white, fontSize: 12),
+          Text(
+            _controller != null && _controller!.value.isInitialized
+                ? _formatDuration(_controller!.value.position)
+                : '00:00',
+            style: const TextStyle(color: Colors.white, fontSize: 12),
           ),
           Expanded(
             child: Slider(
-              value: 0,
+              value: _controller != null && _controller!.value.isInitialized
+                  ? _controller!.value.position.inMilliseconds
+                      .toDouble()
+                      .clamp(0, _controller!.value.duration.inMilliseconds
+                          .toDouble())
+                  : 0,
               min: 0,
-              max: 100,
+              max: _controller != null && _controller!.value.isInitialized
+                  ? _controller!.value.duration.inMilliseconds.toDouble()
+                  : 100,
               activeColor: Colors.white,
               inactiveColor: Colors.white24,
-              onChanged: (value) {},
+              onChanged: _controller != null && _controller!.value.isInitialized
+                  ? (value) {
+                      _controller!.seekTo(
+                        Duration(milliseconds: value.toInt()),
+                      );
+                    }
+                  : null,
             ),
           ),
-          const Text(
-            '24:00',
-            style: TextStyle(color: Colors.white, fontSize: 12),
+          Text(
+            _controller != null && _controller!.value.isInitialized
+                ? _formatDuration(_controller!.value.duration)
+                : '00:00',
+            style: const TextStyle(color: Colors.white, fontSize: 12),
           ),
         ],
       ),
@@ -243,15 +260,44 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   }
 
   void _togglePlay() {
+    if (_controller == null || !_controller!.value.isInitialized) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('视频未加载，无法播放'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+      return;
+    }
     setState(() {
       _isPlaying = !_isPlaying;
+      if (_isPlaying) {
+        _controller!.play();
+      } else {
+        _controller!.pause();
+      }
     });
   }
 
+  String _formatDuration(Duration duration) {
+    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
   void _rewind() {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+    final position = _controller!.value.position;
+    final newPosition = position - const Duration(seconds: 10);
+    _controller!.seekTo(newPosition < Duration.zero ? Duration.zero : newPosition);
   }
 
   void _forward() {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+    final position = _controller!.value.position;
+    final duration = _controller!.value.duration;
+    final newPosition = position + const Duration(seconds: 10);
+    _controller!.seekTo(newPosition > duration ? duration : newPosition);
   }
 
   void _previousEpisode() {
@@ -354,19 +400,43 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                 title: const Text('画质', style: TextStyle(color: Colors.white)),
                 subtitle: const Text('高清 720P',
                     style: TextStyle(color: Colors.white54)),
-                onTap: () {},
+                onTap: () {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('画质切换功能开发中'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                },
               ),
               ListTile(
                 leading: const Icon(Icons.router, color: Colors.white),
                 title: const Text('线路', style: TextStyle(color: Colors.white)),
                 subtitle: const Text('线路1',
                     style: TextStyle(color: Colors.white54)),
-                onTap: () {},
+                onTap: () {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('线路切换功能开发中'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                },
               ),
               ListTile(
                 leading: const Icon(Icons.download, color: Colors.white),
                 title: const Text('缓存本集', style: TextStyle(color: Colors.white)),
-                onTap: () {},
+                onTap: () {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('缓存功能开发中'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                },
               ),
             ],
           ),
@@ -383,23 +453,24 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       builder: (context) {
         return AlertDialog(
           title: const Text('播放速度'),
-          content: RadioGroup<double>(
-            groupValue: _playbackSpeed,
-            onChanged: (value) {
-              setState(() {
-                _playbackSpeed = value!;
-              });
-              Navigator.pop(context);
-            },
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: speeds.map((speed) {
-                return RadioListTile<double>(
-                  title: Text('${speed}x'),
-                  value: speed,
-                );
-              }).toList(),
-            ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: speeds.map((speed) {
+              return RadioListTile<double>(
+                title: Text('${speed}x'),
+                value: speed,
+                groupValue: _playbackSpeed,
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() {
+                      _playbackSpeed = value;
+                      _controller?.setPlaybackSpeed(value);
+                    });
+                    Navigator.pop(context);
+                  }
+                },
+              );
+            }).toList(),
           ),
         );
       },

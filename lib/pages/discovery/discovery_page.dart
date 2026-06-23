@@ -38,11 +38,13 @@ class _DiscoveryPageState extends State<DiscoveryPage>
   String _searchQuery = '';
   int _selectedSourceIndex = -1;
   int _selectedCategoryIndex = -1;
+  String _sortMode = 'manual'; // manual / name / url / time / respond
 
   // 性能优化：缓存过滤结果和分类解析结果
   List<BookSource> _cachedFilteredSources = [];
   List<BookSource> _lastBookSources = [];
   String _lastSearchQuery = '';
+  String _lastSortMode = 'manual';
   final Map<int, List<ExploreCategory>> _cachedCategories = {};
 
   @override
@@ -198,14 +200,27 @@ class _DiscoveryPageState extends State<DiscoveryPage>
               icon: Icon(Icons.folder_outlined,
                   size: 20, color: onSurfaceColor),
               tooltip: '收藏分组',
-              onPressed: () {},
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('收藏分组功能开发中'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
             ),
             // 排序按钮
             PopupMenuButton<String>(
               icon: Icon(Icons.sort, size: 20, color: onSurfaceColor),
               tooltip: '排序',
               offset: const Offset(0, DesignTokens.topBarHeight),
-              onSelected: (value) {},
+              onSelected: (value) {
+                setState(() {
+                  _sortMode = value;
+                  _selectedSourceIndex = -1;
+                  _selectedCategoryIndex = -1;
+                });
+              },
               itemBuilder: (context) => [
                 PopupMenuItem(
                   value: 'manual',
@@ -527,10 +542,12 @@ class _DiscoveryPageState extends State<DiscoveryPage>
   /// 获取过滤后的书源列表（带缓存，避免每次 build 重复计算）
   List<BookSource> _getFilteredSources(List<BookSource> sources) {
     if (_searchQuery == _lastSearchQuery &&
+        _sortMode == _lastSortMode &&
         identical(sources, _lastBookSources)) {
       return _cachedFilteredSources;
     }
     _lastSearchQuery = _searchQuery;
+    _lastSortMode = _sortMode;
     _lastBookSources = sources;
     _cachedFilteredSources = _filterSources(sources);
     _cachedCategories.clear();
@@ -551,12 +568,33 @@ class _DiscoveryPageState extends State<DiscoveryPage>
   }
 
   List<BookSource> _filterSources(List<BookSource> sources) {
-    if (_searchQuery.isEmpty) return sources;
-    final query = _searchQuery.toLowerCase();
-    return sources.where((s) {
-      return s.bookSourceName.toLowerCase().contains(query) ||
-          (s.bookSourceGroup?.toLowerCase().contains(query) ?? false);
-    }).toList();
+    var filtered = sources;
+    if (_searchQuery.isNotEmpty) {
+      final query = _searchQuery.toLowerCase();
+      filtered = filtered.where((s) {
+        return s.bookSourceName.toLowerCase().contains(query) ||
+            (s.bookSourceGroup?.toLowerCase().contains(query) ?? false);
+      }).toList();
+    }
+    final sorted = List<BookSource>.of(filtered);
+    switch (_sortMode) {
+      case 'name':
+        sorted.sort((a, b) =>
+            a.bookSourceName.compareTo(b.bookSourceName));
+      case 'url':
+        sorted.sort((a, b) =>
+            a.bookSourceUrl.compareTo(b.bookSourceUrl));
+      case 'time':
+        sorted.sort((a, b) =>
+            b.lastUpdateTime.compareTo(a.lastUpdateTime));
+      case 'respond':
+        sorted.sort((a, b) =>
+            a.respondTime.compareTo(b.respondTime));
+      case 'manual':
+      default:
+        break;
+    }
+    return sorted;
   }
 
   /// 解析 exploreUrl 为分类列表
@@ -687,6 +725,11 @@ class _DiscoveryPageState extends State<DiscoveryPage>
                 title: const Text('编辑书源'),
                 onTap: () {
                   Navigator.pop(context);
+                  Navigator.pushNamed(
+                    context,
+                    AppRoutes.bookSourceEdit,
+                    arguments: {'sourceUrl': source.bookSourceUrl},
+                  );
                 },
               ),
               ListTile(
@@ -694,6 +737,9 @@ class _DiscoveryPageState extends State<DiscoveryPage>
                 title: const Text('置顶'),
                 onTap: () {
                   Navigator.pop(context);
+                  context
+                      .read<DiscoveryProvider>()
+                      .pinSource(source.bookSourceUrl);
                 },
               ),
               ListTile(

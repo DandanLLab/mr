@@ -34,22 +34,50 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
             _buildListItem(
               title: '系统提示词',
               subtitle: '设置 AI 的身份、工具调用规则和回答风格',
-              onTap: () {},
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('该功能开发中，敬请期待'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
             ),
             _buildListItem(
               title: '导入默认技能',
               subtitle: '导入内置的技能模板',
-              onTap: () {},
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('该功能开发中，敬请期待'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
             ),
             _buildListItem(
               title: '技能提示词',
               subtitle: '暂无技能',
-              onTap: () {},
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('该功能开发中，敬请期待'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
             ),
             _buildListItem(
               title: '管理原生工具',
               subtitle: '启用或停用内置工具能力',
-              onTap: () {},
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('该功能开发中，敬请期待'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
             ),
             _buildSwitchItem(
               title: '回车发送',
@@ -60,22 +88,50 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
             _buildListItem(
               title: '上下文压缩',
               subtitle: '自动压缩对话上下文',
-              onTap: () {},
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('该功能开发中，敬请期待'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
             ),
             _buildListItem(
               title: '人设管理',
               subtitle: '暂无人设',
-              onTap: () {},
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('该功能开发中，敬请期待'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
             ),
             _buildListItem(
               title: '图片画廊',
               subtitle: '查看 AI 生成的图片',
-              onTap: () {},
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('该功能开发中，敬请期待'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
             ),
             _buildListItem(
               title: '图片提供商管理',
               subtitle: '暂无图片提供商',
-              onTap: () {},
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('该功能开发中，敬请期待'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
             ),
           ]),
 
@@ -85,7 +141,14 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
             _buildListItem(
               title: '管理提供商',
               subtitle: '暂无提供商',
-              onTap: () {},
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('该功能开发中，敬请期待'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
             ),
           ]),
 
@@ -95,12 +158,26 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
             _buildListItem(
               title: '添加 MCP 服务器',
               subtitle: '添加 Streamable HTTP MCP 接口',
-              onTap: () {},
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('该功能开发中，敬请期待'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
             ),
             _buildListItem(
               title: '管理 MCP 服务器',
               subtitle: '暂无 MCP 服务器',
-              onTap: () {},
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('该功能开发中，敬请期待'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
             ),
           ]),
 
@@ -116,27 +193,62 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
             _buildListItem(
               title: 'Tavily API Key',
               subtitle: '点按填写 Tavily API Key',
-              onTap: () {},
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('该功能开发中，敬请期待'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
             ),
             _buildListItem(
               title: 'Tavily 接口地址',
               subtitle: 'https://api.tavily.com/search',
-              onTap: () {},
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('该功能开发中，敬请期待'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
             ),
             _buildListItem(
               title: '默认主题',
               subtitle: '通用',
-              onTap: () {},
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('该功能开发中，敬请期待'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
             ),
             _buildListItem(
               title: '默认深度',
               subtitle: '基础',
-              onTap: () {},
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('该功能开发中，敬请期待'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
             ),
             _buildListItem(
               title: '默认结果数',
               subtitle: '5',
-              onTap: () {},
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('该功能开发中，敬请期待'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
             ),
           ]),
 

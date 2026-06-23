@@ -41,7 +41,6 @@ class _DetailPageState extends State<DetailPage> {
   bool _isRefreshing = false;
   Book? _book;
   List<Chapter> _chapters = [];
-  bool _isDescExpanded = false;
   int _totalWordCount = 0;
   BookDataProvider? _dataProvider;
   bool _showReadRecord = true;
@@ -203,6 +202,8 @@ class _DetailPageState extends State<DetailPage> {
               child: CachedNetworkImage(
                 imageUrl: _book!.coverUrl,
                 fit: BoxFit.cover,
+                placeholder: (_, __) =>
+                    Container(color: Theme.of(context).colorScheme.primary),
                 errorWidget: (_, __, ___) =>
                     Container(color: Theme.of(context).colorScheme.primary),
               ),
@@ -259,8 +260,9 @@ class _DetailPageState extends State<DetailPage> {
     final availableHeight =
         MediaQuery.sizeOf(context).height -
         MediaQuery.paddingOf(context).top -
-        kToolbarHeight -
-        50 -
+        DesignTokens.topBarHeight -
+        DesignTokens.bottomBarHeight -
+        MediaQuery.paddingOf(context).bottom -
         168;
 
     return Column(
@@ -349,11 +351,6 @@ class _DetailPageState extends State<DetailPage> {
               const SizedBox(height: 12),
               _buildOriginalInfoRows(),
               const SizedBox(height: 14),
-              Text(
-                '内容简介',
-                style: TextStyle(color: scheme.onSurfaceVariant, fontSize: DesignTokens.fontSubtitle),
-              ),
-              const SizedBox(height: 9),
               _buildIntroContent(scheme.onSurfaceVariant),
             ],
           ),
@@ -552,32 +549,7 @@ class _DetailPageState extends State<DetailPage> {
     if (intro.isEmpty) {
       return Text('暂无简介', style: TextStyle(color: color));
     }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        GestureDetector(
-          onTap: () {
-            setState(() {
-              _isDescExpanded = !_isDescExpanded;
-            });
-          },
-          child: _isDescExpanded
-              ? _buildFullIntro(intro)
-              : _buildCollapsedIntro(intro),
-        ),
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton(
-            onPressed: () {
-              setState(() {
-                _isDescExpanded = !_isDescExpanded;
-              });
-            },
-            child: Text(_isDescExpanded ? '收起' : '展开全部'),
-          ),
-        ),
-      ],
-    );
+    return _buildFullIntro(intro);
   }
 
   String _chapterSummaryText() {
@@ -903,6 +875,8 @@ class _DetailPageState extends State<DetailPage> {
           _dataProvider = createBookDataProvider(newBook);
           final chapters = await _dataProvider!.getChapterList(newBook);
 
+          if (!mounted) return;
+
           // 更新书籍
           final updatedBook = newBook.copyWith(
             totalChapterNum: chapters.length,
@@ -925,11 +899,9 @@ class _DetailPageState extends State<DetailPage> {
             );
           });
 
-          if (mounted) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text('已切换到 $sourceName')));
-          }
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('已切换到 $sourceName')));
         } catch (e) {
           if (mounted) {
             ScaffoldMessenger.of(
@@ -1064,6 +1036,7 @@ class _DetailPageState extends State<DetailPage> {
                         await StorageService.instance.addToBookshelf(
                           updatedBook.toJson(),
                         );
+                        if (!mounted) return;
                         setState(() {
                           _book = updatedBook;
                         });
@@ -1107,8 +1080,9 @@ class _DetailPageState extends State<DetailPage> {
             onPressed: () async {
               if (controller.text.isNotEmpty) {
                 final success = await provider.addCustomGroup(controller.text);
+                if (!mounted) return;
                 Navigator.pop(context);
-                if (!success && mounted) {
+                if (!success) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('分组已达上限(64个)或名称已存在')),
                   );
@@ -1141,6 +1115,7 @@ class _DetailPageState extends State<DetailPage> {
               Navigator.pop(context);
               // 删除分组
               await provider.removeCustomGroup(oldName);
+              if (!mounted) return;
               // 重新打开分组选择对话框
               _showChangeGroupDialog();
             },
@@ -1160,8 +1135,9 @@ class _DetailPageState extends State<DetailPage> {
                   oldName,
                   controller.text,
                 );
+                if (!mounted) return;
                 Navigator.pop(context);
-                if (!success && mounted) {
+                if (!success) {
                   ScaffoldMessenger.of(
                     context,
                   ).showSnackBar(const SnackBar(content: Text('分组名称已存在')));
@@ -1321,30 +1297,6 @@ class _DetailPageState extends State<DetailPage> {
     return count >= 2;
   }
 
-  Widget _buildCollapsedIntro(String text) {
-    if (_isHtmlContent(text)) {
-      return Html(
-        data: text,
-        style: {
-          'body': Style(
-            maxLines: 3,
-            textOverflow: TextOverflow.ellipsis,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        },
-      );
-    } else if (_isMarkdownContent(text)) {
-      return MarkdownBody(data: text, selectable: true);
-    } else {
-      return Text(
-        text,
-        maxLines: 3,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-      );
-    }
-  }
-
   Widget _buildFullIntro(String text) {
     if (_isHtmlContent(text)) {
       return Html(
@@ -1467,8 +1419,14 @@ class _DetailPageState extends State<DetailPage> {
   String get _displayWordCount {
     if (_book?.wordCount?.trim().isNotEmpty == true) {
       final value = _book!.wordCount!.trim();
+      // 如果已经包含单位，直接返回
       if (RegExp(r'(字|词|页|P|p)$').hasMatch(value)) {
         return value;
+      }
+      // 如果是纯数字，按字数格式化（万字/字）
+      final numValue = int.tryParse(value);
+      if (numValue != null) {
+        return _formatWordCount(numValue);
       }
       return '$value字';
     }
@@ -1773,13 +1731,24 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _showSetSourceVariable() {
+    if (_bookSource == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('无书源信息，无法设置源变量')),
+      );
+      return;
+    }
+    final controller = TextEditingController(
+      text: _bookSource!.variable ?? '',
+    );
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('设置源变量'),
-        content: const TextField(
-          decoration: InputDecoration(
-            hintText: '输入源变量',
+        content: TextField(
+          controller: controller,
+          maxLines: 5,
+          decoration: const InputDecoration(
+            hintText: '源变量可在JS中通过source.getVariable()获取',
             border: OutlineInputBorder(),
           ),
         ),
@@ -1790,10 +1759,14 @@ class _DetailPageState extends State<DetailPage> {
           ),
           TextButton(
             onPressed: () {
+              final value = controller.text;
               Navigator.pop(context);
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text('源变量已设置')));
+              final updated = _bookSource!.copyWith(variable: value);
+              StorageService.instance.saveBookSource(updated.toJson());
+              setState(() => _bookSource = updated);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('源变量已设置')),
+              );
             },
             child: const Text('确定'),
           ),
@@ -1803,13 +1776,25 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _showSetBookVariable() {
+    if (_book == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('无书籍信息，无法设置书籍变量')),
+      );
+      return;
+    }
+    final storedData = StorageService.instance.getBook(_book!.bookUrl);
+    final currentVariable =
+        storedData != null ? (storedData['variable'] as String? ?? '') : '';
+    final controller = TextEditingController(text: currentVariable);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('设置书籍变量'),
-        content: const TextField(
-          decoration: InputDecoration(
-            hintText: '输入书籍变量',
+        content: TextField(
+          controller: controller,
+          maxLines: 5,
+          decoration: const InputDecoration(
+            hintText: '书籍变量可在书源规则中使用',
             border: OutlineInputBorder(),
           ),
         ),
@@ -1820,10 +1805,15 @@ class _DetailPageState extends State<DetailPage> {
           ),
           TextButton(
             onPressed: () {
+              final value = controller.text;
               Navigator.pop(context);
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text('书籍变量已设置')));
+              if (storedData != null) {
+                storedData['variable'] = value;
+                StorageService.instance.saveBook(storedData);
+              }
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('书籍变量已设置')),
+              );
             },
             child: const Text('确定'),
           ),

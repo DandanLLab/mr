@@ -4,7 +4,7 @@ import '../services/storage_service.dart';
 import '../services/reader_bookmark_service.dart';
 import '../services/reader_tts_manager.dart';
 
-enum PageMode { scroll, slide, cover, simulation }
+enum PageMode { scroll, slide, cover, simulation, none }
 
 enum TapZoneAction {
   none,
@@ -345,13 +345,29 @@ class ReaderProvider extends ChangeNotifier {
 
   void setBackgroundColor(Color color) {
     _backgroundColor = color;
+    // 根据背景色亮度自动适应文字色
+    _autoAdaptTextColor(color);
     _saveToStorage();
     notifyListeners();
   }
 
   void setTextColor(Color color) {
     _textColor = color;
+    _saveToStorage();
     notifyListeners();
+  }
+
+  /// 根据背景色亮度自动设置文字色（深色背景→白字，浅色背景→黑字）
+  void _autoAdaptTextColor(Color bgColor) {
+    // 计算亮度：0.0 全黑，1.0 全白
+    final brightness = bgColor.computeLuminance();
+    if (brightness < 0.5) {
+      // 深色背景 → 白色文字
+      _textColor = Colors.white70;
+    } else {
+      // 浅色背景 → 黑色文字
+      _textColor = Colors.black87;
+    }
   }
 
   void setBrightness(double value) {
@@ -371,6 +387,11 @@ class ReaderProvider extends ChangeNotifier {
     }
     _saveToStorage();
     notifyListeners();
+  }
+
+  void setNightMode(bool value) {
+    if (_isNightMode == value) return;
+    toggleNightMode();
   }
 
   void setFontFamily(String family) {
@@ -425,6 +446,8 @@ class ReaderProvider extends ChangeNotifier {
 
   void setTextIndent(double value) {
     _textIndent = value;
+    // 同步更新缩进字符串，使缩进滑块生效
+    _paragraphIndent = '\u3000' * value.round().clamp(0, 8);
     _saveToStorage();
     notifyListeners();
   }
