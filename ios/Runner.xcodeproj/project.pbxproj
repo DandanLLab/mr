@@ -25,8 +25,8 @@
 		AA000000000000000000000C /* GeneratedPluginRegistrant.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GeneratedPluginRegistrant.h; sourceTree = "<group>"; };
 		AA000000000000000000000D /* GeneratedPluginRegistrant.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = GeneratedPluginRegistrant.m; sourceTree = "<group>"; };
 		AA000000000000000000000F /* Runner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Runner.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		AA0000000000000000000023 /* Generated.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Generated.xcconfig; path = Flutter/Generated.xcconfig; sourceTree = "<group>"; };
-		AA0000000000000000000025 /* flutter_export_environment.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; name = flutter_export_environment.sh; path = Flutter/flutter_export_environment.sh; sourceTree = "<group>"; };
+		AA0000000000000000000023 /* Generated.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Generated.xcconfig; path = Generated.xcconfig; sourceTree = "<group>"; };
+		AA0000000000000000000025 /* flutter_export_environment.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; name = flutter_export_environment.sh; path = flutter_export_environment.sh; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -44,6 +44,7 @@
 			isa = PBXGroup;
 			children = (
 				AA0000000000000000000012 /* Runner */,
+				AA0000000000000000000024 /* Flutter */,
 				AA0000000000000000000010 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -59,7 +60,6 @@
 		AA0000000000000000000012 /* Runner */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000024 /* Flutter */,
 				AA0000000000000000000001 /* AppDelegate.swift */,
 				AA0000000000000000000003 /* NativePlugin.swift */,
 				AA000000000000000000000C /* GeneratedPluginRegistrant.h */,
@@ -76,7 +76,7 @@
 				AA0000000000000000000023 /* Generated.xcconfig */,
 				AA0000000000000000000025 /* flutter_export_environment.sh */,
 			);
-			name = Flutter;
+			path = Flutter;
 			sourceTree = "<group>";
 		};
 		AA0000000000000000000013 /* Supporting Files */ = {
