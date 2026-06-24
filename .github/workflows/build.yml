@@ -171,6 +171,12 @@ jobs:
           rm -rf Pods Podfile.lock
           pod install --repo-update
 
+      - name: Disable Code Signing
+        run: |
+          cd ios
+          # 填入假 Development Team 骗过 Flutter 检查，--no-codesign 会跳过实际签名
+          sed -i '' 's/DEVELOPMENT_TEAM = "";/DEVELOPMENT_TEAM = "XXXXXX";/g' Runner.xcodeproj/project.pbxproj
+
       - name: Build iOS (No Codesign)
         run: flutter build ios --release --no-codesign --no-tree-shake-icons
 
