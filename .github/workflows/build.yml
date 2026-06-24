@@ -168,6 +168,7 @@ jobs:
       - name: Install Pods
         run: |
           cd ios
+          rm -rf Pods Podfile.lock
           pod install --repo-update
 
       - name: Build iOS (No Codesign)
