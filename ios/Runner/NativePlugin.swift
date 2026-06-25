@@ -525,9 +525,11 @@ class NativePlugin: NSObject, FlutterPlugin {
         var buffer = Data(count: bufferSize)
         var numBytesProcessed = 0
 
-        let options: CCOptions = kCCOptionPKCS7Padding | (ivData == nil ? kCCOptionECBMode : 0)
+        // CommonCrypto 常量（kCCOptionPKCS7Padding / kCCOptionECBMode / kCCSuccess）在 Swift 中是 Int，
+        // 而 CCOptions 是 UInt32、CCCryptorStatus 是 Int32，需要显式类型转换。
+        let options: CCOptions = CCOptions(kCCOptionPKCS7Padding) | (ivData == nil ? CCOptions(kCCOptionECBMode) : 0)
 
-        var status: CCCryptorStatus = kCCSuccess
+        var status: CCCryptorStatus = CCCryptorStatus(kCCSuccess)
 
         keyData.withUnsafeBytes { keyBytesRaw in
             rawData.withUnsafeBytes { dataBytesRaw in
@@ -561,7 +563,7 @@ class NativePlugin: NSObject, FlutterPlugin {
             }
         }
 
-        guard status == kCCSuccess else {
+        guard status == CCCryptorStatus(kCCSuccess) else {
             NSLog("AES crypt failed, status: \(status)")
             return nil
         }
