@@ -1,5 +1,5 @@
 # Uncomment this line to define a global platform for your project
-platform :ios, '17.0'
+platform :ios, '16.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
@@ -47,5 +47,14 @@ post_install do |installer|
       config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'i386'
       config.build_settings['EXCLUDED_ARCHS[sdk=iphoneos*]'] = 'armv7'
     end
+  end
+
+  # 强制链接所有静态库的 .o 文件
+  # Dart FFI 运行时按字符串查找符号（DynamicLibrary.process().lookup），
+  # 链接器静态分析看不到引用，默认不链接未引用的 .o 文件
+  # -all_load 强制链接所有静态库，确保 QuickJS 符号进入主二进制
+  installer.pods_project.build_configurations.each do |config|
+    config.build_settings['OTHER_LDFLAGS'] ||= '$(inherited)'
+    config.build_settings['OTHER_LDFLAGS'] += ' -all_load'
   end
 end
