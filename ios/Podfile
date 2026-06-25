@@ -34,7 +34,8 @@ target 'Runner' do
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
 
   # QuickJS 引擎 - 从 C 源码编译，替代 flutter_js
-  pod 'QuickJS', :path => 'QuickJS'
+  # 源码在项目根目录 quickjs/，iOS 和 Android 共享
+  pod 'QuickJS', :path => '../quickjs'
 end
 
 post_install do |installer|
