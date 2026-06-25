@@ -12,7 +12,7 @@
 		AA0000000000000000000006 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000005 /* Main.storyboard */; };
 		AA0000000000000000000008 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000007 /* LaunchScreen.storyboard */; };
 		AA000000000000000000000A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000009 /* Assets.xcassets */; };
-		AA000000000000000000000E /* GeneratedPluginRegistrant.m in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000D /* GeneratedPluginRegistrant.m */; };
+		AA000000000000000000000E /* GeneratedPluginRegistrant.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000D /* GeneratedPluginRegistrant.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -22,8 +22,7 @@
 		AA0000000000000000000007 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		AA0000000000000000000009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AA000000000000000000000B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		AA000000000000000000000C /* GeneratedPluginRegistrant.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GeneratedPluginRegistrant.h; sourceTree = "<group>"; };
-		AA000000000000000000000D /* GeneratedPluginRegistrant.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = GeneratedPluginRegistrant.m; sourceTree = "<group>"; };
+		AA000000000000000000000D /* GeneratedPluginRegistrant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneratedPluginRegistrant.swift; sourceTree = "<group>"; };
 		AA000000000000000000000F /* Runner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Runner.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000000000000000000023 /* Generated.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Generated.xcconfig; path = Generated.xcconfig; sourceTree = "<group>"; };
 		AA0000000000000000000025 /* flutter_export_environment.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; name = flutter_export_environment.sh; path = flutter_export_environment.sh; sourceTree = "<group>"; };
@@ -62,8 +61,7 @@
 			children = (
 				AA0000000000000000000001 /* AppDelegate.swift */,
 				AA0000000000000000000003 /* NativePlugin.swift */,
-				AA000000000000000000000C /* GeneratedPluginRegistrant.h */,
-				AA000000000000000000000D /* GeneratedPluginRegistrant.m */,
+				AA000000000000000000000D /* GeneratedPluginRegistrant.swift */,
 				AA0000000000000000000009 /* Assets.xcassets */,
 				AA0000000000000000000013 /* Supporting Files */,
 			);
@@ -183,7 +181,7 @@
 			files = (
 				AA0000000000000000000002 /* AppDelegate.swift in Sources */,
 				AA0000000000000000000004 /* NativePlugin.swift in Sources */,
-				AA000000000000000000000E /* GeneratedPluginRegistrant.m in Sources */,
+				AA000000000000000000000E /* GeneratedPluginRegistrant.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
