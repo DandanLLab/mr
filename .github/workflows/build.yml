@@ -189,13 +189,20 @@ jobs:
 
       - name: Verify QuickJS Symbols
         run: |
+          echo "=== Runner 二进制大小 ==="
+          ls -lh build/ios/iphoneos/Runner.app/Runner
+          echo "=== Runner.app 目录大小 ==="
+          du -sh build/ios/iphoneos/Runner.app
           echo "=== 检查 QuickJS 符号是否链接到主二进制 ==="
-          # nm 不带 -g 搜索所有符号（包括 local）
           nm build/ios/iphoneos/Runner.app/Runner | grep quickjs_bridge || {
-            echo "❌ QuickJS 符号未找到！-force_load 可能未生效"
+            echo "❌ QuickJS 符号未找到！-all_load 可能未生效"
+            echo "=== 诊断：Runner 二进制中的所有符号（前50个）==="
+            nm build/ios/iphoneos/Runner.app/Runner | head -50
             exit 1
           }
           echo "✅ QuickJS 符号验证通过"
+          echo "=== 找到的 QuickJS 符号 ==="
+          nm build/ios/iphoneos/Runner.app/Runner | grep quickjs_bridge
 
       - name: Create IPA
         id: ipa
