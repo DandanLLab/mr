@@ -162,6 +162,14 @@ jobs:
           sed -i '' "s/^version:.*/version: ${VERSION}+${{ needs.prepare.outputs.commit_count }}/" pubspec.yaml
           grep "^version:" pubspec.yaml
 
+      - name: Disable Swift Package Manager
+        # Flutter 3.45+ 在 stable channel 默认启用 SPM（features.dart: enabledByDefault: true）
+        # SPM 启用时会生成 Swift 版 GeneratedPluginRegistrant（API: register(with:)）
+        # 项目使用 OC 版（.m/.h，API: register(withRegistry:)），必须禁用 SPM
+        # pubspec.yaml 中的 flutter.config.enable-swift-package-manager: false 应该生效
+        # 但 CI 上可能因版本差异未生效，这里显式全局禁用作为双保险
+        run: flutter config --no-enable-swift-package-manager
+
       - name: Install Dependencies
         run: flutter pub get
 
