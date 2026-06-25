@@ -20,7 +20,7 @@ class NativePlugin: NSObject, FlutterPlugin {
 
     static let channelName = "com.mr.app/native"
 
-为什么？    /// 保持正在运行的 WebView handler 引用，防止被提前释放
+  /// 保持正在运行的 WebView handler 引用，防止被提前释放
     private var activeHandlers: [WebViewJsHandler] = []
 
     static func register(with registrar: FlutterPluginRegistrar) {
