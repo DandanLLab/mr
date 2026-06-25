@@ -13,8 +13,11 @@ Pod::Spec.new do |s|
   s.public_header_files = 'quickjs.h', 'quickjs-libc.h', 'cutils.h', 'dtoa.h', 'libregexp.h', 'libunicode.h', 'list.h', 'quickjs_bridge.h'
   s.libraries        = 'm', 'pthread'
   s.pod_target_xcconfig = {
-    'GCC_PREPROCESSOR_DEFINITIONS' => 'CONFIG_VERSION="2026.06.04"',
-    'OTHER_CFLAGS' => '-D_GNU_SOURCE -DCONFIG_VERSION="2026.06.04" -Wno-implicit-function-declaration'
+    # Xcode 的 GCC_PREPROCESSOR_DEFINITIONS 中字符串宏必须用 \" 转义引号
+    # 否则引号被吃掉，CONFIG_VERSION 变成 2026.06.04（浮点数）而非 "2026.06.04"（字符串）
+    # 导致 quickjs.c 中 "..." CONFIG_VERSION "..." 字符串拼接编译失败
+    'GCC_PREPROCESSOR_DEFINITIONS' => 'CONFIG_VERSION=\"2026.06.04\"',
+    'OTHER_CFLAGS' => '-D_GNU_SOURCE -Wno-implicit-function-declaration'
   }
   s.swift_version    = '5.0'
 end

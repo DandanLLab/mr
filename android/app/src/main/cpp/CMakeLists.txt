@@ -23,14 +23,20 @@ add_library(quickjs_c_bridge SHARED ${QUICKJS_SOURCES})
 
 # 编译选项（与 iOS podspec 保持一致）
 target_compile_options(quickjs_c_bridge PRIVATE
-    -D_GNU_SOURCE
-    -DCONFIG_VERSION="2026.06.04"
     -Wno-implicit-function-declaration
     -Wno-unused-parameter
     -Wno-sign-compare
     -Wno-unused-function
     -Wno-unused-variable
     -O2
+)
+
+# 预处理宏定义
+# CONFIG_VERSION 必须是字符串字面量，CMake 的 target_compile_definitions
+# 会正确保留引号，使 quickjs.c 中 "..." CONFIG_VERSION "..." 拼接合法
+target_compile_definitions(quickjs_c_bridge PRIVATE
+    _GNU_SOURCE
+    CONFIG_VERSION="2026.06.04"
 )
 
 # 头文件搜索路径
