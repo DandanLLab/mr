@@ -30,7 +30,8 @@ class NativePlugin: NSObject, FlutterPlugin {
     }
 
     /// 移除已完成的 handler
-    func removeHandler(_ handler: WebViewJsHandler) {
+    /// fileprivate 因为参数 WebViewJsHandler 是 private class
+    fileprivate func removeHandler(_ handler: WebViewJsHandler) {
         activeHandlers.removeAll { $0 === handler }
     }
 

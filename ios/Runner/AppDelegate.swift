@@ -12,7 +12,8 @@ import UIKit
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
         // 先注册 Flutter 插件（与 Flutter 标准模板保持一致）
-        GeneratedPluginRegistrant.register(with: self)
+        // GeneratedPluginRegistrant 是 Objective-C 类，通过 bridging header 导入
+        GeneratedPluginRegistrant.register(withRegistry: self)
 
         // 调用 super，确保 FlutterAppDelegate 完成 window / rootViewController 初始化
         let didLaunch = super.application(application, didFinishLaunchingWithOptions: launchOptions)
