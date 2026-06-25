@@ -29,7 +29,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		AA0000000000000000000020 /* Frameworks */ = {
+		97C146EB1CF9000F007C117D /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -43,7 +43,7 @@
 			isa = PBXGroup;
 			children = (
 				AA0000000000000000000012 /* Runner */,
-				AA0000000000000000000024 /* Flutter */,
+				9740EEB11CF90186004384FC /* Flutter */,
 				AA0000000000000000000010 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -68,7 +68,7 @@
 			path = Runner;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000024 /* Flutter */ = {
+		9740EEB11CF90186004384FC /* Flutter */ = {
 			isa = PBXGroup;
 			children = (
 				AA0000000000000000000023 /* Generated.xcconfig */,
@@ -96,7 +96,7 @@
 			buildPhases = (
 				AA0000000000000000000022 /* Flutter Build Script */,
 				AA000000000000000000001F /* Sources */,
-				AA0000000000000000000020 /* Frameworks */,
+				97C146EB1CF9000F007C117D /* Frameworks */,
 				AA0000000000000000000021 /* Resources */,
 			);
 			buildRules = (
@@ -111,7 +111,7 @@
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		AA0000000000000000000016 /* Project object */ = {
+		97C146E61CF9000F007C117D /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				LastUpgradeCheck = 1300;
@@ -496,5 +496,5 @@
 /* End XCConfigurationList section */
 
 	};
-	rootObject = AA0000000000000000000016 /* Project object */;
+	rootObject = 97C146E61CF9000F007C117D /* Project object */;
 }
