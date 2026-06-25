@@ -165,6 +165,39 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
+      - name: Fix GeneratedPluginRegistrant Reference
+        # flutter pub get 会根据项目语言生成 GeneratedPluginRegistrant
+        # 项目有 .swift 文件 → 生成 .swift 版（API: register(with:)）
+        # 项目无 .swift 文件 → 生成 .m/.h 版（API: register(withRegistry:)）
+        # project.pbxproj 默认引用 OC 版 .m/.h（Flutter 模板默认）
+        # 如果生成了 .swift 版，需要更新 project.pbxproj 引用为 .swift
+        # 如果生成了 .m 版，需要更新 AppDelegate 为 OC API + 添加 bridging header
+        run: |
+          cd ios
+          if [ -f "Runner/GeneratedPluginRegistrant.swift" ]; then
+            echo "✓ Found GeneratedPluginRegistrant.swift (Swift project)"
+            # 更新 project.pbxproj 引用从 .m/.h 改为 .swift
+            sed -i '' 's/GeneratedPluginRegistrant\.m in Sources/GeneratedPluginRegistrant.swift in Sources/g' Runner.xcodeproj/project.pbxproj
+            sed -i '' 's/GeneratedPluginRegistrant\.m"/GeneratedPluginRegistrant.swift"/g' Runner.xcodeproj/project.pbxproj
+            sed -i '' 's/sourcecode\.c\.objc/sourcecode.swift/g' Runner.xcodeproj/project.pbxproj
+            # 删除 .h 引用（Swift 没有头文件）
+            sed -i '' '/GeneratedPluginRegistrant\.h/d' Runner.xcodeproj/project.pbxproj
+            echo "✓ Updated project.pbxproj to reference .swift"
+          elif [ -f "Runner/GeneratedPluginRegistrant.m" ]; then
+            echo "⚠ Found GeneratedPluginRegistrant.m (OC project)"
+            # 更新 AppDelegate 为 OC API
+            sed -i '' 's/GeneratedPluginRegistrant\.register(with: self)/GeneratedPluginRegistrant.register(withRegistry: self)/g' Runner/AppDelegate.swift
+            # 创建 bridging header 让 Swift 能访问 OC 类
+            echo '#import "GeneratedPluginRegistrant.h"' > Runner/Runner-Bridging-Header.h
+            # 配置 SWIFT_OBJC_BRIDGING_HEADER
+            sed -i '' 's/SWIFT_OBJC_BRIDGING_HEADER = "";/SWIFT_OBJC_BRIDGING_HEADER = "Runner\/Runner-Bridging-Header.h";/g' Runner.xcodeproj/project.pbxproj
+            echo "✓ Updated AppDelegate and added bridging header for OC version"
+          else
+            echo "✗ No GeneratedPluginRegistrant file found!"
+            ls -la Runner/GeneratedPluginRegistrant* 2>/dev/null || echo "Files do not exist"
+            exit 1
+          fi
+
       - name: Install Pods
         run: |
           cd ios
