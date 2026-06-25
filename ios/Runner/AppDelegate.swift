@@ -11,9 +11,11 @@ import UIKit
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
-        // 先注册 Flutter 插件（与 Flutter 标准模板保持一致）
-        // GeneratedPluginRegistrant 由 flutter pub get 自动生成（Swift 版）
-        GeneratedPluginRegistrant.register(with: self)
+        // 先注册 Flutter 插件（OC 版 GeneratedPluginRegistrant，通过 bridging header 暴露给 Swift）
+        // Flutter 3.45 在禁用 Swift Package Manager 时总是生成 OC 版（.m/.h）
+        // OC API: + (void)registerWithRegistry:(NSObject<FlutterPluginRegistry>*)registry
+        // Swift 调用 OC 方法时，registerWithRegistry: 转换为 register(withRegistry:)
+        GeneratedPluginRegistrant.register(withRegistry: self)
 
         // 调用 super，确保 FlutterAppDelegate 完成 window / rootViewController 初始化
         let didLaunch = super.application(application, didFinishLaunchingWithOptions: launchOptions)
