@@ -13,6 +13,7 @@
 		AA0000000000000000000008 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000007 /* LaunchScreen.storyboard */; };
 		AA000000000000000000000A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000009 /* Assets.xcassets */; };
 		AA000000000000000000000E /* GeneratedPluginRegistrant.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000D /* GeneratedPluginRegistrant.swift */; };
+		9705A1C61CF904A100538489 /* Flutter.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9740EEB51CF90186004384FC /* Flutter.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,6 +27,7 @@
 		AA000000000000000000000F /* Runner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Runner.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000000000000000000023 /* Generated.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Generated.xcconfig; path = Generated.xcconfig; sourceTree = "<group>"; };
 		AA0000000000000000000025 /* flutter_export_environment.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; name = flutter_export_environment.sh; path = flutter_export_environment.sh; sourceTree = "<group>"; };
+		9740EEB51CF90186004384FC /* Flutter.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Flutter.framework; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -33,6 +35,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9705A1C61CF904A100538489 /* Flutter.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -71,6 +74,7 @@
 		9740EEB11CF90186004384FC /* Flutter */ = {
 			isa = PBXGroup;
 			children = (
+				9740EEB51CF90186004384FC /* Flutter.framework */,
 				AA0000000000000000000023 /* Generated.xcconfig */,
 				AA0000000000000000000025 /* flutter_export_environment.sh */,
 			);
