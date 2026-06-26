@@ -13,7 +13,6 @@
 		AA0000000000000000000008 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000007 /* LaunchScreen.storyboard */; };
 		AA000000000000000000000A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000009 /* Assets.xcassets */; };
 		AA000000000000000000000E /* GeneratedPluginRegistrant.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000D /* GeneratedPluginRegistrant.swift */; };
-		9705A1C61CF904A100538489 /* Flutter.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9740EEB51CF90186004384FC /* Flutter.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,7 +26,6 @@
 		AA000000000000000000000F /* Runner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Runner.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000000000000000000023 /* Generated.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Generated.xcconfig; path = Generated.xcconfig; sourceTree = "<group>"; };
 		AA0000000000000000000025 /* flutter_export_environment.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; name = flutter_export_environment.sh; path = flutter_export_environment.sh; sourceTree = "<group>"; };
-		9740EEB51CF90186004384FC /* Flutter.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Flutter.framework; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -35,11 +33,23 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				9705A1C61CF904A100538489 /* Flutter.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		9705A1C41CF9048500538489 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXGroup section */
 		AA0000000000000000000011 = {
@@ -74,7 +84,6 @@
 		9740EEB11CF90186004384FC /* Flutter */ = {
 			isa = PBXGroup;
 			children = (
-				9740EEB51CF90186004384FC /* Flutter.framework */,
 				AA0000000000000000000023 /* Generated.xcconfig */,
 				AA0000000000000000000025 /* flutter_export_environment.sh */,
 			);
@@ -102,6 +111,8 @@
 				AA000000000000000000001F /* Sources */,
 				97C146EB1CF9000F007C117D /* Frameworks */,
 				AA0000000000000000000021 /* Resources */,
+				9705A1C41CF9048500538489 /* Embed Frameworks */,
+				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
 			);
 			buildRules = (
 			);
@@ -175,6 +186,22 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" build\n";
+		};
+		3B06AD1E1E4923F5004D2608 /* Thin Binary */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}",
+			);
+			name = "Thin Binary";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" embed_and_thin";
 		};
 /* End PBXShellScriptBuildPhase section */
 

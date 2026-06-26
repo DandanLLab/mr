@@ -181,14 +181,21 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
-      - name: Verify Flutter.framework Reference
-        # 校验修复是否生效：project.pbxproj 必须包含 Flutter.framework 的 PBXBuildFile 引用
+      - name: Verify Build Phases
+        # 校验修复是否生效：project.pbxproj 必须包含 Embed Frameworks 和 Thin Binary (embed_and_thin)
+        # 这两个 phase 负责 Flutter.framework 的嵌入，缺失会导致 Library not loaded 闪退
         run: |
-          echo "=== 检查 project.pbxproj 中的 Flutter.framework 引用 ==="
-          grep -c "Flutter.framework in Frameworks" ios/Runner.xcodeproj/project.pbxproj || {
-            echo "❌ project.pbxproj 缺少 Flutter.framework in Frameworks 引用！"
+          echo "=== 检查 project.pbxproj 中的 Embed Frameworks phase ==="
+          grep -c "Embed Frameworks" ios/Runner.xcodeproj/project.pbxproj || {
+            echo "❌ project.pbxproj 缺少 Embed Frameworks phase！"
             exit 1
           }
+          echo "=== 检查 project.pbxproj 中的 Thin Binary phase (embed_and_thin) ==="
+          grep -c "embed_and_thin" ios/Runner.xcodeproj/project.pbxproj || {
+            echo "❌ project.pbxproj 缺少 embed_and_thin 脚本！Flutter.framework 不会被嵌入"
+            exit 1
+          }
+          echo "✅ build phases 完整"
           echo "=== 检查 Generated.xcconfig 是否还有 SPM 字段 ==="
           if grep -q "FLUTTER_FRAMEWORK_SWIFT_PACKAGE_PATH" ios/Flutter/Generated.xcconfig; then
             echo "⚠️ Generated.xcconfig 仍包含 SPM 字段（可能 flutter config 未生效）"
