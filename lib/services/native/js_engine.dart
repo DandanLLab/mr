@@ -1989,23 +1989,9 @@ class JsEngine {
           return '';
         },
 
-        // ===== 字体反爬（对齐 legado JsExtensions）=====
-        // 假声明：TTF 字体反爬需要解析字体文件，QuickJS 无原生支持
-        // 返回 null 让书源 fallback 到非字体分支
-        // java.queryTTF(data, useCache) — 解析 TTF 字体映射
-        queryTTF: function(data, useCache) {
-          var cacheKey = 'ttf:' + (typeof data === 'string' ? data.substring(0, 64) : 'binary');
-          if (useCache !== false && _javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
-          // 占位：返回 null，让书源走非字体分支
-          return null;
-        },
-        // java.queryBase64TTF(data) — 已弃用，等同 queryTTF
-        queryBase64TTF: function(data) { return java.queryTTF(data); },
-        // java.replaceFont(text, errorQueryTTF, correctQueryTTF, filter) — 字体替换
-        // 假声明：无 TTF 映射时原样返回
-        replaceFont: function(text, errorQueryTTF, correctQueryTTF, filter) {
-          return text || '';
-        },
+        // 注：字体反爬（queryTTF/queryBase64TTF/replaceFont）已移除
+        // Legado 自带的字体反爬功能使用频率低，QuickJS 无 TTF 解析能力
+        // 书源若需字体反爬可自行用 JS 实现
 
         // ===== 编解码（对齐 legado JsEncodeUtils）=====
         // java.md5Encode16(str) — 16 位 MD5
@@ -2164,16 +2150,21 @@ class JsEngine {
           if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
           return java.randomUUID().replace(/-/g, '').substring(0, 16);
         },
-        // java.cacheFile(url) — 缓存文件到本地
+        // java.cacheFile(url, saveTime) — 缓存文件到本地
+        // 走原生 NativeChannel.httpDownload 桥接，结果在 _javaCache['cache_file:url']
         cacheFile: function(url, saveTime) {
           var cacheKey = 'cache_file:' + url;
           if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
           return '';
         },
         // java.downloadFile(url) / downloadFile(content, url) — 下载文件返回路径
-        // 假声明：QuickJS 无文件系统，返回占位路径
+        // 走原生 NativeChannel.httpDownload 桥接，结果在 _javaCache['download_file:url']
         downloadFile: function(urlOrContent, url) {
+          // 兼容旧签名 downloadFile(content, url)
           var u = url === undefined ? urlOrContent : url;
+          var cacheKey = 'download_file:' + u;
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          // fallback：返回占位路径
           return '/tmp/' + java.md5Encode(u).substring(0, 16);
         },
         // java.getFile(path) — 获取 File 对象
@@ -3662,7 +3653,23 @@ class JsEngine {
   /// 通过 NativeChannel 预获取结果，写入 _javaCache
   /// 借鉴 legado 的 preCacheHttpResults 机制，但自动扫描而非手动传入
   /// 优化：快速预检，无桥接调用时直接跳过
-  static final _bridgeCallPattern = RegExp(r'\bjava\.(ajax|get|post|head|connect|aesEncode|aesDecode|md5Encode|sha1Encode|sha256Encode|hmacSHA256|base64Encode|base64Decode)\b|\bCryptoJS\b|\bfetch\s*\(');
+  static final _bridgeCallPattern = RegExp(
+    r'\bjava\.(ajax|get|post|head|connect|aesEncode|aesDecode|md5Encode|sha1Encode|sha256Encode|hmacSHA256|base64Encode|base64Decode|webView|webViewGetSource|webViewGetOverrideUrl|startBrowserAwait|getVerificationCode|downloadFile|cacheFile)\b|\bCryptoJS\b|\bfetch\s*\(',
+  );
+
+  /// 扫描 java.webView/getSource/getOverrideUrl 调用，提取字面量参数
+  /// 参数顺序：webView(html, url, js, cacheFirst), webViewGetSource(html, url, js, sourceRegex, ...), webViewGetOverrideUrl(html, url, js, overrideUrlRegex, ...)
+  /// startBrowserAwait(url, title, ...), getVerificationCode(imageUrl)
+  static final _webViewCallPattern = RegExp(
+    r"""java\.(webView|webViewGetSource|webViewGetOverrideUrl|startBrowserAwait|getVerificationCode)\s*\(\s*([^)]*)\)""",
+    multiLine: true,
+  );
+
+  /// 扫描 java.downloadFile/cacheFile 调用，提取 URL 字面量
+  static final _downloadCallPattern = RegExp(
+    r"""java\.(downloadFile|cacheFile)\s*\(\s*["']([^"']+)["']""",
+    multiLine: true,
+  );
 
   Future<void> _preCacheBridgeCalls(String jsCode, {Map<String, dynamic>? env}) async {
     if (_jsRuntime == null) return;
@@ -3976,6 +3983,128 @@ class JsEngine {
       }),
     ]);
 
+    // 6.5 预缓存 WebView 调用（接入 NativeChannel.executeWebViewJs）
+    // 扫描 java.webView/webViewGetSource/webViewGetOverrideUrl/startBrowserAwait/getVerificationCode
+    final webViewFutures = <Future<MapEntry<String, String>?>>[];
+    for (final match in _webViewCallPattern.allMatches(jsCode)) {
+      final method = match.group(1)!;
+      final argsStr = match.group(2) ?? '';
+      // 简单参数分割（不支持嵌套括号，但 Legado 书源基本是字面量）
+      final args = _splitArgs(argsStr);
+      if (args.isEmpty) continue;
+
+      // 各方法对应不同的缓存 key
+      String cacheKey;
+      String? url, jsCode, sourceRegex, overrideRegex, html, imageUrl;
+      switch (method) {
+        case 'webView':
+          // webView(html, url, js, cacheFirst)
+          if (args.length < 2) continue;
+          html = _stripQuotes(args[0]);
+          url = _stripQuotes(args[1]);
+          jsCode = args.length >= 3 ? _stripQuotes(args[2]) : '';
+          cacheKey = 'webview:${url ?? ''}:${(html ?? '').length}';
+          break;
+        case 'webViewGetSource':
+          // webViewGetSource(html, url, js, sourceRegex, cacheFirst, delayTime)
+          if (args.length < 4) continue;
+          html = _stripQuotes(args[0]);
+          url = _stripQuotes(args[1]);
+          jsCode = _stripQuotes(args[2]);
+          sourceRegex = _stripQuotes(args[3]);
+          cacheKey = 'webview_src:${url ?? ''}:${sourceRegex ?? ''}';
+          break;
+        case 'webViewGetOverrideUrl':
+          // webViewGetOverrideUrl(html, url, js, overrideUrlRegex, cacheFirst, delayTime)
+          if (args.length < 4) continue;
+          html = _stripQuotes(args[0]);
+          url = _stripQuotes(args[1]);
+          jsCode = _stripQuotes(args[2]);
+          overrideRegex = _stripQuotes(args[3]);
+          cacheKey = 'webview_override:${url ?? ''}:${overrideRegex ?? ''}';
+          break;
+        case 'startBrowserAwait':
+          // startBrowserAwait(url, title, refetchAfterSuccess, html)
+          if (args.isEmpty) continue;
+          url = _stripQuotes(args[0]);
+          cacheKey = 'browser:${url ?? ''}';
+          jsCode = ''; // 浏览器等待通常不需要 JS
+          break;
+        case 'getVerificationCode':
+          // getVerificationCode(imageUrl)
+          if (args.isEmpty) continue;
+          imageUrl = _stripQuotes(args[0]);
+          cacheKey = 'captcha:${imageUrl ?? ''}';
+          url = imageUrl; // 复用 url 字段
+          jsCode = '';
+          break;
+        default:
+          continue;
+      }
+
+      if (url == null || url.isEmpty || !url.startsWith('http')) continue;
+
+      webViewFutures.add(() async {
+        try {
+          final result = await NativeChannel.instance.executeWebViewJs(
+            url: url!,
+            jsCode: jsCode ?? 'document.documentElement.outerHTML',
+            sourceRegex: sourceRegex,
+            html: html,
+            delayTime: 500, // 默认延迟 500ms 等 WebView 渲染
+          );
+          if (result != null && result.isNotEmpty) {
+            return MapEntry(cacheKey, result);
+          }
+        } catch (_) {}
+        return null;
+      }());
+    }
+    if (webViewFutures.isNotEmpty) {
+      final webResults = await Future.wait(webViewFutures);
+      final webCacheEntries = <String, String>{};
+      for (final entry in webResults) {
+        if (entry != null) webCacheEntries[entry.key] = entry.value;
+      }
+      if (webCacheEntries.isNotEmpty) {
+        await preCacheHttpResults(webCacheEntries);
+      }
+    }
+
+    // 6.6 预缓存下载文件调用（接入 NativeChannel.httpDownload）
+    final downloadFutures = <Future<MapEntry<String, String>?>>[];
+    for (final match in _downloadCallPattern.allMatches(jsCode)) {
+      final method = match.group(1)!;
+      final url = match.group(2)!;
+      if (!url.startsWith('http')) continue;
+      final absoluteUrl = _resolveUrl(url, baseUrl);
+      // 缓存 key 同 JS 侧 java.cacheFile/java.downloadFile 用的 key
+      final cacheKey = method == 'cacheFile' ? 'cache_file:$absoluteUrl' : 'download_file:$absoluteUrl';
+      // 保存路径：用 url md5 作为文件名
+      final saveName = (await NativeChannel.instance.md5(absoluteUrl) ?? absoluteUrl.hashCode.toString());
+      final savePath = '/tmp/mr_$saveName';
+
+      downloadFutures.add(() async {
+        try {
+          final result = await NativeChannel.instance.httpDownload(absoluteUrl, savePath);
+          if (result != null && result.isNotEmpty) {
+            return MapEntry(cacheKey, result);
+          }
+        } catch (_) {}
+        return null;
+      }());
+    }
+    if (downloadFutures.isNotEmpty) {
+      final dlResults = await Future.wait(downloadFutures);
+      final dlCacheEntries = <String, String>{};
+      for (final entry in dlResults) {
+        if (entry != null) dlCacheEntries[entry.key] = entry.value;
+      }
+      if (dlCacheEntries.isNotEmpty) {
+        await preCacheHttpResults(dlCacheEntries);
+      }
+    }
+
     // 7. 预缓存 HTML 解析结果（使用 Dart 原生 html 包）
 
     // 收集已缓存的 HTTP 内容
@@ -4218,6 +4347,53 @@ class JsEngine {
     } catch (_) {
       return url;
     }
+  }
+
+  /// 分割 JS 函数调用的参数字符串（简化版，不支持嵌套括号/字符串内逗号）
+  /// 用于 WebView 调用参数提取，Legado 书源基本是字面量参数
+  List<String> _splitArgs(String argsStr) {
+    if (argsStr.isEmpty) return [];
+    final result = <String>[];
+    final current = StringBuffer();
+    var inSingle = false, inDouble = false, depth = 0;
+    for (var i = 0; i < argsStr.length; i++) {
+      final c = argsStr[i];
+      if (c == '\\' && i + 1 < argsStr.length) {
+        current.write(c);
+        current.write(argsStr[++i]);
+        continue;
+      }
+      if (c == "'" && !inDouble) inSingle = !inSingle;
+      if (c == '"' && !inSingle) inDouble = !inDouble;
+      if (!inSingle && !inDouble) {
+        if (c == '(' || c == '[' || c == '{') depth++;
+        if (c == ')' || c == ']' || c == '}') depth--;
+        if (c == ',' && depth == 0) {
+          result.add(current.toString().trim());
+          current.clear();
+          continue;
+        }
+      }
+      current.write(c);
+    }
+    if (current.isNotEmpty) result.add(current.toString().trim());
+    return result;
+  }
+
+  /// 去除字符串两端的引号
+  String? _stripQuotes(String? s) {
+    if (s == null) return null;
+    s = s.trim();
+    if (s.length >= 2 && ((s.startsWith("'") && s.endsWith("'")) ||
+        (s.startsWith('"') && s.endsWith('"')))) {
+      // 尝试 JSON 解码字面量
+      try {
+        return jsonDecode(s) as String;
+      } catch (_) {
+        return s.substring(1, s.length - 1);
+      }
+    }
+    return s.isEmpty ? null : s;
   }
 
   // ===== 脚本编译缓存（借鉴 legado 的 scriptCache）=====
