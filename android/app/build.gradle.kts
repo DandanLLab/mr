@@ -28,10 +28,13 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // 保险 #1：ndk.abiFilters 只编译 arm64-v8a 的 .so
-        // minSdk=29 起 Android 设备基本都是 arm64，x86_64 只用于模拟器
+        // 保险 #1：清除 Flutter Gradle Plugin 注入的三个 ABI，只保留 arm64-v8a
+        // FlutterPlugin.kt:557-560 在 apply 阶段会 abiFilters.clear() + addAll([armeabi-v7a, arm64-v8a, x86_64])
+        // 用户代码在 plugin apply 之后执行，这里再次 clear() 覆盖
+        // abiFilters 是 val MutableSet<String>（无 setter），不能用 = 赋值，只能 clear() + add()
         ndk {
-            abiFilters += listOf("arm64-v8a")
+            abiFilters.clear()
+            abiFilters.add("arm64-v8a")
         }
         // QuickJS NDK 编译配置
         externalNativeBuild {
@@ -42,21 +45,17 @@ android {
                     "-DPROJECT_ROOT_DIR=${rootProject.projectDir.parentFile?.absolutePath}"
                 )
                 cFlags += "-D_GNU_SOURCE"
-                // 显式只编译 arm64-v8a（覆盖任何继承的 ABI 配置）
-                abiFilters += listOf("arm64-v8a")
+                // 显式只编译 arm64-v8a（覆盖 Flutter 注入的 ABI）
+                abiFilters.clear()
+                abiFilters.add("arm64-v8a")
             }
         }
     }
 
-    // 保险 #2：splits.abi 显式只保留 arm64-v8a，构建时只生成一个 APK
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a")
-            isUniversalApk = false
-        }
-    }
+    // 注意：不能用 splits.abi，AGP 规则要求 ndk.abiFilters 和 splits.abi.filters 必须一致
+    // Flutter 已注入三个 ABI 到 ndk.abiFilters，配 splits.abi 只保留 arm64-v8a 会触发
+    // "Conflicting configuration ... cannot be present when splits abi filters are set"
+    // 这里用 ndk.abiFilters.clear() 覆盖 Flutter 的注入，splits.abi 不启用
 
     // 排除重复/冗余文件，减小 APK 体积
     packaging {
