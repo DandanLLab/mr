@@ -1611,6 +1611,16 @@ class JsEngine {
           }
           return results;
         },
+        // java.ajaxTestAll(urlList, timeout) / ajaxTestAll(urlList, timeout, skipRateLimit) — 批量测试 URL
+        // 假声明：返回空结果数组，QuickJS 同步无法并发测试
+        ajaxTestAll: function(urlList, timeout, skipRateLimit) {
+          if (!urlList || !urlList.length) return [];
+          var results = [];
+          for (var i = 0; i < urlList.length; i++) {
+            results.push({ url: urlList[i], body: java.ajax(urlList[i]), code: 200 });
+          }
+          return results;
+        },
 
         // ===== 变量存取（借鉴 legado 的 CacheManager）=====
         put: function(key, value) {
@@ -1746,17 +1756,26 @@ class JsEngine {
           if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
           return '';
         },
-        base64Encode: function(str) {
+        // java.base64Encode(str) / base64Encode(str, flags) — Base64 编码
+        // 假声明：兼容 Legado 多重载，flags 暂忽略（NO_WRAP/URL_SAFE 等统一标准 Base64）
+        base64Encode: function(str, flags) {
           try {
             if (typeof btoa === 'function') return btoa(unescape(encodeURIComponent(str)));
           } catch(e) {}
           return '';
         },
-        base64Decode: function(str) {
+        // java.base64Decode(str) / base64Decode(str, charset|flags) — Base64 解码
+        // 假声明：兼容 Legado 多重载，charset 按 UTF-8，flags 忽略
+        base64Decode: function(str, arg2) {
           try {
             if (typeof atob === 'function') return decodeURIComponent(escape(atob(str)));
           } catch(e) {}
           return '';
+        },
+        // java.hexDecodeToByteArray(hex) — Hex 解码为 ByteArray
+        hexDecodeToByteArray: function(hex) {
+          var s = java.hexDecodeToString(hex);
+          return s ? java.strToBytes(s) : [];
         },
 
         // ===== HTML 解析（使用内置 _JsoupLite，不再递归自调用）=====
@@ -1843,7 +1862,9 @@ class JsEngine {
         getTime: function() {
           return Date.now();
         },
-        encodeURI: function(str) {
+        // java.encodeURI(str) / encodeURI(str, enc) — URL 编码
+        // 假声明：兼容 Legado 多重载，enc 指定字符集，暂按 UTF-8 处理
+        encodeURI: function(str, enc) {
           return encodeURIComponent(str);
         },
         hexEncodeToString: function(str) {
@@ -1870,10 +1891,13 @@ class JsEngine {
           },
         },
 
-        // legado 兼容：java.webView(htmlOrJs, baseUrl, extra)
+        // legado 兼容：java.webView(html, url, js, cacheFirst)
         // 在 legado 中，java.webView 用于执行包含 JS 的 HTML 并获取渲染结果
         // QuickJS 同步模式下无法真正渲染 WebView，尝试从缓存获取
-        webView: function(htmlOrJs, baseUrl, extra) {
+        // 假声明：兼容 Legado 4 参签名 webView(html, url, js, cacheFirst)
+        webView: function(html, url, js, cacheFirst) {
+          // 兼容旧签名 webView(htmlOrJs, baseUrl, extra)
+          var htmlOrJs = html, baseUrl = url, extra = js;
           var cacheKey = 'webview:' + (baseUrl || '') + ':' + (htmlOrJs || '').length;
           if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
           // fallback: 如果 htmlOrJs 包含 <script>，尝试直接执行其中的 JS
@@ -1891,6 +1915,25 @@ class JsEngine {
             }
           } catch(e) {}
           return '';
+        },
+        // java.webViewGetSource(html, url, js, sourceRegex, cacheFirst, delayTime) — 抓取 WebView 加载的资源 URL
+        // 假声明：QuickJS 无 WebView，从缓存取
+        webViewGetSource: function(html, url, js, sourceRegex, cacheFirst, delayTime) {
+          var cacheKey = 'webview_src:' + (url || '') + ':' + (sourceRegex || '');
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
+        // java.webViewGetOverrideUrl(html, url, js, overrideUrlRegex, cacheFirst, delayTime) — 抓取 WebView 跳转 URL
+        // 假声明：QuickJS 无 WebView，从缓存取
+        webViewGetOverrideUrl: function(html, url, js, overrideUrlRegex, cacheFirst, delayTime) {
+          var cacheKey = 'webview_override:' + (url || '') + ':' + (overrideUrlRegex || '');
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
+        // java.openVideoPlayer(url, title, isFloat) — 打开视频播放器
+        // 假声明：QuickJS 无播放器，空操作
+        openVideoPlayer: function(url, title, isFloat) {
+          console.log('[openVideoPlayer] ' + url + ' / ' + title);
         },
 
         // ===== 缓存管理 =====
@@ -1930,8 +1973,9 @@ class JsEngine {
           if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
           return '';
         },
-        // java.startBrowser(url, title) — 打开浏览器（移动端专用，QuickJS 空操作）
-        startBrowser: function(url, title) {},
+        // java.startBrowser(url, title, html) — 打开浏览器（移动端专用，QuickJS 空操作）
+        // 假声明：兼容 Legado 3 参签名，html 参数暂忽略
+        startBrowser: function(url, title, html) {},
         // java.startBrowserAwait(url, title) — 等待浏览器结果
         startBrowserAwait: function(url, title, refetchAfterSuccess, html) {
           var cacheKey = 'browser:' + url;
@@ -1943,6 +1987,24 @@ class JsEngine {
           var cacheKey = 'captcha:' + imageUrl;
           if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
           return '';
+        },
+
+        // ===== 字体反爬（对齐 legado JsExtensions）=====
+        // 假声明：TTF 字体反爬需要解析字体文件，QuickJS 无原生支持
+        // 返回 null 让书源 fallback 到非字体分支
+        // java.queryTTF(data, useCache) — 解析 TTF 字体映射
+        queryTTF: function(data, useCache) {
+          var cacheKey = 'ttf:' + (typeof data === 'string' ? data.substring(0, 64) : 'binary');
+          if (useCache !== false && _javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          // 占位：返回 null，让书源走非字体分支
+          return null;
+        },
+        // java.queryBase64TTF(data) — 已弃用，等同 queryTTF
+        queryBase64TTF: function(data) { return java.queryTTF(data); },
+        // java.replaceFont(text, errorQueryTTF, correctQueryTTF, filter) — 字体替换
+        // 假声明：无 TTF 映射时原样返回
+        replaceFont: function(text, errorQueryTTF, correctQueryTTF, filter) {
+          return text || '';
         },
 
         // ===== 编解码（对齐 legado JsEncodeUtils）=====
@@ -1982,6 +2044,9 @@ class JsEngine {
           if (!hex) return '';
           try { return java.base64Encode(java.hexDecodeToString(hex)); } catch(e) { return ''; }
         },
+        // java.HMacBase64(data, algorithm, key) — Legado 实际命名（等同 HMacBase64Str）
+        // 假声明：作为别名导出，避免书源里调用 HMacBase64 报 undefined
+        HMacBase64: function(data, algorithm, key) { return java.HMacBase64Str(data, algorithm, key); },
         // java.strToBytes(str) / java.strToBytes(str, charset) — 字符串转字节数组
         strToBytes: function(str, charset) {
           var bytes = [];
@@ -2105,6 +2170,17 @@ class JsEngine {
           if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
           return '';
         },
+        // java.downloadFile(url) / downloadFile(content, url) — 下载文件返回路径
+        // 假声明：QuickJS 无文件系统，返回占位路径
+        downloadFile: function(urlOrContent, url) {
+          var u = url === undefined ? urlOrContent : url;
+          return '/tmp/' + java.md5Encode(u).substring(0, 16);
+        },
+        // java.getFile(path) — 获取 File 对象
+        // 假声明：QuickJS 无 File 概念，返回占位对象
+        getFile: function(path) {
+          return { path: path, exists: function() { return false; }, readText: function() { return ''; } };
+        },
         // java.importScript(path) — 导入脚本
         importScript: function(path) {
           var cacheKey = 'import_script:' + path;
@@ -2123,14 +2199,37 @@ class JsEngine {
         unArchiveFile: function(path) { return ''; },
         // java.getTxtInFolder(path) — 读取文件夹下所有 txt
         getTxtInFolder: function(path) { return ''; },
+        // java.getZipStringContent / getRarStringContent / get7zStringContent — 压缩包内文件读取
+        // 假声明：QuickJS 无原生解压，返回空
+        getZipStringContent: function(url, path, charset) { return ''; },
+        getRarStringContent: function(url, path, charset) { return ''; },
+        get7zStringContent: function(url, path, charset) { return ''; },
+        getZipByteArrayContent: function(url, path) { return []; },
+        getRarByteArrayContent: function(url, path) { return []; },
+        get7zByteArrayContent: function(url, path) { return []; },
         // java.openUrl(url) — 打开 URL
         openUrl: function(url, mimeType) {},
         // java.getReadBookConfig() — 获取阅读配置
         getReadBookConfig: function() { return '{}'; },
+        // java.getReadBookConfigMap() — 获取阅读配置（Map 版）
+        // 假声明：返回空对象
+        getReadBookConfigMap: function() { return {}; },
         // java.getThemeMode() — 获取主题模式
         getThemeMode: function() { return 'light'; },
         // java.getThemeConfig() — 获取主题配置
         getThemeConfig: function() { return '{}'; },
+        // java.getThemeConfigMap() — 获取主题配置（Map 版）
+        // 假声明：返回空对象
+        getThemeConfigMap: function() { return {}; },
+        // java.getSource() — 获取当前书源对象
+        // 假声明：返回空对象
+        getSource: function() { return {}; },
+        // java.getTag() — 获取书源标签
+        getTag: function() { return ''; },
+        // java.logType(any) — 打印类型信息（调试用）
+        logType: function(any) {
+          console.log('[logType] ' + typeof any + ': ' + (any === null ? 'null' : String(any).substring(0, 100)));
+        },
         // java.toURL(urlStr) — 创建 URL 对象
         toURL: function(urlStr, base) {
           try {
@@ -2173,16 +2272,67 @@ class JsEngine {
           return decoded ? java.aesDecode(decoded, key, iv) : '';
         },
         // java.createSymmetricCrypto(transformation, key, iv) — 创建对称加密器
+        // 假声明：对齐 Hutool SymmetricCrypto 接口
+        // 让书源里 cipher.decryptStr(data) / cipher.encryptStr(data) / cipher.encryptHex(data) 等调用
+        // 以为自己跑在 Rhino+Android 上，实则跑在 QuickJS 上
         createSymmetricCrypto: function(transformation, key, iv) {
-          // 简化实现：返回一个包含 encrypt/decrypt 方法的对象
           var keyStr = typeof key === 'string' ? key : (key ? String(key) : '');
           var ivStr = typeof iv === 'string' ? iv : (iv ? String(iv) : '');
-          return {
-            encrypt: function(data) { return java.aesEncode(data, keyStr, ivStr); },
-            decrypt: function(data) { return java.aesDecode(data, keyStr, ivStr); },
+          // DES/3DES/PBE 等暂降级为 AES（实际书源极少用真 DES，多为占位）
+          var algo = typeof transformation === 'string' ? transformation : 'AES/CBC/PKCS5Padding';
+
+          // Base64 字符串 ↔ Hex 字符串互转（Hutool 内置，这里假声明）
+          function _b64ToHex(b64) {
+            try {
+              var raw = java.base64Decode(b64); // UTF-8 字符串
+              var hex = '';
+              for (var i = 0; i < raw.length; i++) {
+                var c = raw.charCodeAt(i) & 0xff;
+                hex += (c < 16 ? '0' : '') + c.toString(16);
+              }
+              return hex;
+            } catch (e) { return ''; }
+          }
+          function _hexToB64(hex) {
+            try {
+              var raw = '';
+              for (var i = 0; i + 1 < hex.length; i += 2) {
+                raw += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+              }
+              return java.base64Encode(raw);
+            } catch (e) { return ''; }
+          }
+
+          var crypto = {
+            // 加密为字符串（默认输出 Base64，对齐 Hutool encryptStr 默认行为）
+            encryptStr: function(data, charset) { return java.aesEncode(data, keyStr, ivStr); },
+            // 解密字符串（输入 Base64，输出 UTF-8 明文，对齐 Hutool decryptStr）
+            decryptStr: function(data, charset) { return java.aesDecode(data, keyStr, ivStr); },
+            // 加密为 Base64
             encryptBase64: function(data) { return java.aesEncodeToBase64String(data, keyStr, '', ivStr); },
-            decryptBase64: function(data) { return java.aesBase64DecodeToString(data, keyStr, '', ivStr); }
+            // 解密 Base64
+            decryptBase64: function(data) { return java.aesBase64DecodeToString(data, keyStr, '', ivStr); },
+            // 加密为 Hex
+            encryptHex: function(data) {
+              var b64 = java.aesEncodeToBase64String(data, keyStr, '', ivStr);
+              return b64 ? _b64ToHex(b64) : '';
+            },
+            // 解密 Hex
+            decryptHex: function(hex) {
+              var b64 = _hexToB64(hex);
+              return b64 ? java.aesBase64DecodeToString(b64, keyStr, '', ivStr) : '';
+            },
+            // 加密为字节数组（QuickJS 无 ByteArray，用 Base64 字符串近似）
+            encrypt: function(data) { return java.aesEncode(data, keyStr, ivStr); },
+            // 解密字节数组
+            decrypt: function(data) { return java.aesDecode(data, keyStr, ivStr); },
+            // 链式设置 IV（对齐 Hutool setIv，返回自身）
+            setIv: function(newIv) {
+              ivStr = typeof newIv === 'string' ? newIv : String(newIv || '');
+              return crypto;
+            }
           };
+          return crypto;
         },
         // java.desEncodeToString / desDecodeToString — DES 兼容（简化为 AES）
         desEncodeToString: function(data, key, transformation, iv) {
@@ -2204,13 +2354,66 @@ class JsEngine {
         tripleDESDecodeArgsBase64Str: function(data, key, mode, padding, iv) {
           return java.aesBase64DecodeToString(data, key, '', iv);
         },
+        // 假声明：补全 Legado 缺失的 3DES 重载
+        // java.tripleDESDecodeStr(data, key, mode, padding, iv) — 3DES 不带 Base64 解密
+        tripleDESDecodeStr: function(data, key, mode, padding, iv) {
+          return java.aesDecode(data, key, iv);
+        },
+        // java.tripleDESEncodeArgsBase64Str(data, key, mode, padding, iv) — 3DES 带 Base64 加密
+        tripleDESEncodeArgsBase64Str: function(data, key, mode, padding, iv) {
+          return java.aesEncodeToBase64String(data, key, '', iv);
+        },
         // java.createAsymmetricCrypto(transformation) — 创建非对称加密器
+        // 假声明：QuickJS 无 RSA/ECC 实现，返回空操作对象
         createAsymmetricCrypto: function(transformation) {
-          return { encrypt: function(data) { return ''; }, decrypt: function(data) { return ''; } };
+          return {
+            encrypt: function(data) { return ''; },
+            decrypt: function(data) { return ''; },
+            encryptStr: function(data) { return ''; },
+            decryptStr: function(data) { return ''; },
+            encryptBase64: function(data) { return ''; },
+            decryptBase64: function(data) { return ''; }
+          };
         },
         // java.createSign(algorithm) — 创建签名器
+        // 假声明：返回空签名器
         createSign: function(algorithm) {
-          return { sign: function(data) { return ''; }, verify: function(data, sig) { return false; } };
+          return {
+            sign: function(data) { return ''; },
+            verify: function(data, sig) { return false; },
+            signBase64: function(data) { return ''; },
+            verifyBase64: function(data, sig) { return false; }
+          };
+        },
+        // ===== AES 参数版（对齐 legado JsEncodeUtils 的 Args/ByteArray 重载）=====
+        // 假声明：mode/padding 暂忽略，统一按 AES/CBC/PKCS5Padding 处理
+        // java.aesEncodeArgsBase64Str(data, key, mode, padding, iv) — AES 参数化加密（web 端兼容）
+        aesEncodeArgsBase64Str: function(data, key, mode, padding, iv) {
+          return java.aesEncodeToBase64String(data, key, '', iv);
+        },
+        // java.aesDecodeArgsBase64Str(data, key, mode, padding, iv) — AES 参数化解密
+        aesDecodeArgsBase64Str: function(data, key, mode, padding, iv) {
+          return java.aesBase64DecodeToString(data, key, '', iv);
+        },
+        // java.aesDecodeToByteArray(str, key, transformation, iv) — AES 解密返回 ByteArray
+        aesDecodeToByteArray: function(str, key, transformation, iv) {
+          var result = java.aesDecode(str, key, iv);
+          return result ? java.strToBytes(result) : [];
+        },
+        // java.aesEncodeToByteArray(data, key, transformation, iv) — AES 加密返回 ByteArray
+        aesEncodeToByteArray: function(data, key, transformation, iv) {
+          var result = java.aesEncode(data, key, iv);
+          return result ? java.strToBytes(result) : [];
+        },
+        // java.aesBase64DecodeToByteArray(str, key, transformation, iv) — AES Base64 解密返回 ByteArray
+        aesBase64DecodeToByteArray: function(str, key, transformation, iv) {
+          var result = java.aesBase64DecodeToString(str, key, transformation, iv);
+          return result ? java.strToBytes(result) : [];
+        },
+        // java.aesEncodeToBase64ByteArray(data, key, transformation, iv) — AES 加密 Base64 返回 ByteArray
+        aesEncodeToBase64ByteArray: function(data, key, transformation, iv) {
+          var result = java.aesEncodeToBase64String(data, key, transformation, iv);
+          return result ? java.strToBytes(result) : [];
         },
 
         // ===== 元素操作（借鉴 legado JsExtensions）=====
