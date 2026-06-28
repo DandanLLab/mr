@@ -1,14 +1,20 @@
 import 'package:flutter/foundation.dart';
-import 'platform_channel.dart';
 import '../app_logger.dart';
+import 'platform_channel.dart';
+import 'quickjs_runtime.dart' show
+  nativeMd5,
+  nativeAesDecrypt, nativeAesEncrypt,
+  nativeBase64Encode, nativeBase64Decode,
+  nativeHtmlQueryExtract,
+  nativeHttpGet, nativeHttpPost;
 
 /// JsExtensions 桥接层
 /// 借鉴 legado 的 JsExtensions 接口设计
-/// 将 JS 中的 java.* 调用桥接到 Dart 侧的 NativeChannel
+/// 将 JS 中的 java.* 调用桥接到 Dart 侧的 C 原生 FFI（优先）或 NativeChannel
 ///
 /// 双轨并行策略：
-/// - 旧书源：继续使用 js_engine.dart 中的 stub java 对象
-/// - 新书源：通过 JsExtensionsBridge 获得真实的桥接实现
+/// - 加密/哈希/编码/HTML 解析 → C FFI（同步，零 MethodChannel 开销）
+/// - HTTP 请求/存储/系统调用 → NativeChannel（MethodChannel）
 class JsExtensionsBridge {
   JsExtensionsBridge._();
   static final JsExtensionsBridge instance = JsExtensionsBridge._();
@@ -20,11 +26,10 @@ class JsExtensionsBridge {
   Future<String?> ajax(String url, {Map<String, String>? headers, int? timeoutMs}) async {
     try {
       if (kIsWeb) return null;
-      return await NativeChannel.instance.httpGet(
-        url,
-        headers: headers,
-        timeoutMs: timeoutMs ?? 10000,
-      );
+      if (!url.startsWith('http://')) return null;
+      final hdr = headers?.entries.map((e) => '${e.key}: ${e.value}').join('\r\n');
+      final r = nativeHttpGet(url, headers: hdr, timeoutMs: timeoutMs ?? 10000);
+      return r?['body'] as String?;
     } catch (e) {
       AppLogger.instance.logJsError('JsExtensions', 'ajax失败: $e');
       return null;
@@ -52,12 +57,10 @@ class JsExtensionsBridge {
   Future<String?> post(String url, {String? body, Map<String, String>? headers, int? timeoutMs}) async {
     try {
       if (kIsWeb) return null;
-      return await NativeChannel.instance.httpPost(
-        url,
-        body: body,
-        headers: headers,
-        timeoutMs: timeoutMs ?? 10000,
-      );
+      if (!url.startsWith('http://')) return null;
+      final hdr = headers?.entries.map((e) => '${e.key}: ${e.value}').join('\r\n');
+      final r = nativeHttpPost(url, body ?? '', headers: hdr, timeoutMs: timeoutMs ?? 10000);
+      return r?['body'] as String?;
     } catch (e) {
       AppLogger.instance.logJsError('JsExtensions', 'post失败: $e');
       return null;
@@ -68,10 +71,12 @@ class JsExtensionsBridge {
 
   /// AES 加密
   /// 对应 legado 的 java.aesEncode(data, key, iv)
+  /// 同步调用 C 原生 FFI，零 MethodChannel 开销
   Future<String?> aesEncode(String data, String key, {String? iv}) async {
     try {
       if (kIsWeb) return null;
-      return await NativeChannel.instance.aesEncrypt(data, key, iv: iv);
+      // C 原生 AES-CBC-PKCS7 加密，同步返回 base64
+      return nativeAesEncrypt(data, key, iv ?? '');
     } catch (e) {
       AppLogger.instance.logJsError('JsExtensions', 'aesEncode失败: $e');
       return null;
@@ -80,10 +85,12 @@ class JsExtensionsBridge {
 
   /// AES 解密
   /// 对应 legado 的 java.aesDecode(data, key, iv)
+  /// 同步调用 C 原生 FFI，零 MethodChannel 开销
   Future<String?> aesDecode(String data, String key, {String? iv}) async {
     try {
       if (kIsWeb) return null;
-      return await NativeChannel.instance.aesDecrypt(data, key, iv: iv);
+      // C 原生 AES-CBC-PKCS7 解密，同步返回明文
+      return nativeAesDecrypt(data, key, iv ?? '');
     } catch (e) {
       AppLogger.instance.logJsError('JsExtensions', 'aesDecode失败: $e');
       return null;
@@ -92,72 +99,90 @@ class JsExtensionsBridge {
 
   /// MD5 哈希
   /// 对应 legado 的 java.md5Encode(str)
+  /// 同步调用 C 原生 FFI，零 MethodChannel 开销
   Future<String?> md5Encode(String str) async {
     try {
       if (kIsWeb) return null;
-      return await NativeChannel.instance.md5(str);
+      return nativeMd5(str);
     } catch (e) {
       return null;
     }
   }
 
   /// Base64 编码
+  /// 同步调用 C 原生 FFI，零 MethodChannel 开销
   Future<String?> base64Encode(String str) async {
     try {
       if (kIsWeb) return null;
-      return await NativeChannel.instance.base64Encode(str);
+      return nativeBase64Encode(str);
     } catch (e) {
       return null;
     }
   }
 
   /// Base64 解码
+  /// 同步调用 C 原生 FFI，零 MethodChannel 开销
   Future<String?> base64Decode(String str) async {
     try {
       if (kIsWeb) return null;
-      return await NativeChannel.instance.base64Decode(str);
+      return nativeBase64Decode(str);
     } catch (e) {
       return null;
     }
   }
 
-  // ===== Jsoup HTML 解析 =====
+  // ===== Jsoup HTML 解析（切到 C 原生 HTML 引擎）=====
 
   /// CSS 选择器选择第一个元素
+  /// 切到 C 原生 HTML 引擎（同步 FFI，零 MethodChannel 开销）
   Future<String?> jsoupSelectFirst(String html, String selector) async {
     try {
       if (kIsWeb) return null;
-      return await NativeChannel.instance.jsoupSelect(html, selector);
+      // 原子调用：HTML 解析 + CSS 查询 + 文本提取
+      return nativeHtmlQueryExtract(html, selector, '@text', false);
     } catch (e) {
       return null;
     }
   }
 
   /// CSS 选择器选择所有元素
+  /// 切到 C 原生 HTML 引擎（同步 FFI，零 MethodChannel 开销）
   Future<List<String>?> jsoupSelectAll(String html, String selector) async {
     try {
       if (kIsWeb) return null;
-      return await NativeChannel.instance.jsoupSelectAll(html, selector);
+      final json = nativeHtmlQueryExtract(html, selector, '@text', true);
+      if (json.isEmpty || json == '[]') return [];
+      // 简易 JSON 解析（只支持纯文本数组）
+      return json
+          .replaceAll('[', '')
+          .replaceAll(']', '')
+          .split(',')
+          .map((s) => s.trim().replaceAll('"', ''))
+          .where((s) => s.isNotEmpty)
+          .toList();
     } catch (e) {
       return null;
     }
   }
 
   /// 获取元素属性
+  /// 切到 C 原生 HTML 引擎（同步 FFI，零 MethodChannel 开销）
   Future<String?> jsoupGetAttr(String html, String selector, String attr) async {
     try {
       if (kIsWeb) return null;
-      return await NativeChannel.instance.jsoupGetAttr(html, selector, attr);
+      return nativeHtmlQueryExtract(html, selector, attr, false);
     } catch (e) {
       return null;
     }
   }
 
   /// 清理 HTML
+  /// 切到 C 原生 HTML 引擎（同步 FFI，零 MethodChannel 开销）
   Future<String?> jsoupClean(String html) async {
     try {
       if (kIsWeb) return null;
-      return await NativeChannel.instance.jsoupClean(html);
+      // C 原生：提取 body 内部文本（移除 script/style 标签）
+      return nativeHtmlQueryExtract(html, 'body', '@html', false);
     } catch (e) {
       return null;
     }

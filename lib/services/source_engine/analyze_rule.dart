@@ -7,7 +7,6 @@ import 'package:xml/xml.dart' as xml;
 
 import '../app_logger.dart';
 import '../native/js_engine.dart';
-import '../native/platform_channel.dart';
 import 'legado_json_path.dart';
 import 'legado_xpath.dart';
 
@@ -2728,10 +2727,38 @@ class _ElementSelector {
       }
     }
 
+    // 2d. Legado 兼容 fallback：逆向扫描末尾索引（对齐 legado findIndexSet）
+    //     处理 li!0、div!-1、span.0 等没有 "." 关键字的纯标签格式
+    //     legado 的 ElementsSingle.findIndexSet 逆向扫描：
+    //       从字符串末尾往前遍历，遇到 ! 或 . 作为分隔符，
+    //       分隔符前为 beforeRule，分隔符后的数字为索引
+    //       例如 li!0 → beforeRule="li", split='!', indexDefault=[0]
+    //       例如 div!-1 → beforeRule="div", split='!', indexDefault=[-1]
+    final lastSepIdx = _findLastIndexSeparator(rule, 0);
+    if (lastSepIdx >= 0) {
+      // 分隔符后面的段必须是纯数字或数字:数字格式
+      var lastSegment = rule.substring(lastSepIdx + 1);
+      if (rule[lastSepIdx] == '!') {
+        lastSegment = '!$lastSegment';
+      }
+      final info = _tryParseIndexSegment(lastSegment);
+      if (info != null) {
+        (exclude, indexes, rangeExpression) = info;
+        rule = rule.substring(0, lastSepIdx);
+        // 如果 beforeRule 是已知 HTML 标签，转 tag.xxx 格式
+        if (_htmlTags.contains(rule.toLowerCase())) {
+          rule = 'tag.$rule';
+        }
+        return _ElementSelector(rule, indexes, exclude,
+            rangeExpression: rangeExpression);
+      }
+    }
+
     return _ElementSelector(rule, indexes, exclude);
   }
 
   /// 对齐 legado ElementsSingle.getElementsSingle 的索引筛选逻辑
+  /// split=='!' 排除 == exclude=true，split=='.' 选择 == exclude=false
   /// legado 注释：
   ///   1. ':'分隔索引，!或.表示筛选方式，索引可为负数
   ///   2. 区间格式为 start:end 或 start:end:step，start 为 0 可省略，end 为 -1 可省略

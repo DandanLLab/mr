@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 import 'package:encrypt/encrypt.dart';
 import 'package:crypto/crypto.dart' as crypto;
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 /// QuickJS 评估结果
 /// 兼容 flutter_js 的 JsEvalResult 接口
@@ -120,6 +121,12 @@ final _UrlEncodeDart _nativeUrlEncode = _qjsLib
     .lookup<NativeFunction<_UrlEncodeC>>('quickjs_bridge_url_encode')
     .asFunction<_UrlEncodeDart>();
 
+typedef _CharsetUrlEncodeC = Pointer<Utf8> Function(Pointer<Utf8> input, IntPtr inputLen, Pointer<Utf8> charset, Pointer<IntPtr> outputLen);
+typedef _CharsetUrlEncodeDart = Pointer<Utf8> Function(Pointer<Utf8> input, int inputLen, Pointer<Utf8> charset, Pointer<IntPtr> outputLen);
+final _CharsetUrlEncodeDart _nativeCharsetUrlEncode = _qjsLib
+    .lookup<NativeFunction<_CharsetUrlEncodeC>>('quickjs_bridge_charset_url_encode')
+    .asFunction<_CharsetUrlEncodeDart>();
+
 typedef _UrlDecodeC = Pointer<Utf8> Function(Pointer<Utf8> input, IntPtr inputLen, Pointer<IntPtr> outputLen);
 typedef _UrlDecodeDart = Pointer<Utf8> Function(Pointer<Utf8> input, int inputLen, Pointer<IntPtr> outputLen);
 final _UrlDecodeDart _nativeUrlDecode = _qjsLib
@@ -155,9 +162,280 @@ String nativeUnescapeHtml(String input) =>
 String nativeUrlEncode(String input) =>
     _callNativeStringOp(input, _nativeUrlEncode);
 
+/// C 原生按字符集 URL 编码（支持 GBK/GB2312/GB18030/UTF-8）
+/// 调用 quickjs_bridge_charset_url_encode
+String nativeCharsetUrlEncode(String input, String charset) {
+  if (input.isEmpty) return input;
+  final inputPtr = input.toNativeUtf8();
+  final charsetPtr = charset.toNativeUtf8();
+  final outputLenPtr = malloc<IntPtr>();
+  try {
+    final resultPtr = _nativeCharsetUrlEncode(inputPtr, inputPtr.length, charsetPtr, outputLenPtr);
+    if (resultPtr == nullptr) return input;
+    final result = _safeToDartString(resultPtr);
+    _bridgeFreeString(resultPtr);
+    return result;
+  } catch (_) {
+    return input;
+  } finally {
+    malloc.free(inputPtr);
+    malloc.free(charsetPtr);
+    malloc.free(outputLenPtr);
+  }
+}
+
 /// C 原生 URL 解码（percent-decode，+ 解码为空格）
 String nativeUrlDecode(String input) =>
     _callNativeStringOp(input, _nativeUrlDecode);
+
+// ===== Batch 1 FFI 绑定：纯 C 原生函数（替代 NativeChannel）=====
+
+// MD5
+typedef _Md5C = Pointer<Utf8> Function(Pointer<Utf8> input, IntPtr inputLen, Pointer<IntPtr> outputLen);
+typedef _Md5Dart = Pointer<Utf8> Function(Pointer<Utf8> input, int inputLen, Pointer<IntPtr> outputLen);
+final _Md5Dart _nativeMd5 = _qjsLib
+    .lookup<NativeFunction<_Md5C>>('quickjs_bridge_md5')
+    .asFunction<_Md5Dart>();
+
+// SHA1
+typedef _Sha1C = Pointer<Utf8> Function(Pointer<Utf8> input, IntPtr inputLen, Pointer<IntPtr> outputLen);
+typedef _Sha1Dart = Pointer<Utf8> Function(Pointer<Utf8> input, int inputLen, Pointer<IntPtr> outputLen);
+final _Sha1Dart _nativeSha1 = _qjsLib
+    .lookup<NativeFunction<_Sha1C>>('quickjs_bridge_sha1')
+    .asFunction<_Sha1Dart>();
+
+// SHA256
+typedef _Sha256C = Pointer<Utf8> Function(Pointer<Utf8> input, IntPtr inputLen, Pointer<IntPtr> outputLen);
+typedef _Sha256Dart = Pointer<Utf8> Function(Pointer<Utf8> input, int inputLen, Pointer<IntPtr> outputLen);
+final _Sha256Dart _nativeSha256 = _qjsLib
+    .lookup<NativeFunction<_Sha256C>>('quickjs_bridge_sha256')
+    .asFunction<_Sha256Dart>();
+
+// HMAC-SHA256
+typedef _HmacC = Pointer<Utf8> Function(Pointer<Utf8> data, IntPtr dataLen, Pointer<Utf8> key, IntPtr keyLen, Pointer<IntPtr> outputLen);
+typedef _HmacDart = Pointer<Utf8> Function(Pointer<Utf8> data, int dataLen, Pointer<Utf8> key, int keyLen, Pointer<IntPtr> outputLen);
+final _HmacDart _nativeHmac = _qjsLib
+    .lookup<NativeFunction<_HmacC>>('quickjs_bridge_hmac_sha256')
+    .asFunction<_HmacDart>();
+
+// AES 解密
+typedef _AesDecryptC = Pointer<Utf8> Function(Pointer<Utf8> cipher, IntPtr cipherLen, Pointer<Utf8> key, IntPtr keyLen, Pointer<Utf8> iv, IntPtr ivLen, Pointer<IntPtr> outputLen);
+typedef _AesDecryptDart = Pointer<Utf8> Function(Pointer<Utf8> cipher, int cipherLen, Pointer<Utf8> key, int keyLen, Pointer<Utf8> iv, int ivLen, Pointer<IntPtr> outputLen);
+final _AesDecryptDart _nativeAesDecrypt = _qjsLib
+    .lookup<NativeFunction<_AesDecryptC>>('quickjs_bridge_aes_decrypt')
+    .asFunction<_AesDecryptDart>();
+
+// AES 加密
+typedef _AesEncryptC = Pointer<Utf8> Function(Pointer<Utf8> plaintext, IntPtr ptLen, Pointer<Utf8> key, IntPtr keyLen, Pointer<Utf8> iv, IntPtr ivLen, Pointer<IntPtr> outputLen);
+typedef _AesEncryptDart = Pointer<Utf8> Function(Pointer<Utf8> plaintext, int ptLen, Pointer<Utf8> key, int keyLen, Pointer<Utf8> iv, int ivLen, Pointer<IntPtr> outputLen);
+final _AesEncryptDart _nativeAesEncrypt = _qjsLib
+    .lookup<NativeFunction<_AesEncryptC>>('quickjs_bridge_aes_encrypt')
+    .asFunction<_AesEncryptDart>();
+
+// Base64 编码
+typedef _B64EncodeC = Pointer<Utf8> Function(Pointer<Utf8> input, IntPtr inputLen, Pointer<IntPtr> outputLen);
+typedef _B64EncodeDart = Pointer<Utf8> Function(Pointer<Utf8> input, int inputLen, Pointer<IntPtr> outputLen);
+final _B64EncodeDart _nativeB64Encode = _qjsLib
+    .lookup<NativeFunction<_B64EncodeC>>('quickjs_bridge_base64_encode')
+    .asFunction<_B64EncodeDart>();
+
+// Base64 解码
+typedef _B64DecodeC = Pointer<Utf8> Function(Pointer<Utf8> input, IntPtr inputLen, Pointer<IntPtr> outputLen);
+typedef _B64DecodeDart = Pointer<Utf8> Function(Pointer<Utf8> input, int inputLen, Pointer<IntPtr> outputLen);
+final _B64DecodeDart _nativeB64Decode = _qjsLib
+    .lookup<NativeFunction<_B64DecodeC>>('quickjs_bridge_base64_decode')
+    .asFunction<_B64DecodeDart>();
+
+/// C 原生 MD5 哈希（hex 字符串）
+String nativeMd5(String input) =>
+    _callNativeStringOp(input, _nativeMd5);
+
+/// C 原生 SHA1 哈希（hex 字符串）
+String nativeSha1(String input) =>
+    _callNativeStringOp(input, _nativeSha1);
+
+/// C 原生 SHA256 哈希（hex 字符串）
+String nativeSha256(String input) =>
+    _callNativeStringOp(input, _nativeSha256);
+
+/// C 原生 HMAC-SHA256（hex 字符串）
+/// 同步调用，替代 MethodChannel 的异步 hmacSHA256
+String nativeHmacSha256(String data, String key) {
+  if (data.isEmpty || key.isEmpty) return '';
+  final dataPtr = data.toNativeUtf8();
+  final keyPtr = key.toNativeUtf8();
+  final outputLenPtr = malloc<IntPtr>();
+  try {
+    final resultPtr = _nativeHmac(dataPtr, dataPtr.length, keyPtr, keyPtr.length, outputLenPtr);
+    if (resultPtr == nullptr) return '';
+    final result = _safeToDartString(resultPtr);
+    _bridgeFreeString(resultPtr);
+    return result;
+  } catch (_) {
+    return '';
+  } finally {
+    malloc.free(dataPtr);
+    malloc.free(keyPtr);
+    malloc.free(outputLenPtr);
+  }
+}
+
+/// C 原生 AES-CBC-PKCS7 解密
+/// 输入 base64 密文、key、iv，输出 UTF-8 明文
+/// 同步调用，替代 MethodChannel 的异步 aesDecrypt
+String nativeAesDecrypt(String cipherB64, String key, String iv) {
+  if (cipherB64.isEmpty || key.isEmpty) return '';
+  final cipherPtr = cipherB64.toNativeUtf8();
+  final keyPtr = key.toNativeUtf8();
+  final ivPtr = iv.toNativeUtf8();
+  final outputLenPtr = malloc<IntPtr>();
+  try {
+    final resultPtr = _nativeAesDecrypt(
+        cipherPtr, cipherPtr.length,
+        keyPtr, keyPtr.length,
+        ivPtr, ivPtr.length,
+        outputLenPtr);
+    if (resultPtr == nullptr) return '';
+    final result = _safeToDartString(resultPtr);
+    _bridgeFreeString(resultPtr);
+    return result;
+  } catch (_) {
+    return '';
+  } finally {
+    malloc.free(cipherPtr);
+    malloc.free(keyPtr);
+    malloc.free(ivPtr);
+    malloc.free(outputLenPtr);
+  }
+}
+
+/// C 原生 AES-CBC-PKCS7 加密
+/// 输入 UTF-8 明文、key、iv，输出 base64 密文
+/// 同步调用，替代 MethodChannel 的异步 aesEncrypt
+String nativeAesEncrypt(String plaintext, String key, String iv) {
+  if (plaintext.isEmpty || key.isEmpty) return '';
+  final ptPtr = plaintext.toNativeUtf8();
+  final keyPtr = key.toNativeUtf8();
+  final ivPtr = iv.toNativeUtf8();
+  final outputLenPtr = malloc<IntPtr>();
+  try {
+    final resultPtr = _nativeAesEncrypt(
+        ptPtr, ptPtr.length,
+        keyPtr, keyPtr.length,
+        ivPtr, ivPtr.length,
+        outputLenPtr);
+    if (resultPtr == nullptr) return '';
+    final result = _safeToDartString(resultPtr);
+    _bridgeFreeString(resultPtr);
+    return result;
+  } catch (_) {
+    return '';
+  } finally {
+    malloc.free(ptPtr);
+    malloc.free(keyPtr);
+    malloc.free(ivPtr);
+    malloc.free(outputLenPtr);
+  }
+}
+
+/// C 原生 Base64 编码
+String nativeBase64Encode(String input) =>
+    _callNativeStringOp(input, _nativeB64Encode);
+
+/// C 原生 Base64 解码
+/// 注意：返回的字节可能包含非 UTF-8 字符，调用方需自行处理
+String nativeBase64Decode(String input) =>
+    _callNativeStringOp(input, _nativeB64Decode);
+
+// ---------- Batch 2: C 原生 HTTP 客户端（HTTP-only）----------
+// HTTP/1.1 GET/POST via C socket，零 MethodChannel。
+// 仅支持 http://；https:// 返回 null，上层降级到 Dio。
+// C: http_response_t* http_get(url, headers, timeout_ms)
+// C: http_response_t* http_post(url, headers, body, body_len, timeout_ms)
+// C: void http_response_free(http_response_t*)
+
+final class HttpResponseNative extends Struct {
+  @Int32()
+  external int statusCode;
+  external Pointer<Utf8> body;
+  @IntPtr()
+  external int bodyLen;
+  external Pointer<Utf8> headersRaw;
+  @Int32()
+  external int isHttps;
+  @Array(256)
+  external Array<Int8> errorMsg;
+}
+
+typedef _HttpGetC = Pointer<HttpResponseNative> Function(
+    Pointer<Utf8>, Pointer<Utf8>, Int32);
+typedef _HttpGetDart = Pointer<HttpResponseNative> Function(
+    Pointer<Utf8>, Pointer<Utf8>, int);
+final _HttpGetDart _nativeHttpGet = _qjsLib
+    .lookup<NativeFunction<_HttpGetC>>('http_get')
+    .asFunction<_HttpGetDart>();
+
+typedef _HttpPostC = Pointer<HttpResponseNative> Function(
+    Pointer<Utf8>, Pointer<Utf8>, Pointer<Uint8>, IntPtr, Int32);
+typedef _HttpPostDart = Pointer<HttpResponseNative> Function(
+    Pointer<Utf8>, Pointer<Utf8>, Pointer<Uint8>, int, int);
+final _HttpPostDart _nativeHttpPost = _qjsLib
+    .lookup<NativeFunction<_HttpPostC>>('http_post')
+    .asFunction<_HttpPostDart>();
+
+typedef _HttpResponseFreeC = Void Function(Pointer<HttpResponseNative>);
+typedef _HttpResponseFreeDart = void Function(Pointer<HttpResponseNative>);
+final _HttpResponseFreeDart _nativeHttpResponseFree = _qjsLib
+    .lookup<NativeFunction<_HttpResponseFreeC>>('http_response_free')
+    .asFunction<_HttpResponseFreeDart>();
+
+/// C 原生 HTTP GET
+/// 仅支持 http://，返回 {statusCode, body, headersRaw} 或 null
+Map<String, dynamic>? nativeHttpGet(String url, {String? headers, int timeoutMs = 15000}) {
+  if (!url.startsWith('http://')) return null;
+  final urlPtr = url.toNativeUtf8();
+  final hdrPtr = headers?.toNativeUtf8();
+  try {
+    final respPtr = _nativeHttpGet(urlPtr, hdrPtr ?? nullptr, timeoutMs);
+    if (respPtr == nullptr) return null;
+    final r = respPtr.ref;
+    final result = <String, dynamic>{'statusCode': r.statusCode, 'bodyLen': r.bodyLen};
+    if (r.body != nullptr) result['body'] = r.body.toDartString();
+    if (r.headersRaw != nullptr) result['headersRaw'] = r.headersRaw.toDartString();
+    _nativeHttpResponseFree(respPtr);
+    return result;
+  } catch (_) { return null; }
+  finally {
+    malloc.free(urlPtr);
+    if (hdrPtr != null) malloc.free(hdrPtr);
+  }
+}
+
+/// C 原生 HTTP POST
+Map<String, dynamic>? nativeHttpPost(String url, String body,
+    {String? headers, int timeoutMs = 15000}) {
+  if (!url.startsWith('http://')) return null;
+  final urlPtr = url.toNativeUtf8();
+  final hdrPtr = headers?.toNativeUtf8();
+  final bodyBytes = utf8.encode(body);
+  final bodyPtr = malloc<Uint8>(bodyBytes.length);
+  for (var i = 0; i < bodyBytes.length; i++) bodyPtr[i] = bodyBytes[i];
+  try {
+    final respPtr = _nativeHttpPost(urlPtr, hdrPtr ?? nullptr, bodyPtr, bodyBytes.length, timeoutMs);
+    if (respPtr == nullptr) return null;
+    final r = respPtr.ref;
+    final result = <String, dynamic>{'statusCode': r.statusCode, 'bodyLen': r.bodyLen};
+    if (r.body != nullptr) result['body'] = r.body.toDartString();
+    if (r.headersRaw != nullptr) result['headersRaw'] = r.headersRaw.toDartString();
+    _nativeHttpResponseFree(respPtr);
+    return result;
+  } catch (_) { return null; }
+  finally {
+    malloc.free(urlPtr);
+    if (hdrPtr != null) malloc.free(hdrPtr);
+    malloc.free(bodyPtr);
+  }
+}
 
 // ---------- C 原生 HTML 解析 + CSS 选择器引擎 ----------
 // 解析加速：原子调用 HTML 解析 + CSS 查询 + 属性提取
@@ -267,6 +545,20 @@ final _BridgeClearBytecodeCacheDart _bridgeClearBytecodeCache = _qjsLib
     .lookup<NativeFunction<_BridgeClearBytecodeCacheC>>(
         'quickjs_bridge_clear_bytecode_cache')
     .asFunction<_BridgeClearBytecodeCacheDart>();
+
+// P2: 超时熔断 FFI 绑定
+typedef _SetEvalTimeoutC = Void Function(Pointer<Void>, Uint64);
+typedef _SetEvalTimeoutDart = void Function(Pointer<Void>, int);
+typedef _WasEvalInterruptedC = Int32 Function(Pointer<Void>);
+typedef _WasEvalInterruptedDart = int Function(Pointer<Void>);
+
+final _SetEvalTimeoutDart _setEvalTimeout = _qjsLib
+    .lookup<NativeFunction<_SetEvalTimeoutC>>('quickjs_bridge_set_eval_timeout')
+    .asFunction<_SetEvalTimeoutDart>();
+
+final _WasEvalInterruptedDart _wasEvalInterrupted = _qjsLib
+    .lookup<NativeFunction<_WasEvalInterruptedC>>('quickjs_bridge_was_eval_interrupted')
+    .asFunction<_WasEvalInterruptedDart>();
 
 /// 性能统计快照（Dart 侧纯数据类，便于 UI 消费与序列化）
 class CryptoStats {
@@ -923,6 +1215,97 @@ class JavascriptRuntime {
     if (_bridge != null) _bridgeClearBytecodeCache(_bridge!);
   }
 
+  // ---------- P2: 超时熔断接口 ----------
+
+  /// 设置脚本执行超时阈值（毫秒）
+  ///
+  /// 设置后，[evaluate] 执行超过此阈值的脚本会被自动中断，
+  /// 返回 "ScriptTimeoutError: execution timed out"。
+  ///
+  /// 设为 0 表示禁用超时（默认行为）。
+  ///
+  /// 适用场景：
+  /// - 书源规则中的死循环 / 无限递归
+  /// - 恶意脚本防护
+  /// - UI 线程保护（避免 JS 卡死整个 App）
+  void setEvalTimeout(int timeoutMs) {
+    if (_bridge != null) _setEvalTimeout(_bridge!, timeoutMs);
+  }
+
+  /// 检查上次 evaluate 是否被超时中断
+  bool wasEvalInterrupted() {
+    if (_bridge == null) return false;
+    return _wasEvalInterrupted(_bridge!) != 0;
+  }
+
+  // ---------- 参考 quickjs-ng：JS 引擎内存统计 + GC 控制 ----------
+
+  /// 获取 QuickJS 引擎内部内存统计
+  JsMemoryStats? getJsMemoryStats() {
+    if (_bridge == null) return null;
+    final native = malloc<JsMemoryUsageNative>();
+    try {
+      _getJsMemoryStats(_bridge!, native);
+      return JsMemoryStats.fromNative(native.ref);
+    } catch (_) {
+      return null;
+    } finally {
+      malloc.free(native);
+    }
+  }
+
+  /// 手动触发 QuickJS GC
+  void runGc() {
+    if (_bridge != null) _runGc(_bridge!);
+  }
+
+  // ---------- 参考 quickjs-ng/quickjs-zh：高价值 API ----------
+
+  /// 检查当前 context 是否有异常（不取出）
+  bool hasException() {
+    if (_bridge == null) return false;
+    return _hasException(_bridge!) != 0;
+  }
+
+  /// 设置 Atomics.wait 可用性
+  void setCanBlock(bool canBlock) {
+    if (_bridge != null) _setCanBlock(_bridge!, canBlock ? 1 : 0);
+  }
+
+  /// 流式打印 JS 值（通过 JS 表达式）
+  String? printValue(String jsExpr, {int maxDepth = 0, int maxStringLength = 0}) {
+    if (_bridge == null) return null;
+    final exprPtr = jsExpr.toNativeUtf8();
+    try {
+      final resultPtr = _printValue(_bridge!, exprPtr, maxDepth, maxStringLength);
+      if (resultPtr == nullptr) return null;
+      final result = _safeToDartString(resultPtr);
+      _bridgeFreeString(resultPtr);
+      return result;
+    } catch (_) {
+      return null;
+    } finally {
+      malloc.free(exprPtr);
+    }
+  }
+
+  /// 获取 Promise 状态
+  /// 返回: 0=非Promise, 1=pending, 2=fulfilled, 3=rejected
+  int promiseState(String varName) {
+    if (_bridge == null) return 0;
+    final namePtr = varName.toNativeUtf8();
+    try {
+      return _promiseState(_bridge!, namePtr);
+    } finally {
+      malloc.free(namePtr);
+    }
+  }
+
+  /// 设置不可捕获异常
+  void setUncatchableException(bool flag) {
+    if (_bridge != null) _setUncatchable(_bridge!, flag ? 1 : 0);
+  }
+
   /// Phase 6: 动态策略切换 —— 根据数据量级选择串行 vs 并行路径
   ///
   /// 返回 true 表示应使用批量多线程路径（[lzDecompressBatch] / [aesDecryptLzBatch]），
@@ -948,4 +1331,338 @@ class JavascriptRuntime {
 /// 兼容 flutter_js 的 getJavascriptRuntime 接口
 JavascriptRuntime getJavascriptRuntime() {
   return JavascriptRuntime();
+}
+
+// ---------- P1: 全局内存统计 FFI 绑定 ----------
+// C 结构体 memory_stats_t 的 Dart 镜像
+final class MemoryStatsNative extends Struct {
+  @Uint64()
+  external int totalAllocs;
+  @Uint64()
+  external int totalFrees;
+  @Uint64()
+  external int totalBytesAlloc;
+  @Uint64()
+  external int totalBytesFree;
+  @Int64()
+  external int currentBytes;
+  @Uint64()
+  external int peakBytes;
+  @Uint64()
+  external int allocFailures;
+}
+
+typedef _GetMemoryStatsC = MemoryStatsNative Function();
+typedef _GetMemoryStatsDart = MemoryStatsNative Function();
+typedef _ResetMemoryStatsC = Void Function();
+typedef _ResetMemoryStatsDart = void Function();
+typedef _GetHandleCountC = Int32 Function();
+typedef _GetHandleCountDart = int Function();
+
+final _GetMemoryStatsDart _getMemoryStats = _qjsLib
+    .lookup<NativeFunction<_GetMemoryStatsC>>('quickjs_bridge_get_memory_stats')
+    .asFunction<_GetMemoryStatsDart>();
+
+final _ResetMemoryStatsDart _resetMemoryStats = _qjsLib
+    .lookup<NativeFunction<_ResetMemoryStatsC>>('quickjs_bridge_reset_memory_stats')
+    .asFunction<_ResetMemoryStatsDart>();
+
+final _GetHandleCountDart _getHandleCount = _qjsLib
+    .lookup<NativeFunction<_GetHandleCountC>>('quickjs_bridge_get_active_handle_count')
+    .asFunction<_GetHandleCountDart>();
+
+/// C 层内存统计快照
+class MemoryStats {
+  final int totalAllocs;
+  final int totalFrees;
+  final int totalBytesAlloc;
+  final int totalBytesFree;
+  final int currentBytes;
+  final int peakBytes;
+  final int allocFailures;
+
+  const MemoryStats({
+    required this.totalAllocs,
+    required this.totalFrees,
+    required this.totalBytesAlloc,
+    required this.totalBytesFree,
+    required this.currentBytes,
+    required this.peakBytes,
+    required this.allocFailures,
+  });
+
+  factory MemoryStats.fromNative(MemoryStatsNative n) => MemoryStats(
+        totalAllocs: n.totalAllocs,
+        totalFrees: n.totalFrees,
+        totalBytesAlloc: n.totalBytesAlloc,
+        totalBytesFree: n.totalBytesFree,
+        currentBytes: n.currentBytes,
+        peakBytes: n.peakBytes,
+        allocFailures: n.allocFailures,
+      );
+
+  factory MemoryStats.zero() => const MemoryStats(
+        totalAllocs: 0,
+        totalFrees: 0,
+        totalBytesAlloc: 0,
+        totalBytesFree: 0,
+        currentBytes: 0,
+        peakBytes: 0,
+        allocFailures: 0,
+      );
+
+  /// 当前持有内存（KB）
+  double get currentKB => currentBytes / 1024.0;
+
+  /// 峰值内存（KB）
+  double get peakKB => peakBytes / 1024.0;
+
+  /// 活跃句柄数（QuickJSBridge 实例数）
+  static int get activeHandleCount => _getHandleCount();
+
+  /// 获取全局内存统计快照
+  static MemoryStats get current => MemoryStats.fromNative(_getMemoryStats());
+
+  /// 重置统计
+  static void reset() => _resetMemoryStats();
+
+  @override
+  String toString() => 'MemoryStats(allocs=$totalAllocs, frees=$totalFrees, '
+      'current=${currentKB.toStringAsFixed(1)}KB, peak=${peakKB.toStringAsFixed(1)}KB, '
+      'failures=$allocFailures)';
+}
+
+// ---------- 参考 quickjs-ng：JS 引擎内部内存统计 FFI 绑定 ----------
+// JSMemoryUsage 的 Dart 镜像（20 个 Int64 字段）
+final class JsMemoryUsageNative extends Struct {
+  @Int64()
+  external int mallocSize;
+  @Int64()
+  external int mallocLimit;
+  @Int64()
+  external int memoryUsedSize;
+  @Int64()
+  external int mallocCount;
+  @Int64()
+  external int memoryUsedCount;
+  @Int64()
+  external int atomCount;
+  @Int64()
+  external int atomSize;
+  @Int64()
+  external int strCount;
+  @Int64()
+  external int strSize;
+  @Int64()
+  external int objCount;
+  @Int64()
+  external int objSize;
+  @Int64()
+  external int propCount;
+  @Int64()
+  external int propSize;
+  @Int64()
+  external int shapeCount;
+  @Int64()
+  external int shapeSize;
+  @Int64()
+  external int jsFuncCount;
+  @Int64()
+  external int jsFuncSize;
+  @Int64()
+  external int jsFuncCodeSize;
+  @Int64()
+  external int jsFuncPc2lineCount;
+  @Int64()
+  external int jsFuncPc2lineSize;
+  @Int64()
+  external int cFuncCount;
+  @Int64()
+  external int arrayCount;
+  @Int64()
+  external int fastArrayCount;
+  @Int64()
+  external int fastArrayElements;
+  @Int64()
+  external int binaryObjectCount;
+  @Int64()
+  external int binaryObjectSize;
+}
+
+typedef _GetJsMemoryStatsC = Void Function(Pointer<Void>, Pointer<JsMemoryUsageNative>);
+typedef _GetJsMemoryStatsDart = void Function(Pointer<Void>, Pointer<JsMemoryUsageNative>);
+typedef _RunGcC = Void Function(Pointer<Void>);
+typedef _RunGcDart = void Function(Pointer<Void>);
+
+final _GetJsMemoryStatsDart _getJsMemoryStats = _qjsLib
+    .lookup<NativeFunction<_GetJsMemoryStatsC>>('quickjs_bridge_get_js_memory_stats')
+    .asFunction<_GetJsMemoryStatsDart>();
+
+final _RunGcDart _runGc = _qjsLib
+    .lookup<NativeFunction<_RunGcC>>('quickjs_bridge_run_gc')
+    .asFunction<_RunGcDart>();
+
+/// QuickJS 引擎内部内存统计
+class JsMemoryStats {
+  final int mallocSize;
+  final int mallocLimit;
+  final int memoryUsedSize;
+  final int mallocCount;
+  final int memoryUsedCount;
+  final int atomCount;
+  final int atomSize;
+  final int strCount;
+  final int strSize;
+  final int objCount;
+  final int objSize;
+  final int propCount;
+  final int propSize;
+  final int shapeCount;
+  final int shapeSize;
+  final int jsFuncCount;
+  final int jsFuncSize;
+  final int jsFuncCodeSize;
+  final int cFuncCount;
+  final int arrayCount;
+  final int fastArrayCount;
+  final int fastArrayElements;
+  final int binaryObjectCount;
+  final int binaryObjectSize;
+
+  const JsMemoryStats({
+    required this.mallocSize,
+    required this.mallocLimit,
+    required this.memoryUsedSize,
+    required this.mallocCount,
+    required this.memoryUsedCount,
+    required this.atomCount,
+    required this.atomSize,
+    required this.strCount,
+    required this.strSize,
+    required this.objCount,
+    required this.objSize,
+    required this.propCount,
+    required this.propSize,
+    required this.shapeCount,
+    required this.shapeSize,
+    required this.jsFuncCount,
+    required this.jsFuncSize,
+    required this.jsFuncCodeSize,
+    required this.cFuncCount,
+    required this.arrayCount,
+    required this.fastArrayCount,
+    required this.fastArrayElements,
+    required this.binaryObjectCount,
+    required this.binaryObjectSize,
+  });
+
+  factory JsMemoryStats.fromNative(JsMemoryUsageNative n) => JsMemoryStats(
+        mallocSize: n.mallocSize,
+        mallocLimit: n.mallocLimit,
+        memoryUsedSize: n.memoryUsedSize,
+        mallocCount: n.mallocCount,
+        memoryUsedCount: n.memoryUsedCount,
+        atomCount: n.atomCount,
+        atomSize: n.atomSize,
+        strCount: n.strCount,
+        strSize: n.strSize,
+        objCount: n.objCount,
+        objSize: n.objSize,
+        propCount: n.propCount,
+        propSize: n.propSize,
+        shapeCount: n.shapeCount,
+        shapeSize: n.shapeSize,
+        jsFuncCount: n.jsFuncCount,
+        jsFuncSize: n.jsFuncSize,
+        jsFuncCodeSize: n.jsFuncCodeSize,
+        cFuncCount: n.cFuncCount,
+        arrayCount: n.arrayCount,
+        fastArrayCount: n.fastArrayCount,
+        fastArrayElements: n.fastArrayElements,
+        binaryObjectCount: n.binaryObjectCount,
+        binaryObjectSize: n.binaryObjectSize,
+      );
+
+  /// 已用内存（KB）
+  double get usedKB => memoryUsedSize / 1024.0;
+
+  /// 内存限制（MB）
+  double get limitMB => mallocLimit / (1024.0 * 1024.0);
+
+  /// 对象总数
+  int get totalObjects => objCount + arrayCount + fastArrayCount;
+
+  @override
+  String toString() => 'JsMemoryStats(used=${usedKB.toStringAsFixed(1)}KB, '
+      'limit=${limitMB.toStringAsFixed(0)}MB, objs=$totalObjects, '
+      'strs=$strCount, atoms=$atomCount, funcs=${jsFuncCount + cFuncCount})';
+}
+
+// ---------- 参考 quickjs-ng/quickjs-zh：高价值 API FFI 绑定 ----------
+typedef _DetectModuleC = Int32 Function(Pointer<Utf8>, IntPtr);
+typedef _DetectModuleDart = int Function(Pointer<Utf8>, int);
+typedef _HasExceptionC = Int32 Function(Pointer<Void>);
+typedef _HasExceptionDart = int Function(Pointer<Void>);
+typedef _SetCanBlockC = Void Function(Pointer<Void>, Int32);
+typedef _SetCanBlockDart = void Function(Pointer<Void>, int);
+typedef _PrintValueC = Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Int32, Int32);
+typedef _PrintValueDart = Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, int, int);
+typedef _PromiseStateC = Int32 Function(Pointer<Void>, Pointer<Utf8>);
+typedef _PromiseStateDart = int Function(Pointer<Void>, Pointer<Utf8>);
+typedef _SetUncatchableC = Void Function(Pointer<Void>, Int32);
+typedef _SetUncatchableDart = void Function(Pointer<Void>, int);
+typedef _GetVersionC = Pointer<Utf8> Function();
+typedef _GetVersionDart = Pointer<Utf8> Function();
+
+final _DetectModuleDart _detectModule = _qjsLib
+    .lookup<NativeFunction<_DetectModuleC>>('quickjs_bridge_detect_module')
+    .asFunction<_DetectModuleDart>();
+
+final _HasExceptionDart _hasException = _qjsLib
+    .lookup<NativeFunction<_HasExceptionC>>('quickjs_bridge_has_exception')
+    .asFunction<_HasExceptionDart>();
+
+final _SetCanBlockDart _setCanBlock = _qjsLib
+    .lookup<NativeFunction<_SetCanBlockC>>('quickjs_bridge_set_can_block')
+    .asFunction<_SetCanBlockDart>();
+
+final _PrintValueDart _printValue = _qjsLib
+    .lookup<NativeFunction<_PrintValueC>>('quickjs_bridge_print_value')
+    .asFunction<_PrintValueDart>();
+
+final _PromiseStateDart _promiseState = _qjsLib
+    .lookup<NativeFunction<_PromiseStateC>>('quickjs_bridge_promise_state')
+    .asFunction<_PromiseStateDart>();
+
+final _SetUncatchableDart _setUncatchable = _qjsLib
+    .lookup<NativeFunction<_SetUncatchableC>>('quickjs_bridge_set_uncatchable_exception')
+    .asFunction<_SetUncatchableDart>();
+
+final _GetVersionDart _getVersion = _qjsLib
+    .lookup<NativeFunction<_GetVersionC>>('quickjs_bridge_get_version')
+    .asFunction<_GetVersionDart>();
+
+/// 检测源码是否为 ES 模块（参考 quickjs-zh JS_DetectModule）
+bool nativeDetectModule(String input) {
+  if (kIsWeb) return false;
+  final ptr = input.toNativeUtf8();
+  try {
+    return _detectModule(ptr, ptr.length) != 0;
+  } finally {
+    malloc.free(ptr);
+  }
+}
+
+/// 获取 QuickJS 版本字符串
+String nativeGetQuickJsVersion() {
+  if (kIsWeb) return 'Web (no QuickJS)';
+  try {
+    final ptr = _getVersion();
+    if (ptr == nullptr) return '';
+    final version = _safeToDartString(ptr);
+    // 注意：get_version 返回的是静态字符串，不需要 free
+    return version;
+  } catch (_) {
+    return '';
+  }
 }

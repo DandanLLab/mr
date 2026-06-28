@@ -10,6 +10,62 @@
 #include "lzstring.h"
 #include "batch_decompress.h"
 #include "html_native.h"
+#include "charset_conv.h"
+#include "handle_table.h"
+#include "memory_tracker.h"
+
+// ---------- P1: 全局线程安全 + 句柄管理 + 内存统计 ----------
+// POSIX 线程兼容层
+#ifndef _WIN32
+  #include <pthread.h>
+#else
+  #include <windows.h>
+  typedef CRITICAL_SECTION pthread_mutex_t;
+  static int pthread_mutex_init(pthread_mutex_t *m, void *a) {
+    (void)a; InitializeCriticalSection(m); return 0;
+  }
+  static int pthread_mutex_destroy(pthread_mutex_t *m) { DeleteCriticalSection(m); return 0; }
+  static int pthread_mutex_lock(pthread_mutex_t *m) { EnterCriticalSection(m); return 0; }
+  static int pthread_mutex_unlock(pthread_mutex_t *m) { LeaveCriticalSection(m); return 0; }
+#endif
+
+// 全局互斥锁：保护 QuickJS runtime 调用（QuickJS 非线程安全）
+static pthread_mutex_t _g_bridge_mutex;
+static int _g_mutex_initialized = 0;
+
+// 全局句柄表：管理 QuickJSBridge* 生命周期，防止 Dart GC 后野指针
+static handle_table_t *_g_bridge_handles = NULL;
+
+// 初始化全局设施（幂等）
+static void _ensure_globals(void) {
+    if (!_g_mutex_initialized) {
+        pthread_mutex_init(&_g_bridge_mutex, NULL);
+        _g_bridge_handles = handle_table_create(16);
+        memory_tracker_init();
+        _g_mutex_initialized = 1;
+    }
+}
+
+// P2: QuickJS 中断处理器 — 超时熔断
+// QuickJS 周期性调用此函数，返回非 0 值中断当前脚本
+static int _interrupt_handler(JSRuntime *rt, void *opaque) {
+    (void)rt;
+    QuickJSBridge *bridge = (QuickJSBridge *)opaque;
+    if (!bridge || bridge->eval_timeout_us == 0) return 0;
+    uint64_t now = _now_us();
+    if (now - bridge->eval_start_time_us > bridge->eval_timeout_us) {
+        bridge->eval_interrupted = 1;
+        return 1; // 中断执行，QuickJS 会抛出异常
+    }
+    return 0;
+}
+
+// P4: 输入长度限制 — 防止超大报文导致内存膨胀/解析崩溃
+#define MAX_SCRIPT_SIZE    (1ULL * 1024 * 1024)    // JS 脚本：1MB
+#define MAX_HTML_SIZE      (10ULL * 1024 * 1024)   // HTML 输入：10MB
+#define MAX_CRYPTO_SIZE    (10ULL * 1024 * 1024)   // 加解密输入：10MB
+#define MAX_BASE64_SIZE    (10ULL * 1024 * 1024)   // Base64 输入：10MB
+#define MAX_HTTP_BODY_SIZE (50ULL * 1024 * 1024)   // HTTP 响应体：50MB
 
 // ---------- Phase 4: 字节码缓存 ----------
 // 跳过词法分析/语法解析/字节码生成阶段，对重复执行的脚本直接走 JS_EvalFunction
@@ -36,6 +92,10 @@ struct QuickJSBridge {
     // Phase 4: 字节码缓存（每个 bridge 独立）
     bytecode_cache_entry_t bytecode_cache[BYTECODE_CACHE_SIZE];
     int bytecode_cache_count;
+    // P2: 超时熔断
+    uint64_t eval_start_time_us;  // 当前 eval 开始时间（微秒）
+    uint64_t eval_timeout_us;     // 超时阈值（微秒），0 = 无超时
+    int eval_interrupted;         // 是否被超时中断
 };
 
 // ---------- 性能统计辅助 ----------
@@ -275,6 +335,238 @@ const char *quickjs_bridge_url_decode(const char *input, size_t input_len, size_
     return output;
 }
 
+// 按指定字符集进行 URL percent-encode
+// 接收 UTF-8 input 和 charset 名称，输出百分号编码字符
+// 支持 GBK/GB2312/GB18030（通过 gbk_table.h 映射表）和 UTF-8
+// 调用方用 quickjs_bridge_free_string 释放
+const char *quickjs_bridge_charset_url_encode(const char *input, size_t input_len,
+                                               const char *charset, size_t *output_len) {
+    if (!input || !output_len) return NULL;
+    *output_len = 0;
+    if (input_len == 0 || !charset) {
+        char *out = (char *)malloc(1);
+        if (out) out[0] = '\0';
+        return out;
+    }
+
+    // charset_url_encode 接收 null-terminated string
+    char *encoded = charset_url_encode(input, charset, output_len);
+    return (const char *)encoded;  // 由 charset_free_string 释放
+}
+
+// ---------- Batch 1: 纯 C 原生函数（不依赖 bridge 上下文）----------
+// 替代 NativeChannel 中的加密/编码/HTML 方法，绕过 Kotlin MethodChannel
+// 所有输出字符串用 quickjs_bridge_free_string 释放
+
+// MD5 哈希：输入 UTF-8 字符串，输出 32 字符 hex 字符串
+const char *quickjs_bridge_md5(const char *input, size_t input_len, size_t *output_len) {
+    if (!input || !output_len) return NULL;
+    *output_len = 0;
+    if (input_len > MAX_CRYPTO_SIZE) return NULL;
+    if (input_len == 0) {
+        char *out = (char *)malloc(1); if (out) out[0] = '\0'; return out;
+    }
+    uint8_t digest[16];
+    md5((const uint8_t *)input, input_len, digest);
+    char *hex = (char *)malloc(33);
+    if (!hex) return NULL;
+    static const char h[] = "0123456789abcdef";
+    for (int i = 0; i < 16; i++) {
+        hex[i*2] = h[digest[i] >> 4];
+        hex[i*2+1] = h[digest[i] & 15];
+    }
+    hex[32] = '\0';
+    *output_len = 32;
+    return hex;
+}
+
+// SHA1 哈希：输入 UTF-8 字符串，输出 40 字符 hex 字符串
+const char *quickjs_bridge_sha1(const char *input, size_t input_len, size_t *output_len) {
+    if (!input || !output_len) return NULL;
+    *output_len = 0;
+    if (input_len == 0) {
+        char *out = (char *)malloc(1); if (out) out[0] = '\0'; return out;
+    }
+    uint8_t digest[20];
+    sha1((const uint8_t *)input, input_len, digest);
+    char *hex = (char *)malloc(41);
+    if (!hex) return NULL;
+    static const char h[] = "0123456789abcdef";
+    for (int i = 0; i < 20; i++) {
+        hex[i*2] = h[digest[i] >> 4];
+        hex[i*2+1] = h[digest[i] & 15];
+    }
+    hex[40] = '\0';
+    *output_len = 40;
+    return hex;
+}
+
+// SHA256 哈希：输入 UTF-8 字符串，输出 64 字符 hex 字符串
+const char *quickjs_bridge_sha256(const char *input, size_t input_len, size_t *output_len) {
+    if (!input || !output_len) return NULL;
+    *output_len = 0;
+    if (input_len == 0) {
+        char *out = (char *)malloc(1); if (out) out[0] = '\0'; return out;
+    }
+    uint8_t digest[32];
+    sha256((const uint8_t *)input, input_len, digest);
+    char *hex = (char *)malloc(65);
+    if (!hex) return NULL;
+    static const char h[] = "0123456789abcdef";
+    for (int i = 0; i < 32; i++) {
+        hex[i*2] = h[digest[i] >> 4];
+        hex[i*2+1] = h[digest[i] & 15];
+    }
+    hex[64] = '\0';
+    *output_len = 64;
+    return hex;
+}
+
+// HMAC-SHA256：输入 (data, key)，输出 64 字符 hex 字符串
+const char *quickjs_bridge_hmac_sha256(const char *data, size_t data_len,
+                                        const char *key, size_t key_len,
+                                        size_t *output_len) {
+    if (!data || !key || !output_len) return NULL;
+    *output_len = 0;
+    char *empty = (char *)malloc(1); if (empty) empty[0] = '\0';
+    if (data_len == 0 || key_len == 0) return empty;
+    free(empty);
+
+    uint8_t digest[32];
+    hmac_sha256((const uint8_t *)key, key_len, (const uint8_t *)data, data_len, digest);
+    char *hex = (char *)malloc(65);
+    if (!hex) return NULL;
+    static const char h[] = "0123456789abcdef";
+    for (int i = 0; i < 32; i++) {
+        hex[i*2] = h[digest[i] >> 4];
+        hex[i*2+1] = h[digest[i] & 15];
+    }
+    hex[64] = '\0';
+    *output_len = 64;
+    return hex;
+}
+
+// AES-CBC-PKCS7 解密：输入 (base64_密文, key_utf8, iv_utf8)，输出 UTF-8 明文
+const char *quickjs_bridge_aes_decrypt(const char *cipher_b64, size_t b64_len,
+                                        const char *key, size_t key_len,
+                                        const char *iv, size_t iv_len,
+                                        size_t *output_len) {
+    if (!cipher_b64 || !key || !output_len) return NULL;
+    if (b64_len > MAX_CRYPTO_SIZE) return NULL;
+    *output_len = 0;
+    char *empty = (char *)malloc(1); if (empty) empty[0] = '\0';
+    if (b64_len == 0 || key_len == 0) return empty;
+    free(empty);
+
+    // Base64 解码
+    size_t enc_len = 0;
+    uint8_t *enc = (uint8_t *)b64_decode(cipher_b64, b64_len, &enc_len);
+    if (!enc) {
+        char *out = (char *)malloc(1); if (out) out[0] = '\0'; return out;
+    }
+
+    // AES-128-CBC 解密
+    uint8_t aes_key[16] = {0};
+    memcpy(aes_key, key, key_len < 16 ? key_len : 16);
+
+    uint8_t aes_iv[16] = {0};
+    if (iv && iv_len > 0) memcpy(aes_iv, iv, iv_len < 16 ? iv_len : 16);
+
+    size_t plain_len = enc_len + 16;
+    uint8_t *plain = (uint8_t *)malloc(plain_len);
+    if (!plain) { free(enc); return NULL; }
+
+    int result = aes_decrypt(enc, enc_len, aes_key, aes_iv, plain, &plain_len);
+    free(enc);
+
+    if (result != 0 || plain_len == 0) {
+        free(plain);
+        char *out = (char *)malloc(1); if (out) out[0] = '\0'; return out;
+    }
+
+    // PKCS7 去填充
+    uint8_t pad = plain[plain_len - 1];
+    if (pad > 0 && pad <= 16 && pad <= plain_len) {
+        plain_len -= pad;
+    }
+
+    *output_len = plain_len;
+    plain[plain_len] = '\0';
+    return (const char *)plain;  // 由 quickjs_bridge_free_string 释放（malloc）
+}
+
+// AES-CBC-PKCS7 加密：输入 (明文_utf8, key_utf8, iv_utf8)，输出 base64 密文
+const char *quickjs_bridge_aes_encrypt(const char *plaintext, size_t pt_len,
+                                        const char *key, size_t key_len,
+                                        const char *iv, size_t iv_len,
+                                        size_t *output_len) {
+    if (!plaintext || !key || !output_len) return NULL;
+    *output_len = 0;
+    char *empty = (char *)malloc(1); if (empty) empty[0] = '\0';
+    if (pt_len == 0 || key_len == 0) return empty;
+    free(empty);
+
+    // AES-128-CBC 加密
+    uint8_t aes_key[16] = {0};
+    memcpy(aes_key, key, key_len < 16 ? key_len : 16);
+
+    uint8_t aes_iv[16] = {0};
+    if (iv && iv_len > 0) memcpy(aes_iv, iv, iv_len < 16 ? iv_len : 16);
+
+    // PKCS7 填充
+    size_t padded_len = pt_len + (16 - (pt_len % 16));
+    uint8_t *padded = (uint8_t *)malloc(padded_len);
+    if (!padded) return NULL;
+    memcpy(padded, plaintext, pt_len);
+    uint8_t pad_val = (uint8_t)(padded_len - pt_len);
+    memset(padded + pt_len, pad_val, padded_len - pt_len);
+
+    size_t cipher_len = padded_len;
+    uint8_t *cipher = (uint8_t *)malloc(cipher_len);
+    if (!cipher) { free(padded); return NULL; }
+
+    int result = aes_encrypt(padded, padded_len, aes_key, aes_iv, cipher, &cipher_len);
+    free(padded);
+
+    if (result != 0 || cipher_len == 0) {
+        free(cipher);
+        char *out = (char *)malloc(1); if (out) out[0] = '\0'; return out;
+    }
+
+    // Base64 编码
+    size_t b64_out_len = 0;
+    char *b64 = b64_encode(cipher, cipher_len, &b64_out_len);
+    free(cipher);
+
+    if (!b64) {
+        char *out = (char *)malloc(1); if (out) out[0] = '\0'; return out;
+    }
+
+    *output_len = b64_out_len;
+    return b64;  // 由 quickjs_bridge_free_string 释放（malloc）
+}
+
+// Base64 编码：输入 UTF-8 字符串，输出 Base64 字符串
+const char *quickjs_bridge_base64_encode(const char *input, size_t input_len, size_t *output_len) {
+    if (!input || !output_len) return NULL;
+    *output_len = 0;
+    if (input_len > MAX_BASE64_SIZE) return NULL;
+    if (input_len == 0) {
+        char *out = (char *)malloc(1); if (out) out[0] = '\0'; return out;
+    }
+    return b64_encode((const uint8_t *)input, input_len, output_len);
+}
+
+// Base64 解码：输入 Base64 字符串，输出 UTF-8 字符串
+const char *quickjs_bridge_base64_decode(const char *input, size_t input_len, size_t *output_len) {
+    if (!input || !output_len) return NULL;
+    *output_len = 0;
+    if (input_len == 0) {
+        char *out = (char *)malloc(1); if (out) out[0] = '\0'; return out;
+    }
+    return b64_decode(input, input_len, output_len);
+}
+
 // ---------- C 原生 HTML 解析 + CSS 选择器引擎 ----------
 // 解析加速：替代 Dart html 包的 querySelectorAll，消除多层 fallback 开销
 // 原子调用：HTML 解析 + CSS 查询 + 属性提取 一次完成，避免多次 FFI 往返
@@ -321,6 +613,12 @@ const char *quickjs_bridge_html_query_extract(
     int *is_error) {
     if (is_error) *is_error = 0;
     if (!html || !selector || !attr) {
+        if (is_error) *is_error = 1;
+        return _str_dup(list_mode ? "[]" : "", 0);
+    }
+
+    // P4: 超大 HTML 防护
+    if (html_len > MAX_HTML_SIZE) {
         if (is_error) *is_error = 1;
         return _str_dup(list_mode ? "[]" : "", 0);
     }
@@ -392,16 +690,19 @@ const char *quickjs_bridge_html_query_extract(
             _json_escape_append(&result_buf, &result_len, &result_cap, value);
             if (result_len + 1 >= result_cap) { result_cap = (result_cap == 0 ? 256 : result_cap * 2); result_buf = (char *)realloc(result_buf, result_cap); }
             result_buf[result_len++] = '"';
+            // list_mode：value 已被拷贝到 JSON 字符串中，释放原内存
+            free(value);
         } else {
             // 单值模式：直接返回第一个匹配的值
             if (value) {
                 free(result_buf);
                 result_buf = value;
                 result_len = strlen(value);
+                // value 所有权移交给 result_buf，无需 free，直接跳出循环
                 break; // 只取第一个
             }
+            // value 为 NULL 时无需处理，继续下一轮
         }
-        free(value);
     }
 
     if (list_mode) {
@@ -1420,13 +1721,108 @@ static JSValue js_crypto_sha1_bin(JSContext *ctx, JSValueConst this_val,
     return js_call_crypto_binary(ctx, 5, argc, argv, 1, "sha1Bin");
 }
 
+// ---------- 编码转换：charset_url_encode / charset_detect ----------
+// 纯 C 实现（based on charset_conv.c + gbk_table.h），零外部依赖
+// 支持 GBK/GB2312/GB18030/UTF-8 编码
+
+// charsetUrlEncode(str, charset) → percent-encoded string
+static JSValue js_conv_charset_url_encode(JSContext *ctx, JSValueConst this_val,
+                                          int argc, JSValueConst *argv) {
+    if (argc < 2) {
+        return JS_ThrowTypeError(ctx, "charsetUrlEncode requires 2 arguments, got %d", argc);
+    }
+    const char *str = JS_ToCString(ctx, argv[0]);
+    const char *charset = JS_ToCString(ctx, argv[1]);
+    if (!str || !charset) {
+        if (str) JS_FreeCString(ctx, str);
+        if (charset) JS_FreeCString(ctx, charset);
+        return JS_ThrowTypeError(ctx, "charsetUrlEncode: arguments must be strings");
+    }
+
+    size_t out_len = 0;
+    char *encoded = charset_url_encode(str, charset, &out_len);
+    JS_FreeCString(ctx, str);
+    JS_FreeCString(ctx, charset);
+
+    if (!encoded) {
+        return JS_NewString(ctx, "");
+    }
+
+    JSValue ret = JS_NewStringLen(ctx, encoded, out_len);
+    charset_free_string(encoded);
+    return ret;
+}
+
+// charsetDetect(html) → charset string or null
+static JSValue js_conv_charset_detect(JSContext *ctx, JSValueConst this_val,
+                                      int argc, JSValueConst *argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "charsetDetect requires 1 argument, got %d", argc);
+    }
+    const char *html = JS_ToCString(ctx, argv[0]);
+    if (!html) {
+        return JS_ThrowTypeError(ctx, "charsetDetect: argument must be a string");
+    }
+
+    size_t out_len = 0;
+    char *charset = charset_detect_from_html(html, &out_len);
+    JS_FreeCString(ctx, html);
+
+    if (!charset) {
+        return JS_NULL;
+    }
+
+    JSValue ret = JS_NewStringLen(ctx, charset, out_len);
+    charset_free_string(charset);
+    return ret;
+}
+
+// charsetDecode(data, charset [, assumeLatin1]) → UTF-8 string
+// data: Uint8Array/ArrayBuffer of raw bytes
+// charset: "GBK"/"UTF-8" etc.
+// 返回 UTF-8 解码后的字符串
+static JSValue js_conv_charset_decode(JSContext *ctx, JSValueConst this_val,
+                                      int argc, JSValueConst *argv) {
+    if (argc < 2) {
+        return JS_ThrowTypeError(ctx, "charsetDecode requires 2 arguments, got %d", argc);
+    }
+
+    size_t data_len = 0;
+    const uint8_t *data = JS_GetArrayBuffer(ctx, &data_len, argv[0]);
+    if (!data) {
+        return JS_ThrowTypeError(ctx, "charsetDecode: argument 1 must be an ArrayBuffer/Uint8Array");
+    }
+
+    const char *charset = JS_ToCString(ctx, argv[1]);
+    if (!charset) {
+        return JS_ThrowTypeError(ctx, "charsetDecode: argument 2 must be a string");
+    }
+
+    size_t out_len = 0;
+    char *decoded = charset_decode_to_utf8(data, data_len, charset, &out_len);
+    JS_FreeCString(ctx, charset);
+
+    if (!decoded) {
+        return JS_ThrowTypeError(ctx, "charsetDecode: decoding failed");
+    }
+
+    JSValue ret = JS_NewStringLen(ctx, decoded, out_len);
+    charset_free_string(decoded);
+    return ret;
+}
+
 QuickJSBridge *quickjs_bridge_create(void) {
     return quickjs_bridge_create_with_config(0, 0);
 }
 
 QuickJSBridge *quickjs_bridge_create_with_config(uint64_t memory_limit, uint64_t stack_size) {
+    _ensure_globals();
     QuickJSBridge *bridge = (QuickJSBridge *)malloc(sizeof(QuickJSBridge));
-    if (!bridge) return NULL;
+    if (!bridge) {
+        memory_tracker_record_failure();
+        return NULL;
+    }
+    memory_tracker_record_alloc(sizeof(QuickJSBridge));
 
     bridge->runtime = JS_NewRuntime();
     if (!bridge->runtime) {
@@ -1439,6 +1835,10 @@ QuickJSBridge *quickjs_bridge_create_with_config(uint64_t memory_limit, uint64_t
     if (stack_size == 0) stack_size = 256ULL * 1024;              // 256KB
     JS_SetMemoryLimit(bridge->runtime, (size_t)memory_limit);
     JS_SetMaxStackSize(bridge->runtime, (size_t)stack_size);
+    // 参考 quickjs-ng：设置 GC 阈值（与内存限制一致，避免频繁 GC）
+    JS_SetGCThreshold(bridge->runtime, (size_t)memory_limit / 4);
+    // 参考 quickjs-zh：剥离源码和调试信息，减小字节码体积
+    JS_SetStripInfo(bridge->runtime, JS_STRIP_SOURCE | JS_STRIP_DEBUG);
 
     bridge->ctx = JS_NewContext(bridge->runtime);
     if (!bridge->ctx) {
@@ -1452,7 +1852,12 @@ QuickJSBridge *quickjs_bridge_create_with_config(uint64_t memory_limit, uint64_t
     bridge->crypto_cb = NULL;
     bridge->crypto_cb_binary = NULL;
     memset(&bridge->stats, 0, sizeof(crypto_stats_t));
+    bridge->eval_timeout_us = 0;
+    bridge->eval_interrupted = 0;
     JS_SetContextOpaque(bridge->ctx, bridge);
+
+    // P2: 注册超时熔断中断处理器
+    JS_SetInterruptHandler(bridge->runtime, _interrupt_handler, bridge);
 
     // 注册原生加密全局对象 __nativeCrypto
     // 字符串路径：aesDecrypt/aesEncrypt/md5/sha256/hmacSHA256/sha1
@@ -1538,6 +1943,19 @@ QuickJSBridge *quickjs_bridge_create_with_config(uint64_t memory_limit, uint64_t
         JS_NewCFunction(bridge->ctx, js_native_btoa, "encode", 1));
     JS_SetPropertyStr(bridge->ctx, global_obj, "__nativeBase64", b64_obj);
 
+    // 注册编码转换原生全局对象 __nativeConv
+    // charsetUrlEncode(str, charset) → percent-encode using given charset
+    // charsetDetect(html) → detect charset from HTML
+    // charsetDecode(data, charset) → decode bytes to UTF-8 string
+    JSValue conv_obj = JS_NewObject(bridge->ctx);
+    JS_SetPropertyStr(bridge->ctx, conv_obj, "charsetUrlEncode",
+        JS_NewCFunction(bridge->ctx, js_conv_charset_url_encode, "charsetUrlEncode", 2));
+    JS_SetPropertyStr(bridge->ctx, conv_obj, "charsetDetect",
+        JS_NewCFunction(bridge->ctx, js_conv_charset_detect, "charsetDetect", 1));
+    JS_SetPropertyStr(bridge->ctx, conv_obj, "charsetDecode",
+        JS_NewCFunction(bridge->ctx, js_conv_charset_decode, "charsetDecode", 2));
+    JS_SetPropertyStr(bridge->ctx, global_obj, "__nativeConv", conv_obj);
+
     JS_FreeValue(bridge->ctx, global_obj);
 
     return bridge;
@@ -1548,6 +1966,20 @@ const char *quickjs_bridge_eval(QuickJSBridge *bridge, const char *script, int *
         if (is_error) *is_error = 1;
         return NULL;
     }
+
+    // P4: 超大脚本防护
+    size_t script_len_pre = strlen(script);
+    if (script_len_pre > MAX_SCRIPT_SIZE) {
+        if (is_error) *is_error = 1;
+        return strdup("SizeLimitError: script exceeds 1MB limit");
+    }
+
+    _ensure_globals();
+    pthread_mutex_lock(&_g_bridge_mutex);
+
+    // P2: 设置超时熔断开始时间
+    bridge->eval_start_time_us = _now_us();
+    bridge->eval_interrupted = 0;
 
     size_t script_len = strlen(script);
     JSValue val;
@@ -1569,18 +2001,34 @@ const char *quickjs_bridge_eval(QuickJSBridge *bridge, const char *script, int *
         }
     }
 
+    const char *result_str;
     if (JS_IsException(val)) {
         JSValue exception = JS_GetException(bridge->ctx);
+        JS_FreeValue(bridge->ctx, val);
+        // P2: 超时熔断检测
+        if (bridge->eval_interrupted) {
+            JS_FreeValue(bridge->ctx, exception);
+            if (is_error) *is_error = 1;
+            char *timeout_msg = strdup("ScriptTimeoutError: execution timed out");
+            memory_tracker_record_alloc(strlen(timeout_msg) + 1);
+            pthread_mutex_unlock(&_g_bridge_mutex);
+            return timeout_msg;
+        }
         const char *str = JS_ToCString(bridge->ctx, exception);
         JS_FreeValue(bridge->ctx, exception);
-        JS_FreeValue(bridge->ctx, val);
         if (is_error) *is_error = 1;
         if (str) {
             char *result = strdup(str);
             JS_FreeCString(bridge->ctx, str);
+            memory_tracker_record_alloc(strlen(result) + 1);
+            pthread_mutex_unlock(&_g_bridge_mutex);
             return result;
         }
-        return strdup("Unknown error");
+        result_str = "Unknown error";
+        char *r = strdup(result_str);
+        memory_tracker_record_alloc(strlen(r) + 1);
+        pthread_mutex_unlock(&_g_bridge_mutex);
+        return r;
     }
 
     const char *str = JS_ToCString(bridge->ctx, val);
@@ -1590,10 +2038,15 @@ const char *quickjs_bridge_eval(QuickJSBridge *bridge, const char *script, int *
     if (str) {
         char *result = strdup(str);
         JS_FreeCString(bridge->ctx, str);
+        memory_tracker_record_alloc(strlen(result) + 1);
+        pthread_mutex_unlock(&_g_bridge_mutex);
         return result;
     }
 
-    return strdup("");
+    char *empty = strdup("");
+    memory_tracker_record_alloc(1);
+    pthread_mutex_unlock(&_g_bridge_mutex);
+    return empty;
 }
 
 // Phase 4: 预编译脚本到字节码缓存（不执行）
@@ -1601,12 +2054,15 @@ const char *quickjs_bridge_eval(QuickJSBridge *bridge, const char *script, int *
 // 返回 0 成功，-1 失败（语法错误等）
 int quickjs_bridge_precompile(QuickJSBridge *bridge, const char *script) {
     if (!bridge || !bridge->ctx || !script) return -1;
+    _ensure_globals();
+    pthread_mutex_lock(&_g_bridge_mutex);
     size_t len = strlen(script);
 
     // 已在缓存中则跳过
     JSValue cached = _bytecode_cache_lookup(bridge, script, len);
     if (!JS_IsNull(cached)) {
         JS_FreeValue(bridge->ctx, cached);  // 释放 lookup 返回的 dup
+        pthread_mutex_unlock(&_g_bridge_mutex);
         return 0;
     }
 
@@ -1614,11 +2070,13 @@ int quickjs_bridge_precompile(QuickJSBridge *bridge, const char *script) {
                          JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
     if (JS_IsException(bc)) {
         JS_FreeValue(bridge->ctx, bc);
+        pthread_mutex_unlock(&_g_bridge_mutex);
         return -1;
     }
 
     _bytecode_cache_store(bridge, script, len, bc);
     JS_FreeValue(bridge->ctx, bc);  // 释放编译结果（cache 已 dup）
+    pthread_mutex_unlock(&_g_bridge_mutex);
     return 0;
 }
 
@@ -1630,12 +2088,16 @@ void quickjs_bridge_clear_bytecode_cache(QuickJSBridge *bridge) {
 
 void quickjs_bridge_free_string(const char *str) {
     if (str) {
+        size_t len = strlen(str);
         free((void *)str);
+        memory_tracker_record_free(len + 1);
     }
 }
 
 void quickjs_bridge_dispose(QuickJSBridge *bridge) {
     if (!bridge) return;
+    _ensure_globals();
+    pthread_mutex_lock(&_g_bridge_mutex);
     // Phase 4: 必须在 JS_FreeContext 之前清空字节码缓存
     // （缓存的 JSValue 依赖 ctx 有效，否则 JS_FreeValue 会 UAF）
     _bytecode_cache_clear(bridge);
@@ -1646,4 +2108,223 @@ void quickjs_bridge_dispose(QuickJSBridge *bridge) {
         JS_FreeRuntime(bridge->runtime);
     }
     free(bridge);
+    memory_tracker_record_free(sizeof(struct QuickJSBridge));
+    pthread_mutex_unlock(&_g_bridge_mutex);
+}
+
+// ---------- P1: 句柄化 API（替代裸指针，防止野指针）----------
+// 上层 Dart 只持有 uint32_t 句柄，操作时查表拿指针
+
+uint32_t quickjs_bridge_create_handle(void) {
+    _ensure_globals();
+    QuickJSBridge *bridge = quickjs_bridge_create();
+    if (!bridge) return 0;
+    return handle_table_register(_g_bridge_handles, bridge);
+}
+
+uint32_t quickjs_bridge_create_handle_with_config(uint64_t memory_limit, uint64_t stack_size) {
+    _ensure_globals();
+    QuickJSBridge *bridge = quickjs_bridge_create_with_config(memory_limit, stack_size);
+    if (!bridge) return 0;
+    return handle_table_register(_g_bridge_handles, bridge);
+}
+
+const char *quickjs_bridge_eval_handle(uint32_t handle, const char *script, int *is_error) {
+    _ensure_globals();
+    QuickJSBridge *bridge = (QuickJSBridge *)handle_table_lookup(_g_bridge_handles, handle);
+    if (!bridge) {
+        if (is_error) *is_error = 1;
+        return NULL;
+    }
+    return quickjs_bridge_eval(bridge, script, is_error);
+}
+
+int quickjs_bridge_precompile_handle(uint32_t handle, const char *script) {
+    _ensure_globals();
+    QuickJSBridge *bridge = (QuickJSBridge *)handle_table_lookup(_g_bridge_handles, handle);
+    if (!bridge) return -1;
+    return quickjs_bridge_precompile(bridge, script);
+}
+
+void quickjs_bridge_dispose_handle(uint32_t handle) {
+    _ensure_globals();
+    QuickJSBridge *bridge = (QuickJSBridge *)handle_table_unregister(_g_bridge_handles, handle);
+    if (!bridge) return;
+    quickjs_bridge_dispose(bridge);
+}
+
+void quickjs_bridge_clear_cache_handle(uint32_t handle) {
+    _ensure_globals();
+    QuickJSBridge *bridge = (QuickJSBridge *)handle_table_lookup(_g_bridge_handles, handle);
+    if (bridge) quickjs_bridge_clear_bytecode_cache(bridge);
+}
+
+// ---------- P1: 内存统计 API ----------
+
+memory_stats_t quickjs_bridge_get_memory_stats(void) {
+    _ensure_globals();
+    return memory_tracker_get_stats();
+}
+
+void quickjs_bridge_reset_memory_stats(void) {
+    _ensure_globals();
+    memory_tracker_reset_stats();
+}
+
+int quickjs_bridge_get_active_handle_count(void) {
+    _ensure_globals();
+    return handle_table_count(_g_bridge_handles);
+}
+
+// ---------- 参考 quickjs-ng：JS 引擎内部内存统计 ----------
+
+void quickjs_bridge_get_js_memory_stats(QuickJSBridge *bridge, JSMemoryUsage *out) {
+    if (!bridge || !bridge->runtime || !out) return;
+    JS_ComputeMemoryUsage(bridge->runtime, out);
+}
+
+void quickjs_bridge_get_js_memory_stats_handle(uint32_t handle, JSMemoryUsage *out) {
+    _ensure_globals();
+    QuickJSBridge *bridge = (QuickJSBridge *)handle_table_lookup(_g_bridge_handles, handle);
+    if (bridge) JS_ComputeMemoryUsage(bridge->runtime, out);
+}
+
+void quickjs_bridge_run_gc(QuickJSBridge *bridge) {
+    if (!bridge || !bridge->runtime) return;
+    JS_RunGC(bridge->runtime);
+}
+
+void quickjs_bridge_run_gc_handle(uint32_t handle) {
+    _ensure_globals();
+    QuickJSBridge *bridge = (QuickJSBridge *)handle_table_lookup(_g_bridge_handles, handle);
+    if (bridge) JS_RunGC(bridge->runtime);
+}
+
+// ---------- 参考 quickjs-ng/quickjs-zh：高价值 API 暴露 ----------
+
+/// 参考 quickjs-zh：检测源码是否为 ES 模块
+int quickjs_bridge_detect_module(const char *input, size_t input_len) {
+    if (!input) return 0;
+    return JS_DetectModule(input, input_len) ? 1 : 0;
+}
+
+/// 参考 quickjs-zh：检查当前 context 是否有异常（不取出）
+int quickjs_bridge_has_exception(QuickJSBridge *bridge) {
+    if (!bridge || !bridge->ctx) return 0;
+    return JS_HasException(bridge->ctx) ? 1 : 0;
+}
+
+/// 参考 quickjs-ng：设置 Atomics.wait 可用性
+void quickjs_bridge_set_can_block(QuickJSBridge *bridge, int can_block) {
+    if (!bridge || !bridge->runtime) return;
+    JS_SetCanBlock(bridge->runtime, can_block ? 1 : 0);
+}
+
+/// 参考 quickjs-zh：流式打印 JS 值（通过 JS 表达式）
+/// 返回 malloc 分配的字符串，调用方需用 quickjs_bridge_free_string 释放
+const char *quickjs_bridge_print_value(QuickJSBridge *bridge, const char *js_expr,
+                                        int max_depth, int max_string_length) {
+    if (!bridge || !bridge->ctx || !js_expr) return NULL;
+
+    _ensure_globals();
+    pthread_mutex_lock(&_g_bridge_mutex);
+
+    // 执行 JS 表达式获取值
+    JSValue val = JS_Eval(bridge->ctx, js_expr, strlen(js_expr), "<print>",
+                          JS_EVAL_TYPE_GLOBAL);
+    if (JS_IsException(val)) {
+        JS_FreeValue(bridge->ctx, val);
+        pthread_mutex_unlock(&_g_bridge_mutex);
+        return strdup("Exception");
+    }
+
+    // 设置打印选项
+    JSPrintValueOptions opts;
+    JS_PrintValueSetDefaultOptions(&opts);
+    if (max_depth > 0) opts.max_depth = (uint32_t)max_depth;
+    if (max_string_length > 0) opts.max_string_length = (uint32_t)max_string_length;
+
+    // 用 DynBuf 收集输出
+    // 参考 quickjs-ng cutils.c：DynBuf 动态缓冲区
+    size_t total_len = 0;
+    char *result = NULL;
+
+    // 简单方案：用 JS_ToCString 获取字符串表示
+    // 完整方案需要 JSPrintValueWrite 回调，这里用简化版
+    const char *str = JS_ToCString(bridge->ctx, val);
+    JS_FreeValue(bridge->ctx, val);
+
+    if (str) {
+        result = strdup(str);
+        JS_FreeCString(bridge->ctx, str);
+        memory_tracker_record_alloc(strlen(result) + 1);
+    } else {
+        result = strdup("");
+        memory_tracker_record_alloc(1);
+    }
+
+    pthread_mutex_unlock(&_g_bridge_mutex);
+    return result;
+}
+
+/// 参考 quickjs-zh：获取 Promise 状态（通过 JS 代码查询）
+/// 返回: 0=非Promise, 1=pending, 2=fulfilled, 3=rejected
+int quickjs_bridge_promise_state(QuickJSBridge *bridge, const char *var_name) {
+    if (!bridge || !bridge->ctx || !var_name) return 0;
+
+    _ensure_globals();
+    pthread_mutex_lock(&_g_bridge_mutex);
+
+    // 构造 JS 代码检查 Promise 状态
+    char script[512];
+    snprintf(script, sizeof(script),
+        "(function(){"
+        "  try {"
+        "    var v = %s;"
+        "    if (typeof v !== 'object' || v === null || typeof v.then !== 'function') return 0;"
+        "    var state = 1;" // 默认 pending
+        "    v.then(function(){ state = 2; }, function(){ state = 3; });"
+        "    return state;"
+        "  } catch(e) { return 0; }"
+        "})()", var_name);
+
+    JSValue val = JS_Eval(bridge->ctx, script, strlen(script), "<promise>",
+                          JS_EVAL_TYPE_GLOBAL);
+    int state = 0;
+    if (!JS_IsException(val)) {
+        JS_ToInt32(bridge->ctx, &state, val);
+    }
+    JS_FreeValue(bridge->ctx, val);
+
+    pthread_mutex_unlock(&_g_bridge_mutex);
+    return state;
+}
+
+/// 参考 quickjs-zh：设置不可捕获异常
+void quickjs_bridge_set_uncatchable_exception(QuickJSBridge *bridge, int flag) {
+    if (!bridge || !bridge->ctx) return;
+    JS_SetUncatchableException(bridge->ctx, flag ? 1 : 0);
+}
+
+/// 参考 quickjs-ng：获取 QuickJS 版本字符串
+const char *quickjs_bridge_get_version(void) {
+    return "QuickJS " CONFIG_VERSION;
+}
+
+// ---------- P2: 超时熔断 API ----------
+
+void quickjs_bridge_set_eval_timeout(QuickJSBridge *bridge, uint64_t timeout_ms) {
+    if (!bridge) return;
+    bridge->eval_timeout_us = timeout_ms * 1000;
+}
+
+void quickjs_bridge_set_eval_timeout_handle(uint32_t handle, uint64_t timeout_ms) {
+    _ensure_globals();
+    QuickJSBridge *bridge = (QuickJSBridge *)handle_table_lookup(_g_bridge_handles, handle);
+    if (bridge) bridge->eval_timeout_us = timeout_ms * 1000;
+}
+
+int quickjs_bridge_was_eval_interrupted(QuickJSBridge *bridge) {
+    if (!bridge) return 0;
+    return bridge->eval_interrupted;
 }

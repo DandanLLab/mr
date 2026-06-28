@@ -1,7 +1,15 @@
 import 'package:flutter/services.dart';
 
-/// Android 原生平台通道
-/// 桥接 OkHttp（高性能HTTP）、Jsoup（HTML解析）、加解密、数据持久化等原生库
+/// 原生平台通道
+/// 保留 C FFI 无法替代的平台特有 API：
+/// - 屏幕亮度（平台 UI API）
+/// - HTTPS HTTP 请求（C HTTP 仅支持 http://）
+/// - HTTP HEAD / Cookie / 下载
+/// - WebView JS 执行（平台 WebView API）
+/// - 设备信息
+/// - 数据存储
+///
+/// 已淘汰的 AES/MD5/SHA/Base64/Jsoup/字符集编码 请走 C FFI。
 class NativeChannel {
   static NativeChannel? _instance;
   static NativeChannel get instance => _instance ??= NativeChannel._();
@@ -12,9 +20,11 @@ class NativeChannel {
     'com.mr.app/native',
   );
 
+  // ===== 屏幕亮度（平台 UI API，C FFI 无法替代）=====
+
   Future<double> getScreenBrightness() async {
     try {
-      return await _channel.invokeMethod<double>('getScreenBrightness') ?? -1;
+    return await _channel.invokeMethod<double>('getScreenBrightness') ?? -1;
     } on PlatformException {
       return -1;
     }
@@ -31,8 +41,8 @@ class NativeChannel {
     }
   }
 
-  /// OkHttp: 高性能 HTTP 请求
-  /// 支持拦截器、缓存、WebSocket、HTTP/2、连接池复用
+  // ===== HTTPS HTTP 请求（C HTTP 仅支持 http://，https:// 走平台）=====
+
   Future<String?> httpGet(
     String url, {
     Map<String, String>? headers,
@@ -50,7 +60,6 @@ class NativeChannel {
     }
   }
 
-  /// OkHttp: POST 请求
   Future<String?> httpPost(
     String url, {
     String? body,
@@ -70,94 +79,26 @@ class NativeChannel {
     }
   }
 
-  /// Jsoup: 解析 HTML 并提取文本
-  /// 支持CSS选择器、XPath等高级选择方式
-  Future<String?> jsoupSelect(String html, String cssSelector) async {
-    try {
-      final result = await _channel.invokeMethod<String>('jsoupSelect', {
-        'html': html,
-        'selector': cssSelector,
-      });
-      return result;
-    } on PlatformException {
-      return null;
-    }
-  }
+  // ===== HTTP HEAD / Cookie / 下载 =====
 
-  /// Jsoup: 提取所有匹配元素的文本
-  Future<List<String>?> jsoupSelectAll(String html, String cssSelector) async {
+  Future<Map<String, String>?> httpHead(String url, {Map<String, String>? headers}) async {
     try {
-      final result = await _channel.invokeMethod<List>('jsoupSelectAll', {
-        'html': html,
-        'selector': cssSelector,
-      });
-      return result?.cast<String>();
-    } on PlatformException {
-      return null;
-    }
-  }
-
-  /// Jsoup: 提取元素属性
-  Future<String?> jsoupGetAttr(
-    String html,
-    String cssSelector,
-    String attr,
-  ) async {
-    try {
-      final result = await _channel.invokeMethod<String>('jsoupGetAttr', {
-        'html': html,
-        'selector': cssSelector,
-        'attr': attr,
-      });
-      return result;
-    } on PlatformException {
-      return null;
-    }
-  }
-
-  /// Jsoup: 清理 HTML（移除脚本/样式等）
-  Future<String?> jsoupClean(String html) async {
-    try {
-      final result = await _channel.invokeMethod<String>('jsoupClean', {
-        'html': html,
-      });
-      return result;
-    } on PlatformException {
-      return null;
-    }
-  }
-
-  /// OkHttp: 带缓存的请求（适用于书源内容缓存）
-  Future<String?> httpGetWithCache(
-    String url, {
-    Map<String, String>? headers,
-    int cacheMaxAge = 3600,
-  }) async {
-    try {
-      final result = await _channel.invokeMethod<String>('httpGetWithCache', {
+      final result = await _channel.invokeMethod<Map>('httpHead', {
         'url': url,
         'headers': headers,
-        'cacheMaxAge': cacheMaxAge,
       });
-      return result;
+      if (result == null) return null;
+      return result.map((k, v) => MapEntry(k, v?.toString() ?? ''));
     } on PlatformException {
       return null;
     }
   }
 
-  // ===== 新增桥接方法 =====
-
-  /// Jsoup: 从 URL 直接解析 HTML
-  Future<String?> jsoupParseUrl(
-    String url, {
-    Map<String, String>? headers,
-    String? cssSelector,
-  }) async {
+  Future<String?> getCookie(String url, {String? key}) async {
     try {
-      final result = await _channel.invokeMethod<String>('jsoupParseUrl', {
+      final result = await _channel.invokeMethod<String>('getCookie', {
         'url': url,
-        'headers': headers,
-        'selector': cssSelector,
+        'key': key,
       });
       return result;
     } on PlatformException {
@@ -165,20 +106,6 @@ class NativeChannel {
     }
   }
 
-  /// Jsoup: 获取所有链接
-  Future<List<String>?> jsoupGetLinks(String html, {String? baseUrl}) async {
-    try {
-      final result = await _channel.invokeMethod<List>('jsoupGetLinks', {
-        'html': html,
-        'baseUrl': baseUrl,
-      });
-      return result?.cast<String>();
-    } on PlatformException {
-      return null;
-    }
-  }
-
-  /// OkHttp: 下载文件
   Future<String?> httpDownload(
     String url,
     String savePath, {
@@ -196,165 +123,8 @@ class NativeChannel {
     }
   }
 
-  /// AES 加密
-  Future<String?> aesEncrypt(String data, String key, {String? iv}) async {
-    try {
-      final result = await _channel.invokeMethod<String>('aesEncrypt', {
-        'data': data,
-        'key': key,
-        'iv': iv,
-      });
-      return result;
-    } on PlatformException {
-      return null;
-    }
-  }
+  // ===== 设备信息 =====
 
-  /// AES 解密
-  Future<String?> aesDecrypt(String data, String key, {String? iv}) async {
-    try {
-      final result = await _channel.invokeMethod<String>('aesDecrypt', {
-        'data': data,
-        'key': key,
-        'iv': iv,
-      });
-      return result;
-    } on PlatformException {
-      return null;
-    }
-  }
-
-  /// MD5 哈希
-  Future<String?> md5(String data) async {
-    try {
-      final result = await _channel.invokeMethod<String>('md5', {'data': data});
-      return result;
-    } on PlatformException {
-      return null;
-    }
-  }
-
-  /// SHA1 哈希
-  Future<String?> sha1(String data) async {
-    try {
-      final result = await _channel.invokeMethod<String>('sha1', {'data': data});
-      return result;
-    } on PlatformException {
-      return null;
-    }
-  }
-
-  /// SHA256 哈希
-  Future<String?> sha256(String data) async {
-    try {
-      final result = await _channel.invokeMethod<String>('sha256', {'data': data});
-      return result;
-    } on PlatformException {
-      return null;
-    }
-  }
-
-  /// HMAC-SHA256
-  Future<String?> hmacSHA256(String data, String key) async {
-    try {
-      final result = await _channel.invokeMethod<String>('hmacSHA256', {
-        'data': data,
-        'key': key,
-      });
-      return result;
-    } on PlatformException {
-      return null;
-    }
-  }
-
-  /// HTTP HEAD 请求
-  Future<Map<String, String>?> httpHead(String url, {Map<String, String>? headers}) async {
-    try {
-      final result = await _channel.invokeMethod<Map>('httpHead', {
-        'url': url,
-        'headers': headers,
-      });
-      if (result == null) return null;
-      return result.map((k, v) => MapEntry(k, v?.toString() ?? ''));
-    } on PlatformException {
-      return null;
-    }
-  }
-
-  /// 获取 Cookie
-  Future<String?> getCookie(String url, {String? key}) async {
-    try {
-      final result = await _channel.invokeMethod<String>('getCookie', {
-        'url': url,
-        'key': key,
-      });
-      return result;
-    } on PlatformException {
-      return null;
-    }
-  }
-
-  /// Base64 编码
-  Future<String?> base64Encode(String data) async {
-    try {
-      final result = await _channel.invokeMethod<String>('base64Encode', {
-        'data': data,
-      });
-      return result;
-    } on PlatformException {
-      return null;
-    }
-  }
-
-  /// Base64 解码
-  Future<String?> base64Decode(String data) async {
-    try {
-      final result = await _channel.invokeMethod<String>('base64Decode', {
-        'data': data,
-      });
-      return result;
-    } on PlatformException {
-      return null;
-    }
-  }
-
-  /// 存储键值对
-  Future<bool> putData(String key, String value) async {
-    try {
-      await _channel.invokeMethod<void>('putData', {
-        'key': key,
-        'value': value,
-      });
-      return true;
-    } on PlatformException {
-      return false;
-    }
-  }
-
-  /// 读取键值对
-  Future<String?> getData(String key, {String defaultValue = ''}) async {
-    try {
-      final result = await _channel.invokeMethod<String>('getData', {
-        'key': key,
-        'defaultValue': defaultValue,
-      });
-      return result;
-    } on PlatformException {
-      return null;
-    }
-  }
-
-  /// 删除键值对
-  Future<bool> deleteData(String key) async {
-    try {
-      await _channel.invokeMethod<void>('deleteData', {'key': key});
-      return true;
-    } on PlatformException {
-      return false;
-    }
-  }
-
-  /// 获取设备信息（SDK版本等）
   Future<Map<String, dynamic>?> getDeviceInfo() async {
     try {
       final result = await _channel.invokeMethod<Map>('getDeviceInfo');
@@ -365,16 +135,8 @@ class NativeChannel {
     }
   }
 
-  // ===== WebView JS 执行（借鉴 legado 的 BackstageWebView）=====
+  // ===== WebView JS =====
 
-  /// 在 WebView 中加载 URL 并执行 JS 代码
-  /// 借鉴 legado 的 BackstageWebView.getStrResponse()
-  ///
-  /// [url] 要加载的页面 URL
-  /// [jsCode] 页面加载完成后执行的 JS 代码
-  /// [sourceRegex] 资源嗅探正则（可选，用于嗅探视频/音频 URL）
-  /// [html] 预加载的 HTML（可选，不加载 URL 直接用 HTML）
-  /// [delayTime] JS 执行延迟时间（毫秒，默认 200）
   Future<String?> executeWebViewJs({
     required String url,
     required String jsCode,
@@ -396,4 +158,57 @@ class NativeChannel {
     }
   }
 
+  // ===== 数据持久化 =====
+
+  Future<bool> putData(String key, String value) async {
+    try {
+      await _channel.invokeMethod<void>('putData', {
+        'key': key,
+        'value': value,
+      });
+      return true;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<String?> getData(String key, {String defaultValue = ''}) async {
+    try {
+      final result = await _channel.invokeMethod<String>('getData', {
+        'key': key,
+        'defaultValue': defaultValue,
+      });
+      return result;
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  Future<bool> deleteData(String key) async {
+    try {
+      await _channel.invokeMethod<void>('deleteData', {'key': key});
+      return true;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  // ===== 带缓存的请求（仅限平台级 https://）=====
+
+  Future<String?> httpGetWithCache(
+    String url, {
+    Map<String, String>? headers,
+    int cacheMaxAge = 3600,
+  }) async {
+    try {
+      final result = await _channel.invokeMethod<String>('httpGetWithCache', {
+        'url': url,
+        'headers': headers,
+        'cacheMaxAge': cacheMaxAge,
+      });
+      return result;
+    } on PlatformException {
+      return null;
+    }
+  }
 }

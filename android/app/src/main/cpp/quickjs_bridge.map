@@ -1,6 +1,9 @@
 {
   global:
     quickjs_bridge_*;
+    http_get;
+    http_post;
+    http_response_free;
     get_cpu_count;
     lz_decompress_batch;
     aes_decrypt_lz_batch;

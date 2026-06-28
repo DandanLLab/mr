@@ -2,6 +2,7 @@
 #define QUICKJS_BRIDGE_H
 
 #include "quickjs.h"
+#include "memory_tracker.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -108,6 +109,46 @@ const char *quickjs_bridge_url_encode(const char *input, size_t input_len, size_
 // URL 解码（percent-decode，+ 解码为空格）
 const char *quickjs_bridge_url_decode(const char *input, size_t input_len, size_t *output_len);
 
+// ---------- Batch 1: 纯 C 原生函数（不依赖 bridge 上下文）----------
+// 替代 NativeChannel 中的加密/编码/HTML 方法，绕过 Kotlin MethodChannel
+// 所有输出字符串用 quickjs_bridge_free_string 释放
+//
+// 注意：这些函数不接收 bridge 参数，不依赖 QuickJS 运行时，
+//       纯 C 计算后返回 malloc 字符串。
+//       适合 Dart FFI 直接调用，全程绕过 MethodChannel。
+
+// MD5 哈希：输入 UTF-8 字符串，输出 32 字符 hex 字符串
+const char *quickjs_bridge_md5(const char *input, size_t input_len, size_t *output_len);
+
+// SHA1 哈希：输入 UTF-8 字符串，输出 40 字符 hex 字符串
+const char *quickjs_bridge_sha1(const char *input, size_t input_len, size_t *output_len);
+
+// SHA256 哈希：输入 UTF-8 字符串，输出 64 字符 hex 字符串
+const char *quickjs_bridge_sha256(const char *input, size_t input_len, size_t *output_len);
+
+// HMAC-SHA256：输入 (data, key)，输出 64 字符 hex 字符串
+const char *quickjs_bridge_hmac_sha256(const char *data, size_t data_len,
+                                        const char *key, size_t key_len,
+                                        size_t *output_len);
+
+// AES-CBC-PKCS7 解密：输入 (base64_密文, key_utf8, iv_utf8)，输出 UTF-8 明文
+const char *quickjs_bridge_aes_decrypt(const char *cipher_b64, size_t b64_len,
+                                        const char *key, size_t key_len,
+                                        const char *iv, size_t iv_len,
+                                        size_t *output_len);
+
+// AES-CBC-PKCS7 加密：输入 (明文_utf8, key_utf8, iv_utf8)，输出 base64 密文
+const char *quickjs_bridge_aes_encrypt(const char *plaintext, size_t pt_len,
+                                        const char *key, size_t key_len,
+                                        const char *iv, size_t iv_len,
+                                        size_t *output_len);
+
+// Base64 编码：输入 UTF-8 字符串，输出 Base64 字符串
+const char *quickjs_bridge_base64_encode(const char *input, size_t input_len, size_t *output_len);
+
+// Base64 解码：输入 Base64 字符串，输出 UTF-8 字符串
+const char *quickjs_bridge_base64_decode(const char *input, size_t input_len, size_t *output_len);
+
 // ---------- C 原生 HTML 解析 + CSS 选择器引擎 ----------
 // 解析加速：替代 Dart html 包的 querySelectorAll，消除多层 fallback 开销
 // 原子调用：HTML 解析 + CSS 查询 + 属性提取 一次完成
@@ -124,6 +165,66 @@ const char *quickjs_bridge_html_query_extract(
     const char *attr,
     int list_mode,
     int *is_error);
+
+// ---------- P1: 句柄化 API（替代裸指针，防止野指针）----------
+// 上层 Dart 只持有 uint32_t 句柄，操作时查表拿指针
+// 旧裸指针 API 保留向后兼容，新代码优先使用句柄 API
+
+uint32_t quickjs_bridge_create_handle(void);
+uint32_t quickjs_bridge_create_handle_with_config(uint64_t memory_limit, uint64_t stack_size);
+const char *quickjs_bridge_eval_handle(uint32_t handle, const char *script, int *is_error);
+int quickjs_bridge_precompile_handle(uint32_t handle, const char *script);
+void quickjs_bridge_dispose_handle(uint32_t handle);
+void quickjs_bridge_clear_cache_handle(uint32_t handle);
+
+// ---------- P1: 内存统计 API ----------
+// 全局内存分配/释放统计，通过 FFI 暴露给 Dart 做线上监控
+
+memory_stats_t quickjs_bridge_get_memory_stats(void);
+void quickjs_bridge_reset_memory_stats(void);
+int quickjs_bridge_get_active_handle_count(void);
+
+// ---------- 参考 quickjs-ng：JS 引擎内部内存统计 + GC 控制 ----------
+// 暴露 QuickJS 内部的 JSMemoryUsage（20 个分项统计）
+
+void quickjs_bridge_get_js_memory_stats(QuickJSBridge *bridge, JSMemoryUsage *out);
+void quickjs_bridge_get_js_memory_stats_handle(uint32_t handle, JSMemoryUsage *out);
+void quickjs_bridge_run_gc(QuickJSBridge *bridge);
+void quickjs_bridge_run_gc_handle(uint32_t handle);
+
+// ---------- 参考 quickjs-ng/quickjs-zh：高价值 API 暴露 ----------
+
+/// 检测源码是否为 ES 模块（参考 quickjs-zh JS_DetectModule）
+int quickjs_bridge_detect_module(const char *input, size_t input_len);
+
+/// 检查当前 context 是否有异常（参考 quickjs-zh JS_HasException）
+int quickjs_bridge_has_exception(QuickJSBridge *bridge);
+
+/// 设置 Atomics.wait 可用性（参考 quickjs-ng JS_SetCanBlock）
+void quickjs_bridge_set_can_block(QuickJSBridge *bridge, int can_block);
+
+/// 流式打印 JS 值（参考 quickjs-zh JS_PrintValue）
+/// 返回 malloc 字符串，需用 quickjs_bridge_free_string 释放
+const char *quickjs_bridge_print_value(QuickJSBridge *bridge, const char *js_expr,
+                                        int max_depth, int max_string_length);
+
+/// 获取 Promise 状态（参考 quickjs-zh JS_PromiseState）
+/// 返回: 0=非Promise, 1=pending, 2=fulfilled, 3=rejected
+int quickjs_bridge_promise_state(QuickJSBridge *bridge, const char *var_name);
+
+/// 设置不可捕获异常（参考 quickjs-zh JS_SetUncatchableException）
+void quickjs_bridge_set_uncatchable_exception(QuickJSBridge *bridge, int flag);
+
+/// 获取 QuickJS 版本字符串
+const char *quickjs_bridge_get_version(void);
+
+// ---------- P2: 超时熔断 API ----------
+// 防止 JS 死循环/无限递归阻塞 C 调度线程
+// 设置超时后，eval 超时会中断 QuickJS 上下文并返回 "ScriptTimeoutError"
+
+void quickjs_bridge_set_eval_timeout(QuickJSBridge *bridge, uint64_t timeout_ms);
+void quickjs_bridge_set_eval_timeout_handle(uint32_t handle, uint64_t timeout_ms);
+int quickjs_bridge_was_eval_interrupted(QuickJSBridge *bridge);
 
 #ifdef __cplusplus
 }

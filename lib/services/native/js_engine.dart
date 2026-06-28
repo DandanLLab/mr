@@ -321,6 +321,8 @@ class JsEngine {
     if (_initialized) return true;
     try {
       _jsRuntime = getJavascriptRuntime();
+      // P2: 设置默认 JS 执行超时 5 秒，防止死循环卡死 App
+      _jsRuntime!.setEvalTimeout(5000);
       // 先标记运行时可用，再注入 polyfills
       // 注意：_initialized 在所有注入完成后才设为 true
       await _injectNodePolyfills();
@@ -386,6 +388,49 @@ class JsEngine {
     }
   }
 
+  // ===== 参考 quickjs-ng/quickjs-zh：高价值 API 代理 =====
+
+  /// QuickJS 引擎版本号（Web 平台返回 'Web (no QuickJS)'）
+  String get quickJsVersion {
+    try {
+      return nativeGetQuickJsVersion();
+    } catch (_) {
+      return 'unknown';
+    }
+  }
+
+  /// 获取 QuickJS 引擎内部内存统计（20+ 字段，来自 JS_ComputeMemoryUsage）
+  /// 返回 null 表示 runtime 未初始化（Web 平台返回零值对象）
+  JsMemoryStats? getJsMemoryStats() => _jsRuntime?.getJsMemoryStats();
+
+  /// 手动触发 GC（JS_RunGC）
+  void runGc() => _jsRuntime?.runGc();
+
+  /// 检查当前 context 是否有未捕获的异常（不取出）
+  bool get hasException => _jsRuntime?.hasException() ?? false;
+
+  /// 获取 Promise 状态
+  /// 返回: 0=非Promise, 1=pending, 2=fulfilled, 3=rejected
+  int promiseState(String varName) {
+    if (_jsRuntime == null) return 0;
+    try {
+      return _jsRuntime!.promiseState(varName);
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// 流式打印 JS 值（调试用）
+  String? printValue(String jsExpr, {int maxDepth = 0, int maxStringLength = 0}) {
+    if (_jsRuntime == null) return null;
+    try {
+      return _jsRuntime!.printValue(jsExpr,
+          maxDepth: maxDepth, maxStringLength: maxStringLength);
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ===== 解析加速：原生字符串工具（代理到 C 层）=====
 
   /// C 原生 HTML 实体反转义
@@ -398,10 +443,11 @@ class JsEngine {
     }
   }
 
-  /// C 原生 URL 编码（RFC 3986 percent-encode）
-  String urlEncodeNative(String input) {
+  /// C 原生 URL 编码（支持指定字符集：GBK/GB2312/GB18030/UTF-8）
+  /// 通过 quickjs_bridge_charset_url_encode 实现
+  String urlEncodeNative(String input, String charset) {
     try {
-      return nativeUrlEncode(input);
+      return nativeCharsetUrlEncode(input, charset);
     } catch (_) {
       return input;
     }
@@ -4537,7 +4583,14 @@ class JsEngine {
       final customHeaders = env?['headers'] as Map<String, String>?;
       final futures = httpUrls.map((url) async {
         try {
-          final result = await NativeChannel.instance.httpGet(url, headers: customHeaders);
+          String? result;
+          if (url.startsWith('http://')) {
+            final r = nativeHttpGet(url,
+                headers: customHeaders?.entries.map((e) => '${e.key}: ${e.value}').join('\r\n'));
+            result = r?['body'] as String?;
+          } else {
+            result = await NativeChannel.instance.httpGet(url, headers: customHeaders);
+          }
           if (result != null) {
             return MapEntry('http_get:$url', result);
           }
@@ -4569,8 +4622,8 @@ class JsEngine {
           if (str != null) {
             final cacheKey = 'md5:$str';
             if (!_isCached(cacheKey)) {
-              final result = await NativeChannel.instance.md5(str);
-              if (result != null) cryptoResults[cacheKey] = result;
+              final result = nativeMd5(str);
+              cryptoResults[cacheKey] = result;
             }
           }
         }
@@ -4581,10 +4634,8 @@ class JsEngine {
           if (str != null) {
             final cacheKey = 'sha1:$str';
             if (!_isCached(cacheKey)) {
-              try {
-                final result = await NativeChannel.instance.sha1(str);
-                if (result != null) cryptoResults[cacheKey] = result;
-              } catch (_) {}
+              final result = nativeSha1(str);
+              if (result.isNotEmpty) cryptoResults[cacheKey] = result;
             }
           }
         }
@@ -4596,8 +4647,8 @@ class JsEngine {
             final cacheKey = 'sha256:$str';
             if (!_isCached(cacheKey)) {
               try {
-                final result = await NativeChannel.instance.sha256(str);
-                if (result != null) cryptoResults[cacheKey] = result;
+                final result = nativeSha256(str);
+                if (result.isNotEmpty) cryptoResults[cacheKey] = result;
               } catch (_) {}
             }
           }
@@ -4611,8 +4662,8 @@ class JsEngine {
             final cacheKey = 'hmac_sha256:$data:$key';
             if (!_isCached(cacheKey)) {
               try {
-                final result = await NativeChannel.instance.hmacSHA256(data, key);
-                if (result != null) cryptoResults[cacheKey] = result;
+                final result = nativeHmacSha256(data, key);
+                if (result.isNotEmpty) cryptoResults[cacheKey] = result;
               } catch (_) {}
             }
           }
@@ -4647,11 +4698,18 @@ class JsEngine {
           final customHeaders = env?['headers'] as Map<String, String>?;
           final postFutures = postUrls.entries.map((entry) async {
             try {
-              final result = await NativeChannel.instance.httpPost(
-                entry.key,
-                body: entry.value,
-                headers: customHeaders,
-              );
+              String? result;
+              if (entry.key.startsWith('http://')) {
+                final hdr = customHeaders?.entries.map((e) => '${e.key}: ${e.value}').join('\r\n');
+                final r = nativeHttpPost(entry.key, entry.value, headers: hdr);
+                result = r?['body'] as String?;
+              } else {
+                result = await NativeChannel.instance.httpPost(
+                  entry.key,
+                  body: entry.value,
+                  headers: customHeaders,
+                );
+              }
               if (result != null) {
                 return MapEntry('http_post:${entry.key}', result);
               }
@@ -4841,7 +4899,8 @@ class JsEngine {
       // 缓存 key 同 JS 侧 java.cacheFile/java.downloadFile 用的 key
       final cacheKey = method == 'cacheFile' ? 'cache_file:$absoluteUrl' : 'download_file:$absoluteUrl';
       // 保存路径：用 url md5 作为文件名
-      final saveName = (await NativeChannel.instance.md5(absoluteUrl) ?? absoluteUrl.hashCode.toString());
+      var saveName = nativeMd5(absoluteUrl);
+      if (saveName.isEmpty) saveName = absoluteUrl.hashCode.toString();
       final savePath = '/tmp/mr_$saveName';
 
       downloadFutures.add(() async {
@@ -4990,8 +5049,8 @@ class JsEngine {
             String localPath;
             if (firstArg.startsWith('http://') || firstArg.startsWith('https://')) {
               // URL：先下载（如果尚未下载）
-              final saveName = (await NativeChannel.instance.md5(firstArg)) ??
-                  'archive_${DateTime.now().millisecondsSinceEpoch}';
+              var saveName = nativeMd5(firstArg);
+              if (saveName.isEmpty) saveName = 'archive_${DateTime.now().millisecondsSinceEpoch}';
               localPath = '$tempPath/$saveName';
               try {
                 await NativeChannel.instance.httpDownload(firstArg, localPath);

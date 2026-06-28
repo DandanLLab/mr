@@ -18,11 +18,15 @@ set(QUICKJS_SOURCES
     ${QUICKJS_SRC_DIR}/lzstring.c
     ${QUICKJS_SRC_DIR}/batch_decompress.c
     ${QUICKJS_SRC_DIR}/html_native.c
+    ${QUICKJS_SRC_DIR}/charset_conv.c
     ${QUICKJS_SRC_DIR}/crypto/md5.c
     ${QUICKJS_SRC_DIR}/crypto/sha1.c
     ${QUICKJS_SRC_DIR}/crypto/sha256.c
     ${QUICKJS_SRC_DIR}/crypto/hmac_sha256.c
     ${QUICKJS_SRC_DIR}/crypto/aes.c
+    ${QUICKJS_SRC_DIR}/http_client.c
+    ${QUICKJS_SRC_DIR}/handle_table.c
+    ${QUICKJS_SRC_DIR}/memory_tracker.c
 )
 
 # 编译为共享库 libquickjs_c_bridge.so
@@ -79,3 +83,9 @@ target_link_libraries(quickjs_c_bridge
     log    # Android log（日志输出）
     m      # 数学库（QuickJS 需要）
 )
+
+# 参考 quickjs-ng：Windows 平台栈大小必须设为 8MB
+# MSVC 默认 1MB 与 QuickJS 的 1MB JS 栈相同会溢出崩溃
+if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+    target_link_options(quickjs_c_bridge PRIVATE /STACK:8388608)
+endif()

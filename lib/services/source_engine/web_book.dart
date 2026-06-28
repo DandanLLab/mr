@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
@@ -9,11 +10,12 @@ import '../../models/chapter.dart';
 import '../app_logger.dart';
 import 'analyze_rule.dart';
 import 'analyze_url.dart' as legado_url;
+import 'charset_utils.dart';
 import 'web_proxy.dart';
 import 'proxy_service.dart';
 import '../native/js_advanced_service.dart';
 import '../native/js_engine.dart';
-import '../native/platform_channel.dart';
+import '../native/quickjs_runtime.dart' show nativeHttpGet, nativeHttpPost;
 
 /// URL 请求选项（类似 OkHttp 的 Request.Builder）
 class UrlOption {
@@ -168,32 +170,31 @@ class HttpClient {
         );
       }
 
-      // Android/iOS 原生端：优先使用 OkHttp（NativeChannel）
+      // 原生端：HTTP 走 C 原生 socket（零 MethodChannel），HTTPS 走 Dio
       if (!kIsWeb) {
         try {
           final timeoutMs =
               (connectTimeout ?? const Duration(seconds: 15)).inMilliseconds;
           String? okResult;
 
-          debugPrint('🔵 [OkHttp] $method $url');
+          debugPrint('🔵 [Native HTTP] $method $url');
           AppLogger.instance.logRequest(method, url, headers: headers);
-          if (method.toUpperCase() == 'POST') {
-            okResult = await NativeChannel.instance.httpPost(
-              url,
-              body: body,
-              headers: headers,
-              timeoutMs: timeoutMs,
-            );
-          } else {
-            okResult = await NativeChannel.instance.httpGet(
-              url,
-              headers: headers,
-              timeoutMs: timeoutMs,
-            );
+          if (url.startsWith('http://')) {
+            if (method.toUpperCase() == 'POST') {
+              final r = nativeHttpPost(url, body ?? '',
+                  headers: headers != null ? headers.entries.map((e) => '${e.key}: ${e.value}').join('\r\n') : null,
+                  timeoutMs: timeoutMs);
+              okResult = r?['body'] as String?;
+            } else {
+              final r = nativeHttpGet(url,
+                  headers: headers != null ? headers.entries.map((e) => '${e.key}: ${e.value}').join('\r\n') : null,
+                  timeoutMs: timeoutMs);
+              okResult = r?['body'] as String?;
+            }
           }
 
           debugPrint(
-              '🔵 [OkHttp] 响应: ${okResult != null ? "${okResult.length} chars" : "null"}');
+              '🔵 [Native HTTP] 响应: ${okResult != null ? "${okResult.length} chars" : "null"}');
           AppLogger.instance.logResponse(url, 200, okResult?.length ?? 0);
           if (okResult != null && okResult.isNotEmpty) {
             return StrResponse(
@@ -204,21 +205,43 @@ class HttpClient {
             );
           }
 
-          // OkHttp 返回 null 或空字符串，降级到 Dio
-          debugPrint('⚠️ OkHttp 返回空，降级到 Dio: $url');
+          // C native 返回 null 或空字符串，降级到 Dio
+          debugPrint('⚠️ Native HTTP 返回空，降级到 Dio: $url');
         } catch (e) {
-          debugPrint('⚠️ OkHttp 异常，降级到 Dio: $e');
+          debugPrint('⚠️ Native HTTP 异常，降级到 Dio: $e');
         }
       }
 
       // 降级方案：使用 Dio
+      // 当 charset 为非 UTF-8 时，用 ResponseType.bytes 获取原始字节后手动解码，
+      // 确保 GBK/GB2312/GB18030 等编码正确转换
+      final useBytes = charset != null && charset.trim().toLowerCase() != 'utf-8' && charset.trim().toLowerCase() != 'utf8';
       final options = Options(
         method: method,
         headers: headers,
-        responseType: ResponseType.plain,
+        responseType: useBytes ? ResponseType.bytes : ResponseType.plain,
         receiveTimeout: readTimeout,
         sendTimeout: connectTimeout,
       );
+
+      if (useBytes) {
+        final response = await _dio.request<List<int>>(
+          url,
+          data: body,
+          options: options,
+        );
+        final bodyStr = CharsetUtils.decodeResponse(
+          Uint8List.fromList(response.data ?? []), charset);
+        return StrResponse(
+          url: response.realUri.toString(),
+          body: bodyStr,
+          statusCode: response.statusCode ?? 200,
+          headers: response.headers.map.map(
+            (key, value) => MapEntry(key, value.first),
+          ),
+          raw: response,
+        );
+      }
 
       final response = await _dio.request<String>(
         url,

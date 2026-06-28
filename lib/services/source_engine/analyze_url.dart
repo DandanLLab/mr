@@ -1,6 +1,7 @@
 import 'dart:convert';
 import '../app_logger.dart';
 import '../native/js_engine.dart';
+import 'charset_utils.dart';
 
 class UrlOption {
   final String? method;
@@ -391,16 +392,27 @@ class AnalyzeUrl {
   }
 
   /// charset 编码处理（借鉴 legado 的 encodeParams）
+  /// 对非 UTF-8 编码的搜索关键词进行字符集转码
   static String _encodeWithCharset(String url, String charset, {String? keyword}) {
     // 支持 charset=escape 使用 escape 编码
     if (charset.toLowerCase() == 'escape' && keyword != null) {
-      // Dart 没有 escape，使用 URI 编码近似
       return url;
     }
 
-    // 支持 GBK/GB2312 等编码
-    // 注意：Dart 原生不支持 GBK 编码，需要通过 NativeChannel 处理
-    // 这里只做标记，实际编码在请求时处理
+    if (keyword != null && keyword.isNotEmpty) {
+      final cs = charset.trim().toLowerCase();
+      if (cs != 'utf-8' && cs != 'utf8' && cs != '' && cs != 'escape') {
+        // 非 UTF-8 编码（如 GBK/GB2312）：重新编码搜索词
+        // 之前 _resolveUrl 已经用 Uri.encodeComponent (UTF-8) 编码了 keyword
+        // 这里替换为指定字符集的 percent-encoding
+        final utf8Encoded = Uri.encodeComponent(keyword);
+        final csEncoded = CharsetUtils.urlEncode(keyword, charset);
+        if (utf8Encoded != csEncoded) {
+          return url.replaceFirst(utf8Encoded, csEncoded);
+        }
+      }
+    }
+
     return url;
   }
 
