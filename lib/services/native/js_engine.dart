@@ -2667,13 +2667,44 @@ class JsEngine {
       ''');
     } catch (_) {}
 
-    // 4. 注入 CryptoJS（使用纯 JS _AES 引擎，支持 WordArray 格式）
+    // 4. 注入 CryptoJS（优先走原生 __nativeCrypto，失败回退纯 JS _AES 引擎）
     final cryptoCode = '''
       var CryptoJS = {
         AES: {
           encrypt: function(data, key, cfg) {
             var iv = cfg && cfg.iv ? cfg.iv : null;
             var mode = (cfg && cfg.mode === CryptoJS.mode.ECB) ? 'ECB' : 'CBC';
+
+            // 优先走原生 AES 加密（仅 CBC 模式）
+            if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto &&
+                __nativeCrypto.aesEncrypt && mode === 'CBC') {
+              try {
+                var dataStr;
+                if (typeof data === 'string') {
+                  dataStr = data;
+                } else if (data && data.toString) {
+                  dataStr = data.toString();
+                } else {
+                  dataStr = String(data);
+                }
+                var keyStr = CryptoJS.enc.Utf8.stringify(key);
+                var ivStr = iv ? CryptoJS.enc.Utf8.stringify(iv) : '';
+                var nativeResult = __nativeCrypto.aesEncrypt(dataStr, keyStr, ivStr);
+                if (nativeResult !== null && nativeResult !== undefined) {
+                  return {
+                    toString: function() { return nativeResult; },
+                    ciphertext: { toString: function(enc) {
+                      if (enc === CryptoJS.enc.Base64) return nativeResult;
+                      return nativeResult;
+                    }}
+                  };
+                }
+              } catch (e) {
+                // native 失败，回退到纯 JS _AES 引擎
+              }
+            }
+
+            // 回退：纯 JS _AES 引擎
             var result = _AES.encrypt(data, key, iv, mode);
             return { toString: function() { return result; }, ciphertext: { toString: function(enc) { return result; } } };
           },
@@ -2681,8 +2712,7 @@ class JsEngine {
             var iv = cfg && cfg.iv ? cfg.iv : null;
             var mode = (cfg && cfg.mode === CryptoJS.mode.ECB) ? 'ECB' : 'CBC';
 
-            // 优先走原生 AES（性能好、无 surrogate 编码问题）
-            // 仅 CBC 模式且 __nativeCrypto 可用时启用
+            // 优先走原生 AES 解密（仅 CBC 模式）
             if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto &&
                 __nativeCrypto.aesDecrypt && mode === 'CBC') {
               try {
@@ -2696,7 +2726,7 @@ class JsEngine {
                   dataB64 = String(data);
                 }
 
-                // WordArray → UTF-8 字符串（用 enc.Utf8.stringify 的同款逻辑）
+                // WordArray → UTF-8 字符串
                 var keyStr = CryptoJS.enc.Utf8.stringify(key);
                 var ivStr = iv ? CryptoJS.enc.Utf8.stringify(iv) : '';
 
@@ -2722,10 +2752,44 @@ class JsEngine {
             return { toString: function(enc) { return result; } };
           },
         },
-        MD5: function(str) { return { toString: function() { return java.md5Encode(str); } }; },
-        SHA1: function(str) { return { toString: function() { return java.sha1Encode ? java.sha1Encode(str) : ''; } }; },
-        SHA256: function(str) { return { toString: function() { return java.sha256Encode ? java.sha256Encode(str) : ''; } }; },
-        HmacSHA256: function(data, key) { return { toString: function() { return java.hmacSHA256 ? java.hmacSHA256(data, key) : ''; } }; },
+        MD5: function(str) {
+          // 优先走原生
+          if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto && __nativeCrypto.md5) {
+            try {
+              var r = __nativeCrypto.md5(str);
+              if (r) return { toString: function() { return r; } };
+            } catch (e) {}
+          }
+          return { toString: function() { return java.md5Encode(str); } };
+        },
+        SHA1: function(str) {
+          if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto && __nativeCrypto.sha1) {
+            try {
+              var r = __nativeCrypto.sha1(str);
+              if (r) return { toString: function() { return r; } };
+            } catch (e) {}
+          }
+          return { toString: function() { return java.sha1Encode ? java.sha1Encode(str) : ''; } };
+        },
+        SHA256: function(str) {
+          if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto && __nativeCrypto.sha256) {
+            try {
+              var r = __nativeCrypto.sha256(str);
+              if (r) return { toString: function() { return r; } };
+            } catch (e) {}
+          }
+          return { toString: function() { return java.sha256Encode ? java.sha256Encode(str) : ''; } };
+        },
+        HmacSHA256: function(data, key) {
+          if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto && __nativeCrypto.hmacSHA256) {
+            try {
+              var keyStr = (typeof key === 'string') ? key : CryptoJS.enc.Utf8.stringify(key);
+              var r = __nativeCrypto.hmacSHA256(data, keyStr);
+              if (r) return { toString: function() { return r; } };
+            } catch (e) {}
+          }
+          return { toString: function() { return java.hmacSHA256 ? java.hmacSHA256(data, key) : ''; } };
+        },
         enc: {
           Utf8: {
             parse: function(s) { return _AES.utf8Parse(s); },
