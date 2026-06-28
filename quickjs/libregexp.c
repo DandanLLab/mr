@@ -3426,7 +3426,7 @@ int main(int argc, char **argv)
     input = argv[3];
     input_len = strlen(input);
 
-    capture = malloc(sizeof(capture[0]) * lre_get_alloc_count(bc));
+    capture = calloc(lre_get_alloc_count(bc), sizeof(capture[0]));
     ret = lre_exec(capture, bc, (uint8_t *)input, 0, input_len, 0, NULL);
     printf("ret=%d\n", ret);
     if (ret == 1) {
