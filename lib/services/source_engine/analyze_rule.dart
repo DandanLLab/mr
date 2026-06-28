@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 import 'package:html/src/query_selector.dart' as html_query;
@@ -420,10 +419,9 @@ class AnalyzeRule {
 
       // 构建步骤描述
       final stepDesc = '步骤${i + 1}/${ruleList.length} mode=${appliedRule.mode}';
-      if (kDebugMode) {
-        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc',
-          detail: 'rule=${appliedRule.rule}, inputLen=${result?.toString().length ?? 0}');
-      }
+      // JS 执行链路日志（info 级别，Release 模式可见）
+      AppLogger.instance.logJsStep('AnalyzeRule', stepDesc,
+        detail: 'rule=${appliedRule.rule}, inputLen=${result?.toString().length ?? 0}');
 
       // 执行规则（传递 stepDesc 给追踪器）
       final ruleResult = _applyRule(result, appliedRule, listMode: false, ruleStep: stepDesc);
@@ -436,14 +434,12 @@ class AnalyzeRule {
         result = ruleResult;
       }
 
-      // 记录步骤输出
-      if (kDebugMode) {
-        final resultType = result?.runtimeType;
-        final resultLen = result?.toString().length ?? 0;
-        final resultPreview = result?.toString();
-        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc 完成',
-          detail: 'resultType=$resultType, resultLen=$resultLen, preview=$resultPreview');
-      }
+      // 记录步骤输出（info 级别，Release 模式可见）
+      final resultType = result?.runtimeType;
+      final resultLen = result?.toString().length ?? 0;
+      final resultPreview = result?.toString();
+      AppLogger.instance.logJsStep('AnalyzeRule', '$stepDesc 完成',
+        detail: 'resultType=$resultType, resultLen=$resultLen, preview=$resultPreview');
 
       // 应用正则替换
       if (result != null && rule.replaceRegex.isNotEmpty) {
@@ -451,14 +447,9 @@ class AnalyzeRule {
       }
     }
 
-    // 输出完整 JS 执行树
-    if (kDebugMode) {
-      final treeStr = JsTracer.instance.getTreeString();
-      if (treeStr.isNotEmpty && treeStr != '(no trace)') {
-        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] JS执行树',
-          detail: treeStr);
-      }
-    }
+    // 输出完整 JS 执行树（info 级别，Release 模式可见）
+    final treeStr = JsTracer.instance.getTreeString();
+    AppLogger.instance.logJsTree('AnalyzeRule', treeStr);
 
     if (result == null) return null;
 
@@ -504,10 +495,9 @@ class AnalyzeRule {
 
       // 构建步骤描述
       final stepDesc = '步骤${i + 1}/${ruleList.length} mode=${appliedRule.mode}';
-      if (kDebugMode) {
-        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc (async)',
-          detail: 'rule=${appliedRule.rule}, inputLen=${result?.toString().length ?? 0}');
-      }
+      // JS 执行链路日志（info 级别，Release 模式可见）
+      AppLogger.instance.logJsStep('AnalyzeRule', '$stepDesc (async)',
+        detail: 'rule=${appliedRule.rule}, inputLen=${result?.toString().length ?? 0}');
 
       // JS 步骤走异步路径，非 JS 步骤走同步路径
       if (appliedRule.mode == RuleMode.js || appliedRule.mode == RuleMode.webJs) {
@@ -525,14 +515,12 @@ class AnalyzeRule {
         result = _applyRule(result, appliedRule, listMode: false, ruleStep: stepDesc);
       }
 
-      // 记录步骤输出
-      if (kDebugMode) {
-        final resultType = result?.runtimeType;
-        final resultLen = result?.toString().length ?? 0;
-        final resultPreview = result?.toString();
-        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc 完成 (async)',
-          detail: 'resultType=$resultType, resultLen=$resultLen, preview=$resultPreview');
-      }
+      // 记录步骤输出（info 级别，Release 模式可见）
+      final resultType = result?.runtimeType;
+      final resultLen = result?.toString().length ?? 0;
+      final resultPreview = result?.toString();
+      AppLogger.instance.logJsStep('AnalyzeRule', '$stepDesc 完成 (async)',
+        detail: 'resultType=$resultType, resultLen=$resultLen, preview=$resultPreview');
 
       // 应用正则替换
       if (result != null && rule.replaceRegex.isNotEmpty) {
@@ -540,14 +528,9 @@ class AnalyzeRule {
       }
     }
 
-    // 输出完整 JS 执行树
-    if (kDebugMode) {
-      final treeStr = JsTracer.instance.getTreeString();
-      if (treeStr.isNotEmpty && treeStr != '(no trace)') {
-        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] JS执行树',
-          detail: treeStr);
-      }
-    }
+    // 输出完整 JS 执行树（info 级别，Release 模式可见）
+    final treeStr = JsTracer.instance.getTreeString();
+    AppLogger.instance.logJsTree('AnalyzeRule', treeStr);
 
     if (result == null) return null;
 
@@ -597,10 +580,9 @@ class AnalyzeRule {
       final contentStr = _serializeContent(content);
       final codePreview = jsCode;
 
-      if (kDebugMode) {
-        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] 异步JS执行',
-          detail: 'content=${contentStr.length}chars, contentType=${content?.runtimeType}, code=$codePreview');
-      }
+      // JS 执行链路日志（info 级别，Release 模式可见）
+      AppLogger.instance.logJsStep('AnalyzeRule', '异步JS执行',
+        detail: 'content=${contentStr.length}chars, contentType=${content?.runtimeType}, code=$codePreview');
 
       // 追踪树：创建节点
       JsTraceNode? traceNode;
@@ -723,10 +705,9 @@ class AnalyzeRule {
       final appliedRule = await _applyVariablesAsync(rule, result);
 
       final stepDesc = '步骤${i + 1}/${ruleList.length} mode=${appliedRule.mode} (list)';
-      if (kDebugMode) {
-        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc (async)',
-          detail: 'rule=${appliedRule.rule}, inputLen=${result?.toString().length ?? 0}');
-      }
+      // JS 执行链路日志（info 级别，Release 模式可见）
+      AppLogger.instance.logJsStep('AnalyzeRule', '$stepDesc (async)',
+        detail: 'rule=${appliedRule.rule}, inputLen=${result?.toString().length ?? 0}');
 
       // JS 步骤走异步，非 JS 走同步
       if (appliedRule.mode == RuleMode.js || appliedRule.mode == RuleMode.webJs) {
@@ -744,12 +725,11 @@ class AnalyzeRule {
         result = _applyRule(result, appliedRule, listMode: true, ruleStep: stepDesc);
       }
 
-      if (kDebugMode) {
-        final resultType = result?.runtimeType;
-        final resultLen = result is List ? result.length : result?.toString().length ?? 0;
-        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc 完成 (async)',
-          detail: 'resultType=$resultType, resultLen=$resultLen');
-      }
+      // 步骤完成日志（info 级别，Release 模式可见）
+      final resultType = result?.runtimeType;
+      final resultLen = result is List ? result.length : result?.toString().length ?? 0;
+      AppLogger.instance.logJsStep('AnalyzeRule', '$stepDesc 完成 (async)',
+        detail: 'resultType=$resultType, resultLen=$resultLen');
 
       if (result != null && rule.replaceRegex.isNotEmpty) {
         if (result is List) {
@@ -760,14 +740,9 @@ class AnalyzeRule {
       }
     }
 
-    // 输出完整 JS 执行树
-    if (kDebugMode) {
-      final treeStr = JsTracer.instance.getTreeString();
-      if (treeStr.isNotEmpty && treeStr != '(no trace)') {
-        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] JS执行树',
-          detail: treeStr);
-      }
-    }
+    // 输出完整 JS 执行树（info 级别，Release 模式可见）
+    final treeStr = JsTracer.instance.getTreeString();
+    AppLogger.instance.logJsTree('AnalyzeRule', treeStr);
 
     if (result == null) return [];
 
@@ -856,10 +831,9 @@ class AnalyzeRule {
       final appliedRule = await _applyVariablesAsync(rule, result);
 
       final stepDesc = '步骤${i + 1}/${ruleList.length} mode=${appliedRule.mode} (elements)';
-      if (kDebugMode) {
-        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc (async)',
-          detail: 'rule=${appliedRule.rule}, inputLen=${result?.toString().length ?? 0}');
-      }
+      // JS 执行链路日志（info 级别，Release 模式可见）
+      AppLogger.instance.logJsStep('AnalyzeRule', '$stepDesc (async)',
+        detail: 'rule=${appliedRule.rule}, inputLen=${result?.toString().length ?? 0}');
 
       // JS 步骤走异步
       if (appliedRule.mode == RuleMode.js || appliedRule.mode == RuleMode.webJs) {
@@ -888,12 +862,11 @@ class AnalyzeRule {
         result = _applyRule(result, appliedRule, listMode: true, ruleStep: stepDesc);
       }
 
-      if (kDebugMode) {
-        final resultType = result?.runtimeType;
-        final resultLen = result is List ? result.length : result?.toString().length ?? 0;
-        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] $stepDesc 完成 (async)',
-          detail: 'resultType=$resultType, resultLen=$resultLen');
-      }
+      // 步骤完成日志（info 级别，Release 模式可见）
+      final resultType = result?.runtimeType;
+      final resultLen = result is List ? result.length : result?.toString().length ?? 0;
+      AppLogger.instance.logJsStep('AnalyzeRule', '$stepDesc 完成 (async)',
+        detail: 'resultType=$resultType, resultLen=$resultLen');
 
       if (result != null && rule.replaceRegex.isNotEmpty) {
         if (result is List) {
@@ -904,14 +877,9 @@ class AnalyzeRule {
       }
     }
 
-    // 输出完整 JS 执行树
-    if (kDebugMode) {
-      final treeStr = JsTracer.instance.getTreeString();
-      if (treeStr.isNotEmpty && treeStr != '(no trace)') {
-        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] JS执行树',
-          detail: treeStr);
-      }
-    }
+    // 输出完整 JS 执行树（info 级别，Release 模式可见）
+    final treeStr = JsTracer.instance.getTreeString();
+    AppLogger.instance.logJsTree('AnalyzeRule', treeStr);
 
     if (result == null) return [];
     if (result is List) return result;
@@ -1718,12 +1686,11 @@ class AnalyzeRule {
       // 收集规则上下文变量，注入到JS作用域
       final vars = _collectVariables();
 
-      if (kDebugMode) {
-        final contentPreview = content?.toString().length ?? 0;
-        final codePreview = jsCode;
-        AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] 执行JS规则',
-          detail: 'content=${contentPreview}chars, code=$codePreview');
-      }
+      // JS 执行链路日志（info 级别，Release 模式可见）
+      final contentPreview = content?.toString().length ?? 0;
+      final codePreview = jsCode;
+      AppLogger.instance.logJsStep('AnalyzeRule', '执行JS规则',
+        detail: 'content=${contentPreview}chars, code=$codePreview');
 
       return JsEngine.instance.executeSync(
         jsCode,
@@ -2003,10 +1970,9 @@ class AnalyzeRule {
     final matches = _templateRegex.allMatches(text).toList();
     if (matches.isEmpty) return text;
 
-    if (kDebugMode) {
-      AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] 模板替换',
-        detail: '模板数=${matches.length}, 原文=$text');
-    }
+    // JS 执行链路日志（info 级别，Release 模式可见）
+    AppLogger.instance.logJsStep('AnalyzeRule', '模板替换',
+      detail: '模板数=${matches.length}, 原文=$text');
 
     // 收集所有替换结果，然后从后往前拼接
     final replacements = <String>[];
@@ -2025,10 +1991,9 @@ class AnalyzeRule {
           expr.startsWith('//')) {
         // 借鉴 legado isRule：以 @ 开头的是规则，递归调用异步 getString
         replacement = (await getStringAsync(expr))?.toString() ?? '';
-        if (kDebugMode) {
-          AppLogger.instance.debug(LogCategory.js, '[AnalyzeRule] 模板子规则',
-            detail: 'expr=$expr, result=$replacement');
-        }
+        // 模板子规则日志（info 级别，Release 模式可见）
+        AppLogger.instance.logJsStep('AnalyzeRule', '模板子规则',
+          detail: 'expr=$expr, result=$replacement');
       } else {
         // 否则尝试作为JS执行（异步）
         try {

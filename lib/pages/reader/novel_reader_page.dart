@@ -14,6 +14,7 @@ import '../../providers/reader_provider.dart';
 import '../../providers/bookshelf_provider.dart';
 import '../../services/book_data_provider.dart';
 import '../../services/chapter_cache_service.dart';
+import '../../services/chapter_prefetch_service.dart';
 import '../../services/local_book/local_book_service.dart';
 import '../../services/reader_bookmark_service.dart';
 import '../../services/storage_service.dart';
@@ -461,16 +462,25 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     }
 
     try {
-      // 优先从缓存读取
+      // 1. 优先从预取内存缓存读取（瞬时返回，跳过文件 I/O）
       String? content;
-      if (_book!.originType == BookOriginType.online) {
+      if (_book!.originType == BookOriginType.online && chapter.url != null) {
+        content = ChapterPrefetchService.instance.getCachedContent(
+          _book!.bookUrl ?? '',
+          chapter.url!,
+        );
+      }
+
+      // 2. 内存未命中则从文件缓存读取
+      if ((content == null || content.isEmpty) &&
+          _book!.originType == BookOriginType.online) {
         content = await ChapterCacheService.instance.readChapterContent(
           _book!,
           chapter,
         );
       }
 
-      // 缓存没有则从网络获取
+      // 3. 缓存没有则从网络获取
       if (content == null || content.isEmpty) {
         content = await _dataProvider!.getContent(
           _book!,
@@ -531,6 +541,27 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
         unawaited(_saveCurrentProgress(chapter: chapter, pos: restorePos));
         unawaited(_preloadAdjacentChapters(_currentChapterIndex));
+
+        // 后台预取后续 N 章（Phase 3 流水线化：用户翻页时瞬时返回）
+        if (_book!.originType == BookOriginType.online &&
+            chapterIndex + 1 < _chapters.length) {
+          final prefetchIndices = ChapterPrefetchService.computePrefetchIndices(
+            chapterIndex,
+            _chapters.length,
+            5,
+            isReadable: (i) => !_chapters[i].isVolume && _chapters[i].url != null,
+          );
+          if (prefetchIndices.isNotEmpty) {
+            final prefetchChs =
+                prefetchIndices.map((i) => _chapters[i]).toList();
+            unawaited(ChapterPrefetchService.instance.prefetchChapters(
+              book: _book!,
+              chapters: prefetchChs,
+              provider: _dataProvider!,
+              allChapters: _chapters,
+            ));
+          }
+        }
       }
     } catch (e) {
       if (mounted) {

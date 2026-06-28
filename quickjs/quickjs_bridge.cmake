@@ -14,6 +14,8 @@ set(QUICKJS_SOURCES
     ${QUICKJS_SRC_DIR}/libregexp.c
     ${QUICKJS_SRC_DIR}/libunicode.c
     ${QUICKJS_SRC_DIR}/quickjs_bridge.c
+    ${QUICKJS_SRC_DIR}/lzstring.c
+    ${QUICKJS_SRC_DIR}/batch_decompress.c
     ${QUICKJS_SRC_DIR}/crypto/md5.c
     ${QUICKJS_SRC_DIR}/crypto/sha1.c
     ${QUICKJS_SRC_DIR}/crypto/sha256.c

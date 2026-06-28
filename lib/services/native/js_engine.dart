@@ -350,6 +350,42 @@ class JsEngine {
 
   bool get isAvailable => _initialized && _jsRuntime != null;
 
+  // ===== Phase 6: 性能统计接口（代理到 JavascriptRuntime）=====
+
+  /// 获取 C 原生加密累计统计快照
+  /// 包含 AES/MD5/SHA/LZString/AES+LZ 原子组合/批量解压 所有路径
+  /// 返回 null 表示 runtime 未初始化（Web 平台返回零值对象）
+  CryptoStats? getCryptoStats() => _jsRuntime?.getCryptoStats();
+
+  /// 重置统计计数器
+  void resetCryptoStats() => _jsRuntime?.resetCryptoStats();
+
+  // ===== Phase 4: 字节码缓存接口（代理到 JavascriptRuntime）=====
+
+  /// 预编译脚本到字节码缓存（不执行）
+  ///
+  /// 后续 evaluate 同一脚本时跳过词法/语法分析，直接走 JS_EvalFunction。
+  /// 适用于核心库初始化、书源规则预热等场景。
+  /// Web 平台返回 false（不支持）。
+  bool precompile(String script) {
+    if (_jsRuntime == null) return false;
+    return _jsRuntime!.precompile(script);
+  }
+
+  /// 清空字节码缓存
+  ///
+  /// 释放所有缓存条目占用的内存。适用于书源切换、内存压力、调试场景。
+  void clearBytecodeCache() => _jsRuntime?.clearBytecodeCache();
+
+  /// 暴露 CPU 核心数（用于面板显示并行能力，Web 返回 1）
+  int get nativeCpuCount {
+    try {
+      return nativeGetCpuCount();
+    } catch (_) {
+      return 1;
+    }
+  }
+
   // ===== 分流策略 =====
 
   /// 解析规则代码，剥离 @js: 前缀和 <js></js> 标签
@@ -725,8 +761,15 @@ class JsEngine {
       globalThis._jsLog = _jsLog;
 
       // ===== btoa/atob 全局函数 =====
-      // Base64 编码/解码，QuickJS 原生可能不提供
-      if (typeof btoa === 'undefined') {
+      // Phase 4-b: 优先走 C 原生 __nativeBase64，消除纯 JS 逐字节循环与中间字符串分配
+      // __nativeBase64.decode/encode 与浏览器 atob/btoa 语义一致（binary string, code point 0-255）
+      if (typeof __nativeBase64 !== 'undefined' && __nativeBase64 &&
+          __nativeBase64.decode && __nativeBase64.encode) {
+        // 直接引用 C 原生函数，零 JS 包装层开销
+        globalThis.atob = __nativeBase64.decode;
+        globalThis.btoa = __nativeBase64.encode;
+      } else if (typeof btoa === 'undefined') {
+        // 回退：纯 JS 实现（仅当 C 原生不可用时，例如非 Android 平台或旧版本）
         var _b64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
         globalThis.btoa = function(str) {
           var output = '';
@@ -3268,10 +3311,13 @@ class JsEngine {
     final engineTag = 'QuickJS';
     final codePreview = resolved.code;
 
-    if (kDebugMode) {
-      AppLogger.instance.debug(LogCategory.js, '[$engineTag] 同步执行JS',
-        detail: 'code=$codePreview, content=${content?.toString().length ?? 0}chars');
-    }
+    // 显式增加 QuickJS 执行计数（统一计数入口）
+    AppLogger.instance.incrementQuickjsCount();
+    // JS 执行链路日志（info 级别，Release 模式可见）：输出完整代码与输入
+    AppLogger.instance.logJsExecute(engineTag, codePreview);
+    AppLogger.instance.logJsStep(engineTag, '同步执行JS 开始',
+      detail: 'ruleStep=${ruleStep ?? "N/A"}, codeLen=${codePreview.length}, contentLen=${content?.toString().length ?? 0}');
+    AppLogger.instance.logJsInput(engineTag, content?.toString(), tag: 'sync');
 
     // 追踪树：创建节点
     JsTraceNode? traceNode;
@@ -3311,15 +3357,16 @@ class JsEngine {
       // 追踪树：记录输出（无论成功或异常都 pop，保证栈平衡）
       if (traceNode != null) {
         final outputStr = result?.toString();
-        final outputShort = outputStr != null && outputStr.length > 200
-            ? '${outputStr.substring(0, 200)}...'
-            : outputStr;
+        // 输出完整内容到日志（不再截断），便于调试页面查看
         JsTracer.instance.pop(
-          outputPreview: outputShort,
+          outputPreview: outputStr,
           outputType: result?.runtimeType.toString(),
           error: caughtError?.toString() ?? evalError,
         );
       }
+      // 输出完整执行结果到日志链路
+      AppLogger.instance.logJsOutput(engineTag, result?.toString(),
+        outputType: result?.runtimeType.toString(), tag: 'sync');
     }
 
     return result;
@@ -3398,11 +3445,9 @@ class JsEngine {
         return null;
       }
       final parsed = _parseJsResult(evalResult.stringResult);
-      if (kDebugMode) {
-        final resultPreview = parsed?.toString().length ?? 0;
-        AppLogger.instance.debug(LogCategory.js, '[QuickJS] 同步执行完成',
-          detail: 'resultType=${parsed?.runtimeType}, resultLen=$resultPreview, isError=${evalResult.isError}');
-      }
+      // 同步执行完成日志（info 级别，Release 模式可见）
+      AppLogger.instance.logJsStep('QuickJS', '同步执行完成',
+        detail: 'resultType=${parsed?.runtimeType}, resultLen=${parsed?.toString().length ?? 0}, isError=${evalResult.isError}');
       return parsed;
     } catch (e) {
       AppLogger.instance.logJsError('QuickJS', e.toString());
@@ -3477,12 +3522,10 @@ class JsEngine {
     final extracted = _extractJsCode(jsCode) ?? jsCode;
     final resolved = resolveEngine(extracted, sourceEngine: sourceEngine);
 
-    if (kDebugMode) {
-      AppLogger.instance.logJsExecute(
-        'QuickJS',
-        resolved.code,
-      );
-    }
+    // 显式增加 QuickJS 执行计数（统一计数入口）
+    AppLogger.instance.incrementQuickjsCount();
+    // JS 执行链路日志（info 级别，Release 模式可见）：打印完整 JS 代码
+    AppLogger.instance.logJsExecute('QuickJS', resolved.code);
 
     // 合并 env：传入的 env 优先，补充 baseUrl
     final mergedEnv = <String, dynamic>{
@@ -3504,10 +3547,12 @@ class JsEngine {
       AppLogger.instance.warn(LogCategory.js, '预缓存桥接调用失败，继续执行JS', detail: e.toString());
     }
 
-    // 调试：输出 processJsRule 的 result 参数类型和长度
-    if (kDebugMode) {
-      AppLogger.instance.debug(LogCategory.js, '[processJsRule] result type=${actualResult.runtimeType}, len=${actualResult is String ? actualResult.length : (actualResult is List ? actualResult.length : '?')}');
-    }
+    // 输出 processJsRule 入参信息（info 级别，Release 模式可见）
+    AppLogger.instance.logJsInput('QuickJS',
+      actualResult is String ? actualResult : actualResult?.toString(),
+      tag: 'processJsRule');
+    AppLogger.instance.logJsStep('QuickJS', '[processJsRule] 入参',
+      detail: 'result type=${actualResult.runtimeType}, len=${actualResult is String ? actualResult.length : (actualResult is List ? actualResult.length : '?')}, baseUrl=$baseUrl');
 
     return _evalLock.synchronized(() =>
       _executeQuickJSRule(resolved.code, result: actualResult, env: mergedEnv, variables: _extractVariables(mergedEnv))
@@ -3637,10 +3682,12 @@ class JsEngine {
     try {
       // 断点1：记录原始JS代码
       final codePreview = jsCode;
-      if (kDebugMode) {
-        AppLogger.instance.debug(LogCategory.js, '[QuickJS] 开始异步执行',
-          detail: codePreview);
-      }
+      // JS 执行链路日志（info 级别，Release 模式可见）：打印完整 JS 代码
+      AppLogger.instance.logJsStep('QuickJS', '[QuickJS] 开始异步执行',
+        detail: 'ruleStep=${ruleStep ?? "N/A"}, codeLen=${codePreview.length}');
+      AppLogger.instance.logJsInput('QuickJS',
+        result is String ? result : result?.toString(),
+        tag: 'async');
 
       // 追踪树：创建节点
       if (JsTracer.instance.enabled) {
@@ -3668,11 +3715,9 @@ class JsEngine {
       // 自动补 return
       final wrappedCode = _wrapJsCode(jsCode);
 
-      // 断点2：记录包装后的代码
-      if (kDebugMode) {
-        AppLogger.instance.debug(LogCategory.js, '[QuickJS] 代码包装完成',
-          detail: wrappedCode);
-      }
+      // 断点2：记录包装后的代码（info 级别，Release 模式可见）
+      AppLogger.instance.logJsStep('QuickJS', '[QuickJS] 代码包装完成',
+        detail: wrappedCode);
 
       // 构建共享作用域变量注入（借鉴 legado 的 scope 链）
       final sharedVars = <String, String>{};
@@ -3784,10 +3829,9 @@ class JsEngine {
       // 断点3：记录执行结果
       final evalResultStr = evalResult.stringResult;
       final resultShort = evalResultStr;
-      if (kDebugMode) {
-        AppLogger.instance.debug(LogCategory.js, '[QuickJS] 异步执行完成',
-          detail: 'isError=${evalResult.isError}, result=$resultShort');
-      }
+      // 异步执行完成日志（info 级别，Release 模式可见）
+      AppLogger.instance.logJsStep('QuickJS', '[QuickJS] 异步执行完成',
+        detail: 'isError=${evalResult.isError}, result=$resultShort');
 
       if (evalResult.isError) {
         AppLogger.instance.logJsError('QuickJS', evalResult.stringResult);
@@ -3799,6 +3843,8 @@ class JsEngine {
             error: resultShort,
           );
         }
+        // 输出执行树到日志（info 级别）
+        _logCurrentTraceTree();
         return null;
       }
       final strResult = evalResult.stringResult;
@@ -3809,6 +3855,10 @@ class JsEngine {
           outputType: 'String',
         );
       }
+      // 输出完整执行结果到日志链路（info 级别）
+      AppLogger.instance.logJsOutput('QuickJS', strResult, outputType: 'String', tag: 'async');
+      // 输出执行树到日志（info 级别）
+      _logCurrentTraceTree();
       // undefined → 返回空字符串而不是 null（书源规则可能不需要返回值）
       if (strResult == 'undefined') return '';
       // null → 返回 Dart null，避免 "null" 字符串被当作有效结果
@@ -3823,10 +3873,22 @@ class JsEngine {
           error: e.toString(),
         );
       }
+      // 异常时也输出执行树
+      _logCurrentTraceTree();
       // 即使异常也尝试提取 console 日志
       _flushConsoleLogs();
       return null;
     }
+  }
+
+  /// 输出当前 JsTracer 执行树到日志（info 级别）
+  /// 当栈为空时（根节点已 pop）才输出整棵树，避免中途输出碎片
+  void _logCurrentTraceTree() {
+    if (!JsTracer.instance.enabled) return;
+    // 仅当追踪栈为空时输出整棵树（说明根节点已完成）
+    if (!JsTracer.instance.isStackEmpty) return;
+    final treeStr = JsTracer.instance.getTreeString();
+    AppLogger.instance.logJsTree('QuickJS', treeStr);
   }
 
   /// 提取 QuickJS 中 console 缓存的日志，同步到 AppLogger

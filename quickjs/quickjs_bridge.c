@@ -7,6 +7,21 @@
 #include "crypto/sha256.h"
 #include "crypto/hmac_sha256.h"
 #include "crypto/aes.h"
+#include "lzstring.h"
+#include "batch_decompress.h"
+
+// ---------- Phase 4: 字节码缓存 ----------
+// 跳过词法分析/语法解析/字节码生成阶段，对重复执行的脚本直接走 JS_EvalFunction
+#define BYTECODE_CACHE_SIZE 32
+
+typedef struct {
+    uint64_t hash;        // 脚本 FNV-1a 哈希（快速比较）
+    char *script;         // 脚本源码（owned，strlen 字节 + '\0'）
+    size_t script_len;    // 脚本长度
+    JSValue bytecode;     // 编译后的字节码（owned，JS_DupValue 持有）
+    uint64_t hits;        // 命中次数（LFU 淘汰策略依据）
+    int in_use;           // 槽位是否占用
+} bytecode_cache_entry_t;
 
 struct QuickJSBridge {
     JSRuntime *runtime;
@@ -17,6 +32,9 @@ struct QuickJSBridge {
     crypto_callback_binary crypto_cb_binary;
     // 性能统计（每个 bridge 独立）
     crypto_stats_t stats;
+    // Phase 4: 字节码缓存（每个 bridge 独立）
+    bytecode_cache_entry_t bytecode_cache[BYTECODE_CACHE_SIZE];
+    int bytecode_cache_count;
 };
 
 // ---------- 性能统计辅助 ----------
@@ -56,6 +74,81 @@ crypto_stats_t quickjs_bridge_get_crypto_stats(QuickJSBridge *bridge) {
 
 void quickjs_bridge_reset_crypto_stats(QuickJSBridge *bridge) {
     if (bridge) memset(&bridge->stats, 0, sizeof(crypto_stats_t));
+}
+
+// ---------- Phase 4: 字节码缓存辅助函数 ----------
+
+// FNV-1a 64-bit 哈希（快速比较脚本，避免逐字节 strcmp）
+static uint64_t _fnv1a_hash(const char *s, size_t len) {
+    uint64_t h = 1469598103934665603ULL;
+    for (size_t i = 0; i < len; i++) {
+        h ^= (unsigned char)s[i];
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+// 查找字节码缓存：命中返回 JS_DupValue 后的字节码（调用方需 JS_FreeValue），
+// 未命中返回 JS_NULL
+static JSValue _bytecode_cache_lookup(QuickJSBridge *bridge, const char *script, size_t len) {
+    uint64_t hash = _fnv1a_hash(script, len);
+    for (int i = 0; i < BYTECODE_CACHE_SIZE; i++) {
+        bytecode_cache_entry_t *e = &bridge->bytecode_cache[i];
+        if (e->in_use && e->hash == hash && e->script_len == len &&
+            memcmp(e->script, script, len) == 0) {
+            e->hits++;
+            return JS_DupValue(bridge->ctx, e->bytecode);
+        }
+    }
+    return JS_NULL;
+}
+
+// 存入字节码缓存（LFU 淘汰：命中次数最少的条目被替换）
+// bytecode 参数：函数内部会 JS_DupValue 持有，调用方仍保留自己的引用
+static void _bytecode_cache_store(QuickJSBridge *bridge, const char *script,
+                                   size_t len, JSValueConst bytecode) {
+    int target = -1;
+    uint64_t min_hits = (uint64_t)-1;
+    for (int i = 0; i < BYTECODE_CACHE_SIZE; i++) {
+        if (!bridge->bytecode_cache[i].in_use) {
+            target = i;
+            break;
+        }
+        if (bridge->bytecode_cache[i].hits < min_hits) {
+            min_hits = bridge->bytecode_cache[i].hits;
+            target = i;
+        }
+    }
+    if (target < 0) return;
+
+    bytecode_cache_entry_t *e = &bridge->bytecode_cache[target];
+    if (e->in_use) {
+        free(e->script);
+        JS_FreeValue(bridge->ctx, e->bytecode);
+    } else {
+        bridge->bytecode_cache_count++;
+    }
+    e->hash = _fnv1a_hash(script, len);
+    e->script = (char *)malloc(len + 1);
+    memcpy(e->script, script, len);
+    e->script[len] = 0;
+    e->script_len = len;
+    e->bytecode = JS_DupValue(bridge->ctx, bytecode);
+    e->hits = 0;
+    e->in_use = 1;
+}
+
+// 清空字节码缓存（必须在 JS_FreeContext 之前调用）
+static void _bytecode_cache_clear(QuickJSBridge *bridge) {
+    for (int i = 0; i < BYTECODE_CACHE_SIZE; i++) {
+        bytecode_cache_entry_t *e = &bridge->bytecode_cache[i];
+        if (e->in_use) {
+            free(e->script);
+            JS_FreeValue(bridge->ctx, e->bytecode);
+            memset(e, 0, sizeof(*e));
+        }
+    }
+    bridge->bytecode_cache_count = 0;
 }
 
 // ---------- 全局回调（向后兼容，作为默认值）----------
@@ -376,6 +469,631 @@ static JSValue js_native_aes_decrypt(JSContext *ctx, JSValueConst this_val,
     return ret;
 }
 
+// ---------- Base64 解码助手（供 AES+LZ 原子组合使用）----------
+// 标准 base64 字母表解码，跳过非字母表字符（空白、换行等），遇 '=' 停止
+// 返回 malloc 分配的字节缓冲区，调用者负责 free
+static uint8_t *b64_decode(const char *src, size_t src_len, size_t *out_len) {
+    static int8_t rev_table[256];
+    static int inited = 0;
+    if (!inited) {
+        int i;
+        memset(rev_table, -1, sizeof(rev_table));
+        const char *alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        for (i = 0; i < 64; i++) rev_table[(unsigned char)alpha[i]] = (int8_t)i;
+        inited = 1;
+    }
+
+    size_t max_out = (src_len / 4) * 3 + 3;
+    uint8_t *out = (uint8_t *)malloc(max_out);
+    if (!out) return NULL;
+
+    size_t o = 0;
+    uint32_t buf = 0;
+    int bits = 0;
+    size_t i;
+    for (i = 0; i < src_len; i++) {
+        unsigned char ch = (unsigned char)src[i];
+        if (ch == '=') break;
+        int8_t v = rev_table[ch];
+        if (v < 0) continue;
+        buf = (buf << 6) | (uint32_t)v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out[o++] = (uint8_t)((buf >> bits) & 0xFF);
+        }
+    }
+
+    *out_len = o;
+    return out;
+}
+
+// Phase 4: Base64 编码（标准字母表，带 = 填充）
+static char *b64_encode(const uint8_t *src, size_t src_len, size_t *out_len) {
+    static const char alpha[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t out_size = ((src_len + 2) / 3) * 4 + 1;
+    char *out = (char *)malloc(out_size);
+    if (!out) return NULL;
+
+    size_t o = 0;
+    size_t i;
+    for (i = 0; i + 2 < src_len; i += 3) {
+        uint32_t b = ((uint32_t)src[i] << 16) | ((uint32_t)src[i + 1] << 8) | src[i + 2];
+        out[o++] = alpha[(b >> 18) & 0x3F];
+        out[o++] = alpha[(b >> 12) & 0x3F];
+        out[o++] = alpha[(b >> 6) & 0x3F];
+        out[o++] = alpha[b & 0x3F];
+    }
+    if (i < src_len) {
+        uint32_t b = (uint32_t)src[i] << 16;
+        if (i + 1 < src_len) b |= (uint32_t)src[i + 1] << 8;
+        out[o++] = alpha[(b >> 18) & 0x3F];
+        out[o++] = alpha[(b >> 12) & 0x3F];
+        out[o++] = (i + 1 < src_len) ? alpha[(b >> 6) & 0x3F] : '=';
+        out[o++] = '=';
+    }
+    out[o] = 0;
+    *out_len = o;
+    return out;
+}
+
+// ---------- Phase 4: C 原生 atob/btoa ----------
+// 替代 JsEngine 注入的纯 JS 实现，消除解释执行开销
+// 语义与浏览器一致：atob 返回「二进制字符串」（每个 char code 0-255）
+
+static JSValue js_native_atob(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv) {
+    (void)this_val;
+    if (argc < 1 || JS_IsNull(argv[0]) || JS_IsUndefined(argv[0])) {
+        return JS_NewString(ctx, "");
+    }
+    const char *input = JS_ToCString(ctx, argv[0]);
+    if (!input) return JS_ThrowTypeError(ctx, "atob: argument must be a string");
+
+    size_t input_len = strlen(input);
+    size_t raw_len = 0;
+    uint8_t *raw = b64_decode(input, input_len, &raw_len);
+    JS_FreeCString(ctx, input);
+
+    if (!raw) return JS_ThrowTypeError(ctx, "atob: invalid base64 input");
+
+    // 原始字节 → Latin-1 字符串（UTF-8 编码 code points 0-255）
+    // 字节 0-127 → 1 UTF-8 字节；字节 128-255 → 2 UTF-8 字节
+    size_t utf8_max = raw_len * 2;
+    char *utf8_buf = (char *)malloc(utf8_max + 1);
+    if (!utf8_buf) { free(raw); return JS_ThrowTypeError(ctx, "atob: out of memory"); }
+
+    size_t pos = 0;
+    for (size_t i = 0; i < raw_len; i++) {
+        uint8_t b = raw[i];
+        if (b < 0x80) {
+            utf8_buf[pos++] = (char)b;
+        } else {
+            utf8_buf[pos++] = (char)(0xC2 | (b >> 6));
+            utf8_buf[pos++] = (char)(0x80 | (b & 0x3F));
+        }
+    }
+    free(raw);
+
+    JSValue ret = JS_NewStringLen(ctx, utf8_buf, pos);
+    free(utf8_buf);
+    return ret;
+}
+
+static JSValue js_native_btoa(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv) {
+    (void)this_val;
+    if (argc < 1 || JS_IsNull(argv[0]) || JS_IsUndefined(argv[0])) {
+        return JS_NewString(ctx, "");
+    }
+    const char *input = JS_ToCString(ctx, argv[0]);
+    if (!input) return JS_ThrowTypeError(ctx, "btoa: argument must be a string");
+
+    // 解析 UTF-8 提取 code points（二进制字符串每个字符应为 0-255）
+    size_t input_len = strlen(input);
+    uint8_t *bytes = (uint8_t *)malloc(input_len + 1);
+    if (!bytes) {
+        JS_FreeCString(ctx, input);
+        return JS_ThrowTypeError(ctx, "btoa: out of memory");
+    }
+
+    size_t byte_count = 0;
+    size_t i;
+    for (i = 0; i < input_len; ) {
+        unsigned char c = (unsigned char)input[i];
+        int code;
+        if (c < 0x80) {
+            code = c;
+            i += 1;
+        } else if ((c & 0xE0) == 0xC0 && i + 1 < input_len) {
+            code = ((c & 0x1F) << 6) | ((unsigned char)input[i + 1] & 0x3F);
+            i += 2;
+        } else if ((c & 0xF0) == 0xE0 && i + 2 < input_len) {
+            code = ((c & 0x0F) << 12) | (((unsigned char)input[i + 1] & 0x3F) << 6) |
+                   ((unsigned char)input[i + 2] & 0x3F);
+            i += 3;
+        } else {
+            i += 1;
+            continue;
+        }
+        if (code > 255) {
+            free(bytes);
+            JS_FreeCString(ctx, input);
+            return JS_ThrowTypeError(ctx, "btoa: string contains characters outside Latin-1 range");
+        }
+        bytes[byte_count++] = (uint8_t)code;
+    }
+    JS_FreeCString(ctx, input);
+
+    size_t b64_len = 0;
+    char *b64 = b64_encode(bytes, byte_count, &b64_len);
+    free(bytes);
+
+    if (!b64) return JS_ThrowTypeError(ctx, "btoa: encoding failed");
+
+    JSValue ret = JS_NewStringLen(ctx, b64, b64_len);
+    free(b64);
+    return ret;
+}
+
+// ---------- LZString 原生 C 实现 ----------
+// 对应 JS: LZString.decompressFromBase64(input)
+// 接受 JS 字符串，返回 JS 字符串
+// JS 语义：null/undefined → ""，空串 → null，解压失败 → null
+static JSValue js_native_lz_decompress(JSContext *ctx, JSValueConst this_val,
+                                       int argc, JSValueConst *argv) {
+    // null/undefined/缺失 → ""（JS: if (input == null) return "";）
+    if (argc < 1 || JS_IsNull(argv[0]) || JS_IsUndefined(argv[0])) {
+        return JS_NewString(ctx, "");
+    }
+
+    const char *input = JS_ToCString(ctx, argv[0]);
+    if (!input) {
+        return JS_ThrowTypeError(ctx, "decompressFromBase64: argument must be a string");
+    }
+
+    size_t input_len = strlen(input);
+
+    // 空串 → null（JS: if (input == "") return null;）
+    if (input_len == 0) {
+        JS_FreeCString(ctx, input);
+        return JS_NULL;
+    }
+
+    QuickJSBridge *bridge = (QuickJSBridge *)JS_GetContextOpaque(ctx);
+    uint64_t t0 = bridge ? _now_us() : 0;
+
+    size_t out_len = 0;
+    char *out = lz_decompress_from_base64(input, input_len, &out_len);
+
+    if (bridge) _stats_update(&bridge->stats, input_len, out_len, _now_us() - t0);
+
+    JS_FreeCString(ctx, input);
+
+    if (!out) {
+        // 解压失败 → null
+        return JS_NULL;
+    }
+
+    JSValue ret = JS_NewStringLen(ctx, out, out_len);
+    free(out);
+    return ret;
+}
+
+// ---------- AES-CBC-PKCS7 解密 + LZString 解压（原子组合）----------
+// 对应 3A 书源 content() 的解密链路：
+//   atob(result) → IV(前16) | cipher → AES-CBC decrypt → UTF-8 → LZString decompress
+// 直接在 C 层完成全链路，消除 JS 侧字符串膨胀与多次往返
+// 输入：(base64Input, keyUtf8) 字符串
+// 输出：解压后的 JS 字符串
+static JSValue js_native_aes_decrypt_then_lz(JSContext *ctx, JSValueConst this_val,
+                                             int argc, JSValueConst *argv) {
+    if (argc < 2) {
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompress requires 2 arguments, got %d", argc);
+    }
+
+    const char *b64 = JS_ToCString(ctx, argv[0]);
+    if (!b64) return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompress: argument 1 must be a string");
+
+    const char *key_utf8 = JS_ToCString(ctx, argv[1]);
+    if (!key_utf8) {
+        JS_FreeCString(ctx, b64);
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompress: argument 2 must be a string");
+    }
+
+    size_t b64_len = strlen(b64);
+    size_t key_len = strlen(key_utf8);
+
+    if (key_len != 16 && key_len != 24 && key_len != 32) {
+        JS_FreeCString(ctx, b64);
+        JS_FreeCString(ctx, key_utf8);
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompress: key length must be 16/24/32, got %d", (int)key_len);
+    }
+
+    QuickJSBridge *bridge = (QuickJSBridge *)JS_GetContextOpaque(ctx);
+    uint64_t t0 = bridge ? _now_us() : 0;
+
+    // 1. base64 解码
+    size_t raw_len = 0;
+    uint8_t *raw = b64_decode(b64, b64_len, &raw_len);
+    JS_FreeCString(ctx, b64);
+
+    if (!raw || raw_len < 16 || (raw_len - 16) == 0 || (raw_len - 16) % 16 != 0) {
+        if (raw) free(raw);
+        JS_FreeCString(ctx, key_utf8);
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompress: invalid ciphertext (len=%d)", (int)raw_len);
+    }
+
+    // 2. 拆分 IV（前 16 字节）+ 密文
+    const uint8_t *iv = raw;
+    const uint8_t *cipher = raw + 16;
+    size_t cipher_len = raw_len - 16;
+
+    // 3. AES-CBC-PKCS7 解密
+    aes_ctx_t actx;
+    if (aes_init(&actx, (const uint8_t *)key_utf8, key_len) != 0) {
+        free(raw);
+        JS_FreeCString(ctx, key_utf8);
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompress: key expansion failed");
+    }
+    JS_FreeCString(ctx, key_utf8);
+
+    uint8_t *plain = (uint8_t *)malloc(cipher_len);
+    if (!plain) {
+        free(raw);
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompress: out of memory");
+    }
+
+    size_t plain_len = aes_cbc_decrypt(&actx, iv, cipher, cipher_len, plain);
+    free(raw);  // IV 与 cipher 同在 raw 中，AES 已用完
+
+    if (plain_len == (size_t)-1) {
+        free(plain);
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompress: AES decryption failed (bad padding or key)");
+    }
+
+    // 4. LZString 解压（plain 视为 UTF-8 字符串）
+    size_t lz_out_len = 0;
+    char *lz_out = lz_decompress_from_base64((const char *)plain, plain_len, &lz_out_len);
+    free(plain);
+
+    if (bridge) _stats_update(&bridge->stats, b64_len, lz_out_len, _now_us() - t0);
+
+    if (!lz_out) {
+        return JS_NULL;
+    }
+
+    JSValue ret = JS_NewStringLen(ctx, lz_out, lz_out_len);
+    free(lz_out);
+    return ret;
+}
+
+// ---------- 零拷贝 ArrayBuffer 路径（Phase 4）----------
+// JS_NewArrayBuffer 接管 malloc'd buffer 的所有权：当 ArrayBuffer 被 GC 时
+// 通过 free_func 回调自动 free(ptr)，无需 JS 侧手动释放，亦无需 JS_NewStringLen 复制
+// 适用于大块数据（如整章正文）从 C 层回传 JS 的场景，避免一次额外的内存拷贝
+static void js_free_buffer(JSRuntime *rt, void *opaque, void *ptr) {
+    (void)rt;
+    (void)opaque;
+    free(ptr);
+}
+
+// LZString 解压（零拷贝版）
+// 输入：ArrayBuffer（base64 编码字节流，可由 XHR responseType='arraybuffer' 直接获得）
+// 输出：ArrayBuffer（解压后的 UTF-8 字节流，由 JS_GC 自动回收底层 C 内存）
+// 语义：null/undefined → null，空 buffer → null，解压失败 → null
+// 对比字符串版：消除 base64→UTF-8→JS_NewStringLen 的两次复制
+static JSValue js_native_lz_decompress_bin(JSContext *ctx, JSValueConst this_val,
+                                            int argc, JSValueConst *argv) {
+    (void)this_val;
+    if (argc < 1 || JS_IsNull(argv[0]) || JS_IsUndefined(argv[0])) {
+        return JS_NULL;
+    }
+
+    size_t input_len = 0;
+    uint8_t *input = JS_GetArrayBuffer(ctx, &input_len, argv[0]);
+    if (!input) {
+        return JS_ThrowTypeError(ctx, "decompressFromBase64Bin: argument must be an ArrayBuffer");
+    }
+
+    if (input_len == 0) {
+        return JS_NULL;
+    }
+
+    QuickJSBridge *bridge = (QuickJSBridge *)JS_GetContextOpaque(ctx);
+    uint64_t t0 = bridge ? _now_us() : 0;
+
+    // JS_GetArrayBuffer 返回 ArrayBuffer 内部 buffer 的直接指针，零拷贝读取
+    size_t out_len = 0;
+    char *out = lz_decompress_from_base64((const char *)input, input_len, &out_len);
+
+    if (bridge) _stats_update(&bridge->stats, input_len, out_len, _now_us() - t0);
+
+    if (!out) {
+        return JS_NULL;
+    }
+
+    // 零拷贝回传：out 由 js_free_buffer 在 GC 时释放
+    return JS_NewArrayBuffer(ctx, (uint8_t *)out, out_len, js_free_buffer, NULL, 0);
+}
+
+// AES-CBC 解密 + LZString 解压（零拷贝原子组合）
+// 输入：(ArrayBuffer base64Cipher, ArrayBuffer keyBytes)
+//       keyBytes 为原始 AES 密钥字节（16/24/32），无需经过 UTF-8 编码
+// 输出：ArrayBuffer（解压后的 UTF-8 字节流）
+// 适用于：网络层直接返回 ArrayBuffer 的场景，避免 base64 字符串在 JS 侧的临时分配
+static JSValue js_native_aes_decrypt_then_lz_bin(JSContext *ctx, JSValueConst this_val,
+                                                  int argc, JSValueConst *argv) {
+    (void)this_val;
+    if (argc < 2 || JS_IsNull(argv[0]) || JS_IsUndefined(argv[0]) ||
+        JS_IsNull(argv[1]) || JS_IsUndefined(argv[1])) {
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBin requires 2 ArrayBuffers");
+    }
+
+    // base64 密文（零拷贝读取 ArrayBuffer 内部 buffer）
+    size_t b64_len = 0;
+    uint8_t *b64 = JS_GetArrayBuffer(ctx, &b64_len, argv[0]);
+    if (!b64) {
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBin: arg 1 must be ArrayBuffer");
+    }
+
+    // 密钥原始字节（避免 UTF-8 编码往返，AES 密钥本就是字节而非文本）
+    size_t key_len = 0;
+    uint8_t *key_bytes = JS_GetArrayBuffer(ctx, &key_len, argv[1]);
+    if (!key_bytes) {
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBin: arg 2 must be ArrayBuffer");
+    }
+
+    if (key_len != 16 && key_len != 24 && key_len != 32) {
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBin: key length must be 16/24/32, got %d", (int)key_len);
+    }
+
+    QuickJSBridge *bridge = (QuickJSBridge *)JS_GetContextOpaque(ctx);
+    uint64_t t0 = bridge ? _now_us() : 0;
+
+    // 1. base64 解码
+    size_t raw_len = 0;
+    uint8_t *raw = b64_decode((const char *)b64, b64_len, &raw_len);
+    if (!raw || raw_len < 16 || (raw_len - 16) == 0 || (raw_len - 16) % 16 != 0) {
+        if (raw) free(raw);
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBin: invalid ciphertext (len=%d)", (int)raw_len);
+    }
+
+    // 2. 拆分 IV(前 16) + 密文
+    const uint8_t *iv = raw;
+    const uint8_t *cipher = raw + 16;
+    size_t cipher_len = raw_len - 16;
+
+    // 3. AES-CBC-PKCS7 解密
+    aes_ctx_t actx;
+    if (aes_init(&actx, key_bytes, key_len) != 0) {
+        free(raw);
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBin: key expansion failed");
+    }
+
+    uint8_t *plain = (uint8_t *)malloc(cipher_len);
+    if (!plain) {
+        free(raw);
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBin: out of memory");
+    }
+
+    size_t plain_len = aes_cbc_decrypt(&actx, iv, cipher, cipher_len, plain);
+    free(raw);  // IV 与 cipher 同在 raw 中，AES 已用完
+
+    if (plain_len == (size_t)-1) {
+        free(plain);
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBin: AES decryption failed (bad padding or key)");
+    }
+
+    // 4. LZString 解压（plain 视为 base64 字符串字节流）
+    size_t lz_out_len = 0;
+    char *lz_out = lz_decompress_from_base64((const char *)plain, plain_len, &lz_out_len);
+    free(plain);
+
+    if (bridge) _stats_update(&bridge->stats, b64_len, lz_out_len, _now_us() - t0);
+
+    if (!lz_out) {
+        return JS_NULL;
+    }
+
+    // 零拷贝回传
+    return JS_NewArrayBuffer(ctx, (uint8_t *)lz_out, lz_out_len, js_free_buffer, NULL, 0);
+}
+
+// ---------- 批量 LZString 解压（多线程分片）----------
+// 输入 JS 数组 [str1, str2, ...]，返回 JS 数组 [result1, result2, ...]
+// 内部按 CPU 核心数切分并发，消除逐条 JS↔C 往返开销
+static JSValue js_native_lz_decompress_batch(JSContext *ctx, JSValueConst this_val,
+                                             int argc, JSValueConst *argv) {
+    if (argc < 1 || !JS_IsArray(ctx, argv[0])) {
+        return JS_ThrowTypeError(ctx, "decompressFromBase64Batch requires 1 array argument");
+    }
+
+    JSValueConst arr = argv[0];
+    uint32_t count = 0;
+    JSValue len_val = JS_GetPropertyStr(ctx, arr, "length");
+    if (JS_ToUint32(ctx, &count, len_val) != 0) {
+        JS_FreeValue(ctx, len_val);
+        return JS_ThrowTypeError(ctx, "decompressFromBase64Batch: invalid array length");
+    }
+    JS_FreeValue(ctx, len_val);
+
+    if (count == 0) {
+        return JS_NewArray(ctx);
+    }
+
+    // 收集输入字符串（JS_ToCString 返回的指针在 JS_FreeCString 前一直有效，多线程只读安全）
+    const char **inputs = (const char **)malloc(count * sizeof(char *));
+    size_t *input_lens = (size_t *)malloc(count * sizeof(size_t));
+    JSValue *js_items = (JSValue *)malloc(count * sizeof(JSValue));
+    if (!inputs || !input_lens || !js_items) {
+        free(inputs); free(input_lens); free(js_items);
+        return JS_ThrowTypeError(ctx, "decompressFromBase64Batch: out of memory");
+    }
+
+    uint32_t i;
+    for (i = 0; i < count; i++) {
+        js_items[i] = JS_GetPropertyUint32(ctx, arr, i);
+        if (JS_IsNull(js_items[i]) || JS_IsUndefined(js_items[i])) {
+            inputs[i] = NULL;
+            input_lens[i] = 0;
+        } else {
+            const char *s = JS_ToCString(ctx, js_items[i]);
+            inputs[i] = s;
+            input_lens[i] = s ? strlen(s) : 0;
+        }
+    }
+
+    QuickJSBridge *bridge = (QuickJSBridge *)JS_GetContextOpaque(ctx);
+    uint64_t t0 = bridge ? _now_us() : 0;
+
+    char **results = NULL;
+    size_t *out_lens = NULL;
+    int rc = lz_decompress_batch(inputs, input_lens, count, &results, &out_lens);
+
+    if (bridge) {
+        uint64_t total_in = 0, total_out = 0;
+        uint32_t j;
+        for (j = 0; j < count; j++) {
+            total_in += input_lens[j];
+            total_out += out_lens ? out_lens[j] : 0;
+        }
+        _stats_update(&bridge->stats, total_in, total_out, _now_us() - t0);
+    }
+
+    // 释放 JS 字符串
+    for (i = 0; i < count; i++) {
+        if (inputs[i]) JS_FreeCString(ctx, inputs[i]);
+        JS_FreeValue(ctx, js_items[i]);
+    }
+    free(inputs);
+    free(input_lens);
+    free(js_items);
+
+    if (rc != 0) {
+        if (results) { for (i = 0; i < count; i++) free(results[i]); free(results); }
+        free(out_lens);
+        return JS_ThrowTypeError(ctx, "decompressFromBase64Batch: batch failed");
+    }
+
+    // 构建结果数组
+    JSValue ret_arr = JS_NewArray(ctx);
+    for (i = 0; i < count; i++) {
+        JSValue item;
+        if (results[i] == NULL) {
+            item = JS_NULL;  // 解压失败 → null
+        } else {
+            item = JS_NewStringLen(ctx, results[i], out_lens[i]);
+            free(results[i]);
+        }
+        JS_SetPropertyUint32(ctx, ret_arr, i, item);
+    }
+
+    free(results);
+    free(out_lens);
+    return ret_arr;
+}
+
+// ---------- 批量 AES+LZ 解密解压（多线程分片，原子组合）----------
+// 输入 (base64Array, keyUtf8)，返回 JS 数组
+static JSValue js_native_aes_decrypt_then_lz_batch(JSContext *ctx, JSValueConst this_val,
+                                                    int argc, JSValueConst *argv) {
+    if (argc < 2 || !JS_IsArray(ctx, argv[0])) {
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBatch requires (array, key)");
+    }
+
+    JSValueConst arr = argv[0];
+    uint32_t count = 0;
+    JSValue len_val = JS_GetPropertyStr(ctx, arr, "length");
+    if (JS_ToUint32(ctx, &count, len_val) != 0) {
+        JS_FreeValue(ctx, len_val);
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBatch: invalid array length");
+    }
+    JS_FreeValue(ctx, len_val);
+
+    const char *key_utf8 = JS_ToCString(ctx, argv[1]);
+    if (!key_utf8) {
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBatch: key must be a string");
+    }
+    size_t key_len = strlen(key_utf8);
+    if (key_len != 16 && key_len != 24 && key_len != 32) {
+        JS_FreeCString(ctx, key_utf8);
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBatch: key length must be 16/24/32, got %d", (int)key_len);
+    }
+
+    if (count == 0) {
+        JS_FreeCString(ctx, key_utf8);
+        return JS_NewArray(ctx);
+    }
+
+    const char **b64_inputs = (const char **)malloc(count * sizeof(char *));
+    size_t *b64_lens = (size_t *)malloc(count * sizeof(size_t));
+    JSValue *js_items = (JSValue *)malloc(count * sizeof(JSValue));
+    if (!b64_inputs || !b64_lens || !js_items) {
+        free(b64_inputs); free(b64_lens); free(js_items);
+        JS_FreeCString(ctx, key_utf8);
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBatch: out of memory");
+    }
+
+    uint32_t i;
+    for (i = 0; i < count; i++) {
+        js_items[i] = JS_GetPropertyUint32(ctx, arr, i);
+        const char *s = JS_ToCString(ctx, js_items[i]);
+        b64_inputs[i] = s;
+        b64_lens[i] = s ? strlen(s) : 0;
+    }
+
+    QuickJSBridge *bridge = (QuickJSBridge *)JS_GetContextOpaque(ctx);
+    uint64_t t0 = bridge ? _now_us() : 0;
+
+    char **results = NULL;
+    size_t *out_lens = NULL;
+    int rc = aes_decrypt_lz_batch(b64_inputs, b64_lens, count, key_utf8, key_len, &results, &out_lens);
+
+    if (bridge) {
+        uint64_t total_in = 0, total_out = 0;
+        uint32_t j;
+        for (j = 0; j < count; j++) {
+            total_in += b64_lens[j];
+            total_out += out_lens ? out_lens[j] : 0;
+        }
+        _stats_update(&bridge->stats, total_in, total_out, _now_us() - t0);
+    }
+
+    // 释放 JS 字符串
+    for (i = 0; i < count; i++) {
+        if (b64_inputs[i]) JS_FreeCString(ctx, b64_inputs[i]);
+        JS_FreeValue(ctx, js_items[i]);
+    }
+    free(b64_inputs);
+    free(b64_lens);
+    free(js_items);
+    JS_FreeCString(ctx, key_utf8);
+
+    if (rc != 0) {
+        if (results) { for (i = 0; i < count; i++) free(results[i]); free(results); }
+        free(out_lens);
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBatch: batch failed");
+    }
+
+    JSValue ret_arr = JS_NewArray(ctx);
+    for (i = 0; i < count; i++) {
+        JSValue item;
+        if (results[i] == NULL) {
+            item = JS_NULL;
+        } else {
+            item = JS_NewStringLen(ctx, results[i], out_lens[i]);
+            free(results[i]);
+        }
+        JS_SetPropertyUint32(ctx, ret_arr, i, item);
+    }
+
+    free(results);
+    free(out_lens);
+    return ret_arr;
+}
+
 // ---------- JS 函数注册 ----------
 // 字符串路径（小数据，< 1KB）
 static JSValue js_crypto_aes_decrypt(JSContext *ctx, JSValueConst this_val,
@@ -511,8 +1229,42 @@ QuickJSBridge *quickjs_bridge_create_with_config(uint64_t memory_limit, uint64_t
         JS_NewCFunction(bridge->ctx, js_native_aes_encrypt, "aesEncryptNative", 3));
     JS_SetPropertyStr(bridge->ctx, crypto_obj, "aesDecryptNative",
         JS_NewCFunction(bridge->ctx, js_native_aes_decrypt, "aesDecryptNative", 3));
+    // AES-CBC 解密 + LZString 解压 原子组合（3A 书源 content() 路径，消除 JS 侧字符串膨胀）
+    JS_SetPropertyStr(bridge->ctx, crypto_obj, "aesDecryptThenLzDecompress",
+        JS_NewCFunction(bridge->ctx, js_native_aes_decrypt_then_lz, "aesDecryptThenLzDecompress", 2));
+    // 批量 AES+LZ 原子组合（多线程分片，1300 条并发解密）
+    JS_SetPropertyStr(bridge->ctx, crypto_obj, "aesDecryptThenLzDecompressBatch",
+        JS_NewCFunction(bridge->ctx, js_native_aes_decrypt_then_lz_batch, "aesDecryptThenLzDecompressBatch", 2));
+    // 零拷贝 ArrayBuffer 路径（Phase 4）：避免 base64 字符串膨胀与多次内存复制
+    // 适用于网络层直接返回 ArrayBuffer 的场景
+    JS_SetPropertyStr(bridge->ctx, crypto_obj, "aesDecryptThenLzDecompressBin",
+        JS_NewCFunction(bridge->ctx, js_native_aes_decrypt_then_lz_bin, "aesDecryptThenLzDecompressBin", 2));
 
     JS_SetPropertyStr(bridge->ctx, global_obj, "__nativeCrypto", crypto_obj);
+
+    // 注册 LZString 原生全局对象 __nativeLz
+    // 替代纯 JS 版本 LZString.decompressFromBase64，开销从 JS 路径转移到 C 层
+    JSValue lz_obj = JS_NewObject(bridge->ctx);
+    JS_SetPropertyStr(bridge->ctx, lz_obj, "decompressFromBase64",
+        JS_NewCFunction(bridge->ctx, js_native_lz_decompress, "decompressFromBase64", 1));
+    // 批量解压（多线程分片，消除逐条 JS↔C 往返）
+    JS_SetPropertyStr(bridge->ctx, lz_obj, "decompressFromBase64Batch",
+        JS_NewCFunction(bridge->ctx, js_native_lz_decompress_batch, "decompressFromBase64Batch", 1));
+    // 零拷贝 ArrayBuffer 路径（Phase 4）
+    JS_SetPropertyStr(bridge->ctx, lz_obj, "decompressFromBase64Bin",
+        JS_NewCFunction(bridge->ctx, js_native_lz_decompress_bin, "decompressFromBase64Bin", 1));
+    JS_SetPropertyStr(bridge->ctx, global_obj, "__nativeLz", lz_obj);
+
+    // 注册 Base64 原生全局对象 __nativeBase64
+    // 替代 JS 原生 atob/btoa，消除纯 JS 实现的逐字节循环与中间字符串分配
+    // JS 侧通过 globalThis.atob = __nativeBase64.decode 接管
+    JSValue b64_obj = JS_NewObject(bridge->ctx);
+    JS_SetPropertyStr(bridge->ctx, b64_obj, "decode",
+        JS_NewCFunction(bridge->ctx, js_native_atob, "decode", 1));
+    JS_SetPropertyStr(bridge->ctx, b64_obj, "encode",
+        JS_NewCFunction(bridge->ctx, js_native_btoa, "encode", 1));
+    JS_SetPropertyStr(bridge->ctx, global_obj, "__nativeBase64", b64_obj);
+
     JS_FreeValue(bridge->ctx, global_obj);
 
     return bridge;
@@ -524,7 +1276,25 @@ const char *quickjs_bridge_eval(QuickJSBridge *bridge, const char *script, int *
         return NULL;
     }
 
-    JSValue val = JS_Eval(bridge->ctx, script, strlen(script), "<eval>", JS_EVAL_TYPE_GLOBAL);
+    size_t script_len = strlen(script);
+    JSValue val;
+
+    // Phase 4: 字节码缓存 —— 命中时跳过词法/语法分析/字节码生成
+    JSValue cached_bc = _bytecode_cache_lookup(bridge, script, script_len);
+    if (!JS_IsNull(cached_bc)) {
+        // 缓存命中：直接执行字节码（cached_bc 被 JS_EvalFunction 消费）
+        val = JS_EvalFunction(bridge->ctx, cached_bc);
+    } else {
+        // 缓存未命中：编译为字节码（不执行），缓存，再执行
+        val = JS_Eval(bridge->ctx, script, script_len, "<eval>",
+                       JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
+        if (!JS_IsException(val)) {
+            // 存入缓存（内部 JS_DupValue，val 仍有效）
+            _bytecode_cache_store(bridge, script, script_len, val);
+            // 执行字节码（val 被 JS_EvalFunction 消费）
+            val = JS_EvalFunction(bridge->ctx, val);
+        }
+    }
 
     if (JS_IsException(val)) {
         JSValue exception = JS_GetException(bridge->ctx);
@@ -553,6 +1323,38 @@ const char *quickjs_bridge_eval(QuickJSBridge *bridge, const char *script, int *
     return strdup("");
 }
 
+// Phase 4: 预编译脚本到字节码缓存（不执行）
+// 用于在空闲时段预热高频脚本，后续 eval 时直接命中缓存
+// 返回 0 成功，-1 失败（语法错误等）
+int quickjs_bridge_precompile(QuickJSBridge *bridge, const char *script) {
+    if (!bridge || !bridge->ctx || !script) return -1;
+    size_t len = strlen(script);
+
+    // 已在缓存中则跳过
+    JSValue cached = _bytecode_cache_lookup(bridge, script, len);
+    if (!JS_IsNull(cached)) {
+        JS_FreeValue(bridge->ctx, cached);  // 释放 lookup 返回的 dup
+        return 0;
+    }
+
+    JSValue bc = JS_Eval(bridge->ctx, script, len, "<precompile>",
+                         JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
+    if (JS_IsException(bc)) {
+        JS_FreeValue(bridge->ctx, bc);
+        return -1;
+    }
+
+    _bytecode_cache_store(bridge, script, len, bc);
+    JS_FreeValue(bridge->ctx, bc);  // 释放编译结果（cache 已 dup）
+    return 0;
+}
+
+// Phase 4: 清空字节码缓存
+// 用于内存压力场景或脚本失效（如书源切换后旧模板不再复用）
+void quickjs_bridge_clear_bytecode_cache(QuickJSBridge *bridge) {
+    if (bridge) _bytecode_cache_clear(bridge);
+}
+
 void quickjs_bridge_free_string(const char *str) {
     if (str) {
         free((void *)str);
@@ -561,6 +1363,9 @@ void quickjs_bridge_free_string(const char *str) {
 
 void quickjs_bridge_dispose(QuickJSBridge *bridge) {
     if (!bridge) return;
+    // Phase 4: 必须在 JS_FreeContext 之前清空字节码缓存
+    // （缓存的 JSValue 依赖 ctx 有效，否则 JS_FreeValue 会 UAF）
+    _bytecode_cache_clear(bridge);
     if (bridge->ctx) {
         JS_FreeContext(bridge->ctx);
     }

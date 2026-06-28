@@ -68,7 +68,9 @@
 
 /* define to include Atomics.* operations which depend on the OS
    threads */
-#if !defined(__EMSCRIPTEN__)
+/* 体积优化：可通过 CONFIG_NO_ATOMICS 宏裁剪 Atomics/SharedArrayBuffer
+ * 本项目 JS 引擎单线程运行，不使用 Worker/SharedArrayBuffer，裁剪可省约 5-15KB */
+#if !defined(__EMSCRIPTEN__) && !defined(CONFIG_NO_ATOMICS)
 #define CONFIG_ATOMICS
 #endif
 

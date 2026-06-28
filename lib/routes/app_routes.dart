@@ -24,6 +24,7 @@ import '../pages/player/video_player_page.dart';
 import '../pages/player/audio_player_page.dart';
 import '../pages/explore/explore_show_page.dart';
 import '../pages/debug/book_source_debug_page.dart';
+import '../pages/debug/crypto_stats_panel.dart';
 import '../pages/detail/chapter_list_page.dart';
 import '../pages/web/internal_browser_page.dart';
 
@@ -86,6 +87,7 @@ class AppRoutes {
   static const String audioPlayer = '/audio-player';
   static const String exploreShow = '/explore-show';
   static const String bookSourceDebug = '/book-source-debug';
+  static const String cryptoStats = '/crypto-stats';
   static const String chapterList = '/chapter-list';
   static const String internalBrowser = '/internal-browser';
 
@@ -251,6 +253,8 @@ class AppRoutes {
             source: sourceObj is BookSource ? sourceObj : null,
           ),
         );
+      case cryptoStats:
+        return AppPageRoute(builder: (_) => const CryptoStatsPanel());
       case chapterList:
         final args = settings.arguments;
         Map<String, dynamic>? argsMap;

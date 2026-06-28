@@ -233,6 +233,13 @@ class _ProfilePageState extends State<ProfilePage>
                         Navigator.pushNamed(context, AppRoutes.storageManage),
                   ),
                   _buildListItem(
+                    icon: Icons.speed_rounded,
+                    title: '加密性能统计',
+                    subtitle: '查看 C 原生解密链路耗时与吞吐',
+                    onTap: () =>
+                        Navigator.pushNamed(context, AppRoutes.cryptoStats),
+                  ),
+                  _buildListItem(
                     icon: Icons.info_outline_rounded,
                     title: '关于',
                     onTap: _showAboutDialog,

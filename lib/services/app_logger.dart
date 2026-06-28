@@ -96,7 +96,18 @@ class AppLogger {
   Stream<LogEntry> get stream => _controller.stream;
 
   /// 当前最低显示级别
+  /// 注意：JS 执行链路日志（执行次数、代码、输入、输出、执行树）统一使用 info 级别，
+  /// 确保 Release 模式下调试页面也能看到完整链路，避免被 minLevel 过滤掉。
   LogLevel minLevel = kDebugMode ? LogLevel.verbose : LogLevel.info;
+
+  // ===== JS 执行统计（仅保留累计执行序号，用于链路标识）=====
+  int _quickjsExecutionCount = 0;
+
+  /// QuickJS 累计执行次数（仅作序号用，不区分成功/失败）
+  int get quickjsExecutionCount => _quickjsExecutionCount;
+
+  /// 增加 QuickJS 执行计数
+  void incrementQuickjsCount() => _quickjsExecutionCount++;
 
   /// 获取所有日志
   List<LogEntry> get logs => List.unmodifiable(_buffer);
@@ -178,21 +189,47 @@ class AppLogger {
 
   // ===== JS 引擎专用 =====
 
-  /// 记录 JS 执行
+  /// 记录 JS 执行（info 级别，确保 Release 模式可见）
+  /// 注意：此方法不再自动增加计数，由调用方（processJsRule/executeSync/EngineDispatcher）显式调用 incrementQuickjsCount()
   void logJsExecute(String engine, String code, {int? codeLength}) {
-    debug(LogCategory.js, '[$engine] 执行JS (${codeLength ?? code.length} chars)',
+    info(LogCategory.js, '[$engine] 执行JS #$_quickjsExecutionCount (${codeLength ?? code.length} chars)',
       detail: code);
   }
 
-  /// 记录 JS 执行结果
+  /// 记录 JS 执行结果（info 级别，确保 Release 模式可见）
   void logJsResult(String engine, String? result) {
-    debug(LogCategory.js, '[$engine] 结果: ${result != null ? "${result.length} chars" : "null"}',
+    info(LogCategory.js, '[$engine] 结果: ${result != null ? "${result.length} chars" : "null"}',
       detail: result);
   }
 
   /// 记录 JS 执行失败
   void logJsError(String engine, String errorMsg) {
     _log(LogLevel.error, LogCategory.js, '[$engine] 执行失败', detail: errorMsg);
+  }
+
+  /// 记录 JS 执行输入内容（info 级别，打印完整输入）
+  void logJsInput(String engine, String? input, {String? tag}) {
+    final label = tag != null ? '[$engine] 输入[$tag]' : '[$engine] 输入';
+    info(LogCategory.js, '$label (${input?.length ?? 0} chars)', detail: input);
+  }
+
+  /// 记录 JS 执行输出内容（info 级别，打印完整输出）
+  void logJsOutput(String engine, String? output, {String? outputType, String? tag}) {
+    final typeInfo = outputType != null ? '($outputType)' : '';
+    final label = tag != null ? '[$engine] 输出[$tag]$typeInfo' : '[$engine] 输出$typeInfo';
+    info(LogCategory.js, '$label (${output?.length ?? 0} chars)', detail: output);
+  }
+
+  /// 记录 JS 执行树（info 级别，确保 Release 模式可见）
+  /// 将 JsTracer 生成的完整执行树输出到日志流
+  void logJsTree(String engine, String treeString) {
+    if (treeString.isEmpty || treeString == '(no trace)') return;
+    info(LogCategory.js, '[$engine] JS执行树', detail: treeString);
+  }
+
+  /// 记录 JS 执行链路步骤（info 级别）
+  void logJsStep(String engine, String step, {String? detail}) {
+    info(LogCategory.js, '[$engine] $step', detail: detail);
   }
 
   // ===== 规则解析专用 =====

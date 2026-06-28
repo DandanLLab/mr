@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../app_logger.dart';
 import 'js_engine.dart';
 
 // ===== QuickJS 统一调度器 =====
@@ -69,6 +70,9 @@ class EngineDispatcher {
 
     // QuickJS 路径（唯一引擎）
     _quickjsCount++;
+    // 注意：processJsRule 内部会调用 incrementQuickjsCount()，这里不重复调用
+    AppLogger.instance.logJsStep('EngineDispatcher', '调度JS执行 #$_quickjsCount',
+      detail: 'codeLen=${resolved.code.length}, hasResult=${result != null}, baseUrl=$baseUrl');
     String contentStr;
     if (result is List || result is Map) {
       contentStr = jsonEncode(result);
@@ -77,10 +81,12 @@ class EngineDispatcher {
     } else {
       contentStr = result?.toString() ?? '';
     }
-    return JsEngine.instance.processJsRule(
+    final out = await JsEngine.instance.processJsRule(
       contentStr, resolved.code, baseUrl: baseUrl, sourceEngine: sourceEngine,
       dynamicContent: result,
     );
+    AppLogger.instance.logJsResult('EngineDispatcher', out);
+    return out;
   }
 
   /// 健康检查：检测引擎是否可用

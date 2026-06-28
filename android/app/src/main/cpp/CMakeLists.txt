@@ -15,6 +15,8 @@ set(QUICKJS_SOURCES
     ${QUICKJS_SRC_DIR}/libregexp.c
     ${QUICKJS_SRC_DIR}/libunicode.c
     ${QUICKJS_SRC_DIR}/quickjs_bridge.c
+    ${QUICKJS_SRC_DIR}/lzstring.c
+    ${QUICKJS_SRC_DIR}/batch_decompress.c
     ${QUICKJS_SRC_DIR}/crypto/md5.c
     ${QUICKJS_SRC_DIR}/crypto/sha1.c
     ${QUICKJS_SRC_DIR}/crypto/sha256.c
@@ -26,22 +28,46 @@ set(QUICKJS_SOURCES
 # Dart FFI 通过 DynamicLibrary.open('libquickjs_c_bridge.so') 加载
 add_library(quickjs_c_bridge SHARED ${QUICKJS_SOURCES})
 
-# 编译选项（与 iOS podspec 保持一致）
+# 体积优化：编译选项 —— 体积优先 + 裁剪未引用代码
+# -Oz：极致体积优先（比 -O3 体积小 20-30%，速度损失约 10-15%，移动端首选）
+#   注：QuickJS 主要计算开销已沉降至 C 原生函数（Phase 1-3），解释器速度损失用户感知不强
+# -flto：链接期跨文件内联 + 死代码消除（同时优化速度和体积）
+# -ffunction-sections -fdata-sections：按函数/数据分段，配合 --gc-sections 裁剪未引用代码
+# -fomit-frame-pointer：释放 fp 寄存器（arm64 默认行为，显式声明）
 target_compile_options(quickjs_c_bridge PRIVATE
     -Wno-implicit-function-declaration
     -Wno-unused-parameter
     -Wno-sign-compare
     -Wno-unused-function
     -Wno-unused-variable
-    -Os
+    -Oz
+    -flto
+    -ffunction-sections
+    -fdata-sections
+    -fomit-frame-pointer
+)
+
+# 链接期优化：LTO + gc-sections + version-script 精确控制导出符号 + strip
+# -Wl,--gc-sections：移除未引用的函数/数据段
+# -Wl,--version-script：仅导出 quickjs_bridge_* 和批量解压函数，QuickJS 内部符号全部隐藏
+#   避免 .dynsym 表膨胀（QuickJS 有数百个内部 JS_* 函数），so 体积可减 10-30KB
+# -Wl,-s：strip 所有符号表和重定位信息（AGP Release 也会自动 strip，这里显式确保）
+# -flto：链接期优化（与编译期 -flto 配合）
+target_link_options(quickjs_c_bridge PRIVATE
+    -Wl,--gc-sections
+    -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/quickjs_bridge.map
+    -Wl,-s
+    -flto
 )
 
 # 预处理宏定义
 # CONFIG_VERSION 必须是字符串字面量，CMake 的 target_compile_definitions
 # 会正确保留引号，使 quickjs.c 中 "..." CONFIG_VERSION "..." 拼接合法
+# CONFIG_NO_ATOMICS：裁剪 Atomics/SharedArrayBuffer（单线程 JS 引擎不需要，省约 5-15KB）
 target_compile_definitions(quickjs_c_bridge PRIVATE
     _GNU_SOURCE
     CONFIG_VERSION="2026.06.04"
+    CONFIG_NO_ATOMICS
 )
 
 # 头文件搜索路径

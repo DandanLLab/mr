@@ -43,6 +43,14 @@ void quickjs_bridge_dispose(QuickJSBridge *bridge);
 // 释放 eval 返回的字符串
 void quickjs_bridge_free_string(const char *str);
 
+// ---------- Phase 4: 字节码缓存 ----------
+// 预编译脚本到字节码缓存（不执行），后续 eval 同一脚本时跳过词法/语法分析
+// 返回 0 成功，-1 失败（语法错误等）
+int quickjs_bridge_precompile(QuickJSBridge *bridge, const char *script);
+
+// 清空字节码缓存（书源切换、内存压力场景）
+void quickjs_bridge_clear_bytecode_cache(QuickJSBridge *bridge);
+
 // 获取 C 原生加密的性能统计（累计，每个 bridge 独立）
 // 返回当前 stats 的快照（拷贝）
 crypto_stats_t quickjs_bridge_get_crypto_stats(QuickJSBridge *bridge);
