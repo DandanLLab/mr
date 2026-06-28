@@ -73,3 +73,29 @@ List<String?> aesDecryptLzBatch(List<String> b64Inputs, String key) =>
 
 /// Web stub：清理加密回调结果（无操作）
 void cleanupCryptoResults() {}
+
+// ---------- 原生解析工具 Web stub ----------
+// Web 平台无 dart:ffi，回退到 Dart 纯实现
+
+/// Web stub：HTML 实体反转义（Dart 实现）
+String nativeUnescapeHtml(String input) {
+  if (!input.contains('&')) return input;
+  return input
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'")
+      .replaceAll('&nbsp;', ' ');
+}
+
+/// Web stub：URL 编码（Dart Uri.encodeQueryComponent 实现）
+String nativeUrlEncode(String input) => Uri.encodeQueryComponent(input);
+
+/// Web stub：URL 解码（Dart Uri.decodeQueryComponent 实现）
+String nativeUrlDecode(String input) => Uri.decodeQueryComponent(input);
+
+/// Web stub：HTML 解析 + CSS 查询（返回空结果，Web 端回退到 Dart html 包）
+String nativeHtmlQueryExtract(String html, String selector, String attr, bool listMode) {
+  return listMode ? '[]' : '';
+}

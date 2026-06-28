@@ -95,6 +95,36 @@ void quickjs_bridge_set_crypto_callback_binary(crypto_callback_binary cb);
 // 注册二进制加密回调（绑定到指定 bridge 实例，多线程安全）
 void quickjs_bridge_set_crypto_callback_binary_for(QuickJSBridge *bridge, crypto_callback_binary cb);
 
+// ---------- 原生解析工具（不需要 bridge 上下文，纯函数）----------
+// 解析加速：高频字符串操作下沉到 C 层
+// 返回的字符串用 quickjs_bridge_free_string 释放
+
+// HTML 实体反转义：&amp; &lt; &gt; &quot; &#39; &nbsp;
+const char *quickjs_bridge_unescape_html(const char *input, size_t input_len, size_t *output_len);
+
+// URL 编码（percent-encode，RFC 3986）
+const char *quickjs_bridge_url_encode(const char *input, size_t input_len, size_t *output_len);
+
+// URL 解码（percent-decode，+ 解码为空格）
+const char *quickjs_bridge_url_decode(const char *input, size_t input_len, size_t *output_len);
+
+// ---------- C 原生 HTML 解析 + CSS 选择器引擎 ----------
+// 解析加速：替代 Dart html 包的 querySelectorAll，消除多层 fallback 开销
+// 原子调用：HTML 解析 + CSS 查询 + 属性提取 一次完成
+//
+// html/html_len: HTML 字符串
+// selector: CSS 选择器（支持 tag .class #id [attr] [attr=val] descendant(空格) child(>) :nth-child :eq）
+// attr: 提取的属性名，特殊值: "@text"=文本, "@html"=内部HTML, "@outerHtml"=外部HTML, "@tag"=标签名
+// list_mode: 1=返回 JSON 数组 ["v1","v2"], 0=返回第一个匹配的纯字符串
+// is_error: 输出参数，0=成功, 1=失败
+// 返回: malloc 分配的字符串，调用方用 quickjs_bridge_free_string 释放
+const char *quickjs_bridge_html_query_extract(
+    const char *html, size_t html_len,
+    const char *selector,
+    const char *attr,
+    int list_mode,
+    int *is_error);
+
 #ifdef __cplusplus
 }
 #endif

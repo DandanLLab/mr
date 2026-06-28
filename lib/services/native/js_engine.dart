@@ -386,6 +386,55 @@ class JsEngine {
     }
   }
 
+  // ===== 解析加速：原生字符串工具（代理到 C 层）=====
+
+  /// C 原生 HTML 实体反转义
+  /// 单次扫描替代 Dart RegExp + replaceAllMapped，1300 章×6 字段场景收益显著
+  String unescapeHtmlNative(String input) {
+    try {
+      return nativeUnescapeHtml(input);
+    } catch (_) {
+      return input;
+    }
+  }
+
+  /// C 原生 URL 编码（RFC 3986 percent-encode）
+  String urlEncodeNative(String input) {
+    try {
+      return nativeUrlEncode(input);
+    } catch (_) {
+      return input;
+    }
+  }
+
+  /// C 原生 URL 解码（percent-decode，+ 解码为空格）
+  String urlDecodeNative(String input) {
+    try {
+      return nativeUrlDecode(input);
+    } catch (_) {
+      return input;
+    }
+  }
+
+  // ===== 解析加速：C 原生 HTML 解析 + CSS 选择器 =====
+
+  /// C 原生 HTML 解析 + CSS 查询 + 属性提取（原子调用）
+  ///
+  /// 单次 FFI 完成全部操作，替代 Dart html 包的 querySelectorAll + 多层 fallback。
+  /// 1300 章目录场景下消除 1300 次 html_parser.parse 和 7800 次 CSS 查询的 Dart 开销。
+  ///
+  /// [html] HTML 字符串
+  /// [selector] CSS 选择器（tag .class #id [attr] [attr=val] 后代 子代 :nth-child :eq）
+  /// [attr] 属性名，特殊值: @text @html @outerHtml @tag
+  /// [listMode] true=返回 JSON 数组字符串, false=返回第一个匹配的纯字符串
+  String htmlQueryExtractNative(String html, String selector, String attr, bool listMode) {
+    try {
+      return nativeHtmlQueryExtract(html, selector, attr, listMode);
+    } catch (_) {
+      return listMode ? '[]' : '';
+    }
+  }
+
   // ===== 分流策略 =====
 
   /// 解析规则代码，剥离 @js: 前缀和 <js></js> 标签

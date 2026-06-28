@@ -9,6 +9,7 @@
 #include "crypto/aes.h"
 #include "lzstring.h"
 #include "batch_decompress.h"
+#include "html_native.h"
 
 // ---------- Phase 4: 字节码缓存 ----------
 // 跳过词法分析/语法解析/字节码生成阶段，对重复执行的脚本直接走 JS_EvalFunction
@@ -149,6 +150,278 @@ static void _bytecode_cache_clear(QuickJSBridge *bridge) {
         }
     }
     bridge->bytecode_cache_count = 0;
+}
+
+// ---------- 原生解析工具（不需要 bridge 上下文，纯函数）----------
+// 解析加速：将高频字符串操作下沉到 C 层，消除 Dart 正则编译 + lambda 开销
+
+// HTML 实体反转义：单次扫描替代 Dart 的 RegExp + replaceAllMapped
+// 支持：&amp; &lt; &gt; &quot; &#39; &nbsp;
+// 返回 malloc 分配的字符串（调用方用 quickjs_bridge_free_string 释放）
+const char *quickjs_bridge_unescape_html(const char *input, size_t input_len, size_t *output_len) {
+    if (!input || !output_len) return NULL;
+    *output_len = 0;
+    if (input_len == 0) {
+        char *out = (char *)malloc(1);
+        if (out) out[0] = 0;
+        return out;
+    }
+    // 反转义后长度 <= 输入长度，分配 input_len+1 足够
+    char *output = (char *)malloc(input_len + 1);
+    if (!output) return NULL;
+    size_t out_pos = 0;
+
+    for (size_t i = 0; i < input_len; ) {
+        if (input[i] == '&') {
+            // 按长度从长到短匹配，避免前缀冲突
+            if (i + 6 <= input_len && memcmp(input + i, "&nbsp;", 6) == 0) {
+                output[out_pos++] = ' '; i += 6;
+            } else if (i + 6 <= input_len && memcmp(input + i, "&quot;", 6) == 0) {
+                output[out_pos++] = '"'; i += 6;
+            } else if (i + 5 <= input_len && memcmp(input + i, "&amp;", 5) == 0) {
+                output[out_pos++] = '&'; i += 5;
+            } else if (i + 5 <= input_len && memcmp(input + i, "&#39;", 5) == 0) {
+                output[out_pos++] = '\''; i += 5;
+            } else if (i + 4 <= input_len && memcmp(input + i, "&lt;", 4) == 0) {
+                output[out_pos++] = '<'; i += 4;
+            } else if (i + 4 <= input_len && memcmp(input + i, "&gt;", 4) == 0) {
+                output[out_pos++] = '>'; i += 4;
+            } else {
+                output[out_pos++] = input[i++];
+            }
+        } else {
+            output[out_pos++] = input[i++];
+        }
+    }
+    output[out_pos] = 0;
+    *output_len = out_pos;
+    return output;
+}
+
+// URL 编码（percent-encode）：将非安全字符编码为 %XX
+// 返回 malloc 分配的字符串（调用方用 quickjs_bridge_free_string 释放）
+const char *quickjs_bridge_url_encode(const char *input, size_t input_len, size_t *output_len) {
+    if (!input || !output_len) return NULL;
+    *output_len = 0;
+    if (input_len == 0) {
+        char *out = (char *)malloc(1);
+        if (out) out[0] = 0;
+        return out;
+    }
+    // 最坏情况：每个字符编码为 %XX（3倍长度）
+    char *output = (char *)malloc(input_len * 3 + 1);
+    if (!output) return NULL;
+    size_t out_pos = 0;
+    static const char hex[] = "0123456789ABCDEF";
+
+    for (size_t i = 0; i < input_len; i++) {
+        unsigned char c = (unsigned char)input[i];
+        // 安全字符：A-Za-z0-9-_.~ 不编码（RFC 3986 unreserved）
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
+            output[out_pos++] = c;
+        } else {
+            output[out_pos++] = '%';
+            output[out_pos++] = hex[c >> 4];
+            output[out_pos++] = hex[c & 15];
+        }
+    }
+    output[out_pos] = 0;
+    *output_len = out_pos;
+    return output;
+}
+
+// URL 解码（percent-decode）：将 %XX 解码为原始字符，+ 解码为空格
+// 返回 malloc 分配的字符串（调用方用 quickjs_bridge_free_string 释放）
+const char *quickjs_bridge_url_decode(const char *input, size_t input_len, size_t *output_len) {
+    if (!input || !output_len) return NULL;
+    *output_len = 0;
+    if (input_len == 0) {
+        char *out = (char *)malloc(1);
+        if (out) out[0] = 0;
+        return out;
+    }
+    char *output = (char *)malloc(input_len + 1);
+    if (!output) return NULL;
+    size_t out_pos = 0;
+
+    for (size_t i = 0; i < input_len; ) {
+        char c = input[i];
+        if (c == '%' && i + 2 < input_len) {
+            // 解析两位十六进制
+            int hi = -1, lo = -1;
+            char h = input[i + 1], l = input[i + 2];
+            if (h >= '0' && h <= '9') hi = h - '0';
+            else if (h >= 'A' && h <= 'F') hi = h - 'A' + 10;
+            else if (h >= 'a' && h <= 'f') hi = h - 'a' + 10;
+            if (l >= '0' && l <= '9') lo = l - '0';
+            else if (l >= 'A' && l <= 'F') lo = l - 'A' + 10;
+            else if (l >= 'a' && l <= 'f') lo = l - 'a' + 10;
+            if (hi >= 0 && lo >= 0) {
+                output[out_pos++] = (char)((hi << 4) | lo);
+                i += 3;
+                continue;
+            }
+        }
+        if (c == '+') {
+            output[out_pos++] = ' ';
+        } else {
+            output[out_pos++] = c;
+        }
+        i++;
+    }
+    output[out_pos] = 0;
+    *output_len = out_pos;
+    return output;
+}
+
+// ---------- C 原生 HTML 解析 + CSS 选择器引擎 ----------
+// 解析加速：替代 Dart html 包的 querySelectorAll，消除多层 fallback 开销
+// 原子调用：HTML 解析 + CSS 查询 + 属性提取 一次完成，避免多次 FFI 往返
+
+// JSON 字符串转义（追加到 buffer）
+static void _json_escape_append(char **buf, size_t *len, size_t *cap, const char *str) {
+    if (!str) return;
+    for (const char *p = str; *p; p++) {
+        char c = *p;
+        if (c == '"' || c == '\\') {
+            if (*len + 2 >= *cap) { *cap = (*cap == 0 ? 256 : *cap * 2) + 2; *buf = (char *)realloc(*buf, *cap); }
+            (*buf)[(*len)++] = '\\';
+            (*buf)[(*len)++] = c;
+        } else if (c == '\n') {
+            if (*len + 2 >= *cap) { *cap = (*cap == 0 ? 256 : *cap * 2) + 2; *buf = (char *)realloc(*buf, *cap); }
+            (*buf)[(*len)++] = '\\'; (*buf)[(*len)++] = 'n';
+        } else if (c == '\r') {
+            if (*len + 2 >= *cap) { *cap = (*cap == 0 ? 256 : *cap * 2) + 2; *buf = (char *)realloc(*buf, *cap); }
+            (*buf)[(*len)++] = '\\'; (*buf)[(*len)++] = 'r';
+        } else if (c == '\t') {
+            if (*len + 2 >= *cap) { *cap = (*cap == 0 ? 256 : *cap * 2) + 2; *buf = (char *)realloc(*buf, *cap); }
+            (*buf)[(*len)++] = '\\'; (*buf)[(*len)++] = 't';
+        } else if ((unsigned char)c < 0x20) {
+            if (*len + 6 >= *cap) { *cap = (*cap == 0 ? 256 : *cap * 2) + 6; *buf = (char *)realloc(*buf, *cap); }
+            *len += sprintf(*buf + *len, "\\u%04x", (unsigned char)c);
+        } else {
+            if (*len + 1 >= *cap) { *cap = (*cap == 0 ? 256 : *cap * 2) + 1; *buf = (char *)realloc(*buf, *cap); }
+            (*buf)[(*len)++] = c;
+        }
+    }
+}
+
+// 原子调用：HTML 解析 + CSS 查询 + 属性提取
+// html/html_len: HTML 字符串
+// selector: CSS 选择器（支持 tag .class #id [attr] descendant child :nth-child :eq）
+// attr: 提取的属性名，特殊值: "@text"=文本, "@html"=内部HTML, "@outerHtml"=外部HTML, "@tag"=标签名
+// list_mode: 1=返回所有匹配的 JSON 数组, 0=只返回第一个匹配的字符串（非 JSON）
+// 返回: malloc 分配的字符串，调用方用 quickjs_bridge_free_string 释放
+const char *quickjs_bridge_html_query_extract(
+    const char *html, size_t html_len,
+    const char *selector,
+    const char *attr,
+    int list_mode,
+    int *is_error) {
+    if (is_error) *is_error = 0;
+    if (!html || !selector || !attr) {
+        if (is_error) *is_error = 1;
+        return _str_dup(list_mode ? "[]" : "", 0);
+    }
+
+    // 解析 HTML
+    html_node_t *root = html_parse(html, html_len);
+    if (!root) {
+        if (is_error) *is_error = 1;
+        return _str_dup(list_mode ? "[]" : "", 0);
+    }
+
+    // CSS 查询
+    int match_count = 0;
+    html_node_t **matches = html_query_all(root, selector, &match_count);
+
+    // 确定提取函数
+    enum { EXTRACT_TEXT, EXTRACT_INNER_HTML, EXTRACT_OUTER_HTML, EXTRACT_TAG, EXTRACT_ATTR } extract_type = EXTRACT_ATTR;
+    if (attr[0] == '@') {
+        if (strcmp(attr, "@text") == 0 || strcmp(attr, "@text()") == 0) extract_type = EXTRACT_TEXT;
+        else if (strcmp(attr, "@html") == 0 || strcmp(attr, "@innerHtml") == 0 || strcmp(attr, "@innerHTML") == 0) extract_type = EXTRACT_INNER_HTML;
+        else if (strcmp(attr, "@outerHtml") == 0) extract_type = EXTRACT_OUTER_HTML;
+        else if (strcmp(attr, "@tag") == 0 || strcmp(attr, "@tagName") == 0) extract_type = EXTRACT_TAG;
+    }
+
+    // 构建结果
+    char *result_buf = NULL;
+    size_t result_len = 0;
+    size_t result_cap = 0;
+
+    if (list_mode) {
+        // JSON 数组模式: ["val1", "val2", ...]
+        result_buf = (char *)malloc(2);
+        result_buf[result_len++] = '[';
+    }
+
+    for (int i = 0; i < match_count; i++) {
+        html_node_t *elem = matches[i];
+        char *value = NULL;
+        size_t value_len = 0;
+
+        switch (extract_type) {
+            case EXTRACT_TEXT:
+                value = html_get_text(elem, &value_len);
+                break;
+            case EXTRACT_INNER_HTML:
+                value = html_get_inner_html(elem, &value_len);
+                break;
+            case EXTRACT_OUTER_HTML:
+                value = html_get_outer_html(elem, &value_len);
+                break;
+            case EXTRACT_TAG: {
+                const char *tag = html_get_tag_name(elem);
+                if (tag) value = _str_dup(tag, strlen(tag));
+                break;
+            }
+            case EXTRACT_ATTR:
+                value = html_get_attr(elem, attr);
+                break;
+        }
+
+        if (list_mode) {
+            // JSON 数组：添加逗号分隔
+            if (i > 0) {
+                if (result_len + 1 >= result_cap) { result_cap = (result_cap == 0 ? 256 : result_cap * 2); result_buf = (char *)realloc(result_buf, result_cap); }
+                result_buf[result_len++] = ',';
+            }
+            if (result_len + 1 >= result_cap) { result_cap = (result_cap == 0 ? 256 : result_cap * 2); result_buf = (char *)realloc(result_buf, result_cap); }
+            result_buf[result_len++] = '"';
+            _json_escape_append(&result_buf, &result_len, &result_cap, value);
+            if (result_len + 1 >= result_cap) { result_cap = (result_cap == 0 ? 256 : result_cap * 2); result_buf = (char *)realloc(result_buf, result_cap); }
+            result_buf[result_len++] = '"';
+        } else {
+            // 单值模式：直接返回第一个匹配的值
+            if (value) {
+                free(result_buf);
+                result_buf = value;
+                result_len = strlen(value);
+                break; // 只取第一个
+            }
+        }
+        free(value);
+    }
+
+    if (list_mode) {
+        if (result_len + 1 >= result_cap) { result_cap = (result_cap == 0 ? 256 : result_cap * 2); result_buf = (char *)realloc(result_buf, result_cap); }
+        result_buf[result_len++] = ']';
+    }
+
+    if (!result_buf) {
+        result_buf = (char *)malloc(1);
+        result_buf[0] = 0;
+    } else {
+        if (result_len + 1 >= result_cap) { result_buf = (char *)realloc(result_buf, result_len + 1); }
+        result_buf[result_len] = 0;
+    }
+
+    // 清理
+    free(matches);
+    html_node_free(root);
+
+    return result_buf;
 }
 
 // ---------- 全局回调（向后兼容，作为默认值）----------

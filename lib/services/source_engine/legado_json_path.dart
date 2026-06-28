@@ -1,6 +1,22 @@
 import 'dart:convert';
 
 class LegadoJsonPath {
+  // 解析加速：正则编译缓存，避免 _matches 中每次动态编译
+  static final RegExp _filterExprRegex = RegExp(
+    r'''^\s*@(?:\.([A-Za-z0-9_\-$]+)|\[['"]([^'"]+)['"]\])\s*(?:(==|!=|>=|<=|>|<|=~)\s*(.+))?\s*$''',
+  );
+  static final RegExp _regexExtractRegex = RegExp(r'^/(.*?)/([ims]*)$');
+  static final Map<String, RegExp> _userRegexCache = {};
+  static RegExp _getCachedUserRegex(String pattern, String flags) {
+    final cacheKey = '$pattern|$flags';
+    return _userRegexCache.putIfAbsent(cacheKey, () => RegExp(
+      pattern,
+      caseSensitive: !flags.contains('i'),
+      multiLine: flags.contains('m'),
+      dotAll: flags.contains('s'),
+    ));
+  }
+
   static dynamic read(dynamic input, String path) {
     dynamic data = input;
     if (data is String) data = jsonDecode(data);
@@ -271,9 +287,7 @@ class LegadoJsonPath {
   }
 
   static bool _matches(dynamic item, String expression) {
-    final match = RegExp(
-      r'''^\s*@(?:\.([A-Za-z0-9_\-$]+)|\[['"]([^'"]+)['"]\])\s*(?:(==|!=|>=|<=|>|<|=~)\s*(.+))?\s*$''',
-    ).firstMatch(expression);
+    final match = _filterExprRegex.firstMatch(expression);
     if (match == null) return false;
     final key = match.group(1) ?? match.group(2)!;
     final actual = item is Map ? item[key] : null;
@@ -281,14 +295,10 @@ class LegadoJsonPath {
     if (op == null) return actual != null && actual != false;
     final expectedText = match.group(4)!.trim();
     if (op == '=~') {
-      final regex = RegExp(r'^/(.*?)/([ims]*)$').firstMatch(expectedText);
+      final regex = _regexExtractRegex.firstMatch(expectedText);
       if (regex == null) return false;
-      return RegExp(
-        regex.group(1)!,
-        caseSensitive: !regex.group(2)!.contains('i'),
-        multiLine: regex.group(2)!.contains('m'),
-        dotAll: regex.group(2)!.contains('s'),
-      ).hasMatch('$actual');
+      // 解析加速：用户正则编译结果缓存，避免每次动态编译
+      return _getCachedUserRegex(regex.group(1)!, regex.group(2)!).hasMatch('$actual');
     }
     final expected = _literal(expectedText);
     return switch (op) {

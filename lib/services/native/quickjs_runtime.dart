@@ -106,6 +106,110 @@ final _BridgeFreeStringDart _bridgeFreeString = _qjsLib
     .lookup<NativeFunction<_BridgeFreeStringC>>('quickjs_bridge_free_string')
     .asFunction<_BridgeFreeStringDart>();
 
+// ---------- 原生解析工具 FFI 绑定 ----------
+// 解析加速：高频字符串操作下沉到 C 层
+typedef _UnescapeHtmlC = Pointer<Utf8> Function(Pointer<Utf8> input, IntPtr inputLen, Pointer<IntPtr> outputLen);
+typedef _UnescapeHtmlDart = Pointer<Utf8> Function(Pointer<Utf8> input, int inputLen, Pointer<IntPtr> outputLen);
+final _UnescapeHtmlDart _nativeUnescapeHtml = _qjsLib
+    .lookup<NativeFunction<_UnescapeHtmlC>>('quickjs_bridge_unescape_html')
+    .asFunction<_UnescapeHtmlDart>();
+
+typedef _UrlEncodeC = Pointer<Utf8> Function(Pointer<Utf8> input, IntPtr inputLen, Pointer<IntPtr> outputLen);
+typedef _UrlEncodeDart = Pointer<Utf8> Function(Pointer<Utf8> input, int inputLen, Pointer<IntPtr> outputLen);
+final _UrlEncodeDart _nativeUrlEncode = _qjsLib
+    .lookup<NativeFunction<_UrlEncodeC>>('quickjs_bridge_url_encode')
+    .asFunction<_UrlEncodeDart>();
+
+typedef _UrlDecodeC = Pointer<Utf8> Function(Pointer<Utf8> input, IntPtr inputLen, Pointer<IntPtr> outputLen);
+typedef _UrlDecodeDart = Pointer<Utf8> Function(Pointer<Utf8> input, int inputLen, Pointer<IntPtr> outputLen);
+final _UrlDecodeDart _nativeUrlDecode = _qjsLib
+    .lookup<NativeFunction<_UrlDecodeC>>('quickjs_bridge_url_decode')
+    .asFunction<_UrlDecodeDart>();
+
+// 原生解析工具包装方法：处理 C 内存分配/释放，返回 Dart String
+// 输入 Dart String → C 字符串 → C 函数处理 → 结果拷贝为 Dart String → 释放 C 内存
+String _callNativeStringOp(
+    String input, Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<IntPtr>) fn) {
+  if (input.isEmpty) return input;
+  final inputPtr = input.toNativeUtf8();
+  final outputLenPtr = malloc<IntPtr>();
+  try {
+    final resultPtr = fn(inputPtr, inputPtr.length, outputLenPtr);
+    if (resultPtr == nullptr) return input;
+    final result = _safeToDartString(resultPtr);
+    _bridgeFreeString(resultPtr);
+    return result;
+  } catch (_) {
+    return input;
+  } finally {
+    malloc.free(inputPtr);
+    malloc.free(outputLenPtr);
+  }
+}
+
+/// C 原生 HTML 实体反转义（单次扫描，替代 Dart RegExp + replaceAllMapped）
+String nativeUnescapeHtml(String input) =>
+    _callNativeStringOp(input, _nativeUnescapeHtml);
+
+/// C 原生 URL 编码（RFC 3986 percent-encode）
+String nativeUrlEncode(String input) =>
+    _callNativeStringOp(input, _nativeUrlEncode);
+
+/// C 原生 URL 解码（percent-decode，+ 解码为空格）
+String nativeUrlDecode(String input) =>
+    _callNativeStringOp(input, _nativeUrlDecode);
+
+// ---------- C 原生 HTML 解析 + CSS 选择器引擎 ----------
+// 解析加速：原子调用 HTML 解析 + CSS 查询 + 属性提取
+typedef _HtmlQueryExtractC = Pointer<Utf8> Function(
+    Pointer<Utf8> html, IntPtr htmlLen,
+    Pointer<Utf8> selector,
+    Pointer<Utf8> attr,
+    Int32 listMode,
+    Pointer<Int32> isError);
+typedef _HtmlQueryExtractDart = Pointer<Utf8> Function(
+    Pointer<Utf8> html, int htmlLen,
+    Pointer<Utf8> selector,
+    Pointer<Utf8> attr,
+    int listMode,
+    Pointer<Int32> isError);
+final _HtmlQueryExtractDart _nativeHtmlQueryExtract = _qjsLib
+    .lookup<NativeFunction<_HtmlQueryExtractC>>('quickjs_bridge_html_query_extract')
+    .asFunction<_HtmlQueryExtractDart>();
+
+/// C 原生 HTML 解析 + CSS 查询 + 属性提取（原子调用）
+///
+/// 单次 FFI 调用完成：HTML 字符串 → DOM 树 → CSS 选择器匹配 → 属性提取
+/// 消除 Dart html 包的多层 fallback 开销和多次 DOM 解析
+///
+/// [html] HTML 字符串
+/// [selector] CSS 选择器（支持 tag .class #id [attr] [attr=val] 后代 子代 :nth-child :eq）
+/// [attr] 属性名，特殊值: @text @html @outerHtml @tag
+/// [listMode] true=返回 JSON 数组, false=返回第一个匹配的纯字符串
+/// 返回: listMode=true 时为 JSON 数组字符串，listMode=false 时为纯字符串或空字符串
+String nativeHtmlQueryExtract(String html, String selector, String attr, bool listMode) {
+  final htmlPtr = html.toNativeUtf8();
+  final selectorPtr = selector.toNativeUtf8();
+  final attrPtr = attr.toNativeUtf8();
+  final isErrorPtr = malloc<Int32>();
+  try {
+    isErrorPtr.value = 0;
+    final resultPtr = _nativeHtmlQueryExtract(
+        htmlPtr, htmlPtr.length, selectorPtr, attrPtr, listMode ? 1 : 0, isErrorPtr);
+    if (resultPtr == nullptr) return listMode ? '[]' : '';
+    final result = _safeToDartString(resultPtr);
+    _bridgeFreeString(resultPtr);
+    return result;
+  } catch (_) {
+    return listMode ? '[]' : '';
+  } finally {
+    malloc.free(htmlPtr);
+    malloc.free(selectorPtr);
+    malloc.free(attrPtr);
+    malloc.free(isErrorPtr);
+  }
+}
+
 // 释放运行时：void quickjs_bridge_dispose(bridge)
 final _BridgeDisposeDart _bridgeDispose = _qjsLib
     .lookup<NativeFunction<_BridgeDisposeC>>('quickjs_bridge_dispose')

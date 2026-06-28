@@ -39,7 +39,8 @@ class AnalyzeRule {
   // 规则缓存
   static final Map<String, List<_SourceRule>> _stringRuleCache = {};
   static final Map<String, RegExp?> _regexCache = {};
-  static const int _maxCacheSize = 64; // 稍微加大缓存上限
+  // 解析加速：扩容缓存上限，1300 章目录场景规则数远超 64，频繁重建 _SourceRule
+  static const int _maxCacheSize = 2048;
 
   // ===== 热路径 RegExp 常量（避免重复编译）=====
 
