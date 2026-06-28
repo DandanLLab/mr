@@ -686,8 +686,7 @@ class JsEngine {
           level: level,
           msg: typeof msg === 'string' ? msg : (msg && msg.toString ? msg.toString() : String(msg))
         });
-        // 防止日志数组无限增长（保留最近 500 条）
-        if (_consoleLogs.length > 500) _consoleLogs.splice(0, _consoleLogs.length - 500);
+        // 不限制日志数组长度（用户要求保留完整日志）
       }
       globalThis.console = {
         log: function() { _jsLog(Array.from(arguments).join(' '), 'log'); },
