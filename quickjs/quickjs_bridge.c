@@ -1,6 +1,7 @@
 #include "quickjs_bridge.h"
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "crypto/md5.h"
 #include "crypto/sha1.h"
 #include "crypto/sha256.h"
@@ -10,9 +11,54 @@
 struct QuickJSBridge {
     JSRuntime *runtime;
     JSContext *ctx;
+    // 上下文绑定的加密回调（每个 bridge 实例独立，多线程安全）
+    // 为 NULL 时回退到全局回调（向后兼容）
+    crypto_callback crypto_cb;
+    crypto_callback_binary crypto_cb_binary;
+    // 性能统计（每个 bridge 独立）
+    crypto_stats_t stats;
 };
 
-// ---------- 原生加密回调（全局，所有 runtime 共享）----------
+// ---------- 性能统计辅助 ----------
+#if defined(_WIN32) || defined(_WIN64)
+#include <windows.h>
+static uint64_t _now_us(void) {
+    static LARGE_INTEGER freq = {0};
+    if (freq.QuadPart == 0) QueryPerformanceFrequency(&freq);
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    return (uint64_t)(now.QuadPart * 1000000 / freq.QuadPart);
+}
+#else
+static uint64_t _now_us(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000 + (uint64_t)ts.tv_nsec / 1000;
+}
+#endif
+
+static void _stats_update(crypto_stats_t *s, uint64_t bytes_in, uint64_t bytes_out, uint64_t elapsed_us) {
+    s->total_calls++;
+    s->total_bytes_in += bytes_in;
+    s->total_bytes_out += bytes_out;
+    s->total_us += elapsed_us;
+    if (elapsed_us > s->max_us) s->max_us = elapsed_us;
+    if (s->min_us == 0 || elapsed_us < s->min_us) s->min_us = elapsed_us;
+}
+
+crypto_stats_t quickjs_bridge_get_crypto_stats(QuickJSBridge *bridge) {
+    if (!bridge) {
+        crypto_stats_t empty = {0};
+        return empty;
+    }
+    return bridge->stats;
+}
+
+void quickjs_bridge_reset_crypto_stats(QuickJSBridge *bridge) {
+    if (bridge) memset(&bridge->stats, 0, sizeof(crypto_stats_t));
+}
+
+// ---------- 全局回调（向后兼容，作为默认值）----------
 static crypto_callback g_crypto_cb = NULL;
 static crypto_callback_binary g_crypto_cb_binary = NULL;
 
@@ -24,12 +70,35 @@ void quickjs_bridge_set_crypto_callback_binary(crypto_callback_binary cb) {
     g_crypto_cb_binary = cb;
 }
 
+// ---------- 上下文绑定回调（每个 bridge 实例独立）----------
+void quickjs_bridge_set_crypto_callback_for(QuickJSBridge *bridge, crypto_callback cb) {
+    if (bridge) bridge->crypto_cb = cb;
+}
+
+void quickjs_bridge_set_crypto_callback_binary_for(QuickJSBridge *bridge, crypto_callback_binary cb) {
+    if (bridge) bridge->crypto_cb_binary = cb;
+}
+
+// 获取生效的回调（优先 bridge 实例，回退全局）
+static crypto_callback get_crypto_cb(JSContext *ctx) {
+    QuickJSBridge *bridge = (QuickJSBridge *)JS_GetContextOpaque(ctx);
+    if (bridge && bridge->crypto_cb) return bridge->crypto_cb;
+    return g_crypto_cb;
+}
+
+static crypto_callback_binary get_crypto_cb_binary(JSContext *ctx) {
+    QuickJSBridge *bridge = (QuickJSBridge *)JS_GetContextOpaque(ctx);
+    if (bridge && bridge->crypto_cb_binary) return bridge->crypto_cb_binary;
+    return g_crypto_cb_binary;
+}
+
 // ---------- 字符串路径 ----------
 // 通用加密调度：调用 Dart 回调，返回 JSValue
 // 失败抛 JS 异常，成功返回字符串
 static JSValue js_call_crypto(JSContext *ctx, int op, int argc, JSValueConst *argv,
                               int min_args, const char *fn_name) {
-    if (!g_crypto_cb) {
+    crypto_callback cb = get_crypto_cb(ctx);
+    if (!cb) {
         return JS_ThrowTypeError(ctx, "%s: native crypto not registered", fn_name);
     }
     if (argc < min_args) {
@@ -60,7 +129,7 @@ static JSValue js_call_crypto(JSContext *ctx, int op, int argc, JSValueConst *ar
     }
 
     int is_error = 0;
-    const char *result = g_crypto_cb(op, a ? a : "", b ? b : "", c ? c : "", &is_error);
+    const char *result = cb(op, a ? a : "", b ? b : "", c ? c : "", &is_error);
 
     if (a) JS_FreeCString(ctx, a);
     if (b) JS_FreeCString(ctx, b);
@@ -80,7 +149,8 @@ static JSValue js_call_crypto(JSContext *ctx, int op, int argc, JSValueConst *ar
 // 返回 Uint8Array（JS_NewArrayBufferCopy 会复制，但只复制一次）
 static JSValue js_call_crypto_binary(JSContext *ctx, int op, int argc, JSValueConst *argv,
                                      int min_args, const char *fn_name) {
-    if (!g_crypto_cb_binary) {
+    crypto_callback_binary cb = get_crypto_cb_binary(ctx);
+    if (!cb) {
         return JS_ThrowTypeError(ctx, "%s: native crypto binary not registered", fn_name);
     }
     if (argc < min_args) {
@@ -112,7 +182,7 @@ static JSValue js_call_crypto_binary(JSContext *ctx, int op, int argc, JSValueCo
 
     size_t out_len = 0;
     int is_error = 0;
-    const uint8_t *result = g_crypto_cb_binary(op,
+    const uint8_t *result = cb(op,
         data0, len0, data1, len1, data2, len2,
         &out_len, &is_error);
 
@@ -147,8 +217,13 @@ static JSValue js_native_md5(JSContext *ctx, JSValueConst this_val,
     const uint8_t *data = get_ab(ctx, argv[0], &len, "md5Native", 1);
     if (!data) return JS_EXCEPTION;
 
+    QuickJSBridge *bridge = (QuickJSBridge *)JS_GetContextOpaque(ctx);
+    uint64_t t0 = bridge ? _now_us() : 0;
+
     uint8_t digest[16];
     md5(data, len, digest);
+
+    if (bridge) _stats_update(&bridge->stats, len, 16, _now_us() - t0);
     return JS_NewArrayBufferCopy(ctx, digest, 16);
 }
 
@@ -160,8 +235,13 @@ static JSValue js_native_sha1(JSContext *ctx, JSValueConst this_val,
     const uint8_t *data = get_ab(ctx, argv[0], &len, "sha1Native", 1);
     if (!data) return JS_EXCEPTION;
 
+    QuickJSBridge *bridge = (QuickJSBridge *)JS_GetContextOpaque(ctx);
+    uint64_t t0 = bridge ? _now_us() : 0;
+
     uint8_t digest[20];
     sha1(data, len, digest);
+
+    if (bridge) _stats_update(&bridge->stats, len, 20, _now_us() - t0);
     return JS_NewArrayBufferCopy(ctx, digest, 20);
 }
 
@@ -173,8 +253,13 @@ static JSValue js_native_sha256(JSContext *ctx, JSValueConst this_val,
     const uint8_t *data = get_ab(ctx, argv[0], &len, "sha256Native", 1);
     if (!data) return JS_EXCEPTION;
 
+    QuickJSBridge *bridge = (QuickJSBridge *)JS_GetContextOpaque(ctx);
+    uint64_t t0 = bridge ? _now_us() : 0;
+
     uint8_t digest[32];
     sha256(data, len, digest);
+
+    if (bridge) _stats_update(&bridge->stats, len, 32, _now_us() - t0);
     return JS_NewArrayBufferCopy(ctx, digest, 32);
 }
 
@@ -188,8 +273,13 @@ static JSValue js_native_hmac_sha256(JSContext *ctx, JSValueConst this_val,
     const uint8_t *key = get_ab(ctx, argv[1], &key_len, "hmacSHA256Native", 2);
     if (!key) return JS_EXCEPTION;
 
+    QuickJSBridge *bridge = (QuickJSBridge *)JS_GetContextOpaque(ctx);
+    uint64_t t0 = bridge ? _now_us() : 0;
+
     uint8_t digest[32];
     hmac_sha256(key, key_len, data, data_len, digest);
+
+    if (bridge) _stats_update(&bridge->stats, data_len + key_len, 32, _now_us() - t0);
     return JS_NewArrayBufferCopy(ctx, digest, 32);
 }
 
@@ -222,7 +312,13 @@ static JSValue js_native_aes_encrypt(JSContext *ctx, JSValueConst this_val,
     uint8_t *out = (uint8_t *)malloc(max_out);
     if (!out) return JS_ThrowTypeError(ctx, "aesEncryptNative: out of memory");
 
+    QuickJSBridge *bridge = (QuickJSBridge *)JS_GetContextOpaque(ctx);
+    uint64_t t0 = bridge ? _now_us() : 0;
+
     size_t out_len = aes_cbc_encrypt(&actx, iv, pt, pt_len, out);
+
+    if (bridge) _stats_update(&bridge->stats, pt_len, out_len == (size_t)-1 ? 0 : out_len, _now_us() - t0);
+
     if (out_len == (size_t)-1) {
         free(out);
         return JS_ThrowTypeError(ctx, "aesEncryptNative: encryption failed");
@@ -263,7 +359,13 @@ static JSValue js_native_aes_decrypt(JSContext *ctx, JSValueConst this_val,
     uint8_t *out = (uint8_t *)malloc(ct_len);
     if (!out) return JS_ThrowTypeError(ctx, "aesDecryptNative: out of memory");
 
+    QuickJSBridge *bridge = (QuickJSBridge *)JS_GetContextOpaque(ctx);
+    uint64_t t0 = bridge ? _now_us() : 0;
+
     size_t out_len = aes_cbc_decrypt(&actx, iv, ct, ct_len, out);
+
+    if (bridge) _stats_update(&bridge->stats, ct_len, out_len == (size_t)-1 ? 0 : out_len, _now_us() - t0);
+
     if (out_len == (size_t)-1) {
         free(out);
         return JS_ThrowTypeError(ctx, "aesDecryptNative: decryption failed (bad padding or key)");
@@ -328,6 +430,10 @@ static JSValue js_crypto_sha1_bin(JSContext *ctx, JSValueConst this_val,
 }
 
 QuickJSBridge *quickjs_bridge_create(void) {
+    return quickjs_bridge_create_with_config(0, 0);
+}
+
+QuickJSBridge *quickjs_bridge_create_with_config(uint64_t memory_limit, uint64_t stack_size) {
     QuickJSBridge *bridge = (QuickJSBridge *)malloc(sizeof(QuickJSBridge));
     if (!bridge) return NULL;
 
@@ -337,9 +443,11 @@ QuickJSBridge *quickjs_bridge_create(void) {
         return NULL;
     }
 
-    // 设置内存限制（256MB）和栈大小（256KB）
-    JS_SetMemoryLimit(bridge->runtime, 256 * 1024 * 1024);
-    JS_SetMaxStackSize(bridge->runtime, 256 * 1024);
+    // 动态资源配置：0 表示使用默认值
+    if (memory_limit == 0) memory_limit = 256ULL * 1024 * 1024;  // 256MB
+    if (stack_size == 0) stack_size = 256ULL * 1024;              // 256KB
+    JS_SetMemoryLimit(bridge->runtime, (size_t)memory_limit);
+    JS_SetMaxStackSize(bridge->runtime, (size_t)stack_size);
 
     bridge->ctx = JS_NewContext(bridge->runtime);
     if (!bridge->ctx) {
@@ -347,6 +455,13 @@ QuickJSBridge *quickjs_bridge_create(void) {
         free(bridge);
         return NULL;
     }
+
+    // 上下文绑定：通过 opaque 指针让 JS 函数能拿到 bridge 实例
+    // 用于 js_call_crypto/js_call_crypto_binary 获取上下文绑定的回调
+    bridge->crypto_cb = NULL;
+    bridge->crypto_cb_binary = NULL;
+    memset(&bridge->stats, 0, sizeof(crypto_stats_t));
+    JS_SetContextOpaque(bridge->ctx, bridge);
 
     // 注册原生加密全局对象 __nativeCrypto
     // 字符串路径：aesDecrypt/aesEncrypt/md5/sha256/hmacSHA256/sha1

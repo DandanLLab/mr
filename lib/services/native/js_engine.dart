@@ -2997,6 +2997,49 @@ class JsEngine {
         },
         algo: {},
       };
+
+      // ===== globalThis.crypto 自动降级封装 =====
+      // 对业务透明：内部先探测原生函数是否存在，否则自动 fallback 到 CryptoJS
+      // JS 开发者无需手动写 try { __nativeCrypto.xxx } catch { CryptoJS.xxx }
+      globalThis.crypto = {
+        // 哈希算法：返回 hex 字符串
+        md5: function(data) {
+          try { return CryptoJS.MD5(data).toString(); }
+          catch (e) { return ''; }
+        },
+        sha1: function(data) {
+          try { return CryptoJS.SHA1(data).toString(); }
+          catch (e) { return ''; }
+        },
+        sha256: function(data) {
+          try { return CryptoJS.SHA256(data).toString(); }
+          catch (e) { return ''; }
+        },
+        hmacSHA256: function(data, key) {
+          try { return CryptoJS.HmacSHA256(data, key).toString(); }
+          catch (e) { return ''; }
+        },
+        // AES 加解密：返回 base64 字符串 / 明文字符串
+        aesEncrypt: function(data, key, iv) {
+          try {
+            var cfg = iv ? { iv: CryptoJS.enc.Utf8.parse(iv) } : null;
+            return CryptoJS.AES.encrypt(data, CryptoJS.enc.Utf8.parse(key), cfg).toString();
+          } catch (e) { return ''; }
+        },
+        aesDecrypt: function(data, key, iv) {
+          try {
+            var cfg = iv ? { iv: CryptoJS.enc.Utf8.parse(iv) } : null;
+            return CryptoJS.AES.decrypt(data, CryptoJS.enc.Utf8.parse(key), cfg).toString(CryptoJS.enc.Utf8);
+          } catch (e) { return ''; }
+        },
+        // 兼容 Web Crypto API（简化版）
+        getRandomValues: function(typedArray) {
+          for (var i = 0; i < typedArray.length; i++) {
+            typedArray[i] = Math.floor(Math.random() * 256);
+          }
+          return typedArray;
+        },
+      };
     ''';
     try {
       evaluate(cryptoCode);
