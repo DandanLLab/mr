@@ -804,6 +804,146 @@ class JsEngine {
           return output;
         };
       }
+
+      // ===== LZString 兼容层 =====
+      // 书源规则常引用 LZString.decompressFromBase64，注入全局对象避免 ReferenceError
+      // decompressFromBase64 优先走 C 原生 __nativeLz（Phase 1 加速），无原生时回退纯 JS
+      if (typeof LZString === 'undefined') {
+        var _lzKeyStr = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+        var _lzBase64ToStr = function(input) {
+          var output = "";
+          var ol = 0;
+          var chr1, chr2, chr3;
+          var enc1, enc2, enc3, enc4;
+          var i = 0;
+          input = input.replace(/[^A-Za-z0-9\+\/\=]/g, "");
+          while (i < input.length) {
+            enc1 = _lzKeyStr.indexOf(input.charAt(i++));
+            enc2 = _lzKeyStr.indexOf(input.charAt(i++));
+            enc3 = _lzKeyStr.indexOf(input.charAt(i++));
+            enc4 = _lzKeyStr.indexOf(input.charAt(i++));
+            chr1 = (enc1 << 2) | (enc2 >> 4);
+            chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
+            chr3 = ((enc3 & 3) << 6) | enc4;
+            if (ol % 2 === 0) {
+              output += String.fromCharCode((252 >> 2) | (chr1 & 3));
+              output += String.fromCharCode((chr1 & 240) >> 4 | (chr2 & 15) << 4);
+              output += String.fromCharCode((chr2 & 192) >> 6 | (chr3 & 63));
+            } else {
+              output += String.fromCharCode((252 >> 2) | (chr1 & 3) | (chr2 & 15) << 4);
+              output += String.fromCharCode((chr1 & 192) >> 6 | (chr2 & 63));
+            }
+            ol += 3;
+          }
+          return output;
+        };
+        var _lzDecompress = function(compressed) {
+          if (compressed == null) return "";
+          if (compressed == "") return null;
+          var dictionary = [];
+          var enlargeIn = 4;
+          var dictSize = 4;
+          var numBits = 3;
+          var entry = "";
+          var result = "";
+          var i, w, bits, resb, maxpower, power, c, data = { val: compressed.charAt(0), position: 32768, index: 1 };
+          for (i = 0; i < 3; i += 1) dictionary[i] = i;
+          bits = 0;
+          maxpower = Math.pow(2, 2);
+          power = 1;
+          while (power != maxpower) {
+            resb = data.val & data.position;
+            data.position >>= 1;
+            if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+            bits |= (resb > 0 ? 1 : 0) * power;
+            power <<= 1;
+          }
+          switch (bits) {
+            case 0:
+              bits = 0; maxpower = Math.pow(2, 8); power = 1;
+              while (power != maxpower) {
+                resb = data.val & data.position; data.position >>= 1;
+                if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+                bits |= (resb > 0 ? 1 : 0) * power; power <<= 1;
+              }
+              c = String.fromCharCode(bits);
+              break;
+            case 1:
+              bits = 0; maxpower = Math.pow(2, 16); power = 1;
+              while (power != maxpower) {
+                resb = data.val & data.position; data.position >>= 1;
+                if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+                bits |= (resb > 0 ? 1 : 0) * power; power <<= 1;
+              }
+              c = String.fromCharCode(bits);
+              break;
+            case 2: return "";
+          }
+          dictionary[3] = c; dictSize = 3; entry = c; result += c;
+          while (true) {
+            if (data.index > compressed.length) return "";
+            bits = 0; maxpower = Math.pow(2, numBits); power = 1;
+            while (power != maxpower) {
+              resb = data.val & data.position; data.position >>= 1;
+              if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+              bits |= (resb > 0 ? 1 : 0) * power; power <<= 1;
+            }
+            switch (c = bits) {
+              case 0:
+                bits = 0; maxpower = Math.pow(2, 8); power = 1;
+                while (power != maxpower) {
+                  resb = data.val & data.position; data.position >>= 1;
+                  if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+                  bits |= (resb > 0 ? 1 : 0) * power; power <<= 1;
+                }
+                dictionary[dictSize++] = String.fromCharCode(bits);
+                c = dictSize - 1; enlargeIn--; break;
+              case 1:
+                bits = 0; maxpower = Math.pow(2, 16); power = 1;
+                while (power != maxpower) {
+                  resb = data.val & data.position; data.position >>= 1;
+                  if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+                  bits |= (resb > 0 ? 1 : 0) * power; power <<= 1;
+                }
+                dictionary[dictSize++] = String.fromCharCode(bits);
+                c = dictSize - 1; enlargeIn--; break;
+              case 2: return result;
+            }
+            if (enlargeIn == 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
+            if (dictionary[c]) { w = dictionary[c]; }
+            else {
+              if (c === dictSize) { w = entry + entry.charAt(0); }
+              else { return null; }
+            }
+            result += w;
+            dictionary[dictSize++] = entry + w.charAt(0);
+            entry = w;
+            enlargeIn--;
+            if (enlargeIn == 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
+          }
+        };
+        globalThis.LZString = {
+          // 优先走 C 原生（Phase 1 加速），无原生时回退纯 JS
+          decompressFromBase64: function(str) {
+            if (typeof __nativeLz !== 'undefined' && __nativeLz && __nativeLz.decompressFromBase64) {
+              return __nativeLz.decompressFromBase64(str);
+            }
+            return _lzDecompress(_lzBase64ToStr(str));
+          },
+          decompress: function(str) {
+            if (str == null) return "";
+            if (str == "") return null;
+            return _lzDecompress(str);
+          },
+          // 压缩方法暂不支持（书源规则极少使用，遇到再补）
+          compressToBase64: function(str) {
+            throw new Error('LZString.compressToBase64 not supported');
+          },
+          compress: function(str) {
+            throw new Error('LZString.compress not supported');
+          },
+        };
+      }
     ''';
 
     evaluate(nodePolyfills);
