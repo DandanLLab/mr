@@ -129,6 +129,13 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // 体积优化：Dart 代码混淆需在 flutter build 命令中启用
+            // 推荐构建命令：
+            //   flutter build apk --release --obfuscate --split-debug-info=build/symbols
+            // --obfuscate：混淆 Dart 代码，移除调试符号，减小 AOT 产物体积约 10-20%
+            // --split-debug-info：分离调试符号到指定目录（用于 stack trace 符号化）
+            //   注意：分离后崩溃栈需要用 symbols 目录下的文件符号化，发布时不要提交该目录
+            // --split-per-abi：本项目已只编译 arm64-v8a，无需此选项
         }
     }
 }
