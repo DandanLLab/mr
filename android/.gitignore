@@ -12,3 +12,6 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+# 例外：项目固定的 release keystore（个人项目，CI 需要统一签名）
+!mr-release.keystore
+!app/mr-release.keystore

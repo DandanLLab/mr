@@ -100,9 +100,29 @@ android {
         }
     }
 
+    // ===== 统一签名配置（修复 CI 每次打包签名不一致问题）=====
+    // 之前用 debug 签名，不同机器/CI 的 debug.keystore 不同，导致签名不一致无法覆盖安装
+    // 现在用固定的 release keystore，无论本地还是 CI 都用同一个签名
+    signingConfigs {
+        create("release") {
+            storeFile = file("mr-release.keystore")
+            storePassword = "mr201024"
+            keyAlias = "mr-key"
+            keyPassword = "mr201024"
+            // 显式启用 V1/V2/V3 签名方案（AGP 7.0+ 默认启用，这里显式设置确保一致）
+            // V1: JAR signing（传统，Android 所有版本兼容）
+            // V2: APK Signature Scheme v2（Android 7.0+，全文件签名，防篡改）
+            // V3: APK Signature Scheme v3（Android 9.0+，支持 key rotation）
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            // 使用固定 release 签名（替代之前的 debug 签名）
+            signingConfig = signingConfigs.getByName("release")
             isShrinkResources = true
             isMinifyEnabled = true
             proguardFiles(
