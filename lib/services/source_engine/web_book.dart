@@ -170,8 +170,8 @@ class HttpClient {
         );
       }
 
-      // 原生端：HTTP 走 C 原生 socket（零 MethodChannel），HTTPS 走 Dio
-      if (!kIsWeb) {
+      // 原生端：避免同步 FFI HTTP 阻塞 UI，统一走 Dio 异步链路
+      if (false) {
         try {
           final timeoutMs =
               (connectTimeout ?? const Duration(seconds: 15)).inMilliseconds;
@@ -179,6 +179,8 @@ class HttpClient {
 
           debugPrint('🔵 [Native HTTP] $method $url');
           AppLogger.instance.logRequest(method, url, headers: headers);
+          // yield 让 UI 先刷新
+          await Future(() {});
           if (url.startsWith('http://')) {
             if (method.toUpperCase() == 'POST') {
               final r = nativeHttpPost(url, body ?? '',
