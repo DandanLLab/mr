@@ -196,6 +196,12 @@ class HttpClient {
           debugPrint(
               '🔵 [Native HTTP] 响应: ${okResult != null ? "${okResult.length} chars" : "null"}');
           AppLogger.instance.logResponse(url, 200, okResult?.length ?? 0);
+          // Native HTTP 响应体熔断：超过 2MB 不再进入 JS/解析链，避免 OOM/卡死
+          if (okResult != null && okResult.length > 2 * 1024 * 1024) {
+            AppLogger.instance.warn(LogCategory.network, 'Native HTTP 响应体过大，已截断',
+                detail: 'url=$url, size=${okResult.length}');
+            okResult = '${okResult.substring(0, 2 * 1024 * 1024)}\n\n<!-- MR: response truncated at 2MB -->';
+          }
           if (okResult != null && okResult.isNotEmpty) {
             return StrResponse(
               url: url,

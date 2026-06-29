@@ -6,6 +6,8 @@
 
 // P4: 响应体大小上限 50MB
 #define MAX_HTTP_BODY_SIZE (50ULL * 1024 * 1024)
+// 默认响应体截断阈值 2MB（超过此大小直接截断，防止 OOM）
+#define MAX_RESPONSE_DEFAULT (2ULL * 1024 * 1024)
 
 // ========== 平台兼容层 ==========
 // Android NDK (CMake)、iOS (static framework)、非 Windows 桌面均是 POSIX 环境
@@ -424,13 +426,29 @@ http_response_t *http_post(const char *url, const char *headers,
         if (resp->body_len > MAX_HTTP_BODY_SIZE) {
             free(resp->body); resp->body = NULL; resp->body_len = 0;
             snprintf(resp->error_msg, sizeof(resp->error_msg), "Response body exceeds 50MB limit");
+        } else if (resp->body_len > MAX_RESPONSE_DEFAULT) {
+            // 超过默认截断阈值，截断响应体（防止 OOM，不影响 header 解析）
+            resp->body[MAX_RESPONSE_DEFAULT] = '\0';
+            resp->body_len = MAX_RESPONSE_DEFAULT;
         }
     } else if (content_length > 0) {
         if ((size_t)content_length > MAX_HTTP_BODY_SIZE) {
             snprintf(resp->error_msg, sizeof(resp->error_msg), "Content-Length exceeds 50MB limit");
         } else {
-            resp->body = _read_n_bytes(&conn, content_length);
-            resp->body_len = content_length;
+            size_t read_size = (size_t)content_length;
+            if (read_size > MAX_RESPONSE_DEFAULT) read_size = MAX_RESPONSE_DEFAULT;
+            resp->body = _read_n_bytes(&conn, read_size);
+            resp->body_len = read_size;
+            if ((size_t)content_length > MAX_RESPONSE_DEFAULT) {
+                // 跳过剩余字节
+                size_t skip = (size_t)content_length - MAX_RESPONSE_DEFAULT;
+                char skip_buf[4096];
+                while (skip > 0) {
+                    int n = _recv_n(&conn, skip_buf, skip > 4096 ? 4096 : (int)skip);
+                    if (n <= 0) break;
+                    skip -= n;
+                }
+            }
         }
     } else {
         // 读到连接关闭（Connection: close 模式）
@@ -441,8 +459,10 @@ http_response_t *http_post(const char *url, const char *headers,
                 char tmp[4096];
                 int n = _recv_n(&conn, tmp, sizeof(tmp));
                 if (n <= 0) break;
-                if (blen + n > MAX_HTTP_BODY_SIZE) { // P4: 50MB 上限
-                    snprintf(resp->error_msg, sizeof(resp->error_msg), "Response body exceeds 50MB limit");
+                if (blen + n > MAX_RESPONSE_DEFAULT) {
+                    snprintf(resp->error_msg, sizeof(resp->error_msg), "Response body truncated at 2MB");
+                    resp->body[blen] = '\0';
+                    resp->body_len = blen;
                     break;
                 }
                 if (blen + n > bcap) {
