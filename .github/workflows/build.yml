@@ -50,7 +50,7 @@ jobs:
           if [ "$COMMIT_COUNT_TODAY" -eq 0 ]; then
             COMMIT_COUNT_TODAY=1
           fi
-          VERSION="${YY}.${MMDD}.${COMMIT_COUNT_TODAY}"
+          VERSION="${YY}${MMDD}${COMMIT_COUNT_TODAY}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "commit_count=$COMMIT_COUNT_TODAY" >> $GITHUB_OUTPUT
           echo "build_date=$(date -u +%Y-%m-%d)" >> $GITHUB_OUTPUT
@@ -100,7 +100,7 @@ jobs:
       - name: Update Version
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          sed -i "s/^version:.*/version: ${VERSION}+${{ needs.prepare.outputs.commit_count }}/" pubspec.yaml
+          sed -i "s/^version:.*/version: ${VERSION}/" pubspec.yaml
           grep "^version:" pubspec.yaml
 
       - name: Remove Aliyun Mirrors
@@ -175,7 +175,7 @@ jobs:
       - name: Update Version
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          sed -i '' "s/^version:.*/version: ${VERSION}+${{ needs.prepare.outputs.commit_count }}/" pubspec.yaml
+          sed -i '' "s/^version:.*/version: ${VERSION}/" pubspec.yaml
           grep "^version:" pubspec.yaml
 
       - name: Install Dependencies
@@ -318,7 +318,7 @@ jobs:
           BODY="${BODY}**打包类型**: ${TYPE_LABEL}\n\n"
           BODY="${BODY}**构建日期**: ${BUILD_DATE}\n\n"
           BODY="${BODY}**今日提交数**: ${COMMIT_COUNT}\n\n"
-          BODY="${BODY}**版本号规则**: YY.MMDD.今日提交数\n\n"
+          BODY="${BODY}**版本号**: ${VERSION}（格式：YYMMDD+今日提交序数）\n\n"
           BODY="${BODY}---\n\n"
 
           # Android 下载说明
