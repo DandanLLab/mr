@@ -13,6 +13,7 @@ import 'providers/explore_show_provider.dart';
 import 'providers/reader_provider.dart';
 import 'providers/search_provider.dart';
 import 'routes/app_routes.dart';
+import 'services/app_logger.dart';
 import 'services/crash_log_service.dart';
 import 'services/native/js_engine.dart';
 import 'services/storage_service.dart';

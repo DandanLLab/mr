@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'quickjs_runtime_stub.dart'
     if (dart.library.io) 'quickjs_runtime.dart';
@@ -9,6 +11,7 @@ import 'package:archive/archive.dart' as archive;
 import 'package:url_launcher/url_launcher.dart' as url_launcher;
 import 'package:synchronized/synchronized.dart';
 import '../app_logger.dart';
+import '../crash_log_service.dart';
 import 'platform_channel.dart';
 import 'shared_js_scope.dart';
 
