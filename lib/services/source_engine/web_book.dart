@@ -14,10 +14,6 @@ import 'charset_utils.dart';
 import 'web_proxy.dart';
 import '../native/js_advanced_service.dart';
 import '../native/js_engine.dart';
-import '../native/quickjs_runtime_stub.dart'
-    if (dart.library.io) '../native/quickjs_runtime.dart'
-    show nativeHttpGet, nativeHttpPost;
-
 /// URL 请求选项（类似 OkHttp 的 Request.Builder）
 class UrlOption {
   final String? method;
