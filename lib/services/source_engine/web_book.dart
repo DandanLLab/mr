@@ -384,6 +384,11 @@ class WebBook {
         }
         return resolved;
       }
+      // JS 返回 null/空 → 日志告警 + 返回空，不要用原始 @js: 代码当 URL
+      AppLogger.instance.warn(LogCategory.network,
+          'JS规则返回空: $url',
+          detail: 'JS执行结果=null，书源规则可能有问题');
+      return '';
     }
 
     // URL 模板变量替换（借鉴 legado 的 searchUrl 解析）

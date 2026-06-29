@@ -426,7 +426,7 @@ http_response_t *http_post(const char *url, const char *headers,
         if (resp->body_len > MAX_HTTP_BODY_SIZE) {
             free(resp->body); resp->body = NULL; resp->body_len = 0;
             snprintf(resp->error_msg, sizeof(resp->error_msg), "Response body exceeds 50MB limit");
-        } else if (resp->body_len > MAX_RESPONSE_DEFAULT) {
+        } else if (resp->body_len > MAX_RESPONSE_DEFAULT && resp->body != NULL) {
             // 超过默认截断阈值，截断响应体（防止 OOM，不影响 header 解析）
             resp->body[MAX_RESPONSE_DEFAULT] = '\0';
             resp->body_len = MAX_RESPONSE_DEFAULT;

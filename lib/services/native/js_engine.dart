@@ -260,6 +260,8 @@ class JsEngine {
   bool _isFlushingLogs = false;
   /// 最近一次 _executeQuickJSSync 的错误信息（供 executeSync 读取后写入 traceNode）
   String? _lastEvalError;
+  /// 并发防护：同步调用中标志，processJsRule 执行时自旋等待
+  bool _evalBusy = false;
   final Map<String, String> _installedPackages = {};
   final Map<String, String> _moduleCache = {};
 
@@ -3634,10 +3636,22 @@ class JsEngine {
   }
 
   /// QuickJS 同步执行
+  /// 支持并发防护 _evalBusy：如果 processJsRule 正持有锁，快速返回 null 避免 QuickJS 崩溃
   dynamic _executeQuickJSSync(String jsCode, dynamic content, {String? baseUrl, Map<String, dynamic>? variables}) {
     if (!_initialized || _jsRuntime == null) {
       return null;
     }
+
+    // 并发防护：_evalBusy=true 表示 processJsRule 正通过 _evalLock 占用 QuickJS
+    // 同步路径无法等待锁释放，直接返回 null，调用方（analyze_rule）收到 null 自动兜底
+    if (_evalBusy) {
+      _lastEvalError = 'JS引擎正忙（processJsRule 占用中），跳过同步执行';
+      debugPrint('⚠️ $_lastEvalError');
+      AppLogger.instance.warn(LogCategory.parse, _lastEvalError!);
+      return null;
+    }
+
+    _evalBusy = true;
     try {
       // content 序列化：List/Map 直接 jsonEncode，String 也 jsonEncode（加引号转义），其他 toString
       final contentStr = serializeForJs(content);
@@ -3716,6 +3730,8 @@ class JsEngine {
       // 引擎级错误（OOM/段错误兜底）记录到崩溃日志
       unawaited(CrashLogService.instance.logJsEngineError('QuickJS.eval', e.toString()));
       return null;
+    } finally {
+      _evalBusy = false;
     }
   }
 
@@ -3817,9 +3833,14 @@ class JsEngine {
     AppLogger.instance.logJsStep('QuickJS', '[processJsRule] 入参',
       detail: 'result type=${actualResult.runtimeType}, len=${actualResult is String ? actualResult.length : (actualResult is List ? actualResult.length : '?')}, baseUrl=$baseUrl');
 
-    return _evalLock.synchronized(() =>
-      _executeQuickJSRule(resolved.code, result: actualResult, env: mergedEnv, variables: _extractVariables(mergedEnv))
-    );
+    return _evalLock.synchronized(() {
+      _evalBusy = true;
+      try {
+        return _executeQuickJSRule(resolved.code, result: actualResult, env: mergedEnv, variables: _extractVariables(mergedEnv));
+      } finally {
+        _evalBusy = false;
+      }
+    });
   }
 
   /// 处理带书籍上下文的 JS 规则
