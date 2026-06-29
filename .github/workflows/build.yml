@@ -53,17 +53,18 @@ jobs:
             COMMIT_COUNT_TODAY=1
           fi
           TOTAL_COMMITS=$(git rev-list --count HEAD 2>/dev/null || echo 1)
+          BUILD_NUMBER=$(date -u +%s)
           VERSION="${YY}.${MMDD}.${COMMIT_COUNT_TODAY}"
           VERSION_COMPACT="${YY}${MMDD}${COMMIT_COUNT_TODAY}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "version_compact=$VERSION_COMPACT" >> $GITHUB_OUTPUT
-          echo "build_number=$TOTAL_COMMITS" >> $GITHUB_OUTPUT
+          echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
           echo "commit_count=$COMMIT_COUNT_TODAY" >> $GITHUB_OUTPUT
           echo "build_date=$(date -u +%Y-%m-%d)" >> $GITHUB_OUTPUT
           echo "=========================================="
           echo "  版本号: $VERSION"
           echo "  紧凑号: $VERSION_COMPACT"
-          echo "  构建号: $TOTAL_COMMITS"
+          echo "  构建号: $BUILD_NUMBER"
           echo "  今日提交数: $COMMIT_COUNT_TODAY"
           echo "=========================================="
 
