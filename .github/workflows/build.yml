@@ -32,6 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      build_number: ${{ steps.version.outputs.build_number }}
       commit_count: ${{ steps.version.outputs.commit_count }}
       build_date: ${{ steps.version.outputs.build_date }}
       release_type: ${{ steps.release_type.outputs.type }}
@@ -50,12 +51,15 @@ jobs:
           if [ "$COMMIT_COUNT_TODAY" -eq 0 ]; then
             COMMIT_COUNT_TODAY=1
           fi
+          TOTAL_COMMITS=$(git rev-list --count HEAD 2>/dev/null || echo 1)
           VERSION="${YY}${MMDD}${COMMIT_COUNT_TODAY}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "build_number=$TOTAL_COMMITS" >> $GITHUB_OUTPUT
           echo "commit_count=$COMMIT_COUNT_TODAY" >> $GITHUB_OUTPUT
           echo "build_date=$(date -u +%Y-%m-%d)" >> $GITHUB_OUTPUT
           echo "=========================================="
           echo "  版本号: $VERSION"
+          echo "  构建号: $TOTAL_COMMITS"
           echo "  今日提交数: $COMMIT_COUNT_TODAY"
           echo "=========================================="
 
@@ -100,7 +104,7 @@ jobs:
       - name: Update Version
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          sed -i "s/^version:.*/version: ${VERSION}/" pubspec.yaml
+          sed -i "s/^version:.*/version: ${VERSION}+${{ needs.prepare.outputs.build_number }}/" pubspec.yaml
           grep "^version:" pubspec.yaml
 
       - name: Remove Aliyun Mirrors
@@ -175,7 +179,7 @@ jobs:
       - name: Update Version
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          sed -i '' "s/^version:.*/version: ${VERSION}/" pubspec.yaml
+          sed -i '' "s/^version:.*/version: ${VERSION}+${{ needs.prepare.outputs.build_number }}/" pubspec.yaml
           grep "^version:" pubspec.yaml
 
       - name: Install Dependencies
