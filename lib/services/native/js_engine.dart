@@ -3906,6 +3906,8 @@ class JsEngine {
           return __returnValue;
         })();
       ''';
+      // 先 yield 让出事件循环
+      await Future(() {});
       final evalResult = _jsRuntime!.evaluate(wrappedScript);
       _flushConsoleLogs();
       if (evalResult.isError) {
@@ -3913,10 +3915,10 @@ class JsEngine {
         return null;
       }
       return evalResult.stringResult;
-    } catch (e) {
-      AppLogger.instance.logJsError('QuickJS', e.toString());
-      return null;
-    }
+      } catch (e) {
+        AppLogger.instance.logJsError('QuickJS', e.toString());
+        return null;
+      }
     });
   }
 
@@ -4277,6 +4279,8 @@ class JsEngine {
           return text.replace(new RegExp(pattern, 'g'), replacement);
         })();
       ''';
+      // 先 yield 让出事件循环
+      await Future(() {});
       final evalResult = _jsRuntime!.evaluate(script);
       if (evalResult.isError) return null;
       return evalResult.stringResult;
@@ -4285,6 +4289,7 @@ class JsEngine {
     }
   }
 
+  /// cssSelect（异步，每次调用前 yield）
   Future<String?> cssSelect(String html, String selector) async {
     if (!_initialized || _jsRuntime == null) return null;
     try {
@@ -4293,6 +4298,8 @@ class JsEngine {
           return java.jsoup.selectFirst(${jsonEncode(html)}, ${jsonEncode(selector)});
         })();
       ''';
+      // 先 yield 让出事件循环
+      await Future(() {});
       final evalResult = _jsRuntime!.evaluate(script);
       if (evalResult.isError) return null;
       return evalResult.stringResult;
@@ -4321,6 +4328,8 @@ class JsEngine {
           return JSON.stringify(result);
         })();
       ''';
+      // 先 yield 让出事件循环
+      await Future(() {});
       final evalResult = _jsRuntime!.evaluate(script);
       if (evalResult.isError) return null;
       return evalResult.stringResult;

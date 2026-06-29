@@ -728,6 +728,11 @@ class AnalyzeRule {
           result = _applyReplaceRegex(result.toString(), rule);
         }
       }
+
+      // 每 5 步让出事件循环，避免长规则链阻塞 UI
+      if (i % 5 == 0) {
+        await Future(() {});
+      }
     }
 
     // 输出完整 JS 执行树（info 级别，Release 模式可见）
