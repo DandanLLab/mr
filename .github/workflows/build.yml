@@ -32,6 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      version_compact: ${{ steps.version.outputs.version_compact }}
       build_number: ${{ steps.version.outputs.build_number }}
       commit_count: ${{ steps.version.outputs.commit_count }}
       build_date: ${{ steps.version.outputs.build_date }}
@@ -52,13 +53,16 @@ jobs:
             COMMIT_COUNT_TODAY=1
           fi
           TOTAL_COMMITS=$(git rev-list --count HEAD 2>/dev/null || echo 1)
-          VERSION="${YY}${MMDD}${COMMIT_COUNT_TODAY}"
+          VERSION="${YY}.${MMDD}.${COMMIT_COUNT_TODAY}"
+          VERSION_COMPACT="${YY}${MMDD}${COMMIT_COUNT_TODAY}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version_compact=$VERSION_COMPACT" >> $GITHUB_OUTPUT
           echo "build_number=$TOTAL_COMMITS" >> $GITHUB_OUTPUT
           echo "commit_count=$COMMIT_COUNT_TODAY" >> $GITHUB_OUTPUT
           echo "build_date=$(date -u +%Y-%m-%d)" >> $GITHUB_OUTPUT
           echo "=========================================="
           echo "  版本号: $VERSION"
+          echo "  紧凑号: $VERSION_COMPACT"
           echo "  构建号: $TOTAL_COMMITS"
           echo "  今日提交数: $COMMIT_COUNT_TODAY"
           echo "=========================================="
@@ -131,7 +135,7 @@ jobs:
           VERSION="${{ needs.prepare.outputs.version }}"
           TYPE="${{ needs.prepare.outputs.release_type }}"
           BUILD_DATE="${{ needs.prepare.outputs.build_date }}"
-          APK_NAME="mr_v${VERSION}_${TYPE}_${BUILD_DATE}_arm64.apk"
+          APK_NAME="mr_v${{ needs.prepare.outputs.version_compact }}_${TYPE}_${BUILD_DATE}_arm64.apk"
           cp build/app/outputs/flutter-apk/app-release.apk "${APK_NAME}"
           echo "apk_name=$APK_NAME" >> $GITHUB_OUTPUT
           ls -lh "${APK_NAME}"
@@ -252,7 +256,7 @@ jobs:
           VERSION="${{ needs.prepare.outputs.version }}"
           TYPE="${{ needs.prepare.outputs.release_type }}"
           BUILD_DATE="${{ needs.prepare.outputs.build_date }}"
-          IPA_NAME="mr_v${VERSION}_${TYPE}_${BUILD_DATE}_ios.ipa"
+          IPA_NAME="mr_v${{ needs.prepare.outputs.version_compact }}_${TYPE}_${BUILD_DATE}_ios.ipa"
           mkdir -p Payload
           cp -r build/ios/iphoneos/Runner.app Payload/
           zip -r "${IPA_NAME}" Payload
@@ -309,6 +313,7 @@ jobs:
         id: body
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
+          VERSION_COMPACT="${{ needs.prepare.outputs.version_compact }}"
           TYPE="${{ needs.prepare.outputs.release_type }}"
           BUILD_DATE="${{ needs.prepare.outputs.build_date }}"
           COMMIT_COUNT="${{ needs.prepare.outputs.commit_count }}"
@@ -318,11 +323,11 @@ jobs:
             TYPE_LABEL="正式版 (stable)"
           fi
 
-          BODY="## MR ${VERSION}\n\n"
+          BODY="## MR ${VERSION_COMPACT}\n\n"
           BODY="${BODY}**打包类型**: ${TYPE_LABEL}\n\n"
           BODY="${BODY}**构建日期**: ${BUILD_DATE}\n\n"
-          BODY="${BODY}**今日提交数**: ${COMMIT_COUNT}\n\n"
-          BODY="${BODY}**版本号**: ${VERSION}（格式：YYMMDD+今日提交序数）\n\n"
+          BODY="${BODY}**版本号**: ${VERSION}（pubspec.yaml 格式）\n\n"
+          BODY="${BODY}**构建号**: ${{ needs.prepare.outputs.build_number }}\n\n"
           BODY="${BODY}---\n\n"
 
           # Android 下载说明
@@ -352,8 +357,8 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ needs.prepare.outputs.version }}-${{ needs.prepare.outputs.release_type }}
-          name: MR ${{ needs.prepare.outputs.version }} (${{ needs.prepare.outputs.release_type == 'stable' && '正式版' || '测试版' }})
+          tag_name: v${{ needs.prepare.outputs.version_compact }}-${{ needs.prepare.outputs.release_type }}
+          name: MR ${{ needs.prepare.outputs.version_compact }} (${{ needs.prepare.outputs.release_type == 'stable' && '正式版' || '测试版' }})
           body_path: release_body.md
           files: |
             artifacts/android/*
