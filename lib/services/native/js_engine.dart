@@ -2960,8 +2960,27 @@ class JsEngine {
           put: function(key, value) { _javaCache[key] = typeof value === 'object' ? JSON.stringify(value) : String(value); },
           getStr: function(key, def) { return _javaCache[key] || (def || ''); },
           log: function(msg) { console.log('[JavaBridge] ' + msg); },
-          aesEncode: function(data, key, iv) { try { return _AES.encrypt(data, key, iv, iv ? 'CBC' : 'ECB'); } catch(e) { return ''; } },
-          aesDecode: function(data, key, iv) { try { return _AES.decrypt(data, key, iv, iv ? 'CBC' : 'ECB'); } catch(e) { return ''; } },
+          aesEncode: function(data, key, iv) {
+            try {
+              var mode = iv ? 'CBC' : 'ECB';
+              if (typeof CryptoJS !== 'undefined' && CryptoJS.AES) {
+                var cfg = iv ? { iv: CryptoJS.enc.Utf8.parse(iv), mode: CryptoJS.mode.CBC } : { mode: CryptoJS.mode.ECB };
+                return CryptoJS.AES.encrypt(data, CryptoJS.enc.Utf8.parse(key), cfg).toString();
+              }
+              return _AES.encrypt(data, key, iv, mode);
+            } catch(e) { return ''; }
+          },
+          aesDecode: function(data, key, iv) {
+            try {
+              var mode = iv ? 'CBC' : 'ECB';
+              // 优先走 CryptoJS 路径（C 原生优先）
+              if (typeof CryptoJS !== 'undefined' && CryptoJS.AES) {
+                var cfg = iv ? { iv: CryptoJS.enc.Utf8.parse(iv), mode: CryptoJS.mode.CBC } : { mode: CryptoJS.mode.ECB };
+                return CryptoJS.AES.decrypt(data, CryptoJS.enc.Utf8.parse(key), cfg).toString(CryptoJS.enc.Utf8);
+              }
+              return _AES.decrypt(data, key, iv, mode);
+            } catch(e) { _jsLog('AES decrypt failed: ' + e, 'error'); return ''; }
+          },
           md5Encode: function(str) { var k = 'md5:' + str; if (_javaCache[k] !== undefined) return _javaCache[k]; return ''; },
           base64Encode: function(str) { try { return btoa(unescape(encodeURIComponent(str))); } catch(e) { return ''; } },
           base64Decode: function(str) { try { return decodeURIComponent(escape(atob(str))); } catch(e) { return ''; } },
@@ -3077,9 +3096,9 @@ class JsEngine {
             var iv = cfg && cfg.iv ? cfg.iv : null;
             var mode = (cfg && cfg.mode === CryptoJS.mode.ECB) ? 'ECB' : 'CBC';
 
-            // 优先走 C 原生 AES 加密（仅 CBC 模式，零 Dart 回调）
+            // 优先走 C 原生 AES 加密（零 Dart 回调）
             if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto &&
-                __nativeCrypto.aesEncryptNative && mode === 'CBC') {
+                __nativeCrypto.aesEncryptNative) {
               try {
                 var dataStr;
                 if (typeof data === 'string') {
@@ -3090,17 +3109,25 @@ class JsEngine {
                   dataStr = String(data);
                 }
                 var keyStr = CryptoJS.enc.Utf8.stringify(key);
-                var ivStr = iv ? CryptoJS.enc.Utf8.stringify(iv) : '';
-
                 var dataU8 = _strToU8(dataStr);
                 var keyU8 = _strToU8(keyStr);
-                var ivU8 = _strToU8(ivStr);
-                var cipherU8 = __nativeCrypto.aesEncryptNative(dataU8, keyU8, ivU8);
-                var resultB64 = _u8ToB64(cipherU8);
-                return {
-                  toString: function() { return resultB64; },
-                  ciphertext: { toString: function(enc) { return resultB64; } }
-                };
+                if (mode === 'CBC' && iv) {
+                  var ivStr = CryptoJS.enc.Utf8.stringify(iv);
+                  var ivU8 = _strToU8(ivStr);
+                  var cipherU8 = __nativeCrypto.aesEncryptNative(dataU8, keyU8, ivU8);
+                  var resultB64 = _u8ToB64(cipherU8);
+                  return {
+                    toString: function() { return resultB64; },
+                    ciphertext: { toString: function(enc) { return resultB64; } }
+                  };
+                } else if (mode === 'ECB') {
+                  var cipherU8 = __nativeCrypto.aesEncryptNativeECB(dataU8, keyU8);
+                  var resultB64 = _u8ToB64(cipherU8);
+                  return {
+                    toString: function() { return resultB64; },
+                    ciphertext: { toString: function(enc) { return resultB64; } }
+                  };
+                }
               } catch (e) {
                 // C 原生失败，回退到 Dart 回调或纯 JS
               }
@@ -3138,9 +3165,9 @@ class JsEngine {
             var iv = cfg && cfg.iv ? cfg.iv : null;
             var mode = (cfg && cfg.mode === CryptoJS.mode.ECB) ? 'ECB' : 'CBC';
 
-            // 优先走 C 原生 AES 解密（仅 CBC 模式，零 Dart 回调）
+            // 优先走 C 原生 AES 解密（零 Dart 回调）
             if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto &&
-                __nativeCrypto.aesDecryptNative && mode === 'CBC') {
+                __nativeCrypto.aesDecryptNative) {
               try {
                 // 提取 base64 密文
                 var dataB64;
@@ -3153,12 +3180,18 @@ class JsEngine {
                 }
 
                 var keyStr = CryptoJS.enc.Utf8.stringify(key);
-                var ivStr = iv ? CryptoJS.enc.Utf8.stringify(iv) : '';
-
                 var cipherU8 = _b64ToU8(dataB64);
                 var keyU8 = _strToU8(keyStr);
-                var ivU8 = _strToU8(ivStr);
-                var plainU8 = __nativeCrypto.aesDecryptNative(cipherU8, keyU8, ivU8);
+                var plainU8;
+                if (mode === 'CBC' && iv) {
+                  var ivStr = CryptoJS.enc.Utf8.stringify(iv);
+                  var ivU8 = _strToU8(ivStr);
+                  plainU8 = __nativeCrypto.aesDecryptNative(cipherU8, keyU8, ivU8);
+                } else if (mode === 'ECB') {
+                  plainU8 = __nativeCrypto.aesDecryptNativeECB(cipherU8, keyU8);
+                } else {
+                  throw new Error('unsupported mode: ' + mode);
+                }
                 var nativeResult = _u8ToStr(plainU8);
                 if (nativeResult !== null && nativeResult !== undefined) {
                   return {

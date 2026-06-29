@@ -150,25 +150,49 @@ static void inv_shift_rows(uint8_t s[16]) {
     t = s[3]; s[3] = s[7]; s[7] = s[11]; s[11] = s[15]; s[15] = t;
 }
 
+// ---------- GF(2^8) 预计算查表（消除 gf_mul 循环，8x 加速 MixColumns）----------
+static int _gf_tables_inited = 0;
+static uint8_t gf2[256];   // 乘 2
+static uint8_t gf3[256];   // 乘 3
+static uint8_t gf9[256];   // 乘 9
+static uint8_t gf11[256];  // 乘 0x0b
+static uint8_t gf13[256];  // 乘 0x0d
+static uint8_t gf14[256];  // 乘 0x0e
+
+static void _init_gf_tables(void) {
+    for (int i = 0; i < 256; i++) {
+        uint8_t x = (uint8_t)i;
+        gf2[i] = xtime(x);
+        gf3[i] = x ^ xtime(x);
+        gf9[i] = gf_mul(x, 0x09);
+        gf11[i] = gf_mul(x, 0x0b);
+        gf13[i] = gf_mul(x, 0x0d);
+        gf14[i] = gf_mul(x, 0x0e);
+    }
+    _gf_tables_inited = 1;
+}
+
 // ---------- MixColumns / InvMixColumns ----------
 static void mix_columns(uint8_t s[16]) {
+    if (!_gf_tables_inited) _init_gf_tables();
     for (int c = 0; c < 4; c++) {
         uint8_t *col = &s[c*4];
         uint8_t a0 = col[0], a1 = col[1], a2 = col[2], a3 = col[3];
-        col[0] = gf_mul(a0, 2) ^ gf_mul(a1, 3) ^ a2 ^ a3;
-        col[1] = a0 ^ gf_mul(a1, 2) ^ gf_mul(a2, 3) ^ a3;
-        col[2] = a0 ^ a1 ^ gf_mul(a2, 2) ^ gf_mul(a3, 3);
-        col[3] = gf_mul(a0, 3) ^ a1 ^ a2 ^ gf_mul(a3, 2);
+        col[0] = gf2[a0] ^ gf3[a1] ^ a2 ^ a3;
+        col[1] = a0 ^ gf2[a1] ^ gf3[a2] ^ a3;
+        col[2] = a0 ^ a1 ^ gf2[a2] ^ gf3[a3];
+        col[3] = gf3[a0] ^ a1 ^ a2 ^ gf2[a3];
     }
 }
 static void inv_mix_columns(uint8_t s[16]) {
+    if (!_gf_tables_inited) _init_gf_tables();
     for (int c = 0; c < 4; c++) {
         uint8_t *col = &s[c*4];
         uint8_t a0 = col[0], a1 = col[1], a2 = col[2], a3 = col[3];
-        col[0] = gf_mul(a0, 0x0e) ^ gf_mul(a1, 0x0b) ^ gf_mul(a2, 0x0d) ^ gf_mul(a3, 0x09);
-        col[1] = gf_mul(a0, 0x09) ^ gf_mul(a1, 0x0e) ^ gf_mul(a2, 0x0b) ^ gf_mul(a3, 0x0d);
-        col[2] = gf_mul(a0, 0x0d) ^ gf_mul(a1, 0x09) ^ gf_mul(a2, 0x0e) ^ gf_mul(a3, 0x0b);
-        col[3] = gf_mul(a0, 0x0b) ^ gf_mul(a1, 0x0d) ^ gf_mul(a2, 0x09) ^ gf_mul(a3, 0x0e);
+        col[0] = gf14[a0] ^ gf11[a1] ^ gf13[a2] ^ gf9[a3];
+        col[1] = gf9[a0] ^ gf14[a1] ^ gf11[a2] ^ gf13[a3];
+        col[2] = gf13[a0] ^ gf9[a1] ^ gf14[a2] ^ gf11[a3];
+        col[3] = gf11[a0] ^ gf13[a1] ^ gf9[a2] ^ gf14[a3];
     }
 }
 
@@ -295,4 +319,56 @@ size_t aes_cbc_decrypt(const aes_ctx_t *ctx,
     }
 
     return ciphertext_len - pad_len;
+}
+
+// ---------- AES-ECB-PKCS7 解密 ----------
+size_t aes_ecb_decrypt(const aes_ctx_t *ctx,
+                       const uint8_t *ciphertext, size_t ciphertext_len,
+                       uint8_t *plaintext) {
+    // 密文长度必须是 16 的倍数
+    if (ciphertext_len == 0 || ciphertext_len % 16 != 0) {
+        return (size_t)-1;
+    }
+
+    for (size_t off = 0; off < ciphertext_len; off += 16) {
+        aes_decrypt_block(ctx, ciphertext + off, plaintext + off);
+    }
+
+    // 验证 PKCS7 padding
+    uint8_t pad_len = plaintext[ciphertext_len - 1];
+    if (pad_len < 1 || pad_len > 16) {
+        return (size_t)-1;
+    }
+    for (size_t i = ciphertext_len - pad_len; i < ciphertext_len; i++) {
+        if (plaintext[i] != pad_len) {
+            return (size_t)-1;
+        }
+    }
+
+    return ciphertext_len - pad_len;
+}
+
+// ---------- AES-ECB-PKCS7 加密 ----------
+size_t aes_ecb_encrypt(const aes_ctx_t *ctx,
+                       const uint8_t *plaintext, size_t plaintext_len,
+                       uint8_t *ciphertext) {
+    // PKCS7 padding
+    size_t pad_len = 16 - (plaintext_len % 16);
+    if (pad_len == 0) pad_len = 16;
+
+    size_t padded_len = plaintext_len + pad_len;
+
+    uint8_t *padded = (uint8_t *)malloc(padded_len);
+    if (!padded) return (size_t)-1;
+    memcpy(padded, plaintext, plaintext_len);
+    for (size_t i = plaintext_len; i < padded_len; i++) {
+        padded[i] = (uint8_t)pad_len;
+    }
+
+    for (size_t off = 0; off < padded_len; off += 16) {
+        aes_encrypt_block(ctx, padded + off, ciphertext + off);
+    }
+
+    free(padded);
+    return padded_len;
 }

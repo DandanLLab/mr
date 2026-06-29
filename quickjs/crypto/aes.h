@@ -37,4 +37,18 @@ size_t aes_cbc_decrypt(const aes_ctx_t *ctx,
 }
 #endif
 
+// ---------- AES-ECB-PKCS7 ----------
+// 输出缓冲大小至少 ciphertext_len - 1（去掉 padding）
+// 返回明文长度，padding 错误返回 (size_t)-1
+size_t aes_ecb_decrypt(const aes_ctx_t *ctx,
+                       const uint8_t *ciphertext, size_t ciphertext_len,
+                       uint8_t *plaintext);
+
+// AES-ECB-PKCS7 加密
+// 输出缓冲大小至少 plaintext_len + 16 字节（PKCS7 padding 最多 16 字节）
+// 返回密文长度（plaintext_len 向上取 16 的倍数）
+size_t aes_ecb_encrypt(const aes_ctx_t *ctx,
+                       const uint8_t *plaintext, size_t plaintext_len,
+                       uint8_t *ciphertext);
+
 #endif /* CRYPTO_AES_H */

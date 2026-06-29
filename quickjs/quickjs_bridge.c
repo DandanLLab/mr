@@ -480,15 +480,21 @@ const char *quickjs_bridge_aes_decrypt(const char *cipher_b64, size_t b64_len,
         char *out = (char *)malloc(1); if (out) out[0] = '\0'; return out;
     }
 
-    // AES-128-CBC 解密（key/iv 不足 16 字节以 0 填充）
-    uint8_t aes_key[16] = {0};
-    memcpy(aes_key, key, key_len < 16 ? key_len : 16);
+    // AES-CBC-PKCS7 解密（支持 AES-128/192/256）
+    // 确定实际密钥长度：16/24/32 对应 AES-128/192/256
+    size_t actual_key_len;
+    if (key_len <= 16) actual_key_len = 16;
+    else if (key_len <= 24) actual_key_len = 24;
+    else actual_key_len = 32;
+
+    uint8_t aes_key[32] = {0};
+    memcpy(aes_key, key, key_len < actual_key_len ? key_len : actual_key_len);
 
     uint8_t aes_iv[16] = {0};
     if (iv && iv_len > 0) memcpy(aes_iv, iv, iv_len < 16 ? iv_len : 16);
 
     aes_ctx_t actx;
-    if (aes_init(&actx, aes_key, 16) != 0) {
+    if (aes_init(&actx, aes_key, actual_key_len) != 0) {
         free(enc);
         char *out = (char *)malloc(1); if (out) out[0] = '\0'; return out;
     }
@@ -521,15 +527,21 @@ const char *quickjs_bridge_aes_encrypt(const char *plaintext, size_t pt_len,
     if (pt_len == 0 || key_len == 0) return empty;
     free(empty);
 
-    // AES-128-CBC 加密（key/iv 不足 16 字节以 0 填充）
-    uint8_t aes_key[16] = {0};
-    memcpy(aes_key, key, key_len < 16 ? key_len : 16);
+    // AES-CBC-PKCS7 加密（支持 AES-128/192/256）
+    // 确定实际密钥长度：16/24/32 对应 AES-128/192/256
+    size_t actual_key_len;
+    if (key_len <= 16) actual_key_len = 16;
+    else if (key_len <= 24) actual_key_len = 24;
+    else actual_key_len = 32;
+
+    uint8_t aes_key[32] = {0};
+    memcpy(aes_key, key, key_len < actual_key_len ? key_len : actual_key_len);
 
     uint8_t aes_iv[16] = {0};
     if (iv && iv_len > 0) memcpy(aes_iv, iv, iv_len < 16 ? iv_len : 16);
 
     aes_ctx_t actx;
-    if (aes_init(&actx, aes_key, 16) != 0) {
+    if (aes_init(&actx, aes_key, actual_key_len) != 0) {
         char *out = (char *)malloc(1); if (out) out[0] = '\0'; return out;
     }
 
@@ -1048,6 +1060,88 @@ static JSValue js_native_aes_decrypt(JSContext *ctx, JSValueConst this_val,
     if (out_len == (size_t)-1) {
         free(out);
         return JS_ThrowTypeError(ctx, "aesDecryptNative: decryption failed (bad padding or key)");
+    }
+
+    JSValue ret = JS_NewArrayBufferCopy(ctx, out, out_len);
+    free(out);
+    return ret;
+}
+
+// AES-ECB-PKCS7 解密：输入 (ciphertext, key) ArrayBuffer，输出 plaintext ArrayBuffer
+static JSValue js_native_aes_decrypt_ecb(JSContext *ctx, JSValueConst this_val,
+                                          int argc, JSValueConst *argv) {
+    if (argc < 2) return JS_ThrowTypeError(ctx, "aesDecryptNativeECB requires 2 arguments, got %d", argc);
+    size_t ct_len, key_len;
+    const uint8_t *ct = get_ab(ctx, argv[0], &ct_len, "aesDecryptNativeECB", 1);
+    if (!ct) return JS_EXCEPTION;
+    const uint8_t *key = get_ab(ctx, argv[1], &key_len, "aesDecryptNativeECB", 2);
+    if (!key) return JS_EXCEPTION;
+
+    if (key_len != 16 && key_len != 24 && key_len != 32) {
+        return JS_ThrowTypeError(ctx, "aesDecryptNativeECB: key length must be 16/24/32, got %d", (int)key_len);
+    }
+    if (ct_len == 0 || ct_len % 16 != 0) {
+        return JS_ThrowTypeError(ctx, "aesDecryptNativeECB: ciphertext length must be multiple of 16, got %d", (int)ct_len);
+    }
+
+    aes_ctx_t actx;
+    if (aes_init(&actx, key, key_len) != 0) {
+        return JS_ThrowTypeError(ctx, "aesDecryptNativeECB: key expansion failed");
+    }
+
+    uint8_t *out = (uint8_t *)malloc(ct_len);
+    if (!out) return JS_ThrowTypeError(ctx, "aesDecryptNativeECB: out of memory");
+
+    QuickJSBridge *bridge = (QuickJSBridge *)JS_GetContextOpaque(ctx);
+    uint64_t t0 = bridge ? _now_us() : 0;
+
+    size_t out_len = aes_ecb_decrypt(&actx, ct, ct_len, out);
+
+    if (bridge) _stats_update(&bridge->stats, ct_len, out_len == (size_t)-1 ? 0 : out_len, _now_us() - t0);
+
+    if (out_len == (size_t)-1) {
+        free(out);
+        return JS_ThrowTypeError(ctx, "aesDecryptNativeECB: decryption failed (bad padding or key)");
+    }
+
+    JSValue ret = JS_NewArrayBufferCopy(ctx, out, out_len);
+    free(out);
+    return ret;
+}
+
+// AES-ECB-PKCS7 加密：输入 (plaintext, key) ArrayBuffer，输出 ciphertext ArrayBuffer
+static JSValue js_native_aes_encrypt_ecb(JSContext *ctx, JSValueConst this_val,
+                                          int argc, JSValueConst *argv) {
+    if (argc < 2) return JS_ThrowTypeError(ctx, "aesEncryptNativeECB requires 2 arguments, got %d", argc);
+    size_t pt_len, key_len;
+    const uint8_t *pt = get_ab(ctx, argv[0], &pt_len, "aesEncryptNativeECB", 1);
+    if (!pt) return JS_EXCEPTION;
+    const uint8_t *key = get_ab(ctx, argv[1], &key_len, "aesEncryptNativeECB", 2);
+    if (!key) return JS_EXCEPTION;
+
+    if (key_len != 16 && key_len != 24 && key_len != 32) {
+        return JS_ThrowTypeError(ctx, "aesEncryptNativeECB: key length must be 16/24/32, got %d", (int)key_len);
+    }
+
+    aes_ctx_t actx;
+    if (aes_init(&actx, key, key_len) != 0) {
+        return JS_ThrowTypeError(ctx, "aesEncryptNativeECB: key expansion failed");
+    }
+
+    size_t max_out = pt_len + 16;
+    uint8_t *out = (uint8_t *)malloc(max_out);
+    if (!out) return JS_ThrowTypeError(ctx, "aesEncryptNativeECB: out of memory");
+
+    QuickJSBridge *bridge = (QuickJSBridge *)JS_GetContextOpaque(ctx);
+    uint64_t t0 = bridge ? _now_us() : 0;
+
+    size_t out_len = aes_ecb_encrypt(&actx, pt, pt_len, out);
+
+    if (bridge) _stats_update(&bridge->stats, pt_len, out_len == (size_t)-1 ? 0 : out_len, _now_us() - t0);
+
+    if (out_len == (size_t)-1) {
+        free(out);
+        return JS_ThrowTypeError(ctx, "aesEncryptNativeECB: encryption failed");
     }
 
     JSValue ret = JS_NewArrayBufferCopy(ctx, out, out_len);
@@ -1919,6 +2013,11 @@ QuickJSBridge *quickjs_bridge_create_with_config(uint64_t memory_limit, uint64_t
         JS_NewCFunction(bridge->ctx, js_native_aes_encrypt, "aesEncryptNative", 3));
     JS_SetPropertyStr(bridge->ctx, crypto_obj, "aesDecryptNative",
         JS_NewCFunction(bridge->ctx, js_native_aes_decrypt, "aesDecryptNative", 3));
+    // AES-ECB 模式（无 IV，纯 C 原生）
+    JS_SetPropertyStr(bridge->ctx, crypto_obj, "aesEncryptNativeECB",
+        JS_NewCFunction(bridge->ctx, js_native_aes_encrypt_ecb, "aesEncryptNativeECB", 2));
+    JS_SetPropertyStr(bridge->ctx, crypto_obj, "aesDecryptNativeECB",
+        JS_NewCFunction(bridge->ctx, js_native_aes_decrypt_ecb, "aesDecryptNativeECB", 2));
     // AES-CBC 解密 + LZString 解压 原子组合（3A 书源 content() 路径，消除 JS 侧字符串膨胀）
     JS_SetPropertyStr(bridge->ctx, crypto_obj, "aesDecryptThenLzDecompress",
         JS_NewCFunction(bridge->ctx, js_native_aes_decrypt_then_lz, "aesDecryptThenLzDecompress", 2));
