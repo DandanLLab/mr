@@ -3692,6 +3692,25 @@ class JsEngine {
       detail: resultOrErr != null && resultOrErr.length > 200 ? '${resultOrErr.substring(0, 200)}...' : (resultOrErr ?? ''));
   }
 
+  /// 批量 JS 执行（轻量路径，用于目录/搜索列表批量解析）
+  ///
+  /// 跳过 processJsRule 的重路径：不执行 _preCacheBridgeCalls 正则扫描、
+  /// 不构建巨大 wrappedScript、不执行 JsTracer、不记录 info 级日志。
+  /// 只做必要的变量注入 + 一次 evaluate，加 _evalLock 串行保证线程安全。
+  ///
+  /// [script] 完整的 JS 脚本（调用方已构造好）
+  /// 返回 evaluate 的原始字符串结果
+  String? batchEvaluate(String script) {
+    if (_jsRuntime == null) return null;
+    try {
+      final result = _jsRuntime!.evaluate(script);
+      if (result.isError) return null;
+      return result.stringResult;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<dynamic> evaluateAsync(String script) async {
     if (!_initialized || _jsRuntime == null) return null;
     try {

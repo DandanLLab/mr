@@ -1732,16 +1732,10 @@ class AnalyzeRule {
           'try{result=$jsCode}catch(e){result=null}'
           'return result;}))';
 
-      final env = _collectVariables();
-      env['baseUrl'] = _baseUrl ?? '';
-
-      final result = await JsEngine.instance.processJsRule(
-        '',
-        batchCode,
-        baseUrl: _baseUrl,
-        sourceEngine: _sourceEngine,
-        env: env,
-      );
+      // [性能优化] 走轻量路径 batchEvaluate，跳过 processJsRule 重路径
+      // 不执行 _preCacheBridgeCalls（6个正则扫描几十KB）、不构建 4KB+ wrappedScript、
+      // 不执行 JsTracer、不记录 info 级日志——只做一次 evaluate
+      final result = JsEngine.instance.batchEvaluate(batchCode);
 
       if (result == null || result.isEmpty) {
         return List.filled(elements.length, null);
