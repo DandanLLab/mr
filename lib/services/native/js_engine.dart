@@ -2075,18 +2075,47 @@ class JsEngine {
           if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
           try {
             var result;
+            // Phase 5: 全 C 直通（base64 → C 层一站式解码+解密 → ArrayBuffer → UTF-8 字符串）
+            // 零 CryptoJS 包装层，零 JS UTF-8 parse/stringify
+            if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto.aesDecryptFromBase64) {
+              var plainU8 = iv
+                ? __nativeCrypto.aesDecryptFromBase64(data, key, iv)
+                : __nativeCrypto.aesDecryptFromBase64ECB(data, key);
+              if (plainU8 && plainU8.byteLength > 0) {
+                result = _u8ToStr(plainU8);
+                if (result && result.length > 0) {
+                  _javaCache[cacheKey] = result;
+                  return result;
+                }
+              }
+            }
+            // 回退：走 CryptoJS.C 原生路径或纯 JS
             if (typeof CryptoJS !== 'undefined' && CryptoJS.AES) {
-              // 走 CryptoJS.AES → __nativeCrypto.aesDecryptNative（C 原生，零 Dart 回调）
               var cfg = iv ? { iv: CryptoJS.enc.Utf8.parse(iv), mode: CryptoJS.mode.CBC } : { mode: CryptoJS.mode.ECB };
               result = CryptoJS.AES.decrypt(data, CryptoJS.enc.Utf8.parse(key), cfg).toString(CryptoJS.enc.Utf8);
             } else {
-              // 回退：纯 JS _AES 引擎
               var mode = iv ? 'CBC' : 'ECB';
               result = _AES.decrypt(data, key, iv, mode);
             }
             _javaCache[cacheKey] = result;
             return result;
           } catch(e) { _jsLog('AES decrypt failed: ' + e, 'error'); return ''; }
+        },
+        // 全 C 直通 AES 解密：base64 密文 → Uint8Array（零 CryptoJS 包装层）
+        // 用于图片解密等需要原始字节而不是字符串的场景
+        aesDecodeBytes: function(data, key, iv) {
+          try {
+            if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto.aesDecryptFromBase64) {
+              if (iv) {
+                return __nativeCrypto.aesDecryptFromBase64(data, key, iv);
+              } else {
+                return __nativeCrypto.aesDecryptFromBase64ECB(data, key);
+              }
+            }
+            // 回退：走标准 aesDecode 后转 bytes
+            var s = java.aesDecode(data, key, iv);
+            return _strToU8(s);
+          } catch(e) { return new Uint8Array(0); }
         },
         md5Encode: function(str) {
           // 优先使用纯 JS _MD5 引擎，fallback 到缓存
@@ -2973,6 +3002,16 @@ class JsEngine {
           aesDecode: function(data, key, iv) {
             try {
               var mode = iv ? 'CBC' : 'ECB';
+              // Phase 5: 全 C 直通（base64 字符串 → C 层一站式解码+解密 → ArrayBuffer → UTF-8）
+              if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto.aesDecryptFromBase64) {
+                var plainU8 = iv
+                  ? __nativeCrypto.aesDecryptFromBase64(data, key, iv)
+                  : __nativeCrypto.aesDecryptFromBase64ECB(data, key);
+                if (plainU8 && plainU8.byteLength > 0) {
+                  var r = _u8ToStr(plainU8);
+                  if (r && r.length > 0) return r;
+                }
+              }
               // 回退到 CryptoJS 路径（优先走 C 原生）
               if (typeof CryptoJS !== 'undefined' && CryptoJS.AES) {
                 var cfg = iv ? { iv: CryptoJS.enc.Utf8.parse(iv), mode: CryptoJS.mode.CBC } : { mode: CryptoJS.mode.ECB };
@@ -2980,6 +3019,16 @@ class JsEngine {
               }
               return _AES.decrypt(data, key, iv, mode);
             } catch(e) { _jsLog('AES decrypt failed: ' + e, 'error'); return ''; }
+          },
+          aesDecodeBytes: function(data, key, iv) {
+            try {
+              if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto.aesDecryptFromBase64) {
+                if (iv) return __nativeCrypto.aesDecryptFromBase64(data, key, iv);
+                return __nativeCrypto.aesDecryptFromBase64ECB(data, key);
+              }
+              var s = java.aesDecode(data, key, iv);
+              return _strToU8(s);
+            } catch(e) { return new Uint8Array(0); }
           },
           md5Encode: function(str) { var k = 'md5:' + str; if (_javaCache[k] !== undefined) return _javaCache[k]; return ''; },
           base64Encode: function(str) { try { return btoa(unescape(encodeURIComponent(str))); } catch(e) { return ''; } },
@@ -3154,6 +3203,45 @@ class JsEngine {
           decrypt: function(data, key, cfg) {
             var iv = cfg && cfg.iv ? cfg.iv : null;
             var mode = (cfg && cfg.mode === CryptoJS.mode.ECB) ? 'ECB' : 'CBC';
+
+            // Phase 5: 全 C 直通路径（base64 字符串 → C 层一站式解码+解密 → ArrayBuffer → UTF-8）
+            // 消除 _b64ToU8 → aesDecryptNative → _u8ToStr 的来回复制，一次 C 调用完成
+            if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto &&
+                __nativeCrypto.aesDecryptFromBase64) {
+              try {
+                var dataB64;
+                if (typeof data === 'string') {
+                  dataB64 = data;
+                } else if (data && data.ciphertext && typeof data.ciphertext.toString === 'function') {
+                  dataB64 = data.ciphertext.toString(CryptoJS.enc.Base64);
+                } else {
+                  dataB64 = String(data);
+                }
+                var keyStr = CryptoJS.enc.Utf8.stringify(key);
+                var ivStr = iv ? CryptoJS.enc.Utf8.stringify(iv) : '';
+                var plainU8;
+                if (mode === 'CBC' && iv) {
+                  plainU8 = __nativeCrypto.aesDecryptFromBase64(dataB64, keyStr, ivStr);
+                } else if (mode === 'ECB') {
+                  plainU8 = __nativeCrypto.aesDecryptFromBase64ECB(dataB64, keyStr);
+                } else {
+                  throw new Error('unsupported mode: ' + mode);
+                }
+                if (plainU8 && plainU8.byteLength > 0) {
+                  var nativeResult = _u8ToStr(plainU8);
+                  if (nativeResult !== null && nativeResult !== undefined) {
+                    return {
+                      toString: function(enc) {
+                        if (enc === CryptoJS.enc.Base64) {
+                          return java.base64Encode(nativeResult) || '';
+                        }
+                        return nativeResult;
+                      }
+                    };
+                  }
+                }
+              } catch (e) {}
+            }
 
             // 优先走 C 原生 AES 解密（零 Dart 回调）
             if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto &&
