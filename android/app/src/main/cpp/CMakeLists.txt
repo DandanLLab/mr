@@ -46,11 +46,15 @@ target_compile_options(quickjs_c_bridge PRIVATE
     -Wno-unused-function
     -Wno-unused-variable
     -Oz
-    -flto
     -ffunction-sections
     -fdata-sections
     -fomit-frame-pointer
+    -flto
 )
+
+# quickjs.c 异常大（5万+行），带 LTO 编译在低内存 CI runner 上容易 OOM
+# -fno-lto 覆盖 target 的 -flto，只影响 quickjs.c 一个文件
+set_source_files_properties(${QUICKJS_SRC_DIR}/quickjs.c PROPERTIES COMPILE_FLAGS "-fno-lto")
 
 # 链接期优化：LTO + gc-sections + version-script 精确控制导出符号 + strip
 # -Wl,--gc-sections：移除未引用的函数/数据段

@@ -1282,7 +1282,7 @@ static void _free_array_buf(JSRuntime *rt, void *opaque, void *ptr) {
 }
 
 // AES-CBC-PKCS7 全 C 直通解密：base64 密文 → ArrayBuffer 明文
-// 参数: (base64Cipher, base64Key, base64Iv)
+// 参数: (base64Cipher, keyUtf8, ivUtf8)
 // 返回: ArrayBuffer（Uint8Array），失败返回空 ArrayBuffer
 static JSValue js_native_aes_decrypt_base64(JSContext *ctx, JSValueConst this_val,
                                             int argc, JSValueConst *argv) {
@@ -1292,26 +1292,34 @@ static JSValue js_native_aes_decrypt_base64(JSContext *ctx, JSValueConst this_va
             return JS_NewArrayBufferCopy(ctx, NULL, 0);
     }
 
+    // cipher_b64: base64 编码的密文字符串
+    // key/iv: UTF-8 纯文本字符串（不是 base64！）
     const char *cipher_b64 = JS_ToCString(ctx, argv[0]);
-    const char *key_b64 = JS_ToCString(ctx, argv[1]);
-    const char *iv_b64 = JS_ToCString(ctx, argv[2]);
-    if (!cipher_b64 || !key_b64 || !iv_b64) {
+    const char *key_utf8 = JS_ToCString(ctx, argv[1]);
+    const char *iv_utf8 = JS_ToCString(ctx, argv[2]);
+    if (!cipher_b64 || !key_utf8 || !iv_utf8) {
         JS_FreeCString(ctx, cipher_b64);
-        JS_FreeCString(ctx, key_b64);
-        JS_FreeCString(ctx, iv_b64);
+        JS_FreeCString(ctx, key_utf8);
+        JS_FreeCString(ctx, iv_utf8);
         return JS_NewArrayBufferCopy(ctx, NULL, 0);
     }
 
-    // 1. Base64 解码密文、key、iv
-    size_t ct_len = 0, key_len = 0, iv_len = 0;
+    // 1. Base64 解码密文；key 和 iv 是 UTF-8 字节，直接取
+    size_t ct_len = 0;
     uint8_t *ct = b64_decode(cipher_b64, strlen(cipher_b64), &ct_len);
-    uint8_t *key = b64_decode(key_b64, strlen(key_b64), &key_len);
-    uint8_t *iv = b64_decode(iv_b64, strlen(iv_b64), &iv_len);
+    size_t key_len = strlen(key_utf8);
+    uint8_t *key = (uint8_t *)malloc(key_len + 1);
+    memcpy(key, key_utf8, key_len);
+    key[key_len] = 0;
+    size_t iv_len = strlen(iv_utf8);
+    uint8_t *iv = (uint8_t *)malloc(iv_len + 1);
+    memcpy(iv, iv_utf8, iv_len);
+    iv[iv_len] = 0;
     JS_FreeCString(ctx, cipher_b64);
-    JS_FreeCString(ctx, key_b64);
-    JS_FreeCString(ctx, iv_b64);
+    JS_FreeCString(ctx, key_utf8);
+    JS_FreeCString(ctx, iv_utf8);
 
-    if (!ct || !key || !iv || ct_len == 0 || ct_len % 16 != 0 || key_len < 16 || iv_len != 16) {
+    if (!ct || !key || !iv || ct_len == 0 || ct_len % 16 != 0 || key_len < 16 || iv_len < 16) {
         free(ct); free(key); free(iv);
         return JS_NewArrayBufferCopy(ctx, NULL, 0);
     }
@@ -1333,8 +1341,13 @@ static JSValue js_native_aes_decrypt_base64(JSContext *ctx, JSValueConst this_va
 
     // 4. AES-CBC 解密（原地解密在 ct buffer 上完成，零额外 malloc）
     // ct buffer 将直接作为 ArrayBuffer 返回，省掉一次 memcpy
-    size_t pt_len = aes_cbc_decrypt(&actx, iv, ct, ct_len, ct);
+    // iv 取前 16 字节（若不足则补零，但在上面已确保 iv_len >= 16）
+    uint8_t iv16[16];
+    memset(iv16, 0, 16);
+    memcpy(iv16, iv, iv_len > 16 ? 16 : iv_len);
     free(iv);
+
+    size_t pt_len = aes_cbc_decrypt(&actx, iv16, ct, ct_len, ct);
 
     if (pt_len == (size_t)-1) {
         free(ct);
@@ -1350,7 +1363,7 @@ static JSValue js_native_aes_decrypt_base64(JSContext *ctx, JSValueConst this_va
 }
 
 // AES-ECB-PKCS7 全 C 直通解密：base64 密文 → ArrayBuffer 明文
-// 参数: (base64Cipher, base64Key)
+// 参数: (base64Cipher, keyUtf8)
 static JSValue js_native_aes_decrypt_base64_ecb(JSContext *ctx, JSValueConst this_val,
                                                 int argc, JSValueConst *argv) {
     if (argc < 2) return JS_ThrowTypeError(ctx, "aesDecryptFromBase64ECB requires 2 arguments, got %d", argc);
@@ -1359,19 +1372,24 @@ static JSValue js_native_aes_decrypt_base64_ecb(JSContext *ctx, JSValueConst thi
             return JS_NewArrayBufferCopy(ctx, NULL, 0);
     }
 
+    // cipher_b64: base64 编码的密文字符串
+    // key: UTF-8 纯文本字符串（不是 base64！）
     const char *cipher_b64 = JS_ToCString(ctx, argv[0]);
-    const char *key_b64 = JS_ToCString(ctx, argv[1]);
-    if (!cipher_b64 || !key_b64) {
+    const char *key_utf8 = JS_ToCString(ctx, argv[1]);
+    if (!cipher_b64 || !key_utf8) {
         JS_FreeCString(ctx, cipher_b64);
-        JS_FreeCString(ctx, key_b64);
+        JS_FreeCString(ctx, key_utf8);
         return JS_NewArrayBufferCopy(ctx, NULL, 0);
     }
 
-    size_t ct_len = 0, key_len = 0;
+    size_t ct_len = 0;
     uint8_t *ct = b64_decode(cipher_b64, strlen(cipher_b64), &ct_len);
-    uint8_t *key = b64_decode(key_b64, strlen(key_b64), &key_len);
+    size_t key_len = strlen(key_utf8);
+    uint8_t *key = (uint8_t *)malloc(key_len + 1);
+    memcpy(key, key_utf8, key_len);
+    key[key_len] = 0;
     JS_FreeCString(ctx, cipher_b64);
-    JS_FreeCString(ctx, key_b64);
+    JS_FreeCString(ctx, key_utf8);
 
     if (!ct || !key || ct_len == 0 || ct_len % 16 != 0 || key_len < 16) {
         free(ct); free(key);
