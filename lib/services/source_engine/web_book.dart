@@ -751,97 +751,23 @@ class WebBook {
         return [];
       }
 
-      final results = <Map<String, dynamic>>[];
-
-      // [性能] 搜索列表批量化并发：每批 16 个元素并发提取 8 字段
-      // 替代之前的逐元素串行 await
-      const searchBatchSize = 16;
-      for (int batchStart = 0; batchStart < bookElements.length; batchStart += searchBatchSize) {
-        final batchEnd = (batchStart + searchBatchSize) < bookElements.length
-            ? batchStart + searchBatchSize
-            : bookElements.length;
-        final batchResults = await Future.wait(
-          List.generate(batchEnd - batchStart, (j) async {
-            final i = batchStart + j;
-            var element = bookElements[i];
-
-            // 关键修复：如果 bookList 返回的是 String 而非 Element，说明规则可能直接指向了文本内容
-            if (element is String && element.isNotEmpty && !element.trim().startsWith('<')) {
-              element = '<div>$element</div>';
-            }
-
-            final itemAnalyzer = AnalyzeRule()
-              ..setContent(element, baseUrl: parsed.url)
-              ..setRedirectUrl(response.url)
-              ..setSourceEngine(source.engineType)
-              ..setSourceInfo(searchSourceMap)
-              ..putVariable('key', keyword)
-              ..putVariable('page', page);
-
-            // 并发提取所有字段，每个字段独立 catchError 防止一个异常毁了整条结果
-            final fields = await Future.wait([
-              itemAnalyzer.getStringAsync(searchRule.name ?? '')
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(searchRule.author ?? '')
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(searchRule.coverUrl ?? '', isUrl: true)
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(searchRule.intro ?? '')
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(searchRule.bookUrl ?? '', isUrl: true)
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(searchRule.kind ?? '')
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(searchRule.lastChapter ?? '')
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(searchRule.wordCount ?? '')
-                  .catchError((_) => null),
-            ]);
-            var name = fields[0];
-            var author = fields[1];
-            final coverUrl = fields[2];
-            var intro = fields[3];
-            final bookUrl = fields[4];
-            final kind = fields[5];
-            final lastChapter = fields[6];
-            final wordCount = fields[7];
-
-            if (name != null && name.isNotEmpty) {
-              // 借鉴 legado：书名/作者格式化
-              name = _formatBookName(name);
-              author = _formatBookAuthor(author ?? '');
-
-              // 借鉴 legado：简介 HTML 格式化
-              if (intro != null && intro.isNotEmpty) {
-                intro = _formatIntro(intro);
-              }
-
-              // 拼接相对链接：用书源URL作为基准
-              final resolvedBookUrl = resolveUrl(bookUrl, source.bookSourceUrl);
-              final resolvedCoverUrl = resolveUrl(coverUrl, source.bookSourceUrl);
-
-              return <String, dynamic>{
-                'name': name,
-                'author': author,
-                'coverUrl': resolvedCoverUrl,
-                'intro': intro ?? '',
-                'bookUrl': resolvedBookUrl,
-                'kind': kind ?? '',
-                'lastChapter': lastChapter ?? '',
-                'wordCount': wordCount ?? '',
-                'sourceUrl': source.bookSourceUrl,
-                'sourceName': source.bookSourceName,
-                'mediaType': source.bookSourceType.mediaType.index,
-                'originType': BookOriginType.online.index,
-              };
-            }
-            return null;
-          }),
-        );
-        for (final book in batchResults) {
-          if (book != null) results.add(book);
-        }
-      }
+      // [性能] 全量并发 + 空规则跳过，搜索/发现共用 _extractBookItems
+      final results = await _extractBookItems(
+        elements: bookElements,
+        nameRule: searchRule.name ?? '',
+        authorRule: searchRule.author ?? '',
+        coverUrlRule: searchRule.coverUrl ?? '',
+        bookUrlRule: searchRule.bookUrl ?? '',
+        introRule: searchRule.intro ?? '',
+        kindRule: searchRule.kind ?? '',
+        lastChapterRule: searchRule.lastChapter ?? '',
+        wordCountRule: searchRule.wordCount ?? '',
+        baseUrl: parsed.url,
+        redirectUrl: response.url,
+        source: source,
+        sourceMap: searchSourceMap,
+        extraEnv: {'key': keyword, 'page': page},
+      );
 
       // 借鉴 legado：搜索结果去重
       final seen = <String>{};
@@ -932,83 +858,38 @@ class WebBook {
         ..putVariable('url', exploreUrl)
         ..putVariable('page', 1);
 
-      final results = <Map<String, dynamic>>[];
       final bookElements = await analyzer.getElementsAsync(bookListRule);
 
       // 保存原始元素数量（用于调试）
       lastExploreElementCount = bookElements.length;
 
-      // [性能] 发现列表批量化并发：每批 16 个元素并发提取 8 字段
-      const exploreBatchSize = 16;
-      for (int batchStart = 0; batchStart < bookElements.length; batchStart += exploreBatchSize) {
-        final batchEnd = (batchStart + exploreBatchSize) < bookElements.length
-            ? batchStart + exploreBatchSize
-            : bookElements.length;
-        final batchResults = await Future.wait(
-          List.generate(batchEnd - batchStart, (j) async {
-            var element = bookElements[batchStart + j];
+      if (bookElements.isEmpty) return [];
 
-            // 关键修复：处理非 HTML 字符串元素
-            if (element is String && element.isNotEmpty && !element.trim().startsWith('<')) {
-              element = '<div>$element</div>';
-            }
+      // [性能] 全量并发 + 空规则跳过，复用 _extractBookItems
+      final nameRule = (useSearchFallback ? (searchRule?.name) : exploreRule.name) ?? '';
+      final authorRule = (useSearchFallback ? (searchRule?.author) : exploreRule.author) ?? '';
+      final coverUrlRule = (useSearchFallback ? (searchRule?.coverUrl) : exploreRule.coverUrl) ?? '';
+      final introRule = (useSearchFallback ? (searchRule?.intro) : exploreRule.intro) ?? '';
+      final bookUrlRule = (useSearchFallback ? (searchRule?.bookUrl) : exploreRule.bookUrl) ?? '';
+      final kindRule = (useSearchFallback ? (searchRule?.kind) : exploreRule.kind) ?? '';
+      final lastChapterRule = (useSearchFallback ? (searchRule?.lastChapter) : exploreRule.lastChapter) ?? '';
+      final wordCountRule = (useSearchFallback ? (searchRule?.wordCount) : exploreRule.wordCount) ?? '';
 
-            final itemAnalyzer = AnalyzeRule()
-              ..setContent(element, baseUrl: exploreUrl)
-              ..setRedirectUrl(response.url)
-              ..setSourceEngine(source.engineType)
-              ..setSourceInfo(exploreSourceMap);
-
-            // 并发提取所有字段，每个字段独立 catchError
-            final nameRule = useSearchFallback ? (searchRule?.name ?? '') : exploreRule.name;
-            final authorRule = useSearchFallback ? (searchRule?.author ?? '') : exploreRule.author;
-            final coverUrlRule = useSearchFallback ? (searchRule?.coverUrl ?? '') : exploreRule.coverUrl;
-            final introRule = useSearchFallback ? (searchRule?.intro ?? '') : exploreRule.intro;
-            final bookUrlRule = useSearchFallback ? (searchRule?.bookUrl ?? '') : exploreRule.bookUrl;
-            final kindRule = useSearchFallback ? (searchRule?.kind ?? '') : exploreRule.kind;
-            final lastChapterRule = useSearchFallback ? (searchRule?.lastChapter ?? '') : exploreRule.lastChapter;
-            final wordCountRule = useSearchFallback ? (searchRule?.wordCount ?? '') : exploreRule.wordCount;
-
-            final fields = await Future.wait([
-              itemAnalyzer.getStringAsync(nameRule)
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(authorRule)
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(coverUrlRule, isUrl: true)
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(introRule)
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(bookUrlRule, isUrl: true)
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(kindRule)
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(lastChapterRule)
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(wordCountRule)
-                  .catchError((_) => null),
-            ]);
-            final name = fields[0];
-            if (name == null || name.isEmpty) return null;
-            return <String, dynamic>{
-              'name': name,
-              'author': fields[1] ?? '',
-              'coverUrl': fields[2] ?? '',
-              'intro': fields[3] ?? '',
-              'bookUrl': fields[4] ?? '',
-              'kind': fields[5] ?? '',
-              'lastChapter': fields[6] ?? '',
-              'wordCount': fields[7] ?? '',
-              'sourceUrl': source.bookSourceUrl,
-              'sourceName': source.bookSourceName,
-              'mediaType': source.bookSourceType.mediaType.index,
-              'originType': BookOriginType.online.index,
-            };
-          }),
-        );
-        for (final book in batchResults) {
-          if (book != null) results.add(book);
-        }
-      }
+      final results = await _extractBookItems(
+        elements: bookElements,
+        nameRule: nameRule,
+        authorRule: authorRule,
+        coverUrlRule: coverUrlRule,
+        bookUrlRule: bookUrlRule,
+        introRule: introRule,
+        kindRule: kindRule,
+        lastChapterRule: lastChapterRule,
+        wordCountRule: wordCountRule,
+        baseUrl: exploreUrl,
+        redirectUrl: response.url,
+        source: source,
+        sourceMap: exploreSourceMap,
+      );
 
       return results;
     } catch (e) {
@@ -1305,6 +1186,106 @@ class WebBook {
     }
   }
 
+  /// 通用列表书籍提取方法：[全量并发] + [空规则跳过]
+  /// 搜索/发现/详情列表共用，减少重复代码
+  Future<List<Map<String, dynamic>>> _extractBookItems({
+    required List<dynamic> elements,
+    required String nameRule,
+    required String authorRule,
+    required String coverUrlRule,
+    required String bookUrlRule,
+    required String introRule,
+    required String kindRule,
+    required String lastChapterRule,
+    required String wordCountRule,
+    required String baseUrl,
+    required String redirectUrl,
+    required BookSource source,
+    required Map<String, dynamic> sourceMap,
+    Map<String, dynamic>? extraEnv,
+  }) async {
+    // 预计算空规则跳过标志
+    final hasName = nameRule.isNotEmpty;
+    final hasAuthor = authorRule.isNotEmpty;
+    final hasCover = coverUrlRule.isNotEmpty;
+    final hasIntro = introRule.isNotEmpty;
+    final hasBookUrl = bookUrlRule.isNotEmpty;
+    final hasKind = kindRule.isNotEmpty;
+    final hasLastChapter = lastChapterRule.isNotEmpty;
+    final hasWordCount = wordCountRule.isNotEmpty;
+
+    // [性能] 全量并发：所有元素一次性发射
+    final allResults = await Future.wait(
+      List.generate(elements.length, (i) async {
+        var element = elements[i];
+        // 处理非 HTML 字符串元素
+        if (element is String && element.isNotEmpty && !element.trim().startsWith('<')) {
+          element = '<div>$element</div>';
+        }
+
+        final itemAnalyzer = AnalyzeRule()
+          ..setContent(element, baseUrl: baseUrl)
+          ..setRedirectUrl(redirectUrl)
+          ..setSourceEngine(source.engineType)
+          ..setSourceInfo(sourceMap);
+        if (extraEnv != null) {
+          for (final entry in extraEnv.entries) {
+            itemAnalyzer.putVariable(entry.key, entry.value);
+          }
+        }
+
+        // 只对有值的规则发起异步调用，空规则直接短路
+        final futures = <Future<String?>>[];
+        if (hasName) futures.add(itemAnalyzer.getStringAsync(nameRule).catchError((_) => null));
+        if (hasAuthor) futures.add(itemAnalyzer.getStringAsync(authorRule).catchError((_) => null));
+        if (hasCover) futures.add(itemAnalyzer.getStringAsync(coverUrlRule, isUrl: true).catchError((_) => null));
+        if (hasIntro) futures.add(itemAnalyzer.getStringAsync(introRule).catchError((_) => null));
+        if (hasBookUrl) futures.add(itemAnalyzer.getStringAsync(bookUrlRule, isUrl: true).catchError((_) => null));
+        if (hasKind) futures.add(itemAnalyzer.getStringAsync(kindRule).catchError((_) => null));
+        if (hasLastChapter) futures.add(itemAnalyzer.getStringAsync(lastChapterRule).catchError((_) => null));
+        if (hasWordCount) futures.add(itemAnalyzer.getStringAsync(wordCountRule).catchError((_) => null));
+
+        final fields = futures.isNotEmpty ? await Future.wait(futures) : [];
+        int fi = 0;
+
+        var name = hasName ? (fields[fi++] ?? '') : '';
+        final author = hasAuthor ? (fields[fi++] ?? '') : '';
+        final coverUrl = hasCover ? (fields[fi++] ?? '') : '';
+        var intro = hasIntro ? (fields[fi++] ?? '') : '';
+        final bookUrl = hasBookUrl ? (fields[fi++] ?? '') : '';
+        final kind = hasKind ? (fields[fi++] ?? '') : '';
+        final lastChapter = hasLastChapter ? (fields[fi++] ?? '') : '';
+        final wordCount = hasWordCount ? (fields[fi++] ?? '') : '';
+
+        if (name.isNotEmpty) {
+          name = _formatBookName(name);
+          if (intro.isNotEmpty) intro = _formatIntro(intro);
+          return <String, dynamic>{
+            'name': name,
+            'author': _formatBookAuthor(author),
+            'coverUrl': resolveUrl(coverUrl, source.bookSourceUrl),
+            'intro': intro,
+            'bookUrl': resolveUrl(bookUrl, source.bookSourceUrl),
+            'kind': kind,
+            'lastChapter': lastChapter,
+            'wordCount': wordCount,
+            'sourceUrl': source.bookSourceUrl,
+            'sourceName': source.bookSourceName,
+            'mediaType': source.bookSourceType.mediaType.index,
+            'originType': BookOriginType.online.index,
+          };
+        }
+        return null;
+      }),
+    );
+
+    final results = <Map<String, dynamic>>[];
+    for (final r in allResults) {
+      if (r != null) results.add(r);
+    }
+    return results;
+  }
+
   /// 对齐 legado BookChapterList.analyzeChapterList (内层)
   /// 返回 (chapterList, nextUrlList)
   Future<(List<Chapter>, List<String>)> _analyzeChapterList({
@@ -1353,81 +1334,70 @@ class WebBook {
 
     // legado: if (elements.isNotEmpty)
     if (elements.isNotEmpty) {
-      // [性能] 批量化元素处理：每批 16 个元素并发提取字段
-      // 避免 1000+ 章节逐个串行等待，单次循环从 O(n) 降到 O(n/16)
-      const batchSize = 16;
-      for (int batchStart = 0; batchStart < elements.length; batchStart += batchSize) {
-        final batchEnd = (batchStart + batchSize) < elements.length
-            ? batchStart + batchSize
-            : elements.length;
-        final batchResults = await Future.wait(
-          List.generate(batchEnd - batchStart, (j) {
-            final idx = batchStart + j;
-            final item = elements[idx];
-            // legado: analyzeRule.setContent(item)
-            final itemAnalyzer = AnalyzeRule()
-              ..setContent(item, baseUrl: baseUrl)
-              ..setRedirectUrl(redirectUrl)
-              ..setSourceEngine(source.engineType)
-              ..setSourceInfo(sourceMap)
-              ..setBookInfo(bookMap);
+      // [性能] 全量并发：所有元素一次性并发发射，不分批！
+      // 同时跳过空规则减少不必要的 getStringAsync 调用
+      final hasName = (tocRule.chapterName ?? '').isNotEmpty;
+      final hasUrl = (tocRule.chapterUrl ?? '').isNotEmpty;
+      final hasVolume = (tocRule.isVolume ?? '').isNotEmpty;
+      final hasTime = (tocRule.updateTime ?? '').isNotEmpty;
+      final hasVip = (tocRule.isVip ?? '').isNotEmpty;
+      final hasPay = (tocRule.isPay ?? '').isNotEmpty;
 
-            // 并发提取所有字段，每个字段独立 catchError
-            return Future.wait([
-              itemAnalyzer.getStringAsync(tocRule.chapterName ?? '')
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(tocRule.chapterUrl ?? '')
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(tocRule.isVolume ?? '')
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(tocRule.updateTime ?? '')
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(tocRule.isVip ?? '')
-                  .catchError((_) => null),
-              itemAnalyzer.getStringAsync(tocRule.isPay ?? '')
-                  .catchError((_) => null),
-            ]).then((fields) {
-              final title = fields[0] ?? '';
-              final url = fields[1] ?? '';
-              final isVolumeStr = fields[2];
-              final isVolume = _isRuleTrue(isVolumeStr);
-              final info = fields[3] ?? '';
-              final isVip = _isRuleTrue(fields[4]);
-              final isPay = _isRuleTrue(fields[5]);
+      final allResults = await Future.wait(
+        List.generate(elements.length, (idx) async {
+          final item = elements[idx];
+          final itemAnalyzer = AnalyzeRule()
+            ..setContent(item, baseUrl: baseUrl)
+            ..setRedirectUrl(redirectUrl)
+            ..setSourceEngine(source.engineType)
+            ..setSourceInfo(sourceMap)
+            ..setBookInfo(bookMap);
 
-              // legado: if (bookChapter.url.isEmpty())
-              var resolvedUrl = url;
-              if (resolvedUrl.isEmpty) {
-                if (isVolume) {
-                  resolvedUrl = '$title$idx';
-                } else {
-                  resolvedUrl = baseUrl;
-                }
-              } else {
-                resolvedUrl = resolveUrl(url, redirectUrl);
-              }
+          // 只对有值的规则发起异步调用，空规则直接短路为 ''（减少 50%+ 调用）
+          final futures = <Future<String?>>[];
+          if (hasName) futures.add(itemAnalyzer.getStringAsync(tocRule.chapterName ?? '').catchError((_) => null));
+          if (hasUrl) futures.add(itemAnalyzer.getStringAsync(tocRule.chapterUrl ?? '').catchError((_) => null));
+          if (hasVolume) futures.add(itemAnalyzer.getStringAsync(tocRule.isVolume ?? '').catchError((_) => null));
+          if (hasTime) futures.add(itemAnalyzer.getStringAsync(tocRule.updateTime ?? '').catchError((_) => null));
+          if (hasVip) futures.add(itemAnalyzer.getStringAsync(tocRule.isVip ?? '').catchError((_) => null));
+          if (hasPay) futures.add(itemAnalyzer.getStringAsync(tocRule.isPay ?? '').catchError((_) => null));
 
-              // legado: if (bookChapter.title.isNotEmpty)
-              if (title.isNotEmpty) {
-                return Chapter(
-                  id: '${baseUrl}_$idx',
-                  bookId: book?.bookUrl ?? baseUrl,
-                  title: title,
-                  index: idx,
-                  url: resolvedUrl,
-                  isVolume: isVolume,
-                  isVip: isVip,
-                  isPay: isPay,
-                  tag: isVolume ? info : info,
-                );
-              }
-              return null;
-            });
-          }),
-        );
-        for (final chapter in batchResults) {
-          if (chapter != null) chapterList.add(chapter);
-        }
+          final fields = futures.isNotEmpty ? await Future.wait(futures) : [];
+          int fi = 0;
+          final title = hasName ? (fields[fi++] ?? '') : '';
+          final url = hasUrl ? (fields[fi++] ?? '') : '';
+          final isVolume = hasVolume ? _isRuleTrue(fields[fi++]) : false;
+          final info = hasTime ? (fields[fi++] ?? '') : '';
+          final isVip = hasVip ? _isRuleTrue(fields[fi++]) : false;
+          final isPay = hasPay ? _isRuleTrue(fields[fi++]) : false;
+
+          var resolvedUrl = url;
+          if (resolvedUrl.isEmpty) {
+            resolvedUrl = isVolume ? '$title$idx' : baseUrl;
+          } else {
+            resolvedUrl = resolveUrl(url, redirectUrl);
+          }
+
+          // legado: if (bookChapter.title.isNotEmpty)
+          final finalTitle = title;
+          if (finalTitle.isNotEmpty) {
+            return Chapter(
+              id: '${baseUrl}_$idx',
+              bookId: book?.bookUrl ?? baseUrl,
+              title: finalTitle,
+              index: idx,
+              url: resolvedUrl,
+              isVolume: isVolume,
+              isVip: isVip,
+              isPay: isPay,
+              tag: isVolume ? info : info,
+            );
+          }
+          return null;
+        }),
+      );
+      for (final chapter in allResults) {
+        if (chapter != null) chapterList.add(chapter);
       }
     }
 
