@@ -52,8 +52,19 @@ target_compile_options(quickjs_c_bridge PRIVATE
     -fomit-frame-pointer
 )
 
-# quickjs.c 单独跳过 -flto（文件太大，CI runner 内存不足时 OOM）
-# 其他所有文件正常使用 -flto，链接器的 -flto 仍能全量跨模块优化
+# quickjs.c 巨无霸（5万+行、2MB、1507 个 static 函数），完整 LTO IR 在 CI 7GB runner 上 OOM
+# 内存优化策略（全部叠加）：
+#   -fno-lto              ← 不产生 LTO GIMPLE IR，省 4-6GB
+#   -fno-inline-functions ← 不内联，函数体不复制到调用处，省 20-30% IR
+#   -fno-unroll-loops     ← 不展开循环，避免 IR 膨胀 10-20%
+#   -fno-tree-vectorize   ← 不自动矢量化，省向量化分析内存
+#   -mllvm -inline-threshold=0
+#                         ← LLVM 内联阈值降为 0，进一步阻止内联
+# 注：quickjs.c 主要是 JS 解释器 + 内置对象，这些优化不影响关键路径性能
+#     C 原生性能函数（AES/Base64/LZString）全在其他 17 个文件中
+set_source_files_properties(${QUICKJS_SRC_DIR}/quickjs.c PROPERTIES
+    COMPILE_FLAGS "-Oz -fno-lto -fno-inline-functions -fno-unroll-loops -fno-tree-vectorize -mllvm -inline-threshold=0"
+)
 set_source_files_properties(
     ${QUICKJS_SRC_DIR}/cutils.c
     ${QUICKJS_SRC_DIR}/dtoa.c
