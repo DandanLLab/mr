@@ -38,69 +38,14 @@ class JsAdvancedService {
     bool isCover = false,
     Map<String, dynamic>? book,
   }) async {
-    // 1. 从 source.variable 中读取 AES 配置（借鉴 Legado 的 source.getVariableMap）
-    //    配置格式：{"aesKey":"xxx","aesIv":"xxx"}（aesIv 可选，缺省时走 ECB）
-    final vars = source.getVariableMap();
-    final aesKey = vars['aesKey'];
-    final aesIv = vars['aesIv'];
-    final hasAesConfig = aesKey != null && aesKey.isNotEmpty;
-
     final ruleJs = _getImageDecodeRule(source, isCover);
-
-    // 既无 AES 配置也无 JS 规则 → 直接返回原始字节流
-    if (!hasAesConfig && (ruleJs == null || ruleJs.isEmpty)) return imageBytes;
-
-    // 2. 根据是否有 AES 配置和用户 JS，构建最终要执行的 JS
-    //    - 有 AES 配置：注入 C 原生 AES 预解密（走 __nativeCrypto.aesDecryptNative / aesDecryptNativeECB）
-    //      先解密字节流，再让用户 JS 处理已解密的数据
-    //    - 无 AES 配置：直接执行用户 JS
-    String effectiveJs;
-    if (hasAesConfig) {
-      final aesKeyJs = jsonEncode(aesKey);
-      final aesIvJs = aesIv != null && aesIv.isNotEmpty ? jsonEncode(aesIv) : 'null';
-      final aesDecryptBlock = '''
-(function() {
-  try {
-    if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto) {
-      var __key = $aesKeyJs;
-      var __cipherU8 = _b64ToU8(result);
-      var __keyU8 = _strToU8(__key);
-      var __plainU8;
-      if ($aesIvJs !== null) {
-        // CBC 模式：走 C 原生 aesDecryptNative（cipherU8, keyU8, ivU8）
-        var __ivU8 = _strToU8($aesIvJs);
-        __plainU8 = __nativeCrypto.aesDecryptNative(__cipherU8, __keyU8, __ivU8);
-      } else {
-        // ECB 模式：走 C 原生 aesDecryptNativeECB（cipherU8, keyU8）
-        __plainU8 = __nativeCrypto.aesDecryptNativeECB(__cipherU8, __keyU8);
-      }
-      if (__plainU8 && __plainU8.length > 0) {
-        result = _u8ToB64(__plainU8);
-      }
-    }
-  } catch(e) {}
-})();
-''';
-
-      if (ruleJs != null && ruleJs.isNotEmpty) {
-        // AES 预解密 + 用户 JS 规则（先解密再让用户 JS 处理）
-        effectiveJs = '$aesDecryptBlock\n$ruleJs';
-      } else {
-        // 仅有 AES 配置 + 无用户 JS → 只做解密返回
-        effectiveJs = '''
-$aesDecryptBlock
-result;
-''';
-      }
-    } else {
-      effectiveJs = ruleJs!;
-    }
+    if (ruleJs == null || ruleJs.isEmpty) return imageBytes;
 
     try {
       // 借鉴 legado：图片数据以 Base64 传入 JS，JS 返回 Base64
       final base64Data = base64Encode(imageBytes);
       final result = JsEngine.instance.executeSync(
-        effectiveJs,
+        ruleJs,
         base64Data,
         baseUrl: source.bookSourceUrl,
         sourceEngine: source.engineType,
