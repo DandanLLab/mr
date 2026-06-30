@@ -1345,14 +1345,44 @@ class WebBook {
 
     // legado: if (elements.isNotEmpty)
     if (elements.isNotEmpty) {
-      // [性能] 全量并发：所有元素一次性并发发射，不分批！
-      // 同时跳过空规则减少不必要的 getStringAsync 调用
       final hasName = (tocRule.chapterName ?? '').isNotEmpty;
       final hasUrl = (tocRule.chapterUrl ?? '').isNotEmpty;
       final hasVolume = (tocRule.isVolume ?? '').isNotEmpty;
       final hasTime = (tocRule.updateTime ?? '').isNotEmpty;
       final hasVip = (tocRule.isVip ?? '').isNotEmpty;
       final hasPay = (tocRule.isPay ?? '').isNotEmpty;
+
+      // [批量JS优化] 预检查每个字段是否为 JS 规则（@js: 或 <js> 开头）
+      // JS 规则：一次 batchEvaluate 全部元素，1 次 FFI 替代 N 次
+      // 非 JS 规则（CSS/Jsoup/JSON 等）：走逐元素 fast path
+      final nameRule = tocRule.chapterName ?? '';
+      final urlRule = tocRule.chapterUrl ?? '';
+      final volumeRule = tocRule.isVolume ?? '';
+      final timeRule = tocRule.updateTime ?? '';
+      final vipRule = tocRule.isVip ?? '';
+      final payRule = tocRule.isPay ?? '';
+
+      final isNameJs = nameRule.startsWith('@js:') || nameRule.startsWith('<js>');
+      final isUrlJs = urlRule.startsWith('@js:') || urlRule.startsWith('<js>');
+      final isVolumeJs = hasVolume && (volumeRule.startsWith('@js:') || volumeRule.startsWith('<js>'));
+      final isTimeJs = hasTime && (timeRule.startsWith('@js:') || timeRule.startsWith('<js>'));
+      final isVipJs = hasVip && (vipRule.startsWith('@js:') || vipRule.startsWith('<js>'));
+      final isPayJs = hasPay && (payRule.startsWith('@js:') || payRule.startsWith('<js>'));
+
+      // 批量 evaluate JS 规则（每个字段 1 次 FFI 调用）
+      final batchAnalyzer = AnalyzeRule()
+        ..setContent(body, baseUrl: baseUrl)
+        ..setRedirectUrl(redirectUrl)
+        ..setSourceEngine(source.engineType)
+        ..setSourceInfo(sourceMap)
+        ..setBookInfo(bookMap);
+
+      final batchNames = isNameJs ? (await batchAnalyzer.batchApplyJsAsync(elements, nameRule.startsWith('@js:') ? nameRule.substring(4) : nameRule.substring(4, nameRule.length - 4))) : null;
+      final batchUrls = isUrlJs ? await batchAnalyzer.batchApplyJsAsync(elements, urlRule.startsWith('@js:') ? urlRule.substring(4) : urlRule.substring(4, urlRule.length - 4)) : null;
+      final batchVolumes = isVolumeJs ? await batchAnalyzer.batchApplyJsAsync(elements, volumeRule.startsWith('@js:') ? volumeRule.substring(4) : volumeRule.substring(4, volumeRule.length - 4)) : null;
+      final batchTimes = isTimeJs ? await batchAnalyzer.batchApplyJsAsync(elements, timeRule.startsWith('@js:') ? timeRule.substring(4) : timeRule.substring(4, timeRule.length - 4)) : null;
+      final batchVips = isVipJs ? await batchAnalyzer.batchApplyJsAsync(elements, vipRule.startsWith('@js:') ? vipRule.substring(4) : vipRule.substring(4, vipRule.length - 4)) : null;
+      final batchPays = isPayJs ? await batchAnalyzer.batchApplyJsAsync(elements, payRule.startsWith('@js:') ? payRule.substring(4) : payRule.substring(4, payRule.length - 4)) : null;
 
       final allResults = await Future.wait(
         List.generate(elements.length, (idx) async {
@@ -1364,14 +1394,51 @@ class WebBook {
             ..setSourceInfo(sourceMap)
             ..setBookInfo(bookMap);
 
-          // 只对有值的规则发起异步调用，空规则直接短路为 ''（减少 50%+ 调用）
+          // JS 规则从预计算结果数组取值，非 JS 规则走逐元素异步
           final futures = <Future<String?>>[];
-          if (hasName) futures.add(itemAnalyzer.getStringAsync(tocRule.chapterName ?? '').catchError((_) => null));
-          if (hasUrl) futures.add(itemAnalyzer.getStringAsync(tocRule.chapterUrl ?? '').catchError((_) => null));
-          if (hasVolume) futures.add(itemAnalyzer.getStringAsync(tocRule.isVolume ?? '').catchError((_) => null));
-          if (hasTime) futures.add(itemAnalyzer.getStringAsync(tocRule.updateTime ?? '').catchError((_) => null));
-          if (hasVip) futures.add(itemAnalyzer.getStringAsync(tocRule.isVip ?? '').catchError((_) => null));
-          if (hasPay) futures.add(itemAnalyzer.getStringAsync(tocRule.isPay ?? '').catchError((_) => null));
+          if (hasName) {
+            if (isNameJs) {
+              // 从批量结果取值，零 FFI 调用
+              futures.add(Future.value(batchNames![idx]));
+            } else {
+              futures.add(itemAnalyzer.getStringAsync(nameRule).catchError((_) => null));
+            }
+          }
+          if (hasUrl) {
+            if (isUrlJs) {
+              futures.add(Future.value(batchUrls![idx]));
+            } else {
+              futures.add(itemAnalyzer.getStringAsync(urlRule).catchError((_) => null));
+            }
+          }
+          if (hasVolume) {
+            if (isVolumeJs) {
+              futures.add(Future.value(batchVolumes![idx]));
+            } else {
+              futures.add(itemAnalyzer.getStringAsync(volumeRule).catchError((_) => null));
+            }
+          }
+          if (hasTime) {
+            if (isTimeJs) {
+              futures.add(Future.value(batchTimes![idx]));
+            } else {
+              futures.add(itemAnalyzer.getStringAsync(timeRule).catchError((_) => null));
+            }
+          }
+          if (hasVip) {
+            if (isVipJs) {
+              futures.add(Future.value(batchVips![idx]));
+            } else {
+              futures.add(itemAnalyzer.getStringAsync(vipRule).catchError((_) => null));
+            }
+          }
+          if (hasPay) {
+            if (isPayJs) {
+              futures.add(Future.value(batchPays![idx]));
+            } else {
+              futures.add(itemAnalyzer.getStringAsync(payRule).catchError((_) => null));
+            }
+          }
 
           final fields = futures.isNotEmpty ? await Future.wait(futures) : [];
           int fi = 0;

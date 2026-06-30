@@ -1701,6 +1701,67 @@ class AnalyzeRule {
     }
   }
 
+  /// [批量JS执行] 对所有 elements 执行同一 JS 规则，一次 evaluate 返回全部结果
+  /// 用于目录/搜索/发现列表等「同字段・多元素」场景。
+  /// 之前：N 个元素 × M 字段 = N×M 次 FFI evaluate
+  /// 现在：M 字段 = M 次 FFI evaluate（每字段 1 次）
+  ///
+  /// [elements] 元素 outerHtml 列表
+  /// [jsCode] JS 规则（如 `result.match(/href="(.*?)"/)[1]`）
+  /// 返回 List<String?>，与 elements 一一对应（失败元素返回 null）
+  Future<List<String?>> batchApplyJsAsync(
+    List<dynamic> elements,
+    String jsCode, {
+    bool isUrl = false,
+  }) async {
+    if (elements.isEmpty || jsCode.isEmpty) return List.filled(elements.length, null);
+    try {
+      // 构造 JS 表达式：将所有元素序列化为 JSON 数组，一次性 evaluate
+      // 每个元素作为 result 变量传入 JS 规则
+      final itemsJson = StringBuffer('[');
+      for (var i = 0; i < elements.length; i++) {
+        if (i > 0) itemsJson.write(',');
+        itemsJson.write(jsonEncode(elements[i].toString()));
+      }
+      itemsJson.write(']');
+
+      // 构造批量 JS：用 map 对数组中的每个元素执行同一规则
+      // 外层 JSON.parse 确保元素中的特殊字符不破坏 JS 语法
+      final batchCode = 'JSON.parse(JSON.stringify($itemsJson.map(function(el,idx){'
+          'var result=el;'
+          'try{result=$jsCode}catch(e){result=null}'
+          'return result;}))';
+
+      final env = _collectVariables();
+      env['baseUrl'] = _baseUrl ?? '';
+
+      final result = await JsEngine.instance.processJsRule(
+        '',
+        batchCode,
+        baseUrl: _baseUrl,
+        sourceEngine: _sourceEngine,
+        env: env,
+      );
+
+      if (result == null || result.isEmpty) {
+        return List.filled(elements.length, null);
+      }
+
+      // 解析 JSON 数组结果
+      try {
+        final decoded = jsonDecode(result);
+        if (decoded is List) {
+          return decoded.map((e) => e?.toString()).toList();
+        }
+      } catch (_) {}
+
+      return List.filled(elements.length, null);
+    } catch (e) {
+      AppLogger.instance.logJsError('AnalyzeRule', e.toString());
+      return List.filled(elements.length, null);
+    }
+  }
+
   /// JS 异步执行（带完整上下文绑定，借鉴 legado 的 evalJS）
   /// 在需要 java.ajax() 等异步操作时使用此方法
   Future<String?> applyJsAsync(dynamic content, String jsCode) async {
