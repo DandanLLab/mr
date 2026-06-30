@@ -592,7 +592,6 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
 
   Widget _buildDebugBody() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final hintColor = isDark ? Colors.grey[500] : const Color(0xFF9A9A9A);
     
     return Stack(
       children: [
@@ -602,20 +601,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
             thumbVisibility: true,
             // 使用 ListView.builder 懒加载，避免日志条目多时全量构建导致卡顿
             child: _debugLogs.isEmpty
-                ? ListView(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 28),
-                    children: [
-                      const SizedBox(height: 120),
-                      Text(
-                        '等待调试结果...',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: hintColor,
-                        ),
-                      ),
-                    ],
-                  )
+                ? const SizedBox.shrink()
                 : ListView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.fromLTRB(12, 12, 12, 28),
