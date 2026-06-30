@@ -330,6 +330,17 @@ class JsEngine {
 
   /// 初始化 JS 引擎
   Future<bool> init() async {
+    // [覆盖安装闪退修复] 在 FFI 调用前通过 MethodChannel 验证 native lib 完整性
+    // 不执行任何 FFI 调用，100% 避免 SIGSEGV
+    try {
+      _nativeLibChecked = await NativeChannel.instance.checkNativeLib('quickjs_c_bridge');
+    } catch (_) {
+      _nativeLibChecked = false;
+    }
+
+    // native lib 未就绪 → 跳过所有 FFI 调用，避免 SIGSEGV
+    if (!_nativeLibChecked) return false;
+
     if (_initialized && _jsRuntime != null) {
       // 验证全局对象是否仍然存在（防止运行时被意外重置）
       final check = evaluate('typeof java !== "undefined" && typeof CryptoJS !== "undefined" && typeof _javaCache !== "undefined" && typeof _AES !== "undefined"');
@@ -367,13 +378,6 @@ class JsEngine {
       }
 
       _initialized = true;
-      // [覆盖安装闪退修复] 通过 MethodChannel 安全验证 native lib 完整性
-      // 不执行任何 FFI 调用，避免 SIGSEGV
-      try {
-        _nativeLibChecked = await NativeChannel.instance.checkNativeLib('quickjs_c_bridge');
-      } catch (_) {
-        _nativeLibChecked = false;
-      }
       return true;
     } catch (e, st) {
       // FFI lookup 失败（QuickJS 符号未链接到二进制）会在此抛出 ArgumentError
