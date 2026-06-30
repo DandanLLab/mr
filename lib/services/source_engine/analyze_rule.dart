@@ -1737,7 +1737,7 @@ class AnalyzeRule {
       env.forEach((k, v) {
         if (k != 'book' && k != 'source' && k != 'chapter' && k != 'cookie' &&
             k != 'src' && v is String) {
-          extraVars.write('var $k = ${jsonEncode(v)};');
+          extraVars.write('var $k = ${jsonEncode(v)};globalThis.$k=$k;');
         }
       });
 
