@@ -86,7 +86,9 @@ set_source_files_properties(
     PROPERTIES COMPILE_FLAGS "-flto"
 )
 
-# 链接期优化：LTO + gc-sections + version-script 精确控制导出符号 + strip
+# 链接期优化：LTO + ICF + gc-sections + version-script + strip
+# -Wl,--icf=safe：链接时合并相同代码（Identical Code Folding）
+#   不同编译单元的相同函数合并为一份，so 体积省 3-8%
 # -Wl,--gc-sections：移除未引用的函数/数据段
 # -Wl,--version-script：仅导出 quickjs_bridge_* 和批量解压函数，QuickJS 内部符号全部隐藏
 #   避免 .dynsym 表膨胀（QuickJS 有数百个内部 JS_* 函数），so 体积可减 10-30KB
@@ -94,6 +96,7 @@ set_source_files_properties(
 # -flto：链接期优化（与编译期 -flto 配合）
 target_link_options(quickjs_c_bridge PRIVATE
     -Wl,--gc-sections
+    -Wl,--icf=safe
     -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/quickjs_bridge.map
     -Wl,-s
     -flto

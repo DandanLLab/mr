@@ -78,9 +78,11 @@ android {
                 "META-INF/proguard/**",
             )
         }
-        // .so 文件不压缩（Android 6+ 直接 mmap，压缩反而浪费 CPU）
+        // .so 文件开启压缩（APK 基于 zip，对 .so 默认不压缩)
+        // useLegacyPackaging=true 强制 zip 压缩 .so，安装时解压
+        // 省 5-15% APK 体积（代价：首次安装略慢几百ms）
         jniLibs {
-            useLegacyPackaging = false
+            useLegacyPackaging = true
             // 保险 #3：packaging 显式排除 x86_64 和 armeabi-v7a 的 .so
             // 即使上游依赖带了这些 ABI 的 .so 也会被剔除
             excludes += listOf(

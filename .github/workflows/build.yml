@@ -122,7 +122,7 @@ jobs:
         run: flutter pub get
 
       - name: Build APK
-        run: flutter build apk --release --target-platform=android-arm64
+        run: flutter build apk --release --target-platform=android-arm64 --obfuscate --split-debug-info=build/symbols
         env:
           # 2 核 runner：CMake/Ninja 并行度 = CPU 核数
           CMAKE_BUILD_PARALLEL_LEVEL: 2

@@ -1319,7 +1319,7 @@ static JSValue js_native_aes_decrypt_base64(JSContext *ctx, JSValueConst this_va
     JS_FreeCString(ctx, key_utf8);
     JS_FreeCString(ctx, iv_utf8);
 
-    if (!ct || !key || !iv || ct_len == 0 || ct_len % 16 != 0 || key_len < 16 || iv_len < 16) {
+    if (!ct || !key || !iv || ct_len == 0 || ct_len % 16 != 0 || key_len < 16 || iv_len != 16) {
         free(ct); free(key); free(iv);
         return JS_NewArrayBufferCopy(ctx, NULL, 0);
     }
@@ -1579,7 +1579,7 @@ static JSValue js_native_aes_encrypt_base64(JSContext *ctx, JSValueConst this_va
     JS_FreeCString(ctx, key_utf8);
     JS_FreeCString(ctx, iv_utf8);
 
-    if (!pt || !key || !iv || pt_len == 0 || key_len < 16 || iv_len < 16) {
+    if (!pt || !key || !iv || pt_len == 0 || key_len < 16 || iv_len != 16) {
         free(pt); free(key); free(iv);
         return JS_NewArrayBufferCopy(ctx, NULL, 0);
     }
