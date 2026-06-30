@@ -1179,7 +1179,7 @@ class WebBook {
           //   .mapAsync { urlStr -> analyzeChapterList(book, urlStr, res.url, res.body!!, ...) }
           AppLogger.instance.info(LogCategory.parse,
               '目录并发抓取 [count=${nextUrls.length}]');
-          const concurrency = 4;
+          const concurrency = 8;
           for (int i = 0; i < nextUrls.length; i += concurrency) {
             final batch = nextUrls.skip(i).take(concurrency).toList();
             final batchResults = await Future.wait(
@@ -1239,8 +1239,8 @@ class WebBook {
 
       // formatJs: legado 在去重后逐个修改 bookChapter.title
       if (tocRule.formatJs != null && tocRule.formatJs!.isNotEmpty) {
-        // 并发执行 formatJs，每批 8 个
-        const batchSize = 8;
+        // [性能] 扩大 formatJs 批次从 8→32，减少 JS 引擎调度开销
+        const batchSize = 32;
         for (int i = 0; i < list.length; i += batchSize) {
           final batchEnd = (i + batchSize).clamp(0, list.length);
           final indices = List.generate(batchEnd - i, (j) => i + j);
@@ -1317,69 +1317,80 @@ class WebBook {
 
     // legado: if (elements.isNotEmpty)
     if (elements.isNotEmpty) {
-      // legado: elements.forEachIndexed { index, item ->
-      for (int index = 0; index < elements.length; index++) {
-        final item = elements[index];
-        // legado: analyzeRule.setContent(item)
-        // 复用预计算的 sourceMap/bookMap，避免每次循环创建新 Map
-        final itemAnalyzer = AnalyzeRule()
-          ..setContent(item, baseUrl: baseUrl)
-          ..setRedirectUrl(redirectUrl)
-          ..setSourceEngine(source.engineType)
-          ..setSourceInfo(sourceMap)
-          ..setBookInfo(bookMap);
+      // [性能] 批量化元素处理：每批 16 个元素并发提取字段
+      // 避免 1000+ 章节逐个串行等待，单次循环从 O(n) 降到 O(n/16)
+      const batchSize = 16;
+      for (int batchStart = 0; batchStart < elements.length; batchStart += batchSize) {
+        final batchEnd = (batchStart + batchSize) < elements.length
+            ? batchStart + batchSize
+            : elements.length;
+        final batchResults = await Future.wait(
+          List.generate(batchEnd - batchStart, (j) {
+            final idx = batchStart + j;
+            final item = elements[idx];
+            // legado: analyzeRule.setContent(item)
+            final itemAnalyzer = AnalyzeRule()
+              ..setContent(item, baseUrl: baseUrl)
+              ..setRedirectUrl(redirectUrl)
+              ..setSourceEngine(source.engineType)
+              ..setSourceInfo(sourceMap)
+              ..setBookInfo(bookMap);
 
-        // 并发提取所有字段，每个字段独立 catchError
-        final fields = await Future.wait([
-          itemAnalyzer.getStringAsync(tocRule.chapterName ?? '')
-              .catchError((_) => null),
-          itemAnalyzer.getStringAsync(tocRule.chapterUrl ?? '')
-              .catchError((_) => null),
-          itemAnalyzer.getStringAsync(tocRule.isVolume ?? '')
-              .catchError((_) => null),
-          itemAnalyzer.getStringAsync(tocRule.updateTime ?? '')
-              .catchError((_) => null),
-          itemAnalyzer.getStringAsync(tocRule.isVip ?? '')
-              .catchError((_) => null),
-          itemAnalyzer.getStringAsync(tocRule.isPay ?? '')
-              .catchError((_) => null),
-        ]);
-        final title = fields[0] ?? '';
-        final url = fields[1] ?? '';
-        final isVolumeStr = fields[2];
-        final isVolume = _isRuleTrue(isVolumeStr);
-        final info = fields[3] ?? '';
-        final isVip = _isRuleTrue(fields[4]);
-        final isPay = _isRuleTrue(fields[5]);
+            // 并发提取所有字段，每个字段独立 catchError
+            return Future.wait([
+              itemAnalyzer.getStringAsync(tocRule.chapterName ?? '')
+                  .catchError((_) => null),
+              itemAnalyzer.getStringAsync(tocRule.chapterUrl ?? '')
+                  .catchError((_) => null),
+              itemAnalyzer.getStringAsync(tocRule.isVolume ?? '')
+                  .catchError((_) => null),
+              itemAnalyzer.getStringAsync(tocRule.updateTime ?? '')
+                  .catchError((_) => null),
+              itemAnalyzer.getStringAsync(tocRule.isVip ?? '')
+                  .catchError((_) => null),
+              itemAnalyzer.getStringAsync(tocRule.isPay ?? '')
+                  .catchError((_) => null),
+            ]).then((fields) {
+              final title = fields[0] ?? '';
+              final url = fields[1] ?? '';
+              final isVolumeStr = fields[2];
+              final isVolume = _isRuleTrue(isVolumeStr);
+              final info = fields[3] ?? '';
+              final isVip = _isRuleTrue(fields[4]);
+              final isPay = _isRuleTrue(fields[5]);
 
-        // legado: if (bookChapter.url.isEmpty())
-        var resolvedUrl = url;
-        if (resolvedUrl.isEmpty) {
-          if (isVolume) {
-            // legado: bookChapter.url = bookChapter.title + index
-            resolvedUrl = '$title$index';
-          } else {
-            // legado: bookChapter.url = baseUrl
-            resolvedUrl = baseUrl;
-          }
-        } else {
-          // legado BookChapter.getAbsoluteURL(): NetworkUtils.getAbsoluteURL(baseUrl=redirectUrl, url)
-          resolvedUrl = resolveUrl(url, redirectUrl);
-        }
+              // legado: if (bookChapter.url.isEmpty())
+              var resolvedUrl = url;
+              if (resolvedUrl.isEmpty) {
+                if (isVolume) {
+                  resolvedUrl = '$title$idx';
+                } else {
+                  resolvedUrl = baseUrl;
+                }
+              } else {
+                resolvedUrl = resolveUrl(url, redirectUrl);
+              }
 
-        // legado: if (bookChapter.title.isNotEmpty)
-        if (title.isNotEmpty) {
-          chapterList.add(Chapter(
-            id: '${baseUrl}_$index',
-            bookId: book?.bookUrl ?? baseUrl,
-            title: title,
-            index: index,
-            url: resolvedUrl,
-            isVolume: isVolume,
-            isVip: isVip,
-            isPay: isPay,
-            tag: isVolume ? info : info,
-          ));
+              // legado: if (bookChapter.title.isNotEmpty)
+              if (title.isNotEmpty) {
+                return Chapter(
+                  id: '${baseUrl}_$idx',
+                  bookId: book?.bookUrl ?? baseUrl,
+                  title: title,
+                  index: idx,
+                  url: resolvedUrl,
+                  isVolume: isVolume,
+                  isVip: isVip,
+                  isPay: isPay,
+                  tag: isVolume ? info : info,
+                );
+              }
+              return null;
+            });
+          }),
+        );
+        for (final chapter in batchResults) {
+          if (chapter != null) chapterList.add(chapter);
         }
       }
     }
