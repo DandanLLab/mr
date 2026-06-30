@@ -81,9 +81,8 @@ jobs:
   build-android:
     name: Build Android
     needs: prepare
-    # 升级到 8 核 32GB 大 runner，加速 CMake 编译 + 避免 OOM
-    # ubuntu-24.04-8core: 8 vCPU, 32GB RAM, 200GB SSD
-    runs-on: ubuntu-24.04-8core
+    # 标准 2 核 7GB runner，靠 CMake 6 道内存防线（-fno-lto / -fno-inline / 等）避免 OOM
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -125,10 +124,8 @@ jobs:
       - name: Build APK
         run: flutter build apk --release --target-platform=android-arm64
         env:
-          # 8 核 runner：CMake/Ninja 并行编译
-          CMAKE_BUILD_PARALLEL_LEVEL: 8
-          # Gradle 守护进程堆拉满 8GB（GB runner 32GB）
-          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx8g -XX:MaxMetaspaceSize=2g"
+          # 2 核 runner：CMake/Ninja 并行度 = CPU 核数
+          CMAKE_BUILD_PARALLEL_LEVEL: 2
 
       - name: Analyze APK Size
         run: |

@@ -3135,7 +3135,34 @@ class JsEngine {
             var iv = cfg && cfg.iv ? cfg.iv : null;
             var mode = (cfg && cfg.mode === CryptoJS.mode.ECB) ? 'ECB' : 'CBC';
 
-            // 优先走 C 原生 AES 加密（零 Dart 回调）
+            // Phase 5: 全 C 直通加密路径（明文字符串 → C 层加密 → base64 密文字符串）
+            // 消除 _strToU8 → aesEncryptNative → _u8ToB64 的来回复制，一次 C 调用完成
+            if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto &&
+                __nativeCrypto.aesEncryptFromBase64) {
+              try {
+                var dataStr = typeof data === 'string' ? data :
+                    (data && data.toString ? data.toString() : String(data));
+                var dataB64 = java.base64Encode(dataStr);
+                var keyStr = CryptoJS.enc.Utf8.stringify(key);
+                var ivStr = iv ? CryptoJS.enc.Utf8.stringify(iv) : '';
+                var ctB64;
+                if (mode === 'CBC' && iv) {
+                  ctB64 = __nativeCrypto.aesEncryptFromBase64(dataB64, keyStr, ivStr);
+                } else if (mode === 'ECB') {
+                  ctB64 = __nativeCrypto.aesEncryptFromBase64ECB(dataB64, keyStr);
+                } else {
+                  throw new Error('unsupported mode: ' + mode);
+                }
+                if (ctB64 && ctB64.length > 0) {
+                  return {
+                    toString: function() { return ctB64; },
+                    ciphertext: { toString: function(enc) { return ctB64; } }
+                  };
+                }
+              } catch (e) {}
+            }
+
+            // 优先走 C 原生 AES 加密（ArrayBuffer 模式，零 Dart 回调）
             if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto &&
                 __nativeCrypto.aesEncryptNative) {
               try {
