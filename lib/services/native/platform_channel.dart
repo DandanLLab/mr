@@ -237,4 +237,23 @@ class NativeChannel {
       return null;
     }
   }
+
+  // ===== Native lib 完整性检查（安全，不执行 FFI，避免 SIGSEGV）=====
+
+  /// 检查 native .so 文件完整性
+  /// 通过 MethodChannel 走到 Java 层做文件系统检查 + loadLibrary 验证，
+  /// 不直接执行 FFI 调用，避免 SIGSEGV。
+  /// 覆盖安装后首次启动时 .so 可能未完全就绪，此方法可安全检测。
+  Future<bool> checkNativeLib(String libName) async {
+    try {
+      final result = await _channel.invokeMethod<bool>('checkNativeLib', {
+        'libName': libName,
+      });
+      return result ?? false;
+    } on PlatformException catch (_) {
+      return false;
+    } on MissingPluginException catch (_) {
+      return false;
+    }
+  }
 }

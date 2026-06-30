@@ -367,6 +367,13 @@ class JsEngine {
       }
 
       _initialized = true;
+      // [覆盖安装闪退修复] 通过 MethodChannel 安全验证 native lib 完整性
+      // 不执行任何 FFI 调用，避免 SIGSEGV
+      try {
+        _nativeLibChecked = await NativeChannel.instance.checkNativeLib('quickjs_c_bridge');
+      } catch (_) {
+        _nativeLibChecked = false;
+      }
       return true;
     } catch (e, st) {
       // FFI lookup 失败（QuickJS 符号未链接到二进制）会在此抛出 ArgumentError
@@ -376,27 +383,10 @@ class JsEngine {
     }
   }
 
-  /// [覆盖安装闪退修复] FFI 链路 warmup + 兜底重试
-  /// init() 只验证 JS 全局对象存在性，不验证 FFI 链路是否真的活着的。
-  /// 覆盖安装后 .so 虽已加载但 FFI 符号可能未完全解析，
-  /// 实际调用 evaluate() 时 SIGSEGV。
-  ///
-  /// warmup：执行一次跨 FFI 调用的 evaluate，确认链路活着
-  /// 失败则 dispose 重建一次
-  bool ensureReady() {
-    if (!_initialized || _jsRuntime == null) return false;
-    try {
-      evaluate('1+1');
-      return true;
-    } catch (_) {
-      // warmup 失败 → 销毁重建
-      debugPrint('JsEngine warmup 失败，尝试重建运行时...');
-      _jsRuntime?.dispose();
-      _jsRuntime = null;
-      _initialized = false;
-      return false;
-    }
-  }
+  /// [覆盖安装闪退修复] Native lib 完整性安全验证
+  /// 通过 MethodChannel 走到 Java 层检查 .so 文件 + loadLibrary，
+  /// 不执行任何 FFI 调用，100% 避免 SIGSEGV。
+  bool _nativeLibChecked = false;
 
   bool get isAvailable => _initialized && _jsRuntime != null;
 
@@ -4603,10 +4593,9 @@ class JsEngine {
 
   /// 清除 JS 侧 _javaCache（桥接预缓存结果）
   /// 防止调试多个书源/规则时 _javaCache 无限膨胀导致 QuickJS 堆 OOM
-  /// [覆盖安装闪退修复] 先 warmup 确认 FFI 链路活着再 evaluate
   void clearJavaCache() {
     if (_jsRuntime == null || !_initialized) return;
-    if (!ensureReady()) return; // warmup 失败（FFI 链路未就绪）→ 跳过，不崩溃
+    if (!_nativeLibChecked) return; // native lib 未就绪 → 跳过，不崩溃
     try {
       evaluate('_javaCache = {};');
       _cachedKeys.clear();

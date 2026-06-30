@@ -16,6 +16,7 @@ import 'routes/app_routes.dart';
 import 'services/app_logger.dart';
 import 'services/crash_log_service.dart';
 import 'services/native/js_engine.dart';
+import 'services/native/platform_channel.dart';
 import 'services/storage_service.dart';
 import 'services/source_engine/proxy_service.dart';
 import 'services/cover_config_service.dart';
@@ -44,6 +45,9 @@ void main() async {
 
     try {
       await JsEngine.instance.init();
+      // [覆盖安装闪退修复] 通过 MethodChannel 预热验证 native lib 完整性
+      // 安全，不执行 FFI 调用，不 SIGSEGV
+      await NativeChannel.instance.checkNativeLib('quickjs_c_bridge');
     } catch (e) {
       debugPrint('JsEngine init error: $e');
     }

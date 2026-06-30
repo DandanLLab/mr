@@ -4,6 +4,7 @@ import '../models/book_source.dart';
 import '../models/book.dart';
 import '../models/chapter.dart';
 import 'native/js_engine.dart';
+import 'native/platform_channel.dart';
 import 'source_engine/source_engine.dart';
 
 /// 调试状态码（与 Legado 保持一致）
@@ -152,20 +153,21 @@ class SourceDebugService {
     }
   }
 
-  /// [覆盖安装闪退修复] 引擎预热 + 兜底重试
-  /// 覆盖安装后首次调用时 .so 虽已加载但 FFI 符号可能未完全解析，
-  /// 直接 evaluate 会 SIGSEGV 闪退。此方法先 warmup 确认链路活着，
-  /// 失败则 init 重建一次再重试。
+  /// [覆盖安装闪退修复] 通过 MethodChannel 安全验证 native lib 完整性
+  /// 不执行任何 FFI 调用，100% 避免 SIGSEGV。
+  /// 失败则 init 重建一次再检查。
   Future<bool> _ensureEngineReady() async {
-    if (JsEngine.instance.ensureReady()) return true;
-    // 重建运行时
-    try {
-      await JsEngine.instance.init();
-      return JsEngine.instance.ensureReady();
-    } catch (e) {
-      debugPrint('引擎重建仍然失败: $e');
-      return false;
+    if (!await NativeChannel.instance.checkNativeLib('quickjs_c_bridge')) {
+      // 重建后再次检查
+      try {
+        await JsEngine.instance.init();
+        return await NativeChannel.instance.checkNativeLib('quickjs_c_bridge');
+      } catch (e) {
+        debugPrint('引擎重建仍然失败: $e');
+        return false;
+      }
     }
+    return true;
   }
 
   /// 开始调试

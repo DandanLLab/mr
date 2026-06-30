@@ -109,6 +109,8 @@ class NativePlugin(private val context: Context) {
             "setScreenBrightness" -> setScreenBrightness(call, result)
             // WebView JS 执行
             "executeWebViewJs" -> executeWebViewJs(call, result)
+            // Native lib 完整性验证
+            "checkNativeLib" -> checkNativeLib(call, result)
             else -> result.notImplemented()
         }
     }
@@ -665,6 +667,32 @@ class NativePlugin(private val context: Context) {
             } catch (e: Exception) {
                 result.error("WEBVIEW_ERROR", e.message, null)
             }
+        }
+    }
+
+    // ===== Native lib 完整性验证（安全，不执行 FFI）=====
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun checkNativeLib(call: MethodCall, result: MethodChannel.Result) {
+        val libName = call.argument<String>("libName") ?: "quickjs_c_bridge"
+        try {
+            // 1. 文件系统检查：.so 是否存在于 nativeLibraryDir
+            val nativeDir = context.applicationInfo.nativeLibraryDir
+            val libFile = File(nativeDir, "lib${libName}.so")
+            if (!libFile.exists()) {
+                result.success(false)
+                return
+            }
+
+            // 2. loadLibrary 安全验证（Java try/catch 可捕获 UnsatisfiedLinkError）
+            System.loadLibrary(libName)
+            result.success(true)
+        } catch (e: UnsatisfiedLinkError) {
+            Log.w(TAG, "native lib $libName 加载失败: ${e.message}")
+            result.success(false)
+        } catch (e: Exception) {
+            Log.w(TAG, "checkNativeLib $libName 异常: ${e.message}")
+            result.success(false)
         }
     }
 }
