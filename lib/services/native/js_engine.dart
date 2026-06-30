@@ -3659,6 +3659,13 @@ class JsEngine {
 
   dynamic evaluate(String script) {
     if (_jsRuntime == null) return null;
+    // [并发安全] 如果 processJsRule/batchEvaluate 正持有 _evalLock，
+    // 同步 evaluate 无法等待锁，直接返回 null 避免并发调用 _bridgeEval 导致 SIGSEGV
+    if (_evalBusy) {
+      debugPrint('⚠️ evaluate 跳过：JS引擎正忙（_evalLock 占用中）');
+      return null;
+    }
+    _evalBusy = true;
     final sw = Stopwatch()..start();
     String? resultStr;
     bool isError = false;
@@ -3673,6 +3680,7 @@ class JsEngine {
       errMsg = e.toString();
       return null;
     } finally {
+      _evalBusy = false;
       sw.stop();
       // 自动 flush JS console 日志（防递归：日志 flush 内部调用 evaluate 时不再次 flush）
       if (!_isFlushingLogs) {
@@ -3705,13 +3713,18 @@ class JsEngine {
     if (_jsRuntime == null) return null;
     try {
       return _evalLock.synchronized(() {
-        final result = _jsRuntime!.evaluate(script);
-        if (result.isError) {
-          // 仅在出错时记录日志
-          AppLogger.instance.logJsError('batchEvaluate', result.stringResult);
-          return null;
+        _evalBusy = true;
+        try {
+          final result = _jsRuntime!.evaluate(script);
+          if (result.isError) {
+            // 仅在出错时记录日志
+            AppLogger.instance.logJsError('batchEvaluate', result.stringResult);
+            return null;
+          }
+          return result.stringResult;
+        } finally {
+          _evalBusy = false;
         }
-        return result.stringResult;
       });
     } catch (e) {
       AppLogger.instance.logJsError('batchEvaluate', e.toString());
