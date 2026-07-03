@@ -1529,7 +1529,7 @@ class WebBook {
       final batchVips = batchResults[4];
       final batchPays = batchResults[5];
 
-      // CSS batch 可能返回 null（规则含变量/JS 需降级）
+      // CSS batch 可能返回 null（规则含变量/JS 需降级，或全 null 失败）
       final batchCssNames = batchCssResults[0];
       final batchCssUrls = batchCssResults[1];
       final batchCssVolumes = batchCssResults[2];
@@ -1537,46 +1537,41 @@ class WebBook {
       final batchCssVips = batchCssResults[4];
       final batchCssPays = batchCssResults[5];
 
-      // 预计算每个字段是否走 CSS batch 命中路径（避免在 1000+ 循环内重复判空）
-      final useCssName = batchCssNames != null;
-      final useCssUrl = batchCssUrls != null;
-      final useCssVolume = batchCssVolumes != null;
-      final useCssTime = batchCssTimes != null;
-      final useCssVip = batchCssVips != null;
-      final useCssPay = batchCssPays != null;
+      // [修复] batch 有效性检测 — 对齐搜索列表的可靠性
+      // JS batch：batchApplyJsAsync 返回 List<String?>（非 null），但可能全 null（JS 执行失败），
+      //   全 null 时必须降级到逐元素 getStringAsync，否则 title 全空 → 列表 0
+      // CSS batch：batchCssXxx != null 表示 batch 成功（已在 analyze_rule.dart 修复全 null 返回 null）
+      final useJsName = isNameJs &&
+          batchNames.any((e) => e != null && e.isNotEmpty);
+      final useJsUrl = isUrlJs &&
+          batchUrls.any((e) => e != null && e.isNotEmpty);
+      final useJsVolume = isVolumeJs &&
+          batchVolumes.any((e) => e != null && e.isNotEmpty);
+      final useJsTime = isTimeJs &&
+          batchTimes.any((e) => e != null && e.isNotEmpty);
+      final useJsVip = isVipJs &&
+          batchVips.any((e) => e != null && e.isNotEmpty);
+      final useJsPay = isPayJs &&
+          batchPays.any((e) => e != null && e.isNotEmpty);
 
-      // [TOC_DEBUG] web_book 字段路由诊断
-      debugPrint('[TOC_DEBUG] web_book: elements=${elements.length} '
-          'nameRule="${nameRule.length > 60 ? '${nameRule.substring(0, 60)}...' : nameRule}" '
-          'urlRule="${urlRule.length > 60 ? '${urlRule.substring(0, 60)}...' : urlRule}" '
-          'isNameJs=$isNameJs isUrlJs=$isUrlJs '
-          'useCssName=$useCssName useCssUrl=$useCssUrl');
-      if (isNameJs && batchNames.isNotEmpty) {
-        final nonNull = batchNames.where((e) => e != null && e.isNotEmpty).length;
-        debugPrint('[TOC_DEBUG] batchNames(JS): len=${batchNames.length} nonNull=$nonNull '
-            'sample0=${batchNames[0]}');
-      }
-      if (useCssName && batchCssNames!.isNotEmpty) {
-        final nonNull = batchCssNames.where((e) => e != null && e.isNotEmpty).length;
-        debugPrint('[TOC_DEBUG] batchCssNames: len=${batchCssNames.length} nonNull=$nonNull '
-            'sample0=${batchCssNames[0]}');
-      }
-      if (useCssUrl && batchCssUrls!.isNotEmpty) {
-        final nonNull = batchCssUrls.where((e) => e != null && e.isNotEmpty).length;
-        debugPrint('[TOC_DEBUG] batchCssUrls: len=${batchCssUrls.length} nonNull=$nonNull '
-            'sample0=${batchCssUrls[0]}');
-      }
+      final useCssName = !isNameJs && batchCssNames != null;
+      final useCssUrl = !isUrlJs && batchCssUrls != null;
+      final useCssVolume = !isVolumeJs && batchCssVolumes != null;
+      final useCssTime = !isTimeJs && batchCssTimes != null;
+      final useCssVip = !isVipJs && batchCssVips != null;
+      final useCssPay = !isPayJs && batchCssPays != null;
 
       final allResults = await Future.wait(
         List.generate(elements.length, (idx) async {
-          // CSS batch 命中的字段无需创建 itemAnalyzer，零对象/零 getStringAsync 开销
-          // 仅当至少有一个字段需降级时才创建 itemAnalyzer
-          final needItemAnalyzer = !useCssName && hasName && !isNameJs ||
-              !useCssUrl && hasUrl && !isUrlJs ||
-              !useCssVolume && hasVolume && !isVolumeJs ||
-              !useCssTime && hasTime && !isTimeJs ||
-              !useCssVip && hasVip && !isVipJs ||
-              !useCssPay && hasPay && !isPayJs;
+          // [修复] needItemAnalyzer 判断 — JS batch 全 null 也要降级
+          // 三路取值：JS batch 命中 / CSS batch 命中 / 逐元素降级
+          // 仅当至少一个字段需逐元素降级时才创建 itemAnalyzer（避免 1000+ 无谓对象创建）
+          final needItemAnalyzer = (hasName && !useJsName && !useCssName) ||
+              (hasUrl && !useJsUrl && !useCssUrl) ||
+              (hasVolume && !useJsVolume && !useCssVolume) ||
+              (hasTime && !useJsTime && !useCssTime) ||
+              (hasVip && !useJsVip && !useCssVip) ||
+              (hasPay && !useJsPay && !useCssPay);
 
           final itemAnalyzer = needItemAnalyzer
               ? (AnalyzeRule()
@@ -1587,58 +1582,60 @@ class WebBook {
                   ..setBookInfo(bookMap))
               : null;
 
-          // JS 规则从预计算结果数组取值，CSS batch 命中字段也从数组取值，仅降级字段走逐元素
+          // 字段取值：JS batch 命中 / CSS batch 命中 / 逐元素降级
+          // 逐元素降级兼容 JS 规则（getStringAsync 内部走 processJsRule 处理 @js: 前缀）
+          // 用 batchCssXxx != null 让 Dart 自动 promote 类型，避免 ! 多余断言 warning
           final futures = <Future<String?>>[];
           if (hasName) {
-            if (isNameJs) {
-              futures.add(Future.value(batchNames![idx]));
-            } else if (useCssName) {
-              futures.add(Future.value(batchCssNames![idx]));
+            if (useJsName) {
+              futures.add(Future.value(batchNames[idx]));
+            } else if (batchCssNames != null) {
+              futures.add(Future.value(batchCssNames[idx]));
             } else {
               futures.add(itemAnalyzer!.getStringAsync(nameRule).catchError((_) => null));
             }
           }
           if (hasUrl) {
-            if (isUrlJs) {
-              futures.add(Future.value(batchUrls![idx]));
-            } else if (useCssUrl) {
-              futures.add(Future.value(batchCssUrls![idx]));
+            if (useJsUrl) {
+              futures.add(Future.value(batchUrls[idx]));
+            } else if (batchCssUrls != null) {
+              futures.add(Future.value(batchCssUrls[idx]));
             } else {
-              futures.add(itemAnalyzer!.getStringAsync(urlRule).catchError((_) => null));
+              futures.add(itemAnalyzer!.getStringAsync(urlRule, isUrl: true).catchError((_) => null));
             }
           }
           if (hasVolume) {
-            if (isVolumeJs) {
-              futures.add(Future.value(batchVolumes![idx]));
-            } else if (useCssVolume) {
-              futures.add(Future.value(batchCssVolumes![idx]));
+            if (useJsVolume) {
+              futures.add(Future.value(batchVolumes[idx]));
+            } else if (batchCssVolumes != null) {
+              futures.add(Future.value(batchCssVolumes[idx]));
             } else {
               futures.add(itemAnalyzer!.getStringAsync(volumeRule).catchError((_) => null));
             }
           }
           if (hasTime) {
-            if (isTimeJs) {
-              futures.add(Future.value(batchTimes![idx]));
-            } else if (useCssTime) {
-              futures.add(Future.value(batchCssTimes![idx]));
+            if (useJsTime) {
+              futures.add(Future.value(batchTimes[idx]));
+            } else if (batchCssTimes != null) {
+              futures.add(Future.value(batchCssTimes[idx]));
             } else {
               futures.add(itemAnalyzer!.getStringAsync(timeRule).catchError((_) => null));
             }
           }
           if (hasVip) {
-            if (isVipJs) {
-              futures.add(Future.value(batchVips![idx]));
-            } else if (useCssVip) {
-              futures.add(Future.value(batchCssVips![idx]));
+            if (useJsVip) {
+              futures.add(Future.value(batchVips[idx]));
+            } else if (batchCssVips != null) {
+              futures.add(Future.value(batchCssVips[idx]));
             } else {
               futures.add(itemAnalyzer!.getStringAsync(vipRule).catchError((_) => null));
             }
           }
           if (hasPay) {
-            if (isPayJs) {
-              futures.add(Future.value(batchPays![idx]));
-            } else if (useCssPay) {
-              futures.add(Future.value(batchCssPays![idx]));
+            if (useJsPay) {
+              futures.add(Future.value(batchPays[idx]));
+            } else if (batchCssPays != null) {
+              futures.add(Future.value(batchCssPays[idx]));
             } else {
               futures.add(itemAnalyzer!.getStringAsync(payRule).catchError((_) => null));
             }
@@ -1661,18 +1658,11 @@ class WebBook {
           }
 
           // legado: if (bookChapter.title.isNotEmpty)
-          final finalTitle = title;
-          // [TOC_DEBUG] 前 3 个元素的字段值
-          if (idx < 3) {
-            debugPrint('[TOC_DEBUG] idx=$idx title="${title.length > 50 ? '${title.substring(0, 50)}...' : title}" '
-                'url="${url.length > 60 ? '${url.substring(0, 60)}...' : url}" '
-                'finalTitleEmpty=${finalTitle.isEmpty}');
-          }
-          if (finalTitle.isNotEmpty) {
+          if (title.isNotEmpty) {
             return Chapter(
               id: '${baseUrl}_$idx',
               bookId: book?.bookUrl ?? baseUrl,
-              title: finalTitle,
+              title: title,
               index: idx,
               url: resolvedUrl,
               isVolume: isVolume,
