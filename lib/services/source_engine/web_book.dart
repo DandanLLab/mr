@@ -281,7 +281,7 @@ class WebBook {
 
   /// 执行 JS 规则并返回字符串结果
   Future<String?> _executeJs(String jsCode,
-      {String? result, String? baseUrl, Map<String, dynamic>? extraEnv}) async {
+      {String? result, String? baseUrl, Map<String, dynamic>? extraEnv, dynamic dynamicContent}) async {
     try {
       AppLogger.instance.logJsExecute('分流', jsCode);
       // 构建完整 env（借鉴 legado 的 evalJS 绑定）
@@ -298,6 +298,7 @@ class WebBook {
         baseUrl: baseUrl ?? source.bookSourceUrl,
         sourceEngine: source.engineType,
         env: env,
+        dynamicContent: dynamicContent,
       );
       if (_loggedRuleTags.add('flow')) {
         AppLogger.instance.logJsResult('分流', jsResult);
@@ -794,7 +795,7 @@ class WebBook {
         final diagInfo = '元素数:${bookElements.length}, 但所有元素name为空!\n'
             'name规则: ${searchRule.name ?? ""}\n'
             '第一个元素类型: ${bookElements.first.runtimeType}\n'
-            '第一个元素HTML: ${bookElements.first is dom.Element ? (bookElements.first as dom.Element).outerHtml : "$bookElements.first"}';
+            '第一个元素HTML: ${bookElements.first is dom.Element ? (bookElements.first as dom.Element).outerHtml : "${bookElements.first}"}';
         AppLogger.instance.warn(LogCategory.parse, '搜索结果诊断', detail: diagInfo);
         debugPrint('⚠️ $diagInfo');
       }
@@ -939,10 +940,12 @@ class WebBook {
         ..setSourceInfo(_sourceToMap(source));
       // 借鉴 legado 的 BookInfo.kt：init 规则用 getElement() 获取元素对象
       // legado: analyzeRule.setContent(analyzeRule.getElement(infoRule.init))
+      // [修复 Bug #1] 改为异步 getElementsAsync 取首元素
+      // 之前用同步 getElement，内部走 executeSync 不预缓存桥接调用，init 规则含 java.ajax 等异步桥接必失败
       if (bookInfoRule.init != null && bookInfoRule.init!.isNotEmpty) {
-        final initElement = analyzer.getElement(bookInfoRule.init!);
-        if (initElement != null) {
-          analyzer.setContent(initElement);
+        final initElements = await analyzer.getElementsAsync(bookInfoRule.init!);
+        if (initElements.isNotEmpty) {
+          analyzer.setContent(initElements.first);
           if (_loggedRuleTags.add('详情_init')) {
             AppLogger.instance.logJsResult('init', '元素定位成功，内容已替换');
           }
@@ -953,15 +956,17 @@ class WebBook {
       lastBookInfoHtml = html;
 
       // [性能] 详情页 8 字段并发提取，替代逐个串行 await
+      // [修复 Bug #2] coverUrl/tocUrl 加 isUrl:true，让引擎内部取第一行并拼接绝对路径
+      // 之前未传 isUrl，多行 URL 会让 resolveUrl 内部 Uri.resolve 抛异常或返回错误 URL
       final detailFields = await Future.wait([
         analyzer.getStringAsync(bookInfoRule.name ?? ''),
         analyzer.getStringAsync(bookInfoRule.author ?? ''),
-        analyzer.getStringAsync(bookInfoRule.coverUrl ?? ''),
+        analyzer.getStringAsync(bookInfoRule.coverUrl ?? '', isUrl: true),
         analyzer.getStringAsync(bookInfoRule.intro ?? ''),
         analyzer.getStringAsync(bookInfoRule.kind ?? ''),
         analyzer.getStringAsync(bookInfoRule.lastChapter ?? ''),
         analyzer.getStringAsync(bookInfoRule.wordCount ?? ''),
-        analyzer.getStringAsync(bookInfoRule.tocUrl ?? ''),
+        analyzer.getStringAsync(bookInfoRule.tocUrl ?? '', isUrl: true),
       ]);
       final name = detailFields[0];
       final author = detailFields[1];
@@ -1172,12 +1177,15 @@ class WebBook {
         for (int i = 0; i < list.length; i += batchSize) {
           final batchEnd = (i + batchSize).clamp(0, list.length);
           final indices = List.generate(batchEnd - i, (j) => i + j);
+          // [修复 Bug #18] 用 dynamicContent 传 Map 而非 result 传 JSON 字符串
+          // 之前 result=jsonEncode({...})，processJsRule 会把 JSON 字符串再 jsonEncode 一次，
+          // JS 规则里 result 变成带引号的字符串而非对象，result.title 返回 undefined，formatJs 失效
           final batchResults = await Future.wait(
             indices.map((idx) => _executeJs(tocRule.formatJs!,
-              result: jsonEncode({
+              dynamicContent: {
                 'index': idx + 1,
                 'title': list[idx].title,
-              }),
+              },
               baseUrl: tocUrl)),
           );
           for (int j = 0; j < indices.length; j++) {
@@ -1360,7 +1368,9 @@ class WebBook {
         final lastChapter = hasLastChapter ? (fields[fi++] ?? '') : '';
         final wordCount = hasWordCount ? (fields[fi++] ?? '') : '';
 
-        if (name.isNotEmpty) {
+        // [修复 Bug #4] 书名判空加 trim，避免空白书名条目混入搜索结果
+        // _formatBookName 内部会 trim，但判空在格式化之前，需先 trim 判空
+        if (name.trim().isNotEmpty) {
           name = _formatBookName(name);
           if (intro.isNotEmpty) intro = _formatIntro(intro);
           return <String, dynamic>{
@@ -1516,11 +1526,15 @@ class WebBook {
             : Future.value(null),
       ];
 
-      // 并发发射所有 JS batch 和 CSS batch（1 轮 await 替代 12 轮串行）
-      final batchResults = await Future.wait(
+      // [修复 Bug #16] JS batch 和 CSS batch 之间无依赖，并发启动后串行 await
+      // 两个 Future 已同时启动，第一个 await 时第二个已在跑，无额外延迟
+      // 之前两个串行 await，1000+ 章场景多 1 轮 FFI evaluate 延迟
+      final batchResultsFuture = Future.wait(
         batchFutures.map((f) => f ?? Future.value(<String?>[])),
       );
-      final batchCssResults = await Future.wait(batchCssFutures);
+      final batchCssResultsFuture = Future.wait(batchCssFutures);
+      final batchResults = await batchResultsFuture;
+      final batchCssResults = await batchCssResultsFuture;
 
       final batchNames = batchResults[0];
       final batchUrls = batchResults[1];
@@ -1658,11 +1672,13 @@ class WebBook {
           }
 
           // legado: if (bookChapter.title.isNotEmpty)
-          if (title.isNotEmpty) {
+          // [修复 Bug #3] 标题判空加 trim，避免纯空白标题章节混入目录
+          final trimmedTitle = title.trim();
+          if (trimmedTitle.isNotEmpty) {
             return Chapter(
               id: '${baseUrl}_$idx',
               bookId: book?.bookUrl ?? baseUrl,
-              title: title,
+              title: trimmedTitle,
               index: idx,
               url: resolvedUrl,
               isVolume: isVolume,

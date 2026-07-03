@@ -732,8 +732,10 @@ class AnalyzeRule {
       {bool isUrl = false}) async {
     dynamic result = _content;
 
-    // 追踪树：开始规则链追踪
-    JsTracer.instance.clear();
+    // 追踪树：开始规则链追踪（Release 模式 enabled=false 跳过，避免无意义 clear）
+    if (JsTracer.instance.enabled) {
+      JsTracer.instance.clear();
+    }
 
     for (var i = 0; i < ruleList.length; i++) {
       final rule = ruleList[i];
@@ -867,8 +869,10 @@ class AnalyzeRule {
   Future<List<dynamic>> _getElementsAsync(List<_SourceRule> ruleList) async {
     dynamic result = _content;
 
-    // 追踪树：开始规则链追踪
-    JsTracer.instance.clear();
+    // 追踪树：开始规则链追踪（Release 模式 enabled=false 跳过，避免 1000+ 章目录无意义 clear）
+    if (JsTracer.instance.enabled) {
+      JsTracer.instance.clear();
+    }
 
     for (var i = 0; i < ruleList.length; i++) {
       final rule = ruleList[i];
@@ -925,8 +929,11 @@ class AnalyzeRule {
     }
 
     // 输出完整 JS 执行树（info 级别，Release 模式可见）
-    final treeStr = JsTracer.instance.getTreeString();
-    AppLogger.instance.logJsTree('AnalyzeRule', treeStr);
+    // [修复 Bug #7] 加 enabled 守卫，避免 1000+ 章目录场景 6000+ 次空树字符串构建
+    if (JsTracer.instance.enabled) {
+      final treeStr = JsTracer.instance.getTreeString();
+      AppLogger.instance.logJsTree('AnalyzeRule', treeStr);
+    }
 
     if (result == null) return [];
     if (result is List) return result;
