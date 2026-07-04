@@ -10,7 +10,15 @@ Pod::Spec.new do |s|
   s.ios.deployment_target = '16.0'
   s.osx.deployment_target = '10.14'
   s.static_framework = true
-  s.source_files     = '**/*.{c,h}'
+  # [修复 iOS 链接失败] source_files 显式指定顶层 + crypto/，对齐 Android CMakeLists.txt
+  # 之前用 '**/*.{c,h}' 通配符，会把 lexbor/ 子目录 100+ 个含 main 函数的 .c 文件卷入编译
+  # 导致 iOS 链接时 duplicate symbol _main 失败（"连接符掉了"）
+  # lexbor 是历史遗留死代码，html_native.c 自实现 HTML 解析，不依赖 lexbor
+  s.source_files     = '*.{c,h}', 'crypto/*.{c,h}'
+  # 对齐 Android CMakeLists.txt：不编译 quickjs-libc.c
+  # Android 注释：不需要标准库辅助函数，且部分 POSIX 调用不兼容
+  # iOS 同为 POSIX，为避免潜在不兼容（如 fork/exec），对齐 Android 排除
+  s.exclude_files    = 'quickjs-libc.c'
   s.public_header_files = 'quickjs.h', 'quickjs-libc.h', 'cutils.h', 'dtoa.h', 'libregexp.h', 'libunicode.h', 'list.h', 'quickjs_bridge.h'
   s.libraries        = 'm', 'pthread'
   s.pod_target_xcconfig = {

@@ -39,6 +39,10 @@ class NativePlugin: NSObject, FlutterPlugin {
 
     func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
+        // 原生库检查（iOS 静态链接进主二进制，无 .so 文件，直接返回 true）
+        // 对齐 Android NativePlugin.kt 的 checkNativeLib，保证 MethodChannel API 跨平台语义一致
+        case "checkNativeLib":
+            result(true)
         // 屏幕亮度
         case "getScreenBrightness":
             getScreenBrightness(result: result)
