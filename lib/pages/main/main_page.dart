@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../bookshelf/bookshelf_page.dart';
@@ -30,6 +31,11 @@ class _MainPageState extends State<MainPage> {
 
   // 侧边栏状态
   bool _sidebarOpen = false;
+
+  // [修复 Bug #1] 主页返回键拦截：再按一次退出
+  // 之前根路由无 PopScope，系统返回键直接触发 SystemNavigator.pop 退到桌面
+  DateTime? _lastBackPressed;
+  static const Duration _exitConfirmDuration = Duration(seconds: 2);
 
   @override
   void initState() {
@@ -118,6 +124,34 @@ class _MainPageState extends State<MainPage> {
     final layoutMode = appProvider.navBarLayoutMode;
     final sidebarGravity = appProvider.navBarSidebarGravity;
 
+    // [修复 Bug #1] 主页根路由拦截返回键，避免直接退到桌面
+    // canPop=false → 系统返回键不会 pop 路由，而是触发 onPopInvokedWithResult
+    // 在回调中实现「再按一次退出」：2 秒内再按才真正退出，否则提示 Toast
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final now = DateTime.now();
+        if (_lastBackPressed == null ||
+            now.difference(_lastBackPressed!) > _exitConfirmDuration) {
+          _lastBackPressed = now;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('再按一次返回键退出应用'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        } else {
+          // 二次返回 → 真正退出应用（移到后台，不杀进程）
+          await SystemNavigator.pop();
+        }
+      },
+      child: _buildContent(appProvider, layoutMode, sidebarGravity),
+    );
+  }
+
+  Widget _buildContent(
+      AppProvider appProvider, String layoutMode, String sidebarGravity) {
     if (_isLoading) {
       return Scaffold(
         body: Center(

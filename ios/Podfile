@@ -46,17 +46,19 @@ post_install do |installer|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
       config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'i386'
       config.build_settings['EXCLUDED_ARCHS[sdk=iphoneos*]'] = 'armv7'
-      # [修复 iOS 引擎初始化失败] 禁用所有 Pods target 的死代码裁剪
-      # Dart FFI 运行时按字符串查找符号，链接器静态分析看不到引用
-      # DEAD_CODE_STRIPPING=NO 确保所有 C 函数符号保留在最终二进制中
+      # [动态运行时库方案] DEAD_CODE_STRIPPING=NO 仍保留
+      # 虽然动态框架方案下 QuickJS 符号隔离在 .framework 内，
+      # 但其他 Flutter 插件（如 path_provider）仍可能用静态库，
+      # 保留此设置确保所有 Pods target 的符号不被裁剪
       config.build_settings['DEAD_CODE_STRIPPING'] = 'NO'
     end
   end
 
-  # 强制链接所有静态库的 .o 文件
-  # Dart FFI 运行时按字符串查找符号（DynamicLibrary.process().lookup），
-  # 链接器静态分析看不到引用，默认不链接未引用的 .o 文件
-  # -all_load 强制链接所有静态库，确保 QuickJS 符号进入主二进制
+  # [动态运行时库方案] -all_load 仍保留
+  # 之前静态框架时，-all_load 强制链接 QuickJS 静态库的所有 .o 文件到主二进制
+  # 现在动态框架下，QuickJS 符号在 .framework 内，不需要 -all_load 卷入
+  # 但其他 Flutter 插件可能用静态库 + Dart FFI，保留 -all_load 兼容
+  # 注意：-all_load 不会影响动态框架，只对静态库生效
   installer.pods_project.build_configurations.each do |config|
     config.build_settings['OTHER_LDFLAGS'] ||= '$(inherited)'
     config.build_settings['OTHER_LDFLAGS'] += ' -all_load'

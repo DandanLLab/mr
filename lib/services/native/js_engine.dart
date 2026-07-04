@@ -332,8 +332,9 @@ class JsEngine {
   Future<bool> init() async {
     // [覆盖安装闪退修复] 仅 Android：在 FFI 调用前通过 MethodChannel 验证 .so 完整性
     // Android 动态链接 libquickjs_c_bridge.so，覆盖安装时 .so 提取存在竞争，需检查。
-    // iOS 静态链接进 Runner 可执行文件，符号编译期绑定，无 .so 文件也无 checkNativeLib
-    // handler，故 iOS 直接信任，否则 MissingPluginException 会导致引擎启动失败。
+    // [动态运行时库方案] iOS 改为动态框架（QuickJS.framework），由系统在 App 启动时
+    // 自动 dlopen 嵌入的 .framework，符号在进程内可见。无需 MethodChannel 检查，
+    // 否则 MissingPluginException 会导致引擎启动失败。
     if (Platform.isAndroid) {
       try {
         _nativeLibChecked = await NativeChannel.instance.checkNativeLib('quickjs_c_bridge');
@@ -343,7 +344,7 @@ class JsEngine {
       // native lib 未就绪 → 跳过所有 FFI 调用，避免 SIGSEGV
       if (!_nativeLibChecked) return false;
     } else {
-      // iOS / 其他平台：静态链接，无需检查
+      // iOS / 其他平台：动态框架由系统自动加载，无需检查
       _nativeLibChecked = true;
     }
 

@@ -9,7 +9,18 @@ Pod::Spec.new do |s|
   s.source           = { :path => '.' }
   s.ios.deployment_target = '16.0'
   s.osx.deployment_target = '10.14'
-  s.static_framework = true
+  # [动态运行时库方案] 改为动态框架（.framework 含可执行文件）
+  # 之前 static_framework=true 编译为静态库，符号靠 -all_load 卷入主二进制，
+  # Dart FFI 用 DynamicLibrary.process() 查找。但静态链接存在以下问题：
+  #   1. duplicate symbol _main（lexbor 子目录 100+ 个 main 函数污染）
+  #   2. -all_load 强制链接所有 .o，主二进制体积膨胀
+  #   3. 符号查找不稳定（依赖 -all_load + DEAD_CODE_STRIPPING=NO 双重保障）
+  # 动态框架方案：
+  #   - QuickJS 编译为 QuickJS.framework/QuickJS 可执行文件
+  #   - Dart FFI 用 DynamicLibrary.open('QuickJS.framework/QuickJS') 明确查找
+  #   - 符号隔离在动态库内，不影响主二进制
+  #   - 不依赖 -all_load，链接错误更易诊断
+  s.static_framework = false
   # [修复 iOS 链接失败] source_files 显式指定顶层 + crypto/，对齐 Android CMakeLists.txt
   # 之前用 '**/*.{c,h}' 通配符，会把 lexbor/ 子目录 100+ 个含 main 函数的 .c 文件卷入编译
   # 导致 iOS 链接时 duplicate symbol _main 失败（"连接符掉了"）
@@ -31,22 +42,15 @@ Pod::Spec.new do |s|
     #   注：QuickJS 主要计算开销已沉降至 C 原生函数（Phase 1-3），解释器速度损失用户感知不强
     # -fomit-frame-pointer：释放 fp 寄存器
     #
-    # [修复 iOS 引擎初始化失败] 移除 -flto 和 -ffunction-sections -fdata-sections
-    # 原因：Dart FFI 通过 DynamicLibrary.process().lookup('symbol_name') 在运行时
-    #       按字符串查找 C 函数符号，这种引用对 LTO 和链接器静态分析完全不可见。
-    #       -flto 会在链接阶段进行全局优化，将只被 Dart FFI 引用的导出函数
-    #       （如 get_cpu_count、quickjs_bridge_create 等）视为"未引用代码"并移除，
-    #       导致运行时 lookup 抛出 ArgumentError → 引擎初始化失败。
-    #       -all_load 只强制加载 .o 文件，无法阻止 LTO 在链接阶段裁剪符号。
-    #       DEAD_CODE_STRIPPING=NO 只控制链接器 dead strip pass，不控制 LTO 死代码消除。
-    # 修复：移除 -flto（阻止 LTO 裁剪 FFI 符号）
-    #       移除 -ffunction-sections -fdata-sections（配合 dead strip 使用，现已不需要）
-    #       保留 -Oz -fomit-frame-pointer（纯体积优化，不影响符号导出）
-    # 影响范围：仅 iOS/macOS，不影响 Android（Android 使用 CMakeLists.txt）
-    'OTHER_CFLAGS' => '-D_GNU_SOURCE -Wno-implicit-function-declaration -Oz -fomit-frame-pointer'
+    # [动态框架方案] 不再需要移除 -flto
+    # 之前静态框架时，-flto 会裁剪只被 Dart FFI 引用的符号（LTO 看不到 FFI 引用）
+    # 现在动态框架下，符号导出由动态库自身控制，-fvisibility=default 确保所有
+    # quickjs_bridge_* 符号在动态库导出表中可见，LTO 不会裁剪导出符号
+    # 但为保守起见，仍不启用 -flto，避免 LTO 对动态库符号导出的潜在影响
+    'OTHER_CFLAGS' => '-D_GNU_SOURCE -Wno-implicit-function-declaration -Oz -fomit-frame-pointer -fvisibility=default'
   }
-  # -all_load 在 project.pbxproj 的 OTHER_LDFLAGS 中设置（不在这里设，避免 xcconfig 冲突）
-  # Dart FFI 运行时按字符串查找符号，链接器静态分析看不到引用
-  # -all_load 强制链接所有静态库的所有 .o 文件
+  # 动态框架方案下，Dart FFI 用 DynamicLibrary.open('QuickJS.framework/QuickJS') 查找符号
+  # 不再依赖 app target 的 -all_load 强制链接静态库
+  # 47 个 quickjs_bridge_* 符号在 quickjs_bridge.c 中定义，-fvisibility=default 确保导出
   s.swift_version    = '5.0'
 end

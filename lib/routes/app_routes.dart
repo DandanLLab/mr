@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'dart:io' show Platform;
 import '../models/book.dart';
 import '../models/book_source.dart';
 import '../pages/main/main_page.dart';
@@ -61,6 +63,15 @@ class AppPageRoute<T> extends PageRouteBuilder<T> {
             );
           },
         );
+
+  /// [修复 Bug #2] 启用 iOS 侧滑返回手势
+  /// PageRouteBuilder 默认 popGestureEnabled 返回 false，导致 iOS 边缘侧滑失效
+  /// 对齐 MaterialPageRoute：iOS 上启用侧滑，Android 上禁用（用系统返回键）
+  @override
+  bool get popGestureEnabled {
+    if (kIsWeb) return false;
+    return Platform.isIOS || Platform.isMacOS;
+  }
 }
 
 class AppRoutes {

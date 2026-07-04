@@ -26,11 +26,24 @@ void main() async {
   runZonedGuarded(() async {
     WidgetsFlutterBinding.ensureInitialized();
 
-    // 初始化崩溃日志服务（必须最先，注册全局错误捕获）
-    await CrashLogService.instance.init();
+    // [修复 Bug #4] 初始化时序保护
+    // 之前 CrashLogService.init() 在 try-catch 外，且在 Hive 之前调用
+    // 虽然其内部 _loadErrorCounters/_loadCrashLogs 有 try/catch 吞异常，
+    // 但若 path_provider 在某些设备上抛异常仍可能中断 init() → 后续错误捕获注册失败
+    // 现统一加 try/catch 保护，确保任何服务初始化失败都不会中断 runApp
+    try {
+      // 初始化崩溃日志服务（必须最先，注册全局错误捕获）
+      await CrashLogService.instance.init();
+    } catch (e) {
+      debugPrint('CrashLogService init error: $e');
+    }
 
     // 初始化应用日志文件系统（启动即记录所有操作日志）
-    AppLogger.instance.initFileLogging();
+    try {
+      AppLogger.instance.initFileLogging();
+    } catch (e) {
+      debugPrint('AppLogger init error: $e');
+    }
 
     try {
       await Hive.initFlutter();
@@ -57,7 +70,11 @@ void main() async {
 
     // 启动 CORS 代理服务（仅 Web 端需要，原生端 Dio 不受 CORS 限制）
     if (kIsWeb) {
-      await ProxyService.instance.start();
+      try {
+        await ProxyService.instance.start();
+      } catch (e) {
+        debugPrint('ProxyService start error: $e');
+      }
     }
 
     runApp(const DanShenqiApp());

@@ -70,13 +70,21 @@ const int _CRYPTO_OP_SHA1 = 5;
 /// 加载 QuickJS 动态库
 ///
 /// 全端加载策略：
-/// - iOS/macOS: podspec 配置 static_framework，符号链接到主程序 → DynamicLibrary.process()
+/// - iOS/macOS: podspec 配置动态框架（static_framework=false），
+///   编译为 QuickJS.framework/QuickJS 可执行文件 → DynamicLibrary.open()
+///   [动态运行时库方案] 之前用 static_framework=true + DynamicLibrary.process()，
+///   符号靠 -all_load 卷入主二进制，存在 duplicate symbol _main 和符号裁剪问题。
+///   现改为动态框架，符号隔离在 .framework 内，FFI lookup 直接命中，稳定可靠。
 /// - Android: NDK 编译为 libquickjs_c_bridge.so → DynamicLibrary.open()
 /// - Windows: CMake 编译为 quickjs_c_bridge.dll → DynamicLibrary.open()
 /// - Linux: CMake 编译为 libquickjs_c_bridge.so → DynamicLibrary.open()
 DynamicLibrary _loadQuickJsLib() {
   if (Platform.isIOS || Platform.isMacOS) {
-    return DynamicLibrary.process();
+    // 动态框架路径：QuickJS.framework/QuickJS
+    // iOS App 打包后，.framework 嵌入 App Bundle 的 Frameworks/ 目录
+    // 系统加载主二进制时自动 dlopen 嵌入的 .framework，符号在进程内可见
+    // DynamicLibrary.open 会先查找已加载的库，再尝试 dlopen
+    return DynamicLibrary.open('QuickJS.framework/QuickJS');
   } else if (Platform.isAndroid) {
     return DynamicLibrary.open('libquickjs_c_bridge.so');
   } else if (Platform.isWindows) {

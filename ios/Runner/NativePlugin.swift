@@ -39,8 +39,10 @@ class NativePlugin: NSObject, FlutterPlugin {
 
     func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
-        // 原生库检查（iOS 静态链接进主二进制，无 .so 文件，直接返回 true）
-        // 对齐 Android NativePlugin.kt 的 checkNativeLib，保证 MethodChannel API 跨平台语义一致
+        // 原生库检查（iOS 动态框架由系统自动加载，无 .so 文件，直接返回 true）
+        // [动态运行时库方案] iOS 改为 QuickJS.framework 动态框架，App 启动时系统自动 dlopen
+        // js_engine.dart iOS 路径直接 _nativeLibChecked = true，不会调用此 handler
+        // 保留 handler 保证 MethodChannel API 跨平台语义一致
         case "checkNativeLib":
             result(true)
         // 屏幕亮度

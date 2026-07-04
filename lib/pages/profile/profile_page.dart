@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -611,8 +612,9 @@ class _ProfilePageState extends State<ProfilePage>
             TextButton(
               onPressed: () {
                 Navigator.pop(context);
-                // 退出应用
-                if (Platform.isAndroid || Platform.isIOS) {
+                // [修复 Bug #5] 退出应用：Web 端 Platform.isAndroid 会抛
+                // UnsupportedOperationException，需 kIsWeb 守卫
+                if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
                   SystemNavigator.pop();
                 }
               },
