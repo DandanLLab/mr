@@ -26,16 +26,24 @@ Pod::Spec.new do |s|
     # 否则引号被吃掉，CONFIG_VERSION 变成 2026.06.04（浮点数）而非 "2026.06.04"（字符串）
     # 导致 quickjs.c 中 "..." CONFIG_VERSION "..." 字符串拼接编译失败
     'GCC_PREPROCESSOR_DEFINITIONS' => 'CONFIG_VERSION=\"2026.06.04\" CONFIG_NO_ATOMICS=1',
-    # 体积优化：编译选项 —— 体积优先 + 裁剪未引用代码
+    # 体积优化：编译选项 —— 体积优先
     # -Oz：极致体积优先（比 -O3 体积小 20-30%，速度损失约 10-15%，移动端首选）
     #   注：QuickJS 主要计算开销已沉降至 C 原生函数（Phase 1-3），解释器速度损失用户感知不强
-    # -flto：链接期跨文件内联 + 死代码消除（同时优化速度和体积）
     # -fomit-frame-pointer：释放 fp 寄存器
-    # -ffunction-sections -fdata-sections：配合 app target 的 -dead_strip 裁剪未引用代码
-    # （注：-dead_strip 与 -all_load 在 project.pbxproj 中配置，不在此处重复设置，
-    #   避免 pod_target_xcconfig 与 app target xcconfig 冲突）
-    # iOS QuickJS 为 static_framework，符号导出由 app target -dead_strip 控制，无需 version-script
-    'OTHER_CFLAGS' => '-D_GNU_SOURCE -Wno-implicit-function-declaration -Oz -flto -fomit-frame-pointer -ffunction-sections -fdata-sections'
+    #
+    # [修复 iOS 引擎初始化失败] 移除 -flto 和 -ffunction-sections -fdata-sections
+    # 原因：Dart FFI 通过 DynamicLibrary.process().lookup('symbol_name') 在运行时
+    #       按字符串查找 C 函数符号，这种引用对 LTO 和链接器静态分析完全不可见。
+    #       -flto 会在链接阶段进行全局优化，将只被 Dart FFI 引用的导出函数
+    #       （如 get_cpu_count、quickjs_bridge_create 等）视为"未引用代码"并移除，
+    #       导致运行时 lookup 抛出 ArgumentError → 引擎初始化失败。
+    #       -all_load 只强制加载 .o 文件，无法阻止 LTO 在链接阶段裁剪符号。
+    #       DEAD_CODE_STRIPPING=NO 只控制链接器 dead strip pass，不控制 LTO 死代码消除。
+    # 修复：移除 -flto（阻止 LTO 裁剪 FFI 符号）
+    #       移除 -ffunction-sections -fdata-sections（配合 dead strip 使用，现已不需要）
+    #       保留 -Oz -fomit-frame-pointer（纯体积优化，不影响符号导出）
+    # 影响范围：仅 iOS/macOS，不影响 Android（Android 使用 CMakeLists.txt）
+    'OTHER_CFLAGS' => '-D_GNU_SOURCE -Wno-implicit-function-declaration -Oz -fomit-frame-pointer'
   }
   # -all_load 在 project.pbxproj 的 OTHER_LDFLAGS 中设置（不在这里设，避免 xcconfig 冲突）
   # Dart FFI 运行时按字符串查找符号，链接器静态分析看不到引用

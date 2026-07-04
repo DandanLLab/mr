@@ -46,6 +46,10 @@ post_install do |installer|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
       config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'i386'
       config.build_settings['EXCLUDED_ARCHS[sdk=iphoneos*]'] = 'armv7'
+      # [修复 iOS 引擎初始化失败] 禁用所有 Pods target 的死代码裁剪
+      # Dart FFI 运行时按字符串查找符号，链接器静态分析看不到引用
+      # DEAD_CODE_STRIPPING=NO 确保所有 C 函数符号保留在最终二进制中
+      config.build_settings['DEAD_CODE_STRIPPING'] = 'NO'
     end
   end
 

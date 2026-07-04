@@ -414,12 +414,13 @@
 				MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.mr.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				OTHER_LDFLAGS = "$(inherited) -all_load";
-				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				VERSIONING_SYSTEM = "apple-generic";
-			};
+			DEAD_CODE_STRIPPING = NO;
+			OTHER_LDFLAGS = "$(inherited) -all_load";
+			SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			SWIFT_VERSION = 5.0;
+			TARGETED_DEVICE_FAMILY = "1,2";
+			VERSIONING_SYSTEM = "apple-generic";
+		};
 			name = Debug;
 		};
 		AA000000000000000000001D /* Release */ = {
