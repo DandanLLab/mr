@@ -315,12 +315,14 @@ class AppLogger {
   // ===== JS 引擎专用 =====
 
   void logJsExecute(String engine, String code, {int? codeLength}) {
-    info(LogCategory.js, '[$engine] 执行JS #$_quickjsExecutionCount (${codeLength ?? code.length} chars)',
+    // 降级为 debug：Release 模式自动过滤，减少热路径日志开销
+    debug(LogCategory.js, '[$engine] 执行JS #$_quickjsExecutionCount (${codeLength ?? code.length} chars)',
       detail: code);
   }
 
   void logJsResult(String engine, String? result) {
-    info(LogCategory.js, '[$engine] 结果: ${result != null ? "${result.length} chars" : "null"}',
+    // 降级为 debug：Release 模式自动过滤
+    debug(LogCategory.js, '[$engine] 结果: ${result != null ? "${result.length} chars" : "null"}',
       detail: result);
   }
 
@@ -329,14 +331,14 @@ class AppLogger {
   }
 
   void logJsInput(String engine, String? input, {String? tag}) {
-    final label = tag != null ? '[$engine] 输入[$tag]' : '[$engine] 输入';
-    info(LogCategory.js, '$label (${input?.length ?? 0} chars)', detail: input);
+    // 降级为 debug：Release 模式自动过滤
+    debug(LogCategory.js, tag != null ? '[$engine] 输入[$tag] (${input?.length ?? 0} chars)' : '[$engine] 输入 (${input?.length ?? 0} chars)', detail: input);
   }
 
   void logJsOutput(String engine, String? output, {String? outputType, String? tag}) {
+    // 降级为 debug：Release 模式自动过滤
     final typeInfo = outputType != null ? '($outputType)' : '';
-    final label = tag != null ? '[$engine] 输出[$tag]$typeInfo' : '[$engine] 输出$typeInfo';
-    info(LogCategory.js, '$label (${output?.length ?? 0} chars)', detail: output);
+    debug(LogCategory.js, tag != null ? '[$engine] 输出[$tag]$typeInfo (${output?.length ?? 0} chars)' : '[$engine] 输出$typeInfo (${output?.length ?? 0} chars)', detail: output);
   }
 
   void logJsTree(String engine, String treeString) {

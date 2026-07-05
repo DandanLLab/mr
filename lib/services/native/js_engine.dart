@@ -4261,8 +4261,8 @@ class JsEngine {
     AppLogger.instance.logJsStep('QuickJS', '[processJsRule] 入参',
       detail: 'result type=${actualResult.runtimeType}, len=${actualResult is String ? actualResult.length : (actualResult is List ? actualResult.length : '?')}, baseUrl=$baseUrl');
 
-    // 让出事件循环，避免长时间 JS 执行阻塞 UI 刷新
-    await Future(() {});
+    // 优化：移除多余的 await Future(() {})，_executeQuickJSRule 内部已有让出事件循环的逻辑
+    // 对于时间戳敏感的短小 JS（如搜索 URL 生成），减少 ~5-10ms 延迟
 
     return _evalLock.synchronized(() {
       _evalBusy = true;
@@ -4489,7 +4489,7 @@ class JsEngine {
           var book = ${jsonEncode(env?['book'] ?? {})};
           var chapter = ${jsonEncode(env?['chapter'] ?? {})};
           var source = (function() {
-            var _data = ${jsonEncode(env?['source'] ?? {})};
+            var _data = ${getCachedSourceJson(env?['source'] as Map<String, dynamic>?)};
             var _vars = ${jsonEncode(env?['sourceVars'] ?? {})};
             // 借鉴 legado：source.getVariable() 无参返回 variable 字段的原始字符串值
             // source.getVariable(key) 有参返回指定 key 的值
@@ -4550,8 +4550,11 @@ class JsEngine {
           return __returnValue;
         })();
       ''';
-      // 先 yield 让出事件循环，避免长时间 JS 执行阻塞 UI 刷新
-      await Future(() {});
+      // 优化：仅在 JS 代码较长时让出事件循环，短小 JS（如搜索 URL 生成）直接执行
+      // 阈值 5KB：超过此长度的 JS 可能执行较久，需要让出事件循环避免阻塞 UI
+      if (wrappedScript.length > 5000) {
+        await Future(() {});
+      }
       final evalResult = _jsRuntime!.evaluate(wrappedScript);
 
       // 提取 console 缓存的日志，同步到 AppLogger（借鉴 legado 的调试输出机制）
