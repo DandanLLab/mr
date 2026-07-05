@@ -583,7 +583,14 @@ class AnalyzeRule {
     if (isUrl) {
       if (resultStr.isEmpty) return null;
       if (resultStr.contains('\n')) {
-        resultStr = resultStr.split('\n').first.trim();
+        // [修复 URL 截断 Bug] 含 JSON 选项的 URL（如 URL,{...}）跨多行时，
+        // 不能取第一行（会截断 JSON 选项），应去除换行符保留完整 URL。
+        // 对齐 legado getString：legado 不做换行符处理，直接返回整个字符串。
+        if (resultStr.contains(',{')) {
+          resultStr = resultStr.replaceAll(RegExp(r'[\r\n]+'), '');
+        } else {
+          resultStr = resultStr.split('\n').first.trim();
+        }
       }
       return _getAbsoluteUrl(resultStr);
     }
