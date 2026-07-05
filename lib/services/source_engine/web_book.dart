@@ -598,6 +598,9 @@ class WebBook {
           await _executeJs(urlJs, result: requestUrl, baseUrl: requestUrl) ??
               requestUrl;
     }
+    // 打印最终发送的请求信息，确认 headers 是否真正传到 Dio 层
+    AppLogger.instance.info(LogCategory.network,
+        '发送请求: $requestUrl method=$method headers=$headers');
     StrResponse response = await _client.execute(
       requestUrl,
       method: method,
