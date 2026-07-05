@@ -667,6 +667,10 @@ class WebBook {
     final parsed =
         _parseUrlWithOption(resolvedSearchUrl, keyword: keyword, page: page);
     AppLogger.instance.info(LogCategory.network, '搜索URL: ${parsed.url}');
+    // [调试] 验证 URL 选项解析结果
+    debugPrint('🔍 [调试] resolvedSearchUrl=$resolvedSearchUrl');
+    debugPrint('🔍 [调试] parsed.url=${parsed.url}');
+    debugPrint('🔍 [调试] parsed.option=${parsed.option != null ? "method=${parsed.option!.method}, headers=${parsed.option!.headers}, body=${parsed.option!.body}" : "null"}');
 
     try {
       final response = await _executeRequest(parsed, keyword: keyword);
