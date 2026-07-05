@@ -592,6 +592,9 @@ class WebBook {
     }
 
     debugPrint('🌐 请求: $method ${parsed.url}');
+    if (headers.isNotEmpty) {
+      debugPrint('📋 Headers: $headers');
+    }
     if (body != null) {
       debugPrint('📦 Body: $body');
     }
@@ -671,7 +674,10 @@ class WebBook {
         await _resolveUrl(source.searchUrl!, keyword: keyword, page: page);
     final parsed =
         _parseUrlWithOption(resolvedSearchUrl, keyword: keyword, page: page);
-    AppLogger.instance.info(LogCategory.network, '搜索URL: ${parsed.url}');
+    AppLogger.instance.info(LogCategory.network, '搜索URL: ${parsed.url}'
+        '${parsed.option?.method != null ? '\n  方法: ${parsed.option!.method}' : ''}'
+        '${parsed.option?.headers != null ? '\n  选项Headers: ${parsed.option!.headers}' : ''}'
+        '${parsed.option?.body != null ? '\n  Body: ${parsed.option!.body}' : ''}');
 
     try {
       final response = await _executeRequest(parsed, keyword: keyword);
