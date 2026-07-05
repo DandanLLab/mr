@@ -669,22 +669,15 @@ class WebBook {
         await _resolveUrl(source.searchUrl!, keyword: keyword, page: page);
     final parsed =
         _parseUrlWithOption(resolvedSearchUrl, keyword: keyword, page: page);
-    // 打印 URL 和选项模板（method/headers/body），便于诊断请求是否带上了 Referer 等关键 headers
-    final opt = parsed.option;
-    final methodInfo = opt?.method != null ? ' method=${opt!.method}' : '';
-    final headersInfo = opt?.headers != null && opt!.headers!.isNotEmpty
-        ? ' headers=${opt.headers}'
-        : '';
-    final bodyInfo = opt?.body != null && opt!.body!.isNotEmpty ? ' body=${opt.body}' : '';
-    AppLogger.instance.info(LogCategory.network,
-        '搜索URL: ${parsed.url}$methodInfo$headersInfo$bodyInfo');
+    // 调试面板 1:1 显示 JS 输出的原始内容（含 ,{headers} 等选项），不显示解析后的 parsed.url
+    AppLogger.instance.info(LogCategory.network, '搜索URL: $resolvedSearchUrl');
 
     try {
       final response = await _executeRequest(parsed, keyword: keyword);
       final html = response.body;
 
       lastSearchHtml = html;
-      lastSearchUrl = parsed.url;  // 保存搜索链接
+      lastSearchUrl = resolvedSearchUrl;  // 保存 JS 输出的原始搜索链接
 
       AppLogger.instance
           .info(LogCategory.network, '搜索响应: ${html.length} chars');
