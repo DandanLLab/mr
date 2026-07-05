@@ -5150,13 +5150,22 @@ class JsEngine {
       final customHeaders = env?['headers'] as Map<String, String>?;
       final results = await _runWithConcurrency(() => httpUrls.map((url) async {
         try {
+          // [legado URL 选项兼容] 合并 URL 选项 GET 请求的专属 headers
+          // 修复：之前 GET 预缓存只用了 customHeaders，丢弃了 urlOptionGetHeaders
+          // 导致 java.ajax("url,{\"headers\":{\"Referer\":\"...\"}}") 的 Referer 未传递
+          final optHeaders = urlOptionGetHeaders[url];
+          final mergedHeaders = <String, String>{};
+          if (customHeaders != null) mergedHeaders.addAll(customHeaders);
+          if (optHeaders != null) mergedHeaders.addAll(optHeaders);
+          final effectiveHeaders = mergedHeaders.isNotEmpty ? mergedHeaders : null;
+
           String? result;
           if (url.startsWith('http://')) {
             final r = nativeHttpGet(url,
-                headers: customHeaders?.entries.map((e) => '${e.key}: ${e.value}').join('\r\n'));
+                headers: effectiveHeaders?.entries.map((e) => '${e.key}: ${e.value}').join('\r\n'));
             result = r?['body'] as String?;
           } else {
-            result = await NativeChannel.instance.httpGet(url, headers: customHeaders);
+            result = await NativeChannel.instance.httpGet(url, headers: effectiveHeaders);
           }
           if (result != null) {
             return MapEntry('http_get:$url', result);
