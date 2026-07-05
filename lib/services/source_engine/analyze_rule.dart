@@ -43,10 +43,16 @@ class AnalyzeRule {
   // ===== 热路径 RegExp 常量（避免重复编译）=====
 
   // 规则拆分正则
+  // [修复] 添加 \x00 作为 <js></js> 标签替换后的边界标记，
+  // 避免 </js> 后面的内容（如 CSS 选择器 class.xxx）被 _jsPatternRegex 吞入 JS 代码。
+  // 场景：<js>X</js>class.pic_txt_list → 替换为 @js:X\x00class.pic_txt_list
+  // _jsPatternRegex 在 \x00 处停止，class.pic_txt_list 作为独立规则解析。
   static final _jsPatternRegex = RegExp(
-      r'@js:([\s\S]*?)(?=@js:|$)',
+      r'@js:([\s\S]*?)(?=@js:|\x00|$)',
       caseSensitive: false);
   static final _jsTagPatternRegex = RegExp(r'<js>([\s\S]*?)</js>', caseSensitive: false);
+  /// \x00 边界标记清理正则
+  static final _jsBoundaryRegex = RegExp(r'\x00');
 
   // 变量替换正则
   static final _expressionOnlyRegex = RegExp(
@@ -364,14 +370,17 @@ class AnalyzeRule {
     }
 
     // 解析 @js: 和 <js></js> 规则
-    // 先处理 <js></js> 标签 → 替换为 @js:
+    // 先处理 <js></js> 标签 → 替换为 @js:X\x00（\x00 作为边界标记）
+    // [修复] 必须在 @js:X 后面加 \x00 边界标记，否则 </js> 后面的内容
+    // （如 CSS 选择器 class.pic_txt_list）会被 _jsPatternRegex 吞入 JS 代码，
+    // 导致 QuickJS 报 SyntaxError: class statement requires a name
     String processedRule = ruleStr;
     final jsTagMatches = _jsTagPatternRegex.allMatches(processedRule).toList();
 
     if (jsTagMatches.isNotEmpty) {
       for (final match in jsTagMatches.reversed) {
         processedRule = processedRule.replaceRange(
-            match.start, match.end, '@js:${match.group(1)}');
+            match.start, match.end, '@js:${match.group(1)}\x00');
       }
     }
 
@@ -381,16 +390,20 @@ class AnalyzeRule {
     if (jsMatches.isNotEmpty) {
       var lastEnd = start;
       for (final match in jsMatches) {
-        // 添加匹配之前的部分
+        // 添加匹配之前的部分（清理 \x00 边界标记）
         if (match.start > lastEnd) {
-          final before = processedRule.substring(lastEnd, match.start).trim();
+          final before = processedRule
+              .substring(lastEnd, match.start)
+              .replaceAll(_jsBoundaryRegex, '')
+              .trim();
           if (before.isNotEmpty) {
             ruleList
                 .add(_SourceRule.parse(before, isJson: _isJson, mode: mode));
           }
         }
         // 添加 JS 规则（保留完整前缀，让 JsEngine._resolveEngine 处理分流）
-        final matchedText = match.group(0)?.trim() ?? '';
+        // 清理 JS 代码末尾可能残留的 \x00
+        final matchedText = match.group(0)?.replaceAll(_jsBoundaryRegex, '').trim() ?? '';
         if (matchedText.isNotEmpty) {
           ruleList.add(_SourceRule(
             matchedText,
@@ -401,17 +414,23 @@ class AnalyzeRule {
         }
         lastEnd = match.end;
       }
-      // 添加最后剩余的部分
+      // 添加最后剩余的部分（清理 \x00 边界标记）
       if (lastEnd < processedRule.length) {
-        final remaining = processedRule.substring(lastEnd).trim();
+        final remaining = processedRule
+            .substring(lastEnd)
+            .replaceAll(_jsBoundaryRegex, '')
+            .trim();
         if (remaining.isNotEmpty) {
           ruleList
               .add(_SourceRule.parse(remaining, isJson: _isJson, mode: mode));
         }
       }
     } else {
-      // 没有 JS 规则，直接解析
-      final rest = processedRule.substring(start).trim();
+      // 没有 JS 规则，直接解析（清理 \x00 边界标记）
+      final rest = processedRule
+          .substring(start)
+          .replaceAll(_jsBoundaryRegex, '')
+          .trim();
       if (rest.isNotEmpty) {
         ruleList.add(_SourceRule.parse(rest, isJson: _isJson, mode: mode));
       }
