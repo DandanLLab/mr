@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart' as url_launcher;
 import 'package:synchronized/synchronized.dart';
 import '../app_logger.dart';
 import '../crash_log_service.dart';
+import '../source_engine/analyze_url.dart' as legado_url;
 import 'platform_channel.dart';
 import 'shared_js_scope.dart';
 
@@ -243,6 +244,13 @@ class JsEngine {
   );
   static final _cookiePattern = RegExp(
     r"""java\.getCookie\s*\(\s*["']([^"']+)["']""",
+    multiLine: true,
+  );
+  // [legado URL 选项兼容] 匹配 java.ajax/get/post/connect("url,{...}") 或 fetch("url,{...}")
+  // 支持转义引号，正确捕获完整字符串参数（含嵌套 {}）
+  // 策略：匹配引号开始 → 贪婪匹配到 ,{ → 贪婪匹配到最后一个 } → 对应引号结束
+  static final _urlOptionCallPattern = RegExp(
+    r"""(?:java\.(?:ajax|get|post|connect)|fetch)\s*\(\s*(['"])((?:\\.|(?!\1).)*,\{(?:\\.|(?!\1).)*\})\1""",
     multiLine: true,
   );
   static final _htmlParsePattern = RegExp(
@@ -785,24 +793,64 @@ class JsEngine {
       }
 
       // ===== fetch() 全局函数 =====
-      // 借鉴 legado 的 JsExtensions.ajax：直接返回 HTML 字符串（同步模式）
-      // legado 书源中 fetch(url) 期望直接得到 HTML，不是 Response 对象
+      // 借鉴 legado 的 JsExtensions.ajax + 标准 Web Fetch API
+      // [兼容模式] 返回字符串（body 内容），保持与 java.ajax 一致的行为
+      // 支持 init.method/body/headers 和 legado URL 选项格式 url,{"method":"POST",...}
+      // 注意：标准 fetch 应返回 Promise<Response>，但 QuickJS 同步模式下
+      //       legado 书源期望 fetch(url) 直接返回 HTML 字符串，故保持字符串返回
       function fetch(input, init) {
         var url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
-        var method = (init && init.method) || 'GET';
+        init = init || {};
+        var method = (init.method || 'GET').toUpperCase();
+        var body = init.body;
+        var headers = init.headers || {};
+
+        // [legado 兼容] 处理 body 为 object → JSON 字符串
+        if (body && typeof body === 'object' && !(body instanceof ArrayBuffer)) {
+          body = JSON.stringify(body);
+        }
+        // [legado 兼容] headers 为 JSON 字符串时解析
+        if (typeof headers === 'string') {
+          try { headers = JSON.parse(headers); } catch (e) { headers = {}; }
+        }
+
+        // [legado 兼容] 解析 URL 选项格式 url,{"method":"POST",...}
+        var realUrl = url;
+        if (url && typeof url === 'string' && url.indexOf(',{') >= 0) {
+          try {
+            var idx = url.indexOf(',{');
+            realUrl = url.substring(0, idx).trim();
+            var urlOpt = JSON.parse(url.substring(idx + 1).trim());
+            // URL 选项作为默认，init 优先级更高
+            if (!init.method && urlOpt.method) method = String(urlOpt.method).toUpperCase();
+            if (body == null && urlOpt.body != null) {
+              body = typeof urlOpt.body === 'object' ? JSON.stringify(urlOpt.body) : String(urlOpt.body);
+            }
+            if (urlOpt.headers) {
+              var mergedH = {};
+              for (var k in urlOpt.headers) { mergedH[k] = urlOpt.headers[k]; }
+              for (var k in headers) { mergedH[k] = headers[k]; }
+              headers = mergedH;
+            }
+          } catch (e) { realUrl = url; }
+        }
+
         // 自动拼接 baseUrl
-        var fullUrl = url;
-        if (url && !url.startsWith('http') && typeof baseUrl !== 'undefined' && baseUrl) {
-          fullUrl = baseUrl.replace(/\\/+\$/, '') + '/' + url.replace(/^\\/+/, '');
+        var fullUrl = realUrl;
+        if (realUrl && !realUrl.startsWith('http') && typeof baseUrl !== 'undefined' && baseUrl) {
+          fullUrl = baseUrl.replace(/\\/+\$/, '') + '/' + realUrl.replace(/^\\/+/, '');
         }
-        var cacheKey = method.toUpperCase() === 'POST' ? 'http_post:' + fullUrl : 'http_get:' + fullUrl;
-        if (_javaCache[cacheKey] !== undefined) {
-          return _javaCache[cacheKey];
+
+        // 选择缓存 key
+        var cacheKey = method === 'POST' ? 'http_post:' + fullUrl : 'http_get:' + fullUrl;
+        var cached = _javaCache[cacheKey];
+        if (cached === undefined && fullUrl !== realUrl) {
+          // fallback: 尝试原始 url
+          var origKey = method === 'POST' ? 'http_post:' + realUrl : 'http_get:' + realUrl;
+          cached = _javaCache[origKey];
         }
-        // fallback: 尝试原始 url
-        if (fullUrl !== url) {
-          var origKey = method.toUpperCase() === 'POST' ? 'http_post:' + url : 'http_get:' + url;
-          if (_javaCache[origKey] !== undefined) return _javaCache[origKey];
+        if (cached !== undefined) {
+          return (typeof cached === 'object' && cached !== null && cached.body) ? cached.body : String(cached);
         }
         return '';
       }
@@ -1952,10 +2000,57 @@ class JsEngine {
             getHeader: function(name) { return this.headerMap[name] || ''; }
           };
         },
+        // [legado URL 选项兼容] 解析 url,{"method":"POST","body":{...}} 格式
+        // 返回 { method, body, headers, charset, ... } 或 null
+        _parseUrlOptions: function(urlStr) {
+          if (!urlStr || typeof urlStr !== 'string') return null;
+          var str = urlStr.trim();
+          var idx = str.indexOf(',{');
+          if (idx < 0) return null;
+          try {
+            var opt = JSON.parse(str.substring(idx + 1).trim());
+            // 附带纯 URL，方便调用方使用
+            opt._url = str.substring(0, idx).trim();
+            return opt;
+          } catch (e) { return null; }
+        },
+        // [legado URL 选项兼容] 从 url,{...} 中剥离出纯 URL
+        _extractUrl: function(urlStr) {
+          if (!urlStr || typeof urlStr !== 'string') return urlStr || '';
+          var str = urlStr.trim();
+          var idx = str.indexOf(',{');
+          return idx >= 0 ? str.substring(0, idx).trim() : str;
+        },
+        // [legado URL 选项兼容] 规范化 body：object → JSON 字符串
+        _normalizeBody: function(body) {
+          if (body == null) return '';
+          if (typeof body === 'object') return JSON.stringify(body);
+          return String(body);
+        },
+        // [legado URL 选项兼容] 合并 headers：option.headers 优先于参数 headers
+        _mergeHeaders: function(optHeaders, paramHeaders) {
+          var result = {};
+          if (paramHeaders && typeof paramHeaders === 'object') {
+            for (var k in paramHeaders) { if (Object.prototype.hasOwnProperty.call(paramHeaders, k)) result[k] = paramHeaders[k]; }
+          }
+          if (optHeaders && typeof optHeaders === 'object') {
+            for (var k in optHeaders) { if (Object.prototype.hasOwnProperty.call(optHeaders, k)) result[k] = optHeaders[k]; }
+          }
+          // headers 为 JSON 字符串时解析
+          if (typeof paramHeaders === 'string') {
+            try {
+              var parsed = JSON.parse(paramHeaders);
+              for (var k in parsed) { if (Object.prototype.hasOwnProperty.call(parsed, k)) result[k] = parsed[k]; }
+            } catch (e) {}
+          }
+          return result;
+        },
         get: function(url, headers) {
-          var fullUrl = url;
-          if (url && !url.startsWith('http') && typeof baseUrl !== 'undefined' && baseUrl) {
-            fullUrl = baseUrl.replace(/\\/+\$/, '') + '/' + url.replace(/^\\/+/, '');
+          // [legado 兼容] 解析 URL 选项，但 get 始终用 GET 语义（对齐 legado get 基于 Jsoup）
+          var realUrl = java._extractUrl(url);
+          var fullUrl = realUrl;
+          if (realUrl && !realUrl.startsWith('http') && typeof baseUrl !== 'undefined' && baseUrl) {
+            fullUrl = baseUrl.replace(/\\/+\$/, '') + '/' + realUrl.replace(/^\\/+/, '');
           }
           var cacheKey = 'http_get:' + fullUrl;
           if (_javaCache[cacheKey] !== undefined) {
@@ -1963,20 +2058,22 @@ class JsEngine {
             if (typeof cached === 'object' && cached !== null && 'body' in cached) return cached;
             return java._buildResponse(cached, fullUrl, {});
           }
-          if (fullUrl !== url) {
-            var origKey = 'http_get:' + url;
+          if (fullUrl !== realUrl) {
+            var origKey = 'http_get:' + realUrl;
             if (_javaCache[origKey] !== undefined) {
               var origCached = _javaCache[origKey];
               if (typeof origCached === 'object' && origCached !== null && 'body' in origCached) return origCached;
-              return java._buildResponse(origCached, url, {});
+              return java._buildResponse(origCached, realUrl, {});
             }
           }
           return java._buildResponse('', fullUrl, {});
         },
         post: function(url, body, headers) {
-          var fullUrl = url;
-          if (url && !url.startsWith('http') && typeof baseUrl !== 'undefined' && baseUrl) {
-            fullUrl = baseUrl.replace(/\\/+\$/, '') + '/' + url.replace(/^\\/+/, '');
+          // [legado 兼容] 解析 URL 选项，但 post 始终用 POST 语义
+          var realUrl = java._extractUrl(url);
+          var fullUrl = realUrl;
+          if (realUrl && !realUrl.startsWith('http') && typeof baseUrl !== 'undefined' && baseUrl) {
+            fullUrl = baseUrl.replace(/\\/+\$/, '') + '/' + realUrl.replace(/^\\/+/, '');
           }
           var cacheKey = 'http_post:' + fullUrl;
           if (_javaCache[cacheKey] !== undefined) {
@@ -1984,18 +2081,44 @@ class JsEngine {
             if (typeof cached === 'object' && cached !== null && 'body' in cached) return cached;
             return java._buildResponse(cached, fullUrl, {});
           }
-          if (fullUrl !== url) {
-            var origKey = 'http_post:' + url;
+          if (fullUrl !== realUrl) {
+            var origKey = 'http_post:' + realUrl;
             if (_javaCache[origKey] !== undefined) {
               var origCached = _javaCache[origKey];
               if (typeof origCached === 'object' && origCached !== null && 'body' in origCached) return origCached;
-              return java._buildResponse(origCached, url, {});
+              return java._buildResponse(origCached, realUrl, {});
             }
           }
           return java._buildResponse('', fullUrl, {});
         },
         // legado: ajax 返回 body 字符串（不是 Response 对象）
+        // [legado 兼容] 支持 url,{"method":"POST","body":{...}} 格式，自动选择 GET/POST
         ajax: function(url, headers) {
+          // 解析 URL 选项
+          var opt = java._parseUrlOptions(url);
+          if (opt && opt.method) {
+            var method = String(opt.method).toUpperCase();
+            var realUrl = opt._url || java._extractUrl(url);
+            var reqHeaders = java._mergeHeaders(opt.headers, headers);
+            if (method === 'POST') {
+              var body = java._normalizeBody(opt.body);
+              var resp = java.post(realUrl, body, reqHeaders);
+              return (typeof resp === 'object' && resp !== null && 'body' in resp) ? resp.body : String(resp || '');
+            }
+            if (method === 'HEAD') {
+              return java.head(realUrl, reqHeaders);
+            }
+            if (method === 'PUT' || method === 'DELETE') {
+              // PUT/DELETE 走 POST 缓存（Dart 侧预缓存时统一处理）
+              var body2 = java._normalizeBody(opt.body);
+              var resp2 = java.post(realUrl, body2, reqHeaders);
+              return (typeof resp2 === 'object' && resp2 !== null && 'body' in resp2) ? resp2.body : String(resp2 || '');
+            }
+            // 默认 GET
+            var resp3 = java.get(realUrl, reqHeaders);
+            return (typeof resp3 === 'object' && resp3 !== null && 'body' in resp3) ? resp3.body : String(resp3 || '');
+          }
+          // 普通 GET
           var resp = java.get(url, headers);
           return (typeof resp === 'object' && resp !== null && 'body' in resp) ? resp.body : String(resp || '');
         },
@@ -2415,22 +2538,56 @@ class JsEngine {
         },
 
         // ===== 网络（对齐 legado JsExtensions）=====
-        // java.connect(urlStr, header) — 完整 HTTP 请求，返回 response body
+        // java.connect(urlStr, header) — 完整 HTTP 请求，返回 StrResponse 对象
+        // [legado 兼容] 支持 url,{"method":"POST","body":{...}} 格式
+        // 返回 { body, url, headerMap, html, getHeader }（对齐 legado StrResponse）
         connect: function(urlStr, header, callTimeout) {
-          // 兼容 legado：connect 返回 body 字符串
-          var fullUrl = urlStr;
-          if (urlStr && !urlStr.startsWith('http') && typeof baseUrl !== 'undefined' && baseUrl) {
-            fullUrl = baseUrl.replace(/\\/+\\\$/, '') + '/' + urlStr.replace(/^\\/+/, '');
+          // 解析 URL 选项
+          var opt = java._parseUrlOptions(urlStr);
+          var realUrl = opt ? (opt._url || java._extractUrl(urlStr)) : urlStr;
+          var method = opt && opt.method ? String(opt.method).toUpperCase() : 'GET';
+          var body = opt ? java._normalizeBody(opt.body) : '';
+          var reqHeaders = opt ? java._mergeHeaders(opt.headers, header) : (header || {});
+
+          // 自动拼接 baseUrl
+          var fullUrl = realUrl;
+          if (realUrl && !realUrl.startsWith('http') && typeof baseUrl !== 'undefined' && baseUrl) {
+            fullUrl = baseUrl.replace(/\\/+\$/, '') + '/' + realUrl.replace(/^\\/+/, '');
           }
-          var cacheKey = 'http_connect:' + fullUrl;
-          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
-          // fallback: 尝试 get 缓存
-          return java.get(fullUrl, header);
+
+          // 按 method 选择缓存 key
+          var cacheKey = method === 'POST' ? 'http_post:' + fullUrl : 'http_get:' + fullUrl;
+          if (_javaCache[cacheKey] !== undefined) {
+            var cached = _javaCache[cacheKey];
+            if (typeof cached === 'object' && cached !== null && 'body' in cached) return cached;
+            return java._buildResponse(cached, fullUrl, reqHeaders);
+          }
+          // fallback: 尝试原始 url
+          if (fullUrl !== realUrl) {
+            var origKey = method === 'POST' ? 'http_post:' + realUrl : 'http_get:' + realUrl;
+            if (_javaCache[origKey] !== undefined) {
+              var origCached = _javaCache[origKey];
+              if (typeof origCached === 'object' && origCached !== null && 'body' in origCached) return origCached;
+              return java._buildResponse(origCached, realUrl, reqHeaders);
+            }
+          }
+          // 最终 fallback：走 java.get/post（会处理空响应）
+          if (method === 'POST') {
+            return java.post(realUrl, body, reqHeaders);
+          }
+          return java.get(realUrl, reqHeaders);
         },
         // java.head(urlStr, headers) — HEAD 请求（同步模式无法真正执行，从缓存取）
+        // [legado 兼容] 支持 URL 选项格式
         head: function(urlStr, headers, timeout) {
-          var cacheKey = 'http_head:' + urlStr;
+          var realUrl = java._extractUrl(urlStr);
+          var cacheKey = 'http_head:' + realUrl;
           if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          // fallback: 尝试原始 url
+          if (realUrl !== urlStr) {
+            var origKey = 'http_head:' + urlStr;
+            if (_javaCache[origKey] !== undefined) return _javaCache[origKey];
+          }
           return '';
         },
         // java.getCookie(tag) / java.getCookie(tag, key) — Cookie 管理
@@ -4862,6 +5019,52 @@ class JsEngine {
       }
     }
 
+    // 1.5 [legado URL 选项兼容] 扫描 java.ajax("url,{\"method\":\"POST\",...}") 等调用
+    // 解析 URL 选项，按 method 分类预缓存（GET 加入 httpUrls，POST 单独预缓存）
+    final urlOptionPostEntries = <String, String>{}; // url -> body
+    final urlOptionPostHeaders = <String, Map<String, String>>{}; // url -> headers
+    final urlOptionGetUrls = <String>{}; // 额外的 GET URL
+    final urlOptionGetHeaders = <String, Map<String, String>>{}; // url -> headers
+    for (final match in _urlOptionCallPattern.allMatches(jsCode)) {
+      final quote = match.group(1) ?? '"';
+      final rawStr = match.group(2) ?? '';
+      if (rawStr.isEmpty || !rawStr.contains(',{')) continue;
+      // 反转义字符串（处理 \" \' \\ 等）
+      final unescaped = _unescapeJsString(rawStr, quote);
+      // 处理模板变量 {{key}}, {{page}} 等
+      var resolvedStr = unescaped;
+      if (env != null) {
+        resolvedStr = _resolveTemplateVars(unescaped, env);
+      }
+      // 用 AnalyzeUrl 解析 URL 选项
+      try {
+        final parsed = legado_url.AnalyzeUrl.parse(resolvedStr, baseUrl: baseUrl);
+        final opt = parsed.option;
+        if (opt == null || opt.method == null) continue;
+        final method = opt.method!.toUpperCase();
+        final absoluteUrl = parsed.url;
+        if (absoluteUrl.isEmpty || !absoluteUrl.startsWith('http')) continue;
+
+        if (method == 'POST') {
+          final body = opt.body ?? '';
+          urlOptionPostEntries[absoluteUrl] = body;
+          if (opt.headers != null && opt.headers!.isNotEmpty) {
+            urlOptionPostHeaders[absoluteUrl] = opt.headers!;
+          }
+        } else if (method == 'HEAD') {
+          // HEAD 请求由后续 _headPattern 处理，这里跳过
+        } else {
+          // GET / PUT / DELETE 默认走 GET 缓存
+          urlOptionGetUrls.add(absoluteUrl);
+          if (opt.headers != null && opt.headers!.isNotEmpty) {
+            urlOptionGetHeaders[absoluteUrl] = opt.headers!;
+          }
+        }
+      } catch (_) {}
+    }
+    // URL 选项的 GET URL 加入 httpUrls 统一预缓存
+    httpUrls.addAll(urlOptionGetUrls);
+
     // 2. 扫描变量拼接 URL: java.ajax(url), java.get(baseUrl + "/api"), fetch(variable)
     // 优化：合并所有变量表达式为单次 evaluate，避免逐个求值
     final varExprs = <String>[];
@@ -5053,20 +5256,30 @@ class JsEngine {
             }
           }
         }
+        // [legado URL 选项兼容] 合并 URL 选项 POST 请求
+        postUrls.addAll(urlOptionPostEntries);
+
         if (postUrls.isNotEmpty) {
           final customHeaders = env?['headers'] as Map<String, String>?;
           final postResults = await _runWithConcurrency(() => postUrls.entries.map((entry) async {
             try {
+              // URL 选项 POST 请求可能有专属 headers
+              final optHeaders = urlOptionPostHeaders[entry.key];
+              final mergedHeaders = <String, String>{};
+              if (customHeaders != null) mergedHeaders.addAll(customHeaders);
+              if (optHeaders != null) mergedHeaders.addAll(optHeaders);
+              final effectiveHeaders = mergedHeaders.isNotEmpty ? mergedHeaders : null;
+
               String? result;
               if (entry.key.startsWith('http://')) {
-                final hdr = customHeaders?.entries.map((e) => '${e.key}: ${e.value}').join('\r\n');
+                final hdr = effectiveHeaders?.entries.map((e) => '${e.key}: ${e.value}').join('\r\n');
                 final r = nativeHttpPost(entry.key, entry.value, headers: hdr);
                 result = r?['body'] as String?;
               } else {
                 result = await NativeChannel.instance.httpPost(
                   entry.key,
                   body: entry.value,
-                  headers: customHeaders,
+                  headers: effectiveHeaders,
                 );
               }
               if (result != null) {
@@ -5787,6 +6000,68 @@ class JsEngine {
     } catch (_) {
       return url;
     }
+  }
+
+  /// [legado URL 选项兼容] 反转义 JS 字符串字面量
+  /// 处理 \" \' \\ \n \r \t 等转义序列
+  String _unescapeJsString(String raw, String quote) {
+    if (raw.isEmpty) return raw;
+    // 双引号字符串：用 jsonDecode 安全反转义
+    if (quote == '"') {
+      try {
+        final decoded = jsonDecode('"$raw"');
+        if (decoded is String) return decoded;
+      } catch (_) {
+        // fallback 到手动反转义
+      }
+    }
+    // 单引号字符串或 fallback：手动反转义
+    final result = StringBuffer();
+    var i = 0;
+    while (i < raw.length) {
+      final ch = raw[i];
+      if (ch == '\\' && i + 1 < raw.length) {
+        final next = raw[i + 1];
+        switch (next) {
+          case 'n':
+            result.write('\n');
+            break;
+          case 'r':
+            result.write('\r');
+            break;
+          case 't':
+            result.write('\t');
+            break;
+          case '\\':
+            result.write('\\');
+            break;
+          case '"':
+            result.write('"');
+            break;
+          case "'":
+            result.write("'");
+            break;
+          case '/':
+            result.write('/');
+            break;
+          case 'b':
+            result.write('\b');
+            break;
+          case 'f':
+            result.write('\f');
+            break;
+          default:
+            // 未知转义，保留原样
+            result.write(ch);
+            result.write(next);
+        }
+        i += 2;
+      } else {
+        result.write(ch);
+        i++;
+      }
+    }
+    return result.toString();
   }
 
   /// 分割 JS 函数调用的参数字符串（简化版，不支持嵌套括号/字符串内逗号）
