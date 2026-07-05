@@ -666,7 +666,15 @@ class WebBook {
         await _resolveUrl(source.searchUrl!, keyword: keyword, page: page);
     final parsed =
         _parseUrlWithOption(resolvedSearchUrl, keyword: keyword, page: page);
-    AppLogger.instance.info(LogCategory.network, '搜索URL: ${parsed.url}');
+    // 打印 URL 和选项模板（method/headers/body），便于诊断请求是否带上了 Referer 等关键 headers
+    final opt = parsed.option;
+    final methodInfo = opt?.method != null ? ' method=${opt!.method}' : '';
+    final headersInfo = opt?.headers != null && opt!.headers!.isNotEmpty
+        ? ' headers=${opt.headers}'
+        : '';
+    final bodyInfo = opt?.body != null && opt!.body!.isNotEmpty ? ' body=${opt.body}' : '';
+    AppLogger.instance.info(LogCategory.network,
+        '搜索URL: ${parsed.url}$methodInfo$headersInfo$bodyInfo');
 
     try {
       final response = await _executeRequest(parsed, keyword: keyword);
