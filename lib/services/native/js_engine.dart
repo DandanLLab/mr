@@ -4667,7 +4667,12 @@ class JsEngine {
             detail: 'evalResult: $result');
         return;
       }
-      if (result == 'undefined' || result == '[]' || result.isEmpty) return;
+      if (result == 'undefined' || result == '[]' || result.isEmpty) {
+        // 诊断日志：console 无输出（用户代码未调用 console.log，或 console 被覆盖但 _getLogs 仍存在）
+        // 注意：这里用 info 级别，确保在日志 tab 默认级别下可见
+        AppLogger.instance.info(LogCategory.js, 'console 无日志输出（_consoleLogs 为空）');
+        return;
+      }
       if (result == 'NEED_REINJECT') {
         // 诊断日志：console 被用户代码覆盖（如 eval(result) 里有 console = {...}）
         // 此时原有 console.log 日志已丢失，无法恢复，只能重新注入供下次使用
