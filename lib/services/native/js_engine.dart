@@ -977,7 +977,8 @@ class JsEngine {
           }
         },
         clear: function() { _consoleLogs.length = 0; },
-        _getLogs: function() { return _consoleLogs; },
+        // 返回 slice 副本，避免调用方持有引用后被 _clearLogs 清空
+        _getLogs: function() { return _consoleLogs.slice(); },
         _clearLogs: function() { _consoleLogs.length = 0; _logSeq = 0; },
         _logSeq: function() { return _logSeq; },
       };
@@ -3933,11 +3934,13 @@ class JsEngine {
   }
 
   /// 输出 JS 执行链路追踪：脚本预览 + 行数 + 耗时 + 结果
+  /// message 以 [JS] 开头，匹配调试 tab 的注入规则（debug 级 + [JS] 前缀）
   void _logExecutionTrace(String script, int elapsedMs, bool isError, String? resultOrErr) {
     if (!kDebugMode) return;
     // 日志出锁设计：锁内只记录关键信息，字符串构建移到 AppLogger 中异步处理
     // 避免锁内在 debugPrint 上停留
-    AppLogger.instance.debug(LogCategory.js, '[JS eval ${elapsedMs}ms ${isError ? "ERROR" : "OK"}] ${script.length > 80 ? "${script.substring(0, 80)}..." : script}',
+    final scriptPreview = script.length > 80 ? '${script.substring(0, 80)}...' : script;
+    AppLogger.instance.debug(LogCategory.js, '[JS] eval ${elapsedMs}ms ${isError ? "ERROR" : "OK"} | $scriptPreview',
       detail: resultOrErr != null && resultOrErr.length > 200 ? '${resultOrErr.substring(0, 200)}...' : (resultOrErr ?? ''));
   }
 
@@ -4628,6 +4631,12 @@ class JsEngine {
   /// 提取 QuickJS 中 console 缓存的日志，同步到 AppLogger
   /// 借鉴 legado 的调试输出机制：JS 中的 console.log/warn/error 输出到调试页面
   /// 优化：合并为单次 evaluate，Release 模式跳过
+  ///
+  /// 关键设计：直接调用 _jsRuntime!.evaluate，**不走 evaluate() 包装**。
+  /// 原因：本方法常在 processJsRule / batchEvaluate 的 _evalLock 锁内被调用，
+  /// 此时 _evalBusy=true，若走 evaluate() 会被 `if (_evalBusy) return null` 拦截，
+  /// 导致 console 日志永远无法提取。直接调用 _jsRuntime!.evaluate 可绕过此拦截，
+  /// 安全性由 _isFlushingLogs 防递归标志 + 调用方已持锁保证。
   void _flushConsoleLogs() {
     if (!_initialized || _jsRuntime == null) return;
     // Release 模式跳过日志提取（性能优化）
@@ -4637,7 +4646,8 @@ class JsEngine {
     _isFlushingLogs = true;
     try {
       // 单次 evaluate：检查+获取+清除日志
-      final result = evaluate('''(function(){
+      // 注意：console._getLogs() 已返回 slice 副本，_clearLogs 不会影响已取出的 logs
+      final evalResult = _jsRuntime!.evaluate('''(function(){
   var logs = [];
   if(typeof __consoleLogs !== "undefined" && __consoleLogs.length > 0){
     logs = __consoleLogs.slice();
@@ -4650,10 +4660,11 @@ class JsEngine {
   }
   return JSON.stringify(logs);
 })()''');
-      if (result == null || result == 'undefined' || result == '[]' || result.isEmpty) return;
+      final result = evalResult.stringResult;
+      if (evalResult.isError || result == 'undefined' || result == '[]' || result.isEmpty) return;
       if (result == 'NEED_REINJECT') {
-        // 重新注入 console
-        evaluate('var __consoleLogs = []; globalThis.console = { log: function() { var msg = Array.from(arguments).join(" "); __consoleLogs.push({level:"log", msg:msg}); }, warn: function() { var msg = Array.from(arguments).join(" "); __consoleLogs.push({level:"warn", msg:msg}); }, error: function() { var msg = Array.from(arguments).join(" "); __consoleLogs.push({level:"error", msg:msg}); }, info: function() { var msg = Array.from(arguments).join(" "); __consoleLogs.push({level:"info", msg:msg}); }, debug: function() { var msg = Array.from(arguments).join(" "); __consoleLogs.push({level:"debug", msg:msg}); } };');
+        // 重新注入 console（直接调用 _jsRuntime，避免 _evalBusy 拦截）
+        _jsRuntime!.evaluate('var __consoleLogs = []; globalThis.console = { log: function() { var msg = Array.from(arguments).join(" "); __consoleLogs.push({level:"log", msg:msg}); }, warn: function() { var msg = Array.from(arguments).join(" "); __consoleLogs.push({level:"warn", msg:msg}); }, error: function() { var msg = Array.from(arguments).join(" "); __consoleLogs.push({level:"error", msg:msg}); }, info: function() { var msg = Array.from(arguments).join(" "); __consoleLogs.push({level:"info", msg:msg}); }, debug: function() { var msg = Array.from(arguments).join(" "); __consoleLogs.push({level:"debug", msg:msg}); } };');
         return;
       }
       if (!result.startsWith('[')) return;
@@ -4668,12 +4679,16 @@ class JsEngine {
         switch (level) {
           case 'error':
             AppLogger.instance.error(LogCategory.js, taggedMsg);
+            break;
           case 'warn':
             AppLogger.instance.warn(LogCategory.js, taggedMsg);
+            break;
           case 'info':
             AppLogger.instance.info(LogCategory.js, taggedMsg);
+            break;
           case 'debug':
             AppLogger.instance.debug(LogCategory.js, taggedMsg);
+            break;
           default:
             AppLogger.instance.info(LogCategory.js, taggedMsg);
         }

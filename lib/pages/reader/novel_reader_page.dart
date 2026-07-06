@@ -431,7 +431,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   Future<void> _loadChapterContent() async {
-    if (_book == null || _chapters.isEmpty) {
+    if (_book == null || _dataProvider == null || _chapters.isEmpty) {
       _isChangingChapterByPageView = false;
       setState(() {
         _isLoading = false;
@@ -670,7 +670,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   Future<void> _preloadAdjacentChapters(int chapterIndex) async {
-    if (_book == null) return;
+    if (_book == null || _dataProvider == null) return;
 
     // 预加载下一章
     String? nextContent;
@@ -706,7 +706,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   Future<void> _preloadNextChapter() async {
-    if (_book == null || _nextContent != null) return;
+    if (_book == null || _dataProvider == null || _nextContent != null) return;
     final nextIndex = _nextReadableChapterIndex(_currentChapterIndex);
     if (nextIndex != null) {
       final nextChapter = _chapters[nextIndex];
@@ -722,7 +722,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   /// 预加载上一章（用于滚动模式往上滑）
   Future<void> _preloadPrevChapter() async {
-    if (_book == null || _prevContent != null) return;
+    if (_book == null || _dataProvider == null || _prevContent != null) return;
     final prevIndex = _previousReadableChapterIndex(_currentChapterIndex);
     if (prevIndex != null) {
       final prevChapter = _chapters[prevIndex];

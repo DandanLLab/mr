@@ -455,14 +455,19 @@ class ReaderProvider extends ChangeNotifier {
     await _ttsManager!.init(
       rate: rate,
       onStateChanged: () {
-        _isTtsPlaying = _ttsManager!.isSpeaking;
-        _isTtsPaused = _ttsManager!.isPaused;
-        _ttsParagraphIndex = _ttsManager!.paragraphIndex;
+        // 防护：disposeTts() 可能在回调队列中置 null，导致 _ttsManager! 崩溃
+        final manager = _ttsManager;
+        if (manager == null) return;
+        _isTtsPlaying = manager.isSpeaking;
+        _isTtsPaused = manager.isPaused;
+        _ttsParagraphIndex = manager.paragraphIndex;
         onStateChanged?.call();
         notifyListeners();
       },
       onParagraphChanged: () {
-        _ttsParagraphIndex = _ttsManager!.paragraphIndex;
+        final manager = _ttsManager;
+        if (manager == null) return;
+        _ttsParagraphIndex = manager.paragraphIndex;
         onParagraphChanged?.call();
         notifyListeners();
       },

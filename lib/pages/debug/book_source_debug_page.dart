@@ -49,7 +49,9 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
   // AppLogger 订阅
   StreamSubscription<LogEntry>? _logSubscription;
   final List<LogEntry> _appLogs = [];
-  LogLevel _logFilterLevel = LogLevel.verbose;
+  // 默认 info 级别降噪：过滤掉 verbose/debug 噪音，专注关键流程
+  // 调试 tab 的 [JS] 前缀日志独立注入，不受此过滤影响
+  LogLevel _logFilterLevel = LogLevel.info;
   LogCategory? _logFilterCategory;
 
   // setState 节流：调试期间日志高频产生，逐条 setState 会导致 UI 卡死
@@ -1536,7 +1538,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
                   child: Text(
                     entry.message,
                     style: TextStyle(fontSize: 12, color: textColor),
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -1552,7 +1554,7 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
                     color: detailColor,
                     fontFamily: 'monospace',
                   ),
-                  maxLines: 3,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
