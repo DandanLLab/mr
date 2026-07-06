@@ -100,19 +100,13 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
         _appLogs.removeRange(0, _appLogs.length - 500);
       }
       // 判断是否需要注入调试 tab
-      // error/warning：全部注入
-      // info：注入网络、解析、JS 分类（关键操作信息）
-      // debug：仅注入 JS console 打印指令（[JS] 前缀）
+      // 调试 tab 只显示：错误/警告 + JS console 输出（[JS] 前缀）
+      // 其他详细信息（解析、网络、引擎等 info 日志）去日志 tab 查看
+      // 注意：不能用 category 判断，因为 _classifyPrintMessage 会把
+      // 含 'JSON' 的消息误分类为 js（'JSON' 包含 'JS' 子串）
       final shouldInject = entry.level == LogLevel.error ||
           entry.level == LogLevel.warning ||
-          (entry.level == LogLevel.info &&
-              (entry.category == LogCategory.network ||
-                  entry.category == LogCategory.parse ||
-                  entry.category == LogCategory.js ||
-                  entry.category == LogCategory.engine)) ||
-          (entry.level == LogLevel.debug &&
-              entry.category == LogCategory.js &&
-              entry.message.startsWith('[JS]'));
+          entry.message.startsWith('[JS]');
       if (shouldInject) {
         final prefix = switch (entry.level) {
           LogLevel.error => '🔴',

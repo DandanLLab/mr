@@ -4661,14 +4661,29 @@ class JsEngine {
   return JSON.stringify(logs);
 })()''');
       final result = evalResult.stringResult;
-      if (evalResult.isError || result == 'undefined' || result == '[]' || result.isEmpty) return;
+      if (evalResult.isError) {
+        // 诊断日志：提取脚本本身报错（极少见，runtime 异常时可能发生）
+        AppLogger.instance.warn(LogCategory.js, 'console 日志提取失败',
+            detail: 'evalResult: $result');
+        return;
+      }
+      if (result == 'undefined' || result == '[]' || result.isEmpty) return;
       if (result == 'NEED_REINJECT') {
+        // 诊断日志：console 被用户代码覆盖（如 eval(result) 里有 console = {...}）
+        // 此时原有 console.log 日志已丢失，无法恢复，只能重新注入供下次使用
+        AppLogger.instance.warn(LogCategory.js, 'console 被用户代码覆盖，重新注入',
+            detail: '用户 JS 中的 eval(result) 或直接赋值覆盖了 globalThis.console，'
+                '覆盖前的 console.log 输出已丢失');
         // 重新注入 console（直接调用 _jsRuntime，避免 _evalBusy 拦截）
         _jsRuntime!.evaluate('var __consoleLogs = []; globalThis.console = { log: function() { var msg = Array.from(arguments).join(" "); __consoleLogs.push({level:"log", msg:msg}); }, warn: function() { var msg = Array.from(arguments).join(" "); __consoleLogs.push({level:"warn", msg:msg}); }, error: function() { var msg = Array.from(arguments).join(" "); __consoleLogs.push({level:"error", msg:msg}); }, info: function() { var msg = Array.from(arguments).join(" "); __consoleLogs.push({level:"info", msg:msg}); }, debug: function() { var msg = Array.from(arguments).join(" "); __consoleLogs.push({level:"debug", msg:msg}); } };');
         return;
       }
       if (!result.startsWith('[')) return;
       final logs = jsonDecode(result) as List;
+      if (logs.isNotEmpty) {
+        // 诊断日志：记录提取到的日志数量，便于排查 console.log 没输出的问题
+        AppLogger.instance.debug(LogCategory.js, 'console 提取到 ${logs.length} 条日志');
+      }
       for (final log in logs) {
         if (log is! Map) continue;
         final level = log['level'] as String? ?? 'log';
@@ -4693,7 +4708,11 @@ class JsEngine {
             AppLogger.instance.info(LogCategory.js, taggedMsg);
         }
       }
-    } catch (_) {} finally {
+    } catch (e) {
+      // 诊断日志：提取过程异常（如 runtime 被销毁、JSON 解析失败等）
+      AppLogger.instance.warn(LogCategory.js, 'console 日志提取异常',
+          detail: e.toString());
+    } finally {
       _isFlushingLogs = false;
     }
   }

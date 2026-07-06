@@ -177,7 +177,9 @@ class AppLogger {
     }
 
     // 根据内容关键词判断分类
-    if (msg.contains('JS') ||
+    // 注意：不能用 contains('JS')，因为 'JSON' 包含 'JS' 子串会误分类
+    // 用 \bJS\b 单词边界匹配，'JSON' 中的 'JS' 不是单词边界不会匹配
+    if (RegExp(r'\bJS\b').hasMatch(msg) ||
         msg.contains('QuickJS') ||
         msg.contains('引擎') ||
         msg.contains('FFI')) {
