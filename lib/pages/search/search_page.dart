@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
@@ -441,6 +442,7 @@ class _SearchPageState extends State<SearchPage> {
                     coverUrl,
                     bookName: result['name']?.toString(),
                     bookAuthor: author,
+                    sourceUrl: result['sourceUrl']?.toString(),
                   ),
                 ),
               ),
@@ -588,6 +590,7 @@ class _SearchPageState extends State<SearchPage> {
                 coverUrl,
                 bookName: result['name']?.toString(),
                 bookAuthor: author,
+                sourceUrl: result['sourceUrl']?.toString(),
               ),
             ),
             Padding(
@@ -666,10 +669,13 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   /// 构建搜索结果封面 - 接入封面配置
+  ///
+  /// [sourceUrl] 书源 URL，用于查找书源并提取防盗链请求头（Referer 等）
   Widget _buildSearchCoverImage(
     String coverUrl, {
     String? bookName,
     String? bookAuthor,
+    String? sourceUrl,
   }) {
     final coverConfig = CoverConfigService.instance;
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -687,6 +693,7 @@ class _SearchPageState extends State<SearchPage> {
       final maxWidthDiskCache = coverConfig.loadCoverHighQuality ? null : 320;
       return CachedNetworkImage(
         imageUrl: coverUrl,
+        httpHeaders: _buildCoverHeaders(sourceUrl),
         fit: BoxFit.cover,
         memCacheWidth: memCacheWidth,
         maxWidthDiskCache: maxWidthDiskCache,
@@ -698,6 +705,76 @@ class _SearchPageState extends State<SearchPage> {
     }
 
     return _coverPlaceholder(bookName: bookName, bookAuthor: bookAuthor);
+  }
+
+  /// 根据书源 URL 构建封面图请求头
+  ///
+  /// 很多书源网站有防盗链机制，加载封面图时必须带 Referer 和 User-Agent，
+  /// 否则返回 403 Forbidden。这里从书源的 header 字段提取请求头，
+  /// 并自动补充 Referer（书源 URL）和默认 User-Agent。
+  Map<String, String> _buildCoverHeaders(String? sourceUrl) {
+    final headers = <String, String>{};
+    if (sourceUrl == null || sourceUrl.isEmpty) return headers;
+
+    // 从 SearchProvider 查找对应书源
+    final source = context
+        .read<SearchProvider>()
+        .bookSources
+        .where((s) => s.bookSourceUrl == sourceUrl)
+        .firstOrNull;
+    if (source == null) return headers;
+
+    // 解析书源的 header 字段（可能是 JSON 格式或 Key: Value 按行格式）
+    final headerStr = source.header;
+    if (headerStr != null && headerStr.isNotEmpty) {
+      try {
+        final decoded = json.decode(headerStr);
+        if (decoded is Map) {
+          decoded.forEach((key, value) {
+            final val = value.toString();
+            if (val.isNotEmpty) {
+              headers[key.toString()] = val;
+            }
+          });
+        }
+      } catch (_) {
+        // 非 JSON 格式，按行解析 Key: Value
+        for (final line in headerStr.split('\n')) {
+          final parts = line.split(':');
+          if (parts.length >= 2) {
+            final key = parts[0].trim();
+            final val = parts.sublist(1).join(':').trim();
+            if (key.isNotEmpty && val.isNotEmpty) {
+              headers[key] = val;
+            }
+          }
+        }
+      }
+    }
+
+    // 补充 Referer（使用书源 URL 作为来源页，绕过防盗链）
+    headers.putIfAbsent(
+        'Referer', () => _extractBaseUrl(sourceUrl));
+
+    // 补充默认 User-Agent
+    headers.putIfAbsent(
+      'User-Agent',
+      () => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+          '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    );
+
+    return headers;
+  }
+
+  /// 从完整 URL 中提取根 URL（scheme://host），用作 Referer
+  String _extractBaseUrl(String url) {
+    try {
+      final uri = Uri.parse(url);
+      if (uri.hasScheme && uri.host.isNotEmpty) {
+        return '${uri.scheme}://${uri.host}';
+      }
+    } catch (_) {}
+    return url;
   }
 
   List<String> _resultTags(Map<String, dynamic> result) {

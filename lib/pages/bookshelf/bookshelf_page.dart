@@ -1,12 +1,15 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/book.dart';
+import '../../models/book_source.dart';
 import '../../providers/bookshelf_provider.dart';
 import '../../routes/app_routes.dart';
 import '../../services/local_book/local_book_service.dart';
+import '../../services/storage_service.dart';
 import '../../services/cover_config_service.dart';
 import '../../utils/design_tokens.dart';
 
@@ -2364,6 +2367,7 @@ class _BookshelfPageState extends State<BookshelfPage>
 
       return CachedNetworkImage(
         imageUrl: coverUrl,
+        httpHeaders: _buildCoverHeaders(book),
         fit: BoxFit.cover,
         width: double.infinity,
         height: double.infinity,
@@ -2389,6 +2393,79 @@ class _BookshelfPageState extends State<BookshelfPage>
       bookAuthor: book.displayAuthor,
       isDark: isDark,
     );
+  }
+
+  /// 根据书籍所属书源构建封面图请求头
+  ///
+  /// 很多书源网站有防盗链机制，加载封面图时必须带 Referer 和 User-Agent，
+  /// 否则返回 403 Forbidden。这里从书源的 header 字段提取请求头，
+  /// 并自动补充 Referer（书源 URL）和默认 User-Agent。
+  Map<String, String> _buildCoverHeaders(Book book) {
+    final headers = <String, String>{};
+    final sourceUrl = book.sourceUrl;
+    if (sourceUrl == null || sourceUrl.isEmpty) return headers;
+
+    // 从 StorageService 查找对应书源
+    final sourceData = StorageService.instance.getBookSource(sourceUrl);
+    if (sourceData == null) return headers;
+
+    BookSource? source;
+    try {
+      source = BookSource.fromJson(sourceData);
+    } catch (_) {
+      return headers;
+    }
+
+    // 解析书源的 header 字段（可能是 JSON 格式或 Key: Value 按行格式）
+    final headerStr = source.header;
+    if (headerStr != null && headerStr.isNotEmpty) {
+      try {
+        final decoded = json.decode(headerStr);
+        if (decoded is Map) {
+          decoded.forEach((key, value) {
+            final val = value.toString();
+            if (val.isNotEmpty) {
+              headers[key.toString()] = val;
+            }
+          });
+        }
+      } catch (_) {
+        // 非 JSON 格式，按行解析 Key: Value
+        for (final line in headerStr.split('\n')) {
+          final parts = line.split(':');
+          if (parts.length >= 2) {
+            final key = parts[0].trim();
+            final val = parts.sublist(1).join(':').trim();
+            if (key.isNotEmpty && val.isNotEmpty) {
+              headers[key] = val;
+            }
+          }
+        }
+      }
+    }
+
+    // 补充 Referer（使用书源 URL 作为来源页，绕过防盗链）
+    headers.putIfAbsent('Referer', () => _extractBaseUrl(sourceUrl));
+
+    // 补充默认 User-Agent
+    headers.putIfAbsent(
+      'User-Agent',
+      () => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+          '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    );
+
+    return headers;
+  }
+
+  /// 从完整 URL 中提取根 URL（scheme://host），用作 Referer
+  String _extractBaseUrl(String url) {
+    try {
+      final uri = Uri.parse(url);
+      if (uri.hasScheme && uri.host.isNotEmpty) {
+        return '${uri.scheme}://${uri.host}';
+      }
+    } catch (_) {}
+    return url;
   }
 
   Future<void> _openBook(Book book) async {
