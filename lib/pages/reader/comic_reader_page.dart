@@ -18,7 +18,7 @@ import '../../providers/bookshelf_provider.dart';
 import '../../routes/app_routes.dart';
 import '../../services/book_data_provider.dart';
 import '../../services/chapter_cache_service.dart';
-import '../../services/native/platform_channel.dart';
+import '../../services/native/platform_bridge.dart';
 import '../../services/reader_bookmark_service.dart';
 import '../../services/source_engine/analyze_url.dart';
 import '../../services/storage_service.dart';
@@ -168,7 +168,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   }
 
   Future<void> _initializeReader() async {
-    _originalScreenBrightness = await NativeChannel.instance
+    _originalScreenBrightness = await PlatformBridge.instance
         .getScreenBrightness();
     await _loadSettings();
     await _loadBook();
@@ -185,7 +185,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     _pageController?.dispose();
     // 恢复原始亮度
     unawaited(
-      NativeChannel.instance.setScreenBrightness(_originalScreenBrightness),
+      PlatformBridge.instance.setScreenBrightness(_originalScreenBrightness),
     );
     unawaited(WakelockPlus.disable());
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -204,7 +204,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
 
     // 获取当前亮度作为原始亮度
     try {
-      _originalScreenBrightness = await NativeChannel.instance
+      _originalScreenBrightness = await PlatformBridge.instance
           .getScreenBrightness();
     } catch (_) {
       _originalScreenBrightness = 0.5;
@@ -226,7 +226,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     });
     // 设置亮度
     if (_screenBrightness >= 0) {
-      unawaited(NativeChannel.instance.setScreenBrightness(_screenBrightness));
+      unawaited(PlatformBridge.instance.setScreenBrightness(_screenBrightness));
     }
     if (_keepScreenOn) {
       WakelockPlus.enable();
@@ -2266,14 +2266,14 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       // 每 30ms 最多调用一次原生方法
       if (now - lastNativeCallTime >= 30) {
         lastNativeCallTime = now;
-        NativeChannel.instance.setScreenBrightness(value);
+        PlatformBridge.instance.setScreenBrightness(value);
         pendingValue = null;
       } else {
         pendingValue = value;
         throttleTimer?.cancel();
         throttleTimer = Timer(const Duration(milliseconds: 30), () {
           if (pendingValue != null) {
-            NativeChannel.instance.setScreenBrightness(pendingValue!);
+            PlatformBridge.instance.setScreenBrightness(pendingValue!);
             pendingValue = null;
           }
         });
@@ -2296,7 +2296,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
           Future<void> saveBrightness(double value) async {
             throttleTimer?.cancel();
             // 确保最后的值被设置
-            await NativeChannel.instance.setScreenBrightness(value);
+            await PlatformBridge.instance.setScreenBrightness(value);
             final prefs = await SharedPreferences.getInstance();
             await prefs.setDouble(_brightnessKey, value);
           }
@@ -2306,7 +2306,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             final value = followSystem ? -1.0 : 0.5;
             setState(() => _screenBrightness = value);
             setSheetState(() {});
-            await NativeChannel.instance.setScreenBrightness(value);
+            await PlatformBridge.instance.setScreenBrightness(value);
             final prefs = await SharedPreferences.getInstance();
             await prefs.setDouble(_brightnessKey, value);
           }

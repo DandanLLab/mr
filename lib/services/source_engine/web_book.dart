@@ -12,8 +12,8 @@ import 'analyze_rule.dart';
 import 'analyze_url.dart' as legado_url;
 import 'charset_utils.dart';
 import 'web_proxy.dart';
-import '../native/js_advanced_service.dart';
 import '../native/js_engine.dart';
+import '../native/platform_bridge.dart';
 /// 每个规则类型只显示一次日志的集合
 final Set<String> _loggedRuleTags = {};
 
@@ -138,7 +138,7 @@ class HttpClient {
 
   /// 执行请求（类似 OkHttp 的 Call.execute）
   ///
-  /// Android 端优先使用 OkHttp（NativeChannel），更可靠：
+  /// Android 端优先使用 Dio，更可靠：
   /// - OkHttp 原生支持 HTTP/2、连接池、自动重试
   /// - 不受 Dart VM 网络栈限制
   /// - 正确处理编码和重定向
@@ -1725,10 +1725,9 @@ class WebBook {
       // If webJs is set, use WebView to render the page
       if (contentRule.webJs != null && contentRule.webJs!.isNotEmpty) {
         try {
-          final webJsResult = await JsAdvancedService.instance.executeWebJs(
+          final webJsResult = await PlatformBridge.instance.executeWebViewJs(
             url: response.url,
-            webJs: contentRule.webJs!,
-            source: source,
+            jsCode: contentRule.webJs!,
             sourceRegex: contentRule.sourceRegex,
             html: html,
           );
@@ -1992,10 +1991,9 @@ class WebBook {
 
       if (contentRule.webJs != null && contentRule.webJs!.isNotEmpty) {
         try {
-          final webJsResult = await JsAdvancedService.instance.executeWebJs(
+          final webJsResult = await PlatformBridge.instance.executeWebViewJs(
             url: response.url,
-            webJs: contentRule.webJs!,
-            source: source,
+            jsCode: contentRule.webJs!,
             sourceRegex: contentRule.sourceRegex,
             html: html,
           );

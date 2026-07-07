@@ -7,7 +7,7 @@
 ```bash
 flutter pub get          # 安装依赖
 flutter run              # 在连接的设备/模拟器上运行
-flutter build apk        # 构建 Android APK（触发 QuickJS C 桥接 CMake 编译）
+flutter build apk        # 构建 Android APK
 flutter test             # 运行 test/ 下全部测试
 flutter analyze          # lint + 静态分析
 ```
@@ -21,7 +21,7 @@ flutter analyze          # lint + 静态分析
 - `widget_test.dart` — 占位，恒通过
 - `legado_rule_test.dart` — CSS/JSoup 链式选择器规则
 - `book_source_compat_test.dart` — 书源导入、URL 解析、元数据合并、源定位
-- `crypto_native_test.dart` — C 原生加密对比（需 Android 真机/模拟器加载 `libquickjs_c_bridge.so`，桌面测试运行器会失败）
+- `crypto_native_test.dart` — CryptoJS polyfill 加密对比（需 Android 真机/模拟器加载 flutter_js，桌面测试运行器会失败）
 
 ```bash
 flutter test test/legado_rule_test.dart
@@ -36,8 +36,9 @@ CI 不跑测试，仅本地运行。
 |----|------|
 | 状态管理 | Provider（`lib/providers/` 6 个） |
 | 存储 | Hive（`main.dart` 初始化） |
-| HTTP | Dio（Web 走 `ProxyService` 启动的 CORS 代理） |
-| JS | 双引擎：QuickJS（`flutter_js` + FFI）+ Rhino（Android 原生），由 `EngineDispatcher` 调度 |
+| HTTP | Dio（`PlatformBridge` 统一封装，Web 走 `ProxyService` 启动的 CORS 代理） |
+| JS | QuickJS（`flutter_js` 包），条件导出 Web 桩 |
+| 原生 API | MethodChannel（`PlatformBridge` 统一封装：亮度/WebView/Cookie/设备信息） |
 | 路由 | 自定义 `AppPageRoute` + `PageRouteBuilder`，零时长切换，定义于 `lib/routes/app_routes.dart` |
 
 入口：`lib/main.dart` — 依次初始化 Hive、`StorageService`、`JsEngine`、`CoverConfigService`，再运行 `DanShenqiApp`。
@@ -46,8 +47,8 @@ CI 不跑测试，仅本地运行。
 
 ```
 lib/
-  services/source_engine/   # Legado 规则引擎核心（analyze_rule / web_book / legado_json_path / legado_xpath / js_engine / proxy_service）
-  services/native/          # JS 引擎调度、QuickJS FFI 绑定、平台通道
+  services/source_engine/   # Legado 规则引擎核心（analyze_rule / web_book / legado_json_path / legado_xpath / proxy_service）
+  services/native/          # JS 引擎（flutter_js + 条件导出）、PlatformBridge（Dio HTTP + MethodChannel）
   models/                   # BookSource / Book / Chapter 等及 rules/ 子模型
   pages/                    # 13 个子目录：bookshelf / reader(comic+novel) / player(audio+video) / debug / detail / search / discovery / explore / miniprogram / web / profile / settings / main
   providers/                # App / Bookshelf / Discovery / Reader / Search / ExploreShow
@@ -55,18 +56,25 @@ lib/
   utils/                    # design_tokens 等工具
   widgets/                  # 公共组件 + reader/ 子组件
   themes/                   # 主题配置 + 圆角徽标
+assets/
+  js_polyfill/              # JS polyfill 文件（node-polyfill / crypto-js / jsoup-lite / java-bridge）
 ```
 
 ## Web 平台
 
 `kIsWeb` 时由 `main.dart` 中 `ProxyService.instance.start()` 自动启动 CORS 代理。工具脚本：`tools/cors-proxy.js`。
+JS 引擎在 Web 平台使用桩实现（不支持 JS 执行），通过 `js_engine.dart` 条件导出切换。
 
-## 原生 C 桥接
+## JS 引擎架构
 
-- 源码：`quickjs/`（含 `crypto/`、`lexbor/` 等子目录）
-- 编译产物：`libquickjs_c_bridge.so`（Android）/ `quickjs_c_bridge.dll`（Windows）
-- 构建脚本：`android/app/src/main/cpp/CMakeLists.txt` + `quickjs_bridge.map`
-- 入口绑定：`lib/services/native/quickjs_runtime.dart`（FFI）+ `quickjs_runtime_stub.dart`（Web 桩）
+- **原生平台**（Android/iOS/Windows/Linux/macOS）：`flutter_js` 包内置 QuickJS，通过 FFI 绑定
+- **Web 平台**：`js_engine_web.dart` 桩实现，所有 JS 方法返回空值
+- **条件导出**：`js_engine.dart` → `js_engine_native.dart`（原生）/ `js_engine_web.dart`（Web）
+- **Polyfill**：`assets/js_polyfill/` 下 4 个 JS 文件，从 assets 加载注入 QuickJS
+  - `node-polyfill.js` — process/Buffer/URL/console/btoa/atob 等 Node.js 核心模块
+  - `crypto-js.js` — CryptoJS 兼容 API（AES/MD5/SHA1/SHA256/HMAC-SHA256）
+  - `jsoup-lite.js` — 简化 CSS 选择器引擎
+  - `java-bridge.js` — Legado `java` 对象兼容层（网络请求重定向到 Dart Dio）
 
 ## 静态分析
 

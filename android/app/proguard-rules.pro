@@ -9,14 +9,12 @@
 # Hive (Hive 不依赖 protobuf，无需 keep GeneratedMessageLite)
 -dontwarn com.google.protobuf.**
 
-# Rhino JS引擎 (Android没有java.beans包)
+# flutter_js (QuickJS FFI 绑定，Android 没有 java.beans 包)
 -dontwarn java.beans.**
--dontwarn org.mozilla.javascript.JavaToJSONConverters
 
 # 以下库 R8 在 fullMode 下可自动分析使用情况，无需保守 keep：
-# - OkHttp/Dio：主工程和 flutter_inappwebview 引用，R8 能跟踪
-# - Okio：同上
-# - Jsoup：通过 Java 平台通道调用，R8 能追踪入口
+# - Dio：主工程 HTTP 客户端，R8 能跟踪
+# - flutter_inappwebview：WebView 组件
 # - 序列化：fromJson/toJson 通过反射调用，必须保留
 -keepclassmembers class * {
     *** fromJson(...);

@@ -5,6 +5,7 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   connectivity_plus
   flutter_inappwebview_windows
+  flutter_js
   flutter_tts
   permission_handler_windows
   share_plus

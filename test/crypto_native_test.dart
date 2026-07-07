@@ -1,17 +1,17 @@
-// C 原生加密对比测试
-// 验证 quickjs/crypto/ 下的 C 实现输出与 Dart pointycastle 完全一致
+// CryptoJS polyfill 对比测试
+// 验证 crypto-js.js polyfill 的输出与 Dart crypto 包完全一致
 //
 // 测试策略：
-// 1. 在 JS 中调用 __nativeCrypto.md5Native 等 C 原生函数
-// 2. 在 Dart 中用 pointycastle/crypto 包计算相同输入
-// 3. 比较两者输出是否字节级一致
+// 1. 在 JS 中调用 CryptoJS.MD5 / SHA1 / SHA256 / HmacSHA256 / AES 等 API
+// 2. 在 Dart 中用 crypto 包计算相同输入
+// 3. 比较两者输出是否一致
 import 'package:flutter_test/flutter_test.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'dart:convert';
 import 'package:mr/services/native/js_engine.dart';
 
 void main() {
-  group('C 原生加密对比测试', () {
+  group('CryptoJS polyfill 对比测试', () {
     late JsEngine jsEngine;
 
     setUpAll(() async {
@@ -19,7 +19,7 @@ void main() {
       await jsEngine.init();
     });
 
-    test('MD5: C 原生 vs Dart crypto 包', () {
+    test('MD5: CryptoJS vs Dart crypto 包', () {
       const testCases = [
         '',
         'hello',
@@ -30,15 +30,13 @@ void main() {
       for (final input in testCases) {
         final dartResult = crypto.md5.convert(utf8.encode(input)).toString();
         final jsResult = jsEngine.evaluate(
-          '(function(){ var u8 = _strToU8(${_jsString(input)}); '
-          'var r8 = __nativeCrypto.md5Native(u8); '
-          'return _u8ToHex(r8); })()'
+          'CryptoJS.MD5(${_jsString(input)}).toString()',
         ) as String;
         expect(jsResult, dartResult, reason: 'MD5("$input") 不一致');
       }
     });
 
-    test('SHA1: C 原生 vs Dart crypto 包', () {
+    test('SHA1: CryptoJS vs Dart crypto 包', () {
       const testCases = [
         '',
         'hello',
@@ -49,15 +47,13 @@ void main() {
       for (final input in testCases) {
         final dartResult = crypto.sha1.convert(utf8.encode(input)).toString();
         final jsResult = jsEngine.evaluate(
-          '(function(){ var u8 = _strToU8(${_jsString(input)}); '
-          'var r8 = __nativeCrypto.sha1Native(u8); '
-          'return _u8ToHex(r8); })()'
+          'CryptoJS.SHA1(${_jsString(input)}).toString()',
         ) as String;
         expect(jsResult, dartResult, reason: 'SHA1("$input") 不一致');
       }
     });
 
-    test('SHA256: C 原生 vs Dart crypto 包', () {
+    test('SHA256: CryptoJS vs Dart crypto 包', () {
       const testCases = [
         '',
         'hello',
@@ -68,15 +64,13 @@ void main() {
       for (final input in testCases) {
         final dartResult = crypto.sha256.convert(utf8.encode(input)).toString();
         final jsResult = jsEngine.evaluate(
-          '(function(){ var u8 = _strToU8(${_jsString(input)}); '
-          'var r8 = __nativeCrypto.sha256Native(u8); '
-          'return _u8ToHex(r8); })()'
+          'CryptoJS.SHA256(${_jsString(input)}).toString()',
         ) as String;
         expect(jsResult, dartResult, reason: 'SHA256("$input") 不一致');
       }
     });
 
-    test('HMAC-SHA256: C 原生 vs Dart crypto 包', () {
+    test('HMAC-SHA256: CryptoJS vs Dart crypto 包', () {
       const testCases = [
         ('data', 'key'),
         ('Hello, World!', 'secret'),
@@ -88,17 +82,13 @@ void main() {
             .convert(utf8.encode(data))
             .toString();
         final jsResult = jsEngine.evaluate(
-          '(function(){ '
-          'var d = _strToU8(${_jsString(data)}); '
-          'var k = _strToU8(${_jsString(key)}); '
-          'var r8 = __nativeCrypto.hmacSHA256Native(d, k); '
-          'return _u8ToHex(r8); })()'
+          'CryptoJS.HmacSHA256(${_jsString(data)}, ${_jsString(key)}).toString()',
         ) as String;
         expect(jsResult, dartResult, reason: 'HMAC-SHA256("$data", "$key") 不一致');
       }
     });
 
-    test('AES-CBC-PKCS7 加解密: C 原生自洽', () {
+    test('AES-CBC-PKCS7 加解密: CryptoJS 自洽', () {
       // 测试 AES 加密后解密能还原原文
       const testCases = [
         ('Hello, World!', '1234567890123456', '1234567890123456'),  // AES-128
@@ -108,73 +98,19 @@ void main() {
       for (final (plaintext, key, iv) in testCases) {
         // 加密
         final cipherB64 = jsEngine.evaluate(
-          '(function(){ '
-          'var p = _strToU8(${_jsString(plaintext)}); '
-          'var k = _strToU8(${_jsString(key)}); '
-          'var iv = _strToU8(${_jsString(iv)}); '
-          'var c = __nativeCrypto.aesEncryptNative(p, k, iv); '
-          'return _u8ToB64(c); })()'
+          'CryptoJS.AES.encrypt(${_jsString(plaintext)}, ${_jsString(key)}, '
+          '{iv: ${_jsString(iv)}, mode: CryptoJS.mode.CBC}).toString()',
         ) as String;
 
         expect(cipherB64.isNotEmpty, true, reason: 'AES 加密失败');
 
         // 解密
         final decrypted = jsEngine.evaluate(
-          '(function(){ '
-          'var c = _b64ToU8(${_jsString(cipherB64)}); '
-          'var k = _strToU8(${_jsString(key)}); '
-          'var iv = _strToU8(${_jsString(iv)}); '
-          'var p = __nativeCrypto.aesDecryptNative(c, k, iv); '
-          'return _u8ToStr(p); })()'
+          'CryptoJS.AES.decrypt(${_jsString(cipherB64)}, ${_jsString(key)}, '
+          '{iv: ${_jsString(iv)}, mode: CryptoJS.mode.CBC}).toString()',
         ) as String;
 
         expect(decrypted, plaintext, reason: 'AES 加解密不自洽');
-      }
-    });
-
-    test('AES-CBC 批量解密: aesDecryptFromBase64Batch', () {
-      // 测试批量解密与逐条解密结果一致
-      const testCases = [
-        ('Hello, World!', '1234567890123456', '1234567890123456'),
-        ('你好，世界！', '1234567890123456', '1234567890123456'),
-        ('Batch AES Decrypt Test', '1234567890123456', '1234567890123456'),
-      ];
-
-      // 先加密所有测试数据
-      final cipherList = <String>[];
-      for (final (plaintext, key, iv) in testCases) {
-        final cipherB64 = jsEngine.evaluate(
-          '(function(){ '
-          'var p = _strToU8(${_jsString(plaintext)}); '
-          'var k = _strToU8(${_jsString(key)}); '
-          'var iv = _strToU8(${_jsString(iv)}); '
-          'var c = __nativeCrypto.aesEncryptNative(p, k, iv); '
-          'return _u8ToB64(c); })()'
-        ) as String;
-        cipherList.add(cipherB64);
-      }
-
-      // 构建批量解密的 JS 调用
-      final cipherArrayJs = '[${cipherList.map((c) => _jsString(c)).join(',')}]';
-      final batchResult = jsEngine.evaluate(
-        '(function(){ '
-        'var arr = $cipherArrayJs; '
-        'var key = ${_jsString(testCases.first.$2)}; '
-        'var iv = ${_jsString(testCases.first.$3)}; '
-        'var results = __nativeCrypto.aesDecryptFromBase64Batch(arr, key, iv); '
-        'return JSON.stringify(results); })()'
-      ) as String;
-
-      // 解析批量结果
-      final results = (batchResult.isNotEmpty)
-          ? (jsonDecode(batchResult) as List)
-          : <dynamic>[];
-
-      expect(results.length, testCases.length,
-          reason: '批量解密结果数量不匹配');
-      for (var i = 0; i < testCases.length; i++) {
-        expect(results[i], testCases[i].$1,
-            reason: '批量解密第 $i 项不一致');
       }
     });
   });
