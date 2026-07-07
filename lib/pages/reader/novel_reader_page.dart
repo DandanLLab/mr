@@ -333,8 +333,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
     // 在下一帧调整滚动位置（减去旧章节高度，保持视觉位置不变）
     if (oldChapterHeight > 0 && _scrollController.hasClients) {
-      final newOffset =
-          max(0.0, _scrollController.offset - oldChapterHeight);
+      final newOffset = max(0.0, _scrollController.offset - oldChapterHeight);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_scrollController.hasClients) {
           _scrollController.jumpTo(newOffset);
@@ -376,8 +375,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
     // 在下一帧调整滚动位置（加上当前章节高度，保持视觉位置不变）
     if (prevChapterHeight > 0 && _scrollController.hasClients) {
-      final newOffset =
-          _scrollController.offset + prevChapterHeight;
+      final newOffset = _scrollController.offset + prevChapterHeight;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_scrollController.hasClients) {
           _scrollController.jumpTo(newOffset);
@@ -507,8 +505,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       // 内存熔断：单章内容超过 5MB 时截断，防止 OOM 崩溃
       if (content != null && content.length > 5 * 1024 * 1024) {
         if (kDebugMode) debugPrint('⚠️ 章节内容过大 (${content.length} chars)，熔断截断');
-        AppLogger.instance.warn(LogCategory.system, '章节内容过大熔断',
-            detail: 'chapter=${chapter.title}, size=${content!.length}');
+        AppLogger.instance.warn(
+          LogCategory.system,
+          '章节内容过大熔断',
+          detail: 'chapter=${chapter.title}, size=${content!.length}',
+        );
         CrashLogService.instance.logJsEngineError(
           'Reader.oom',
           '章节内容过大: chapter=${chapter.title}, size=${content!.length}',
@@ -564,17 +565,21 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             chapterIndex,
             _chapters.length,
             5,
-            isReadable: (i) => !_chapters[i].isVolume && _chapters[i].url != null,
+            isReadable: (i) =>
+                !_chapters[i].isVolume && _chapters[i].url != null,
           );
           if (prefetchIndices.isNotEmpty) {
-            final prefetchChs =
-                prefetchIndices.map((i) => _chapters[i]).toList();
-            unawaited(ChapterPrefetchService.instance.prefetchChapters(
-              book: _book!,
-              chapters: prefetchChs,
-              provider: _dataProvider!,
-              allChapters: _chapters,
-            ));
+            final prefetchChs = prefetchIndices
+                .map((i) => _chapters[i])
+                .toList();
+            unawaited(
+              ChapterPrefetchService.instance.prefetchChapters(
+                book: _book!,
+                chapters: prefetchChs,
+                provider: _dataProvider!,
+                allChapters: _chapters,
+              ),
+            );
           }
         }
       }
@@ -829,8 +834,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           paragraph,
           textStyle,
           metrics.width,
-          max(metrics.height - usedHeight - provider.paragraphSpacing,
-              provider.fontSize),
+          max(
+            metrics.height - usedHeight - provider.paragraphSpacing,
+            provider.fontSize,
+          ),
         );
         pages.add(paragraph.substring(0, splitIndex).trimRight());
         paragraph = paragraph.substring(splitIndex).trimLeft();
@@ -1296,11 +1303,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               // 当前章节内容，用 GlobalKey 包裹以便检测滚动位置
               Container(
                 key: _currentChapterKey,
-                child: _buildChapterContent(
-                  provider,
-                  _content,
-                  _chapterTitle,
-                ),
+                child: _buildChapterContent(provider, _content, _chapterTitle),
               ),
               // 下一章内容（往下滑无缝衔接）
               if (_nextContent != null &&
@@ -1390,12 +1393,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             fontWeight: _readerFontWeight(provider),
             textAlign: TextAlign.justify,
           ),
-          'p': Style(
-            margin: Margins.only(bottom: provider.paragraphSpacing),
-          ),
-          'div': Style(
-            margin: Margins.only(bottom: provider.paragraphSpacing),
-          ),
+          'p': Style(margin: Margins.only(bottom: provider.paragraphSpacing)),
+          'div': Style(margin: Margins.only(bottom: provider.paragraphSpacing)),
         },
       );
     }
@@ -1584,7 +1583,30 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   // ==================== Cover Mode ====================
 
   Widget _buildCoverContent(ReaderProvider provider) {
-    return SafeArea(child: _buildPagedView(provider));
+    return SafeArea(
+      child: _pages.isEmpty
+          ? Center(
+              child: Text('无内容', style: TextStyle(color: provider.textColor)),
+            )
+          : AnimatedSwitcher(
+              duration: _pageAnimationDuration(provider),
+              switchInCurve: Curves.easeOut,
+              switchOutCurve: Curves.easeOut,
+              transitionBuilder: (child, animation) {
+                return FadeTransition(opacity: animation, child: child);
+              },
+              child: RepaintBoundary(
+                key: ValueKey(
+                  'cover-${_currentChapterIndex}-${_currentPage.clamp(0, _pages.length - 1)}',
+                ),
+                child: _buildPageContent(
+                  provider,
+                  _pages[_currentPage.clamp(0, _pages.length - 1)],
+                  pageIndex: _currentPage.clamp(0, _pages.length - 1),
+                ),
+              ),
+            ),
+    );
   }
 
   Widget _buildPagedView(ReaderProvider provider) {
@@ -1601,11 +1623,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       itemCount: itemCount,
       itemBuilder: (context, index) {
         if (index < leadingCount) {
-          return _buildChapterBoundaryPage(provider, '上一章');
+          return _buildChapterBoundaryPage(provider, '正在加载上一章...');
         }
         final pageIndex = index - leadingCount;
         if (pageIndex >= _pages.length) {
-          return _buildChapterBoundaryPage(provider, '下一章');
+          return _buildChapterBoundaryPage(provider, '正在加载下一章...');
         }
         return RepaintBoundary(
           child: _buildPageContent(
@@ -1629,12 +1651,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final leadingCount = _pagedLeadingCount;
     if (index < leadingCount) {
       _isChangingChapterByPageView = true;
+      setState(() => _isLoading = true);
       _previousChapter(toLastPage: true);
       return;
     }
     final pageIndex = index - leadingCount;
     if (pageIndex >= _pages.length) {
       _isChangingChapterByPageView = true;
+      setState(() => _isLoading = true);
       _nextChapter();
       return;
     }
@@ -1648,12 +1672,26 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     return Container(
       color: provider.backgroundColor,
       alignment: Alignment.center,
-      child: Text(
-        text,
-        style: TextStyle(
-          color: provider.textColor.withValues(alpha: 0.58),
-          fontSize: max(14, provider.fontSize - 2),
-        ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: provider.textColor.withValues(alpha: 0.6),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            text,
+            style: TextStyle(
+              color: provider.textColor.withValues(alpha: 0.58),
+              fontSize: max(14, provider.fontSize - 2),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1749,12 +1787,58 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               textAlign: TextAlign.center,
             ),
           if (showTitle) SizedBox(height: provider.paragraphSpacing),
+          Expanded(child: _buildRichContent(provider, pageText)),
+          if (provider.showReadingInfo &&
+              (provider.showClock || provider.showProgress))
+            _buildReadingInfo(provider, pageIndex),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReadingInfo(ReaderProvider provider, int pageIndex) {
+    final infoStyle = TextStyle(
+      color: provider.textColor.withValues(alpha: 0.48),
+      fontSize: max(10, provider.fontSize * 0.58),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        children: [
           Expanded(
-            child: _buildRichContent(provider, pageText),
+            child: provider.showClock
+                ? Text(_formatReaderClock(), style: infoStyle)
+                : const SizedBox.shrink(),
+          ),
+          Expanded(
+            child: provider.showProgress
+                ? Text(
+                    _formatReaderProgress(pageIndex),
+                    textAlign: TextAlign.end,
+                    style: infoStyle,
+                  )
+                : const SizedBox.shrink(),
           ),
         ],
       ),
     );
+  }
+
+  String _formatReaderClock() {
+    final now = DateTime.now();
+    final hour = now.hour.toString().padLeft(2, '0');
+    final minute = now.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  String _formatReaderProgress(int pageIndex) {
+    final totalChapters = max(_totalChapters, _chapters.length);
+    final chapterText = totalChapters > 0
+        ? '第 ${_currentChapterIndex + 1}/$totalChapters 章'
+        : '第 ${_currentChapterIndex + 1} 章';
+    if (_pages.length <= 1) return chapterText;
+    final page = pageIndex.clamp(0, _pages.length - 1) + 1;
+    return '$chapterText · 页 $page/${_pages.length}';
   }
 
   // ==================== Highlight Selection ====================
@@ -1804,7 +1888,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         elevation: 8,
         borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingSm, vertical: 4),
+          padding: const EdgeInsets.symmetric(
+            horizontal: DesignTokens.spacingSm,
+            vertical: 4,
+          ),
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
@@ -1836,12 +1923,18 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingSm, vertical: 4),
+        padding: const EdgeInsets.symmetric(
+          horizontal: DesignTokens.spacingSm,
+          vertical: 4,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon, size: 20),
-            Text(label, style: const TextStyle(fontSize: DesignTokens.fontCaption)),
+            Text(
+              label,
+              style: const TextStyle(fontSize: DesignTokens.fontCaption),
+            ),
           ],
         ),
       ),
@@ -1860,11 +1953,16 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             children: [
               const Padding(
                 padding: EdgeInsets.all(DesignTokens.spacingLg),
-                child: Text('选择高亮样式', style: TextStyle(fontSize: DesignTokens.fontSubtitle)),
+                child: Text(
+                  '选择高亮样式',
+                  style: TextStyle(fontSize: DesignTokens.fontSubtitle),
+                ),
               ),
               // Color row
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: DesignTokens.spacingLg,
+                ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: colors.map((c) {
@@ -1907,7 +2005,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             children: [
               const Padding(
                 padding: EdgeInsets.all(DesignTokens.spacingLg),
-                child: Text('选择高亮类型', style: TextStyle(fontSize: DesignTokens.fontSubtitle)),
+                child: Text(
+                  '选择高亮类型',
+                  style: TextStyle(fontSize: DesignTokens.fontSubtitle),
+                ),
               ),
               ...List.generate(styles.length, (i) {
                 return ListTile(
@@ -1916,7 +2017,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                     height: 24,
                     decoration: BoxDecoration(
                       color: color.color.withValues(alpha: 0.4),
-                      borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
+                      borderRadius: BorderRadius.circular(
+                        DesignTokens.actionRadius,
+                      ),
                     ),
                   ),
                   title: Text(styleNames[i]),
@@ -2111,7 +2214,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg),
       child: Row(
         children: [
-          Text('$displayChapter', style: const TextStyle(fontSize: DesignTokens.fontCaption)),
+          Text(
+            '$displayChapter',
+            style: const TextStyle(fontSize: DesignTokens.fontCaption),
+          ),
           Expanded(
             child: SliderTheme(
               data: SliderThemeData(
@@ -2135,7 +2241,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               ),
             ),
           ),
-          Text('$_totalChapters', style: const TextStyle(fontSize: DesignTokens.fontCaption)),
+          Text(
+            '$_totalChapters',
+            style: const TextStyle(fontSize: DesignTokens.fontCaption),
+          ),
         ],
       ),
     );
@@ -2671,7 +2780,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                                     context,
                                   ).colorScheme.primary.withValues(alpha: 0.2)
                                 : Colors.grey.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
+                            borderRadius: BorderRadius.circular(
+                              DesignTokens.panelRadius,
+                            ),
                             border: isSelected
                                 ? Border.all(
                                     color: Theme.of(
@@ -3115,20 +3226,25 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                             },
                             child: Container(
                               margin: const EdgeInsets.all(2),
-                              padding: const EdgeInsets.all(DesignTokens.spacingSm),
+                              padding: const EdgeInsets.all(
+                                DesignTokens.spacingSm,
+                              ),
                               decoration: BoxDecoration(
                                 border: Border.all(color: Colors.grey),
-                                borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
+                                borderRadius: BorderRadius.circular(
+                                  DesignTokens.actionRadius,
+                                ),
                                 color: row == 1 && col == 1
-                                    ? Theme.of(
-                                        context,
-                                      ).colorScheme.primary.withValues(alpha: 0.1)
+                                    ? Theme.of(context).colorScheme.primary
+                                          .withValues(alpha: 0.1)
                                     : null,
                               ),
                               child: Text(
                                 actionLabels[action] ?? '无',
                                 textAlign: TextAlign.center,
-                                style: const TextStyle(fontSize: DesignTokens.fontCaption),
+                                style: const TextStyle(
+                                  fontSize: DesignTokens.fontCaption,
+                                ),
                               ),
                             ),
                           ),
@@ -3650,6 +3766,9 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
   bool _searchBookText = true;
   bool _searchContent = true;
   final Set<int> _expandedVolumes = {};
+  final ScrollController _chapterScrollController = ScrollController();
+  final Map<int, GlobalKey> _chapterKeys = {};
+  bool _didScrollToCurrentChapter = false;
 
   @override
   void initState() {
@@ -3661,6 +3780,7 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
 
   @override
   void dispose() {
+    _chapterScrollController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -3773,7 +3893,10 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
       mainAxisSize: MainAxisSize.min,
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 8),
+          padding: const EdgeInsets.symmetric(
+            horizontal: DesignTokens.spacingLg,
+            vertical: 8,
+          ),
           child: Row(
             children: [
               _buildTab(0, '目录 (${widget.chapters.length})', fg),
@@ -3840,7 +3963,9 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
         ),
         if (_showSearch)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg),
+            padding: const EdgeInsets.symmetric(
+              horizontal: DesignTokens.spacingLg,
+            ),
             child: TextField(
               controller: _searchController,
               style: TextStyle(color: fg),
@@ -3871,7 +3996,10 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
   ) {
     return PopupMenuItem(
       value: value,
-      padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: 12),
+      padding: const EdgeInsets.symmetric(
+        horizontal: DesignTokens.spacingLg,
+        vertical: 12,
+      ),
       child: Row(
         children: [
           Expanded(child: Text(label)),
@@ -3911,7 +4039,9 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
   Widget _buildChapterList(Color fg, bool isOnline) {
     final display = _buildDisplayChapters(_filteredChapters);
     final accent = Theme.of(context).colorScheme.primary;
+    _scheduleScrollToCurrentChapter(display);
     return ListView.separated(
+      controller: _chapterScrollController,
       itemCount: display.length,
       separatorBuilder: (_, __) =>
           Divider(height: 1, thickness: 0.5, color: fg.withValues(alpha: 0.12)),
@@ -3968,9 +4098,18 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
         );
         final isCached = !isOnline || _cachedFiles.contains(fileName);
 
+        final selectedBg = Theme.of(context).brightness == Brightness.dark
+            ? Colors.white.withValues(alpha: 0.12)
+            : accent.withValues(alpha: 0.10);
+        final selectedText = Theme.of(context).brightness == Brightness.dark
+            ? fg
+            : accent;
+
         return InkWell(
           onTap: () => widget.onChapterSelected(chapter.index),
-          child: Padding(
+          child: Container(
+            key: _keyForChapter(chapter.index),
+            color: isSelected ? selectedBg : Colors.transparent,
             padding: const EdgeInsets.all(12),
             child: Row(
               children: [
@@ -3990,8 +4129,11 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
                       Text(
                         chapter.title,
                         style: TextStyle(
-                          color: isSelected ? accent : fg,
+                          color: isSelected ? selectedText : fg,
                           fontSize: DesignTokens.fontBody,
+                          fontWeight: isSelected
+                              ? FontWeight.w600
+                              : FontWeight.normal,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -4018,7 +4160,7 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
                 ),
                 const SizedBox(width: DesignTokens.spacingSm),
                 if (isSelected)
-                  Icon(Icons.check, size: 18, color: accent)
+                  Icon(Icons.check, size: 18, color: selectedText)
                 else if (!isCached)
                   Icon(
                     Icons.cloud_outlined,
@@ -4031,6 +4173,48 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
         );
       },
     );
+  }
+
+  GlobalKey _keyForChapter(int index) {
+    return _chapterKeys.putIfAbsent(index, GlobalKey.new);
+  }
+
+  void _scheduleScrollToCurrentChapter(List<Chapter> display) {
+    if (_didScrollToCurrentChapter ||
+        _currentTab != 0 ||
+        _searchQuery.isNotEmpty ||
+        display.isEmpty) {
+      return;
+    }
+    final displayIndex = display.indexWhere(
+      (c) => c.index == widget.currentChapterIndex,
+    );
+    if (displayIndex < 0) return;
+    _didScrollToCurrentChapter = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_chapterScrollController.hasClients) {
+        final roughOffset = max(0.0, (displayIndex - 2) * 56.0);
+        _chapterScrollController.jumpTo(
+          roughOffset.clamp(
+            0.0,
+            _chapterScrollController.position.maxScrollExtent,
+          ),
+        );
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final ctx = _chapterKeys[widget.currentChapterIndex]?.currentContext;
+        if (ctx == null) return;
+        Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.45,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+        );
+      });
+    });
   }
 
   Widget _buildBookmarkList(Color fg) {
@@ -4064,7 +4248,10 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
           ),
           trailing: Text(
             _formatTime(bookmark.createdAt),
-            style: TextStyle(color: fg.withValues(alpha: 0.5), fontSize: DesignTokens.fontCaption),
+            style: TextStyle(
+              color: fg.withValues(alpha: 0.5),
+              fontSize: DesignTokens.fontCaption,
+            ),
           ),
           onTap: () {
             Navigator.pop(context);

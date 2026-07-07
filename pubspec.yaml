@@ -39,6 +39,7 @@ dependencies:
   
   # 文件/加密/权限
   archive: ^3.4.10
+  charset: ^2.0.1
   crypto: ^3.0.3
   encrypt: ^5.0.1
   permission_handler: ^11.1.0
