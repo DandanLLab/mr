@@ -359,6 +359,13 @@ globalThis.console = {
   clear: function() { _consoleLogs.length = 0; },
   _getLogs: function() { return _consoleLogs.slice(); },
   _clearLogs: function() { _consoleLogs.length = 0; _logSeq = 0; },
+  // 合并获取+清空为一次调用，减少 Dart↔JS 跨 FFI 往返开销
+  _getAndClearLogs: function() {
+    var logs = _consoleLogs.slice();
+    _consoleLogs.length = 0;
+    _logSeq = 0;
+    return logs;
+  },
   _logSeq: function() { return _logSeq; },
 };
 globalThis._jsLog = _jsLog;

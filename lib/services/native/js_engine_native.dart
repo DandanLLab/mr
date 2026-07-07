@@ -221,7 +221,8 @@ class JsEngine {
       _flushConsoleLogs();
 
       if (evalResult.isError) {
-        AppLogger.instance.logJsError('QuickJS', evalResult.stringResult);
+        AppLogger.instance.logJsError('QuickJS',
+            _buildErrorDetail(evalResult.stringResult, content));
         return null;
       }
       return _parseJsResult(evalResult.stringResult);
@@ -328,7 +329,9 @@ class JsEngine {
       final evalResult = _runtime!.evaluate(wrappedScript);
       _flushConsoleLogs();
       if (evalResult.isError) {
-        AppLogger.instance.logJsError('QuickJS', evalResult.stringResult);
+        AppLogger.instance.logJsError('QuickJS',
+            _buildErrorDetail(evalResult.stringResult, content,
+                sourceMap: source));
         return null;
       }
       return evalResult.stringResult;
@@ -420,7 +423,10 @@ class JsEngine {
       _flushConsoleLogs();
 
       if (evalResult.isError) {
-        AppLogger.instance.logJsError('QuickJS', evalResult.stringResult);
+        final src = env?['source'];
+        AppLogger.instance.logJsError('QuickJS',
+            _buildErrorDetail(evalResult.stringResult, result,
+                sourceMap: src is Map<String, dynamic> ? src : null));
         return null;
       }
       final strResult = evalResult.stringResult;
@@ -431,6 +437,44 @@ class JsEngine {
       AppLogger.instance.logJsError('QuickJS', e.toString());
       return null;
     }
+  }
+
+  /// 构建 JS 错误上下文：错误信息 + 书源名 + 输入值预览
+  /// 用于定位"响应内容不对"类问题（如 LZString 解压失败、JSON 字段缺失、
+  /// 返回 HTML 错误页等）——看到输入预览就能判断是响应问题还是规则问题
+  String _buildErrorDetail(String errorMsg, dynamic inputValue,
+      {Map<String, dynamic>? sourceMap}) {
+    final buffer = StringBuffer(errorMsg);
+    // 书源名
+    final name = sourceMap?['bookSourceName'];
+    if (name is String && name.isNotEmpty) {
+      buffer.write('\n[书源] $name');
+    }
+    // 输入值预览（前 200 字符，压缩空白方便单行显示）
+    if (inputValue != null) {
+      buffer.write(
+          '\n[输入] (${inputValue.runtimeType}) ${_previewValue(inputValue)}');
+    }
+    return buffer.toString();
+  }
+
+  /// 预览值：截取前 [maxLen] 字符，压缩空白方便单行显示
+  String _previewValue(dynamic value, [int maxLen = 200]) {
+    String str;
+    if (value is String) {
+      str = value;
+    } else {
+      try {
+        str = jsonEncode(value);
+      } catch (_) {
+        str = '$value';
+      }
+    }
+    str = str.replaceAll(RegExp(r'\s+'), ' ');
+    if (str.length > maxLen) {
+      return '${str.substring(0, maxLen)}... (${str.length} chars)';
+    }
+    return str;
   }
 
   // ===== jsLib 管理 =====
@@ -644,9 +688,9 @@ class JsEngine {
   void _flushConsoleLogs() {
     if (_runtime == null) return;
     try {
-      final logsResult = _runtime!.evaluate('console._getLogs()');
+      // 合并获取+清空为一次 evaluate，减少 Dart↔JS FFI 往返开销
+      final logsResult = _runtime!.evaluate('console._getAndClearLogs()');
       if (logsResult.isError) return;
-      _runtime!.evaluate('console._clearLogs()');
       final logsStr = logsResult.stringResult;
       if (logsStr == 'undefined' || logsStr == '[]') return;
       try {
@@ -661,7 +705,9 @@ class JsEngine {
               } else if (level == 'warn') {
                 AppLogger.instance.warn(LogCategory.js, '[JS] $msg');
               } else {
-                AppLogger.instance.debug(LogCategory.js, '[JS] $msg');
+                // console.log/info/debug/trace → info 级别
+                // 打印内容不管成功失败都输出，info 确保日志 tab 默认可见
+                AppLogger.instance.info(LogCategory.js, '[JS] $msg');
               }
             }
           }
