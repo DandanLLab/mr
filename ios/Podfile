@@ -33,9 +33,8 @@ target 'Runner' do
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
 
-  # QuickJS 引擎 - 从 C 源码编译，替代 flutter_js
-  # 源码在项目根目录 quickjs/，iOS 和 Android 共享
-  pod 'QuickJS', :path => '../quickjs'
+  # QuickJS 由 flutter_js 插件自动管理（pubspec.yaml: flutter_js ^0.8.2）
+  # 不再需要手动引用 quickjs/ 目录的 C 源码（已在 d0f78206 重构中移除）
 end
 
 post_install do |installer|
@@ -46,19 +45,14 @@ post_install do |installer|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
       config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'i386'
       config.build_settings['EXCLUDED_ARCHS[sdk=iphoneos*]'] = 'armv7'
-      # [动态运行时库方案] DEAD_CODE_STRIPPING=NO 仍保留
-      # 虽然动态框架方案下 QuickJS 符号隔离在 .framework 内，
-      # 但其他 Flutter 插件（如 path_provider）仍可能用静态库，
-      # 保留此设置确保所有 Pods target 的符号不被裁剪
+      # DEAD_CODE_STRIPPING=NO：flutter_js 通过 FFI 调用 QuickJS，
+      # 需保留所有符号不被裁剪；其他 Flutter 插件也可能用静态库
       config.build_settings['DEAD_CODE_STRIPPING'] = 'NO'
     end
   end
 
-  # [动态运行时库方案] -all_load 仍保留
-  # 之前静态框架时，-all_load 强制链接 QuickJS 静态库的所有 .o 文件到主二进制
-  # 现在动态框架下，QuickJS 符号在 .framework 内，不需要 -all_load 卷入
-  # 但其他 Flutter 插件可能用静态库 + Dart FFI，保留 -all_load 兼容
-  # 注意：-all_load 不会影响动态框架，只对静态库生效
+  # -all_load：强制链接所有静态库符号，确保 flutter_js 的 FFI 符号可用
+  # 注意：-all_load 只对静态库生效，不影响动态框架
   installer.pods_project.build_configurations.each do |config|
     config.build_settings['OTHER_LDFLAGS'] ||= '$(inherited)'
     config.build_settings['OTHER_LDFLAGS'] += ' -all_load'
