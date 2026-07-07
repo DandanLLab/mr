@@ -444,7 +444,7 @@ if (typeof LZString === 'undefined') {
     var numBits = 3;
     var entry = "";
     var result = "";
-    var i, w, bits, resb, maxpower, power, c, data = { val: compressed.charAt(0), position: 32768, index: 1 };
+    var i, w, bits, resb, maxpower, power, c, data = { val: compressed.charCodeAt(0), position: 32768, index: 1 };
     for (i = 0; i < 3; i += 1) dictionary[i] = i;
     bits = 0;
     maxpower = Math.pow(2, 2);
@@ -452,7 +452,7 @@ if (typeof LZString === 'undefined') {
     while (power != maxpower) {
       resb = data.val & data.position;
       data.position >>= 1;
-      if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+      if (data.position == 0) { data.position = 32768; data.val = compressed.charCodeAt(data.index++); }
       bits |= (resb > 0 ? 1 : 0) * power;
       power <<= 1;
     }
@@ -461,7 +461,7 @@ if (typeof LZString === 'undefined') {
         bits = 0; maxpower = Math.pow(2, 8); power = 1;
         while (power != maxpower) {
           resb = data.val & data.position; data.position >>= 1;
-          if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+          if (data.position == 0) { data.position = 32768; data.val = compressed.charCodeAt(data.index++); }
           bits |= (resb > 0 ? 1 : 0) * power; power <<= 1;
         }
         c = String.fromCharCode(bits);
@@ -470,7 +470,7 @@ if (typeof LZString === 'undefined') {
         bits = 0; maxpower = Math.pow(2, 16); power = 1;
         while (power != maxpower) {
           resb = data.val & data.position; data.position >>= 1;
-          if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+          if (data.position == 0) { data.position = 32768; data.val = compressed.charCodeAt(data.index++); }
           bits |= (resb > 0 ? 1 : 0) * power; power <<= 1;
         }
         c = String.fromCharCode(bits);
@@ -483,7 +483,7 @@ if (typeof LZString === 'undefined') {
       bits = 0; maxpower = Math.pow(2, numBits); power = 1;
       while (power != maxpower) {
         resb = data.val & data.position; data.position >>= 1;
-        if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+        if (data.position == 0) { data.position = 32768; data.val = compressed.charCodeAt(data.index++); }
         bits |= (resb > 0 ? 1 : 0) * power; power <<= 1;
       }
       switch (c = bits) {
@@ -491,7 +491,7 @@ if (typeof LZString === 'undefined') {
           bits = 0; maxpower = Math.pow(2, 8); power = 1;
           while (power != maxpower) {
             resb = data.val & data.position; data.position >>= 1;
-            if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+            if (data.position == 0) { data.position = 32768; data.val = compressed.charCodeAt(data.index++); }
             bits |= (resb > 0 ? 1 : 0) * power; power <<= 1;
           }
           dictionary[dictSize++] = String.fromCharCode(bits);
@@ -500,7 +500,7 @@ if (typeof LZString === 'undefined') {
           bits = 0; maxpower = Math.pow(2, 16); power = 1;
           while (power != maxpower) {
             resb = data.val & data.position; data.position >>= 1;
-            if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+            if (data.position == 0) { data.position = 32768; data.val = compressed.charCodeAt(data.index++); }
             bits |= (resb > 0 ? 1 : 0) * power; power <<= 1;
           }
           dictionary[dictSize++] = String.fromCharCode(bits);

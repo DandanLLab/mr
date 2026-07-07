@@ -705,8 +705,7 @@ class JsEngine {
               } else if (level == 'warn') {
                 AppLogger.instance.warn(LogCategory.js, '[JS] $msg');
               } else {
-                // console.log/info/debug/trace → info 级别
-                // 打印内容不管成功失败都输出，info 确保日志 tab 默认可见
+                // console.log/info/debug/trace → info 级别，确保日志 tab 默认可见
                 AppLogger.instance.info(LogCategory.js, '[JS] $msg');
               }
             }
