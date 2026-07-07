@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:charset/charset.dart';
 
 import '../storage_service.dart';
 
@@ -383,12 +384,30 @@ class TxtParser {
       if (bytes[0] == 0xFF && bytes[1] == 0xFE) return 'utf-16le';
       if (bytes[0] == 0xFE && bytes[1] == 0xFF) return 'utf-16be';
     }
+    String? utf8Text;
     try {
-      utf8.decode(bytes);
-      return 'utf-8';
+      utf8Text = utf8.decode(bytes);
     } catch (_) {
       return 'gbk';
     }
+
+    if (!bytes.any((byte) => byte >= 0x80)) {
+      return 'utf-8';
+    }
+
+    try {
+      final gbkText = const GbkCodec().decode(bytes);
+      final utf8Score = _decodeScore(utf8Text);
+      final gbkScore = _decodeScore(gbkText);
+      final threshold = (bytes.length / 80).clamp(8, 32).round();
+      if (gbkScore > utf8Score + threshold) {
+        return 'gbk';
+      }
+    } catch (_) {
+      // Keep UTF-8 when strict GBK decoding fails.
+    }
+
+    return 'utf-8';
   }
 
   static String decodeBytes(Uint8List bytes, {String? encoding}) {
@@ -397,12 +416,63 @@ class TxtParser {
       case 'utf-8':
         return utf8.decode(bytes, allowMalformed: true);
       case 'utf-16le':
-        return String.fromCharCodes(bytes.buffer.asUint16List().where((c) => c != 0xFEFF));
+        return _decodeUtf16(bytes, littleEndian: true);
       case 'utf-16be':
-        return String.fromCharCodes(bytes.buffer.asUint16List().where((c) => c != 0xFFFE));
+        return _decodeUtf16(bytes, littleEndian: false);
+      case 'gbk':
+      case 'gb2312':
+      case 'gb18030':
+        return const GbkCodec(allowMalformed: true).decode(bytes);
       default:
         return utf8.decode(bytes, allowMalformed: true);
     }
+  }
+
+  static int _decodeScore(String text) {
+    var score = 0;
+    for (final rune in text.runes) {
+      if (rune == 0xFFFD) {
+        score -= 20;
+      } else if (_isCjkRune(rune)) {
+        score += 3;
+      } else if (_isCommonTextRune(rune)) {
+        score += 1;
+      } else if (rune < 0x20 && rune != 0x09 && rune != 0x0A && rune != 0x0D) {
+        score -= 6;
+      } else {
+        score -= 1;
+      }
+    }
+    return score;
+  }
+
+  static bool _isCjkRune(int rune) {
+    return (rune >= 0x3400 && rune <= 0x4DBF) ||
+        (rune >= 0x4E00 && rune <= 0x9FFF) ||
+        (rune >= 0xF900 && rune <= 0xFAFF) ||
+        (rune >= 0x20000 && rune <= 0x2A6DF);
+  }
+
+  static bool _isCommonTextRune(int rune) {
+    return (rune >= 0x20 && rune <= 0x7E) ||
+        rune == 0x09 ||
+        rune == 0x0A ||
+        rune == 0x0D ||
+        (rune >= 0x3000 && rune <= 0x303F) ||
+        (rune >= 0xFF00 && rune <= 0xFFEF);
+  }
+
+  static String _decodeUtf16(Uint8List bytes, {required bool littleEndian}) {
+    final codeUnits = <int>[];
+    for (var i = 0; i + 1 < bytes.length; i += 2) {
+      final codeUnit = littleEndian
+          ? bytes[i] | (bytes[i + 1] << 8)
+          : (bytes[i] << 8) | bytes[i + 1];
+      if (codeUnit != 0xFEFF) {
+        codeUnits.add(codeUnit);
+      }
+    }
+    return String.fromCharCodes(codeUnits);
   }
 
   static String analyzeNameAuthor(String fileName) {

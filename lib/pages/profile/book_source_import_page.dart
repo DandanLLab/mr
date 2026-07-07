@@ -30,6 +30,7 @@ class _BookSourceImportPageState extends State<BookSourceImportPage>
   final _textController = TextEditingController();
   final _jsController = TextEditingController();
   bool _isImporting = false;
+  ScaffoldMessengerState? _messenger;
 
   @override
   void initState() {
@@ -49,7 +50,14 @@ class _BookSourceImportPageState extends State<BookSourceImportPage>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _messenger = ScaffoldMessenger.maybeOf(context);
+  }
+
+  @override
   void dispose() {
+    _hideCurrentSnackBar();
     _tabController.dispose();
     _urlController.dispose();
     _textController.dispose();
@@ -91,12 +99,13 @@ class _BookSourceImportPageState extends State<BookSourceImportPage>
       setState(() => _isImporting = true);
 
       final file = result.files.first;
-      final bytes = file.bytes ??
-          await _readFileBytes(file.path!);
+      final bytes = file.bytes ?? await _readFileBytes(file.path!);
       final ext = file.extension?.toLowerCase() ?? 'json';
 
-      final importResult =
-          await BookSourceImportService().importBytes(bytes, fileExtension: ext);
+      final importResult = await BookSourceImportService().importBytes(
+        bytes,
+        fileExtension: ext,
+      );
       _showResult(importResult);
     } catch (e) {
       _showError('文件导入失败: $e');
@@ -121,9 +130,7 @@ class _BookSourceImportPageState extends State<BookSourceImportPage>
   Future<void> _importFromQr() async {
     final scanned = await Navigator.push<String>(
       context,
-      MaterialPageRoute(
-        builder: (context) => const _QrScannerPage(),
-      ),
+      MaterialPageRoute(builder: (context) => const _QrScannerPage()),
     );
     if (scanned == null || scanned.isEmpty) return;
     await _doImport(scanned);
@@ -152,6 +159,7 @@ class _BookSourceImportPageState extends State<BookSourceImportPage>
         result = await service.importJsText(text);
       }
       _showResult(result);
+      _hideCurrentSnackBar();
       if (mounted) Navigator.pop(context, result);
     } catch (e) {
       _showError('导入失败: $e');
@@ -161,19 +169,25 @@ class _BookSourceImportPageState extends State<BookSourceImportPage>
   }
 
   void _showResult(BookSourceImportResult result) {
-    final msg = '导入完成：新增 ${result.added}，更新 ${result.updated}，未变 ${result.unchanged}';
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        duration: const Duration(seconds: 3),
-      ),
+    final msg =
+        '导入完成：新增 ${result.added}，更新 ${result.updated}，未变 ${result.unchanged}';
+    final messenger = _messenger ?? ScaffoldMessenger.maybeOf(context);
+    messenger?.clearSnackBars();
+    messenger?.showSnackBar(
+      SnackBar(content: Text(msg), duration: const Duration(seconds: 3)),
     );
   }
 
   void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
+    final messenger = _messenger ?? ScaffoldMessenger.maybeOf(context);
+    messenger?.clearSnackBars();
+    messenger?.showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: Colors.red),
     );
+  }
+
+  void _hideCurrentSnackBar() {
+    (_messenger ?? ScaffoldMessenger.maybeOf(context))?.clearSnackBars();
   }
 
   @override
@@ -247,8 +261,7 @@ class _BookSourceImportPageState extends State<BookSourceImportPage>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('使用说明',
-                      style: Theme.of(context).textTheme.titleSmall),
+                  Text('使用说明', style: Theme.of(context).textTheme.titleSmall),
                   const SizedBox(height: DesignTokens.spacingSm),
                   const Text(
                     '• 支持 Legado 格式的书源 JSON\n'
@@ -331,7 +344,8 @@ class _BookSourceImportPageState extends State<BookSourceImportPage>
               maxLines: null,
               expands: true,
               decoration: const InputDecoration(
-                hintText: '粘贴 JS 书源代码...\n// 示例：\n// {"bookSourceName":"示例","bookSourceUrl":"https://..."}',
+                hintText:
+                    '粘贴 JS 书源代码...\n// 示例：\n// {"bookSourceName":"示例","bookSourceUrl":"https://..."}',
                 border: OutlineInputBorder(),
                 prefixIcon: Icon(Icons.code),
               ),
@@ -364,8 +378,10 @@ class _BookSourceImportPageState extends State<BookSourceImportPage>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('JS 书源说明',
-                      style: Theme.of(context).textTheme.titleSmall),
+                  Text(
+                    'JS 书源说明',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
                   const SizedBox(height: DesignTokens.spacingSm),
                   const Text(
                     '• JS 书源是使用 JavaScript 语法的书源\n'
@@ -406,8 +422,7 @@ class _BookSourceImportPageState extends State<BookSourceImportPage>
       final bytes = file.bytes ?? await _readFileBytes(file.path!);
       final text = utf8.decode(bytes, allowMalformed: true);
 
-      final importResult =
-          await BookSourceImportService().importJsText(text);
+      final importResult = await BookSourceImportService().importJsText(text);
       _showResult(importResult);
       if (mounted) Navigator.pop(context, importResult);
     } catch (e) {
@@ -422,14 +437,21 @@ class _BookSourceImportPageState extends State<BookSourceImportPage>
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.qr_code_scanner,
-              size: 80, color: Theme.of(context).colorScheme.primary),
+          Icon(
+            Icons.qr_code_scanner,
+            size: 80,
+            color: Theme.of(context).colorScheme.primary,
+          ),
           const SizedBox(height: DesignTokens.spacingLg),
-          const Text('扫描书源二维码导入',
-              style: TextStyle(fontSize: DesignTokens.fontTitle)),
+          const Text(
+            '扫描书源二维码导入',
+            style: TextStyle(fontSize: DesignTokens.fontTitle),
+          ),
           const SizedBox(height: DesignTokens.spacingSm),
-          const Text('支持包含书源 JSON 或订阅 URL 的二维码',
-              style: TextStyle(color: Colors.grey)),
+          const Text(
+            '支持包含书源 JSON 或订阅 URL 的二维码',
+            style: TextStyle(color: Colors.grey),
+          ),
           const SizedBox(height: DesignTokens.spacingXl),
           FilledButton.icon(
             onPressed: _isImporting ? null : _importFromQr,
