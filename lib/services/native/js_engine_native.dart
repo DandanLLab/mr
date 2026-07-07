@@ -110,7 +110,7 @@ class JsEngine {
   // ===== 基础执行 =====
 
   /// 同步执行 JS 代码，返回字符串结果
-  dynamic evaluate(String script) {
+  String? evaluate(String script) {
     if (_runtime == null) return null;
     if (_evalBusy) {
       debugPrint('⚠️ evaluate 跳过：JS引擎正忙');

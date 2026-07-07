@@ -35,7 +35,7 @@ class JsEngine {
 
   // ===== 基础执行（全部返回空值）=====
 
-  dynamic evaluate(String script) {
+  String? evaluate(String script) {
     debugPrint('JsEngine Web stub: evaluate 不支持');
     return null;
   }
