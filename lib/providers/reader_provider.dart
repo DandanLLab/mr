@@ -15,36 +15,6 @@ enum TapZoneAction {
   nextChapter,
 }
 
-@visibleForTesting
-String readerParagraphIndentString(
-  dynamic value, {
-  double fallbackCount = 2.0,
-}) {
-  if (value is num) {
-    return '\u3000' * value.round().clamp(0, 8);
-  }
-  if (value is String) {
-    final parsed = double.tryParse(value);
-    if (parsed != null) {
-      return '\u3000' * parsed.round().clamp(0, 8);
-    }
-    final count = RegExp(r'^[\u3000\t ]*').firstMatch(value)?.group(0);
-    if ((count?.isNotEmpty ?? false) && count!.length != value.length) {
-      return '\u3000' * count.length.clamp(0, 8);
-    }
-    return value;
-  }
-  return '\u3000' * fallbackCount.round().clamp(0, 8);
-}
-
-@visibleForTesting
-double readerParagraphIndentCount(String indent) {
-  return RegExp(
-        r'^[\u3000\t ]*',
-      ).firstMatch(indent)?.group(0)?.length.toDouble() ??
-      0.0;
-}
-
 class ReaderProvider extends ChangeNotifier {
   PageMode _pageMode = PageMode.simulation;
   double _fontSize = 20.0;
@@ -168,11 +138,6 @@ class ReaderProvider extends ChangeNotifier {
       _paragraphSpacing =
           (config['paragraphSpacing'] as num?)?.toDouble() ?? 4.0;
       _textIndent = (config['textIndent'] as num?)?.toDouble() ?? 2.0;
-      _paragraphIndent = readerParagraphIndentString(
-        config['paragraphIndent'],
-        fallbackCount: _textIndent,
-      );
-      _textIndent = readerParagraphIndentCount(_paragraphIndent);
       _showReadingInfo = config['showReadingInfo'] as bool? ?? true;
       _showChapterTitle = config['showChapterTitle'] as bool? ?? true;
       _showClock = config['showClock'] as bool? ?? true;
@@ -187,6 +152,7 @@ class ReaderProvider extends ChangeNotifier {
       _horizontalPadding =
           (config['horizontalPadding'] as num?)?.toDouble() ?? 16.0;
       _verticalPadding = (config['verticalPadding'] as num?)?.toDouble() ?? 6.0;
+      _paragraphIndent = config['paragraphIndent'] as String? ?? '\u3000\u3000';
       _fontWeightIndex = config['fontWeightIndex'] as int? ?? 1;
       _backgroundImagePath = config['backgroundImagePath'] as String?;
       final highlightRulesJson = config['highlightRules'] as List?;
@@ -367,7 +333,7 @@ class ReaderProvider extends ChangeNotifier {
   void setTextIndent(double value) {
     _textIndent = value;
     // 同步更新缩进字符串，使缩进滑块生效
-    _paragraphIndent = readerParagraphIndentString(value);
+    _paragraphIndent = '\u3000' * value.round().clamp(0, 8);
     _saveToStorage();
     notifyListeners();
   }
@@ -671,8 +637,7 @@ class ReaderProvider extends ChangeNotifier {
   }
 
   void setParagraphIndent(String value) {
-    _paragraphIndent = readerParagraphIndentString(value);
-    _textIndent = readerParagraphIndentCount(_paragraphIndent);
+    _paragraphIndent = value;
     _saveToStorage();
     notifyListeners();
   }

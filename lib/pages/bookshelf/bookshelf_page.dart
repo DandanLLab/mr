@@ -263,60 +263,15 @@ class _BookshelfPageState extends State<BookshelfPage>
                             ),
                           ),
                         ),
-                        // 搜索入口
-                        Builder(
-                          builder: (context) {
-                            final scheme = Theme.of(context).colorScheme;
-                            final isDark = scheme.brightness == Brightness.dark;
-                            final background = isDark
-                                ? scheme.surfaceContainerHighest
-                                : scheme.primaryContainer.withValues(alpha: 0.72);
-                            final foreground = isDark
-                                ? scheme.onSurface
-                                : scheme.onPrimaryContainer;
-                            final border = isDark
-                                ? scheme.outlineVariant
-                                : scheme.primary.withValues(alpha: 0.42);
-                            return Padding(
-                              padding: const EdgeInsets.only(left: 4),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(
-                                  DesignTokens.searchRadius,
-                                ),
-                                onTap: () => Navigator.pushNamed(
-                                  context,
-                                  AppRoutes.search,
-                                ),
-                                child: Container(
-                                  height: 36,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: DesignTokens.spacingMd,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: background,
-                                    borderRadius: BorderRadius.circular(
-                                      DesignTokens.searchRadius,
-                                    ),
-                                    border: Border.all(color: border),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.search,
-                                        size: 20,
-                                        color: foreground,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        '搜索',
-                                        style: TextStyle(color: foreground),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            );
+                        // 搜索按钮
+                        IconButton(
+                          icon: Icon(
+                            Icons.search,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                          tooltip: '搜索',
+                          onPressed: () {
+                            Navigator.pushNamed(context, AppRoutes.search);
                           },
                         ),
                         // 更多菜单

@@ -497,7 +497,10 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: Text('背景样式', style: TextStyle(color: _subColor, fontSize: 12)),
+        child: Text(
+          '背景样式',
+          style: TextStyle(color: _subColor, fontSize: 12),
+        ),
       ),
     );
   }
@@ -706,24 +709,12 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
           child: Text(label, style: TextStyle(color: _textColor)),
         ),
         Expanded(
-          child: SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              activeTrackColor: _isDark ? const Color(0xFF6EA8FF) : null,
-              inactiveTrackColor: _isDark
-                  ? Colors.white.withValues(alpha: 0.28)
-                  : null,
-              thumbColor: _isDark ? const Color(0xFFBFD7FF) : null,
-              overlayColor: _isDark
-                  ? const Color(0xFF6EA8FF).withValues(alpha: 0.16)
-                  : null,
-            ),
-            child: Slider(
-              value: value.clamp(min, max),
-              min: min,
-              max: max,
-              divisions: (max - min).round(),
-              onChanged: onChanged,
-            ),
+          child: Slider(
+            value: value.clamp(min, max),
+            min: min,
+            max: max,
+            divisions: (max - min).round(),
+            onChanged: onChanged,
           ),
         ),
         SizedBox(
@@ -769,21 +760,10 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
   }
 
   Widget _switchTile(String title, bool value, ValueChanged<bool> onChanged) {
-    final onTrack = _isDark ? const Color(0xFF2E7D32) : null;
-    final offTrack = _isDark ? Colors.white.withValues(alpha: 0.18) : null;
-    final offThumb = _isDark ? Colors.white.withValues(alpha: 0.7) : null;
     return SwitchListTile(
       title: Text(title, style: TextStyle(color: _textColor)),
       value: value,
       onChanged: onChanged,
-      thumbColor: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.selected)) return Colors.white;
-        return offThumb;
-      }),
-      trackColor: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.selected)) return onTrack;
-        return offTrack;
-      }),
     );
   }
 

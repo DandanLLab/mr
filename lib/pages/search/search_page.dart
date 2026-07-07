@@ -40,8 +40,6 @@ class _SearchPageState extends State<SearchPage> {
       // 限定单书源搜索（来自发现页/书源编辑页的"搜索书籍"入口）
       if (widget.sourceUrl != null && widget.sourceUrl!.isNotEmpty) {
         provider.selectSingleSource(widget.sourceUrl!);
-      } else {
-        provider.restoreMultiSourceSelectionAfterSingleSourceRoute();
       }
       await provider.loadSearchHistory();
       if (!mounted) return;
@@ -71,9 +69,6 @@ class _SearchPageState extends State<SearchPage> {
     return Scaffold(
       body: Consumer<SearchProvider>(
         builder: (context, provider, child) {
-          final secondaryTextColor = Theme.of(
-            context,
-          ).colorScheme.onSurface.withValues(alpha: 0.68);
           return Column(
             children: [
               // TitleBar + 搜索框（参考原版）
@@ -112,9 +107,7 @@ class _SearchPageState extends State<SearchPage> {
                                       ? IconButton(
                                           icon: const Icon(
                                             Icons.clear,
-                                            size:
-                                                DesignTokens.listItemIconSize *
-                                                0.67,
+                                            size: DesignTokens.listItemIconSize * 0.67,
                                           ),
                                           padding: EdgeInsets.zero,
                                           constraints: const BoxConstraints(),
@@ -259,7 +252,7 @@ class _SearchPageState extends State<SearchPage> {
                     '结果 ${provider.searchResults.length}',
                     style: TextStyle(
                       fontSize: DesignTokens.fontSummary,
-                      color: secondaryTextColor,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
@@ -430,11 +423,6 @@ class _SearchPageState extends State<SearchPage> {
     final author = result['author']?.toString().trim() ?? '未知作者';
     final sourceName = result['sourceName']?.toString().trim() ?? '';
     final tags = _resultTags(result);
-    final scheme = Theme.of(context).colorScheme;
-    final secondaryTextColor = scheme.onSurface.withValues(alpha: 0.68);
-    final chapterTextColor = scheme.brightness == Brightness.dark
-        ? scheme.onSurface.withValues(alpha: 0.9)
-        : scheme.primary;
 
     return RepaintBoundary(
       child: InkWell(
@@ -483,7 +471,7 @@ class _SearchPageState extends State<SearchPage> {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: DesignTokens.fontCaption,
-                        color: secondaryTextColor,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                     const SizedBox(height: 3),
@@ -499,22 +487,18 @@ class _SearchPageState extends State<SearchPage> {
                               vertical: 1,
                             ),
                             decoration: BoxDecoration(
-                              color: scheme.brightness == Brightness.dark
-                                  ? scheme.surfaceContainerHighest
-                                  : scheme.primaryContainer.withValues(
-                                      alpha: 0.3,
-                                    ),
-                              borderRadius: BorderRadius.circular(
-                                DesignTokens.actionRadius,
-                              ),
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .primaryContainer
+                                  .withValues(alpha: 0.3),
+                              borderRadius:
+                                  BorderRadius.circular(DesignTokens.actionRadius),
                             ),
                             child: Text(
                               tag,
                               style: TextStyle(
                                 fontSize: DesignTokens.fontCaption,
-                                color: scheme.brightness == Brightness.dark
-                                    ? scheme.onSurface
-                                    : scheme.primary,
+                                color: Theme.of(context).colorScheme.primary,
                               ),
                             ),
                           );
@@ -528,9 +512,7 @@ class _SearchPageState extends State<SearchPage> {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: DesignTokens.fontCaption,
-                        color: lastChapter.isEmpty
-                            ? secondaryTextColor
-                            : chapterTextColor,
+                        color: Theme.of(context).colorScheme.primary,
                       ),
                     ),
                     const SizedBox(height: 3),
@@ -542,7 +524,7 @@ class _SearchPageState extends State<SearchPage> {
                       style: TextStyle(
                         fontSize: DesignTokens.fontCaption,
                         height: 1.3,
-                        color: secondaryTextColor,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                     // 书源名称
@@ -591,11 +573,6 @@ class _SearchPageState extends State<SearchPage> {
     final lastChapter = result['lastChapter']?.toString().trim() ?? '';
     final author = result['author']?.toString().trim() ?? '未知作者';
     final sourceName = result['sourceName']?.toString().trim() ?? '';
-    final scheme = Theme.of(context).colorScheme;
-    final secondaryTextColor = scheme.onSurface.withValues(alpha: 0.68);
-    final chapterTextColor = scheme.brightness == Brightness.dark
-        ? scheme.onSurface.withValues(alpha: 0.9)
-        : scheme.primary;
 
     return GestureDetector(
       onTap: () => _openDetail(result),
@@ -651,9 +628,7 @@ class _SearchPageState extends State<SearchPage> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: DesignTokens.fontCaption,
-                      color: lastChapter.isEmpty
-                          ? secondaryTextColor
-                          : chapterTextColor,
+                      color: Theme.of(context).colorScheme.primary,
                     ),
                   ),
                   // 书源
@@ -779,13 +754,13 @@ class _SearchPageState extends State<SearchPage> {
     }
 
     // 补充 Referer（使用书源 URL 作为来源页，绕过防盗链）
-    headers.putIfAbsent('Referer', () => _extractBaseUrl(sourceUrl));
+    headers.putIfAbsent(
+        'Referer', () => _extractBaseUrl(sourceUrl));
 
     // 补充默认 User-Agent
     headers.putIfAbsent(
       'User-Agent',
-      () =>
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+      () => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
           '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     );
 
@@ -908,8 +883,7 @@ class _SearchPageState extends State<SearchPage> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            final allSelected =
-                provider.selectedSourceUrls.length ==
+            final allSelected = provider.selectedSourceUrls.length ==
                 provider.bookSources.length;
             return AlertDialog(
               title: Row(
@@ -956,14 +930,10 @@ class _SearchPageState extends State<SearchPage> {
                       final group = entry.key;
                       final sources = entry.value;
                       final selectedInGroup = sources
-                          .where(
-                            (s) => provider.selectedSourceUrls.contains(
-                              s.bookSourceUrl,
-                            ),
-                          )
+                          .where((s) =>
+                              provider.selectedSourceUrls.contains(s.bookSourceUrl))
                           .length;
-                      final allInGroupSelected =
-                          selectedInGroup == sources.length;
+                      final allInGroupSelected = selectedInGroup == sources.length;
                       final isExpanded = expandedGroups.contains(group);
 
                       return Column(
@@ -990,9 +960,9 @@ class _SearchPageState extends State<SearchPage> {
                               '$selectedInGroup / ${sources.length}',
                               style: TextStyle(
                                 fontSize: DesignTokens.fontCaption,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
                               ),
                             ),
                             trailing: Row(
@@ -1004,10 +974,8 @@ class _SearchPageState extends State<SearchPage> {
                                     provider.selectGroupSources(group);
                                     setDialogState(() {});
                                   },
-                                  child: const Text(
-                                    '仅搜此组',
-                                    style: TextStyle(fontSize: 11),
-                                  ),
+                                  child: const Text('仅搜此组',
+                                      style: TextStyle(fontSize: 11)),
                                 ),
                                 Checkbox(
                                   value: allInGroupSelected,
@@ -1040,9 +1008,9 @@ class _SearchPageState extends State<SearchPage> {
                                     size: DesignTokens.listItemIconSize * 0.67,
                                     color: isSelected
                                         ? Theme.of(context).colorScheme.primary
-                                        : Theme.of(
-                                            context,
-                                          ).colorScheme.onSurfaceVariant,
+                                        : Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant,
                                   ),
                                   title: Text(
                                     source.bookSourceName,
@@ -1054,15 +1022,13 @@ class _SearchPageState extends State<SearchPage> {
                                     value: isSelected,
                                     onChanged: (checked) {
                                       provider.toggleSourceSelection(
-                                        source.bookSourceUrl,
-                                      );
+                                          source.bookSourceUrl);
                                       setDialogState(() {});
                                     },
                                   ),
                                   onTap: () {
                                     provider.toggleSourceSelection(
-                                      source.bookSourceUrl,
-                                    );
+                                        source.bookSourceUrl);
                                     setDialogState(() {});
                                   },
                                 ),
@@ -1138,8 +1104,8 @@ class _SearchPageState extends State<SearchPage> {
                       final levelIcon = entry.level == LogLevel.error
                           ? '🔴'
                           : entry.level == LogLevel.warning
-                          ? '🟡'
-                          : '🔵';
+                              ? '🟡'
+                              : '🔵';
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 4),
                         child: RichText(
@@ -1147,16 +1113,16 @@ class _SearchPageState extends State<SearchPage> {
                           overflow: TextOverflow.ellipsis,
                           text: TextSpan(
                             style: DefaultTextStyle.of(context).style.copyWith(
-                              fontSize: DesignTokens.fontCaption,
-                            ),
+                                  fontSize: DesignTokens.fontCaption,
+                                ),
                             children: [
                               TextSpan(
                                 text: '$timeStr $levelIcon ',
                                 style: TextStyle(
                                   fontFamily: 'monospace',
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
                                 ),
                               ),
                               TextSpan(
