@@ -291,16 +291,17 @@ var CryptoJS = {
   },
   AES: {
     encrypt: function(data, key, cfg) {
-      // 统一 key 为 Uint8Array（key 通常来自 enc.Utf8.parse → _strToU8 → Uint8Array）
-      var keyU8 = key instanceof Uint8Array ? key : (Array.isArray(key) ? new Uint8Array(key) : _strToU8(String(key)));
-      // 统一 iv 为 Uint8Array（书源可能传 number[] / Uint8Array / string）
+      // 统一 key 为 Uint8Array（key 通常来自 enc.Utf8.parse → _strToU8 → Uint8Array；
+      // 也可能是 enc.Base64.parse → __nativeBase64.decodeToBytes → ArrayBuffer）
+      var keyU8 = key instanceof Uint8Array ? key : (Array.isArray(key) ? new Uint8Array(key) : (key instanceof ArrayBuffer ? new Uint8Array(key) : _strToU8(String(key))));
+      // 统一 iv 为 Uint8Array（书源可能传 number[] / Uint8Array / ArrayBuffer / string）
       var ivU8 = null;
       if (cfg && cfg.iv) {
         var iv = cfg.iv;
-        ivU8 = iv instanceof Uint8Array ? iv : (Array.isArray(iv) ? new Uint8Array(iv) : (typeof iv === 'string' ? _strToU8(iv) : null));
+        ivU8 = iv instanceof Uint8Array ? iv : (Array.isArray(iv) ? new Uint8Array(iv) : (iv instanceof ArrayBuffer ? new Uint8Array(iv) : (typeof iv === 'string' ? _strToU8(iv) : null)));
       }
-      // 统一 data 为 Uint8Array（书源可能传字符串或 CryptoJS.enc.Utf8.parse(plain) → Uint8Array）
-      var dataU8 = data instanceof Uint8Array ? data : (Array.isArray(data) ? new Uint8Array(data) : _strToU8(String(data)));
+      // 统一 data 为 Uint8Array（书源可能传字符串、CryptoJS.enc.Utf8.parse → Uint8Array、enc.Base64.parse → ArrayBuffer）
+      var dataU8 = data instanceof Uint8Array ? data : (Array.isArray(data) ? new Uint8Array(data) : (data instanceof ArrayBuffer ? new Uint8Array(data) : _strToU8(String(data))));
       var result;
       if (typeof __nativeCrypto !== 'undefined') {
         if (ivU8 && ivU8.length > 0 && __nativeCrypto.aesEncryptNative) {
@@ -321,20 +322,22 @@ var CryptoJS = {
       return { toString: function() { return result || ''; } };
     },
     decrypt: function(ciphertext, key, cfg) {
-      // 统一 key 为 Uint8Array（key 通常来自 enc.Utf8.parse → _strToU8 → Uint8Array）
-      var keyU8 = key instanceof Uint8Array ? key : (Array.isArray(key) ? new Uint8Array(key) : _strToU8(String(key)));
-      // 统一 iv 为 Uint8Array（书源可能传 number[] / Uint8Array / string）
+      // 统一 key 为 Uint8Array（key 通常来自 enc.Utf8.parse → _strToU8 → Uint8Array；
+      // 也可能是 enc.Base64.parse → __nativeBase64.decodeToBytes → ArrayBuffer）
+      var keyU8 = key instanceof Uint8Array ? key : (Array.isArray(key) ? new Uint8Array(key) : (key instanceof ArrayBuffer ? new Uint8Array(key) : _strToU8(String(key))));
+      // 统一 iv 为 Uint8Array（书源可能传 number[] / Uint8Array / ArrayBuffer / string）
       var ivU8 = null;
       if (cfg && cfg.iv) {
         var iv = cfg.iv;
-        ivU8 = iv instanceof Uint8Array ? iv : (Array.isArray(iv) ? new Uint8Array(iv) : (typeof iv === 'string' ? _strToU8(iv) : null));
+        ivU8 = iv instanceof Uint8Array ? iv : (Array.isArray(iv) ? new Uint8Array(iv) : (iv instanceof ArrayBuffer ? new Uint8Array(iv) : (typeof iv === 'string' ? _strToU8(iv) : null)));
       }
       var hasIv = ivU8 && ivU8.length > 0;
       var result;
       if (typeof __nativeCrypto !== 'undefined') {
-        // cipher 为字节序列（number[] / Uint8Array）时优先走 aesDecryptNative，零 base64 开销。
-        // 兼容书源常见写法：atob(result) 取字节 → number[] 直接传入 CryptoJS.AES.decrypt。
-        var isBytes = (ciphertext instanceof Uint8Array) || Array.isArray(ciphertext);
+        // cipher 为字节序列（number[] / Uint8Array / ArrayBuffer）时优先走 aesDecryptNative，零 base64 开销。
+        // 兼容书源常见写法：atob(result) 取字节 → number[] 直接传入 CryptoJS.AES.decrypt；
+        // 或 CryptoJS.enc.Base64.parse(base64Cipher) → ArrayBuffer → 传入 CryptoJS.AES.decrypt。
+        var isBytes = (ciphertext instanceof Uint8Array) || (ciphertext instanceof ArrayBuffer) || Array.isArray(ciphertext);
         if (isBytes && hasIv && __nativeCrypto.aesDecryptNative) {
           var ctU8 = ciphertext instanceof Uint8Array ? ciphertext : new Uint8Array(ciphertext);
           var plainU8 = __nativeCrypto.aesDecryptNative(ctU8, keyU8, ivU8);

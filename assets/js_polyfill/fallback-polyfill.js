@@ -2,14 +2,14 @@
  * fallback-polyfill.js — java-bridge.js 加载失败时的最小回退
  *
  * 当 rootBundle 加载 java-bridge.js 失败时注入，
- * 确保后续 evaluate 不崩溃。
- *
+ * 确保后续 evaluate 不崩溃。*/
+ /*
  * 设计原则：
  *   - 所有书源常用 API 提供空实现（返回 '' / [] / {} / false）
  *   - 网络请求类抛 __NEED_NETWORK__ 标记（与正式版一致，由 Dart 侧拦截）
  *   - 不依赖任何 __nativeCrypto / __nativeLz / __nativeBase64 / __nativeHtml（这些由 C 层注册，与 JS polyfill 独立）
  *   - 保持与 java-bridge.js 相同的 API 表面，避免书源调用未定义方法抛 ReferenceError
- */
+ **/
 
 // ===== 基础变量 =====
 var _javaCache = {};
