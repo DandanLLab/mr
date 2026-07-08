@@ -920,8 +920,10 @@ class JsEngine {
       // 自动补 return：如果 JS 代码不以 return 结尾，自动包裹使其返回最后一个表达式的值
       final wrappedCode = _wrapJsCode(jsCode);
 
-      // 构建变量注入代码（排除核心变量，避免覆盖 result/baseUrl/content）
-      final coreVars = {'result', 'baseUrl', 'content', 'src'};
+      // 构建变量注入代码（排除核心变量，避免覆盖 result/baseUrl/src）
+      // 'content' 不作为核心变量：对齐 legado evalJS（只注入 src=content，不注入 content 变量），
+      // 否则会把 content 注入成字符串，破坏书源 content(result) 这类函数调用，并覆盖书源自定义 content。
+      final coreVars = {'result', 'baseUrl', 'src'};
       final varInjections = <String>[];
       final globalVarInjections = <String>[];
       if (variables != null) {
@@ -954,7 +956,6 @@ class JsEngine {
         (function() {
           var result = $contentStr;
           var baseUrl = ${jsonEncode(baseUrl ?? '')};
-          var content = result;
           var src = ${variables?.containsKey('src') == true ? jsonEncode(variables!['src']?.toString() ?? '') : contentStr};
           $sharedVarsCode
           $varCode
@@ -1145,7 +1146,6 @@ class JsEngine {
         (function() {
           var result = ${jsonEncode(content ?? '')};
           var baseUrl = ${jsonEncode(book?['bookUrl'] ?? '')};
-          var content = result;
           var book = ${jsonEncode(book ?? {})};
           var chapter = ${jsonEncode(chapter ?? {})};
           var source = ${jsonEncode(source ?? {})};
@@ -1209,7 +1209,7 @@ class JsEngine {
   // ===== QuickJS 规则执行 =====
 
   /// 从 env 中提取非核心变量，用于注入到 JS 作用域
-  static const _coreEnvVars = {'result', 'baseUrl', 'content', 'src', 'book', 'chapter', 'source', 'cookie', 'title'};
+  static const _coreEnvVars = {'result', 'baseUrl', 'src', 'book', 'chapter', 'source', 'cookie', 'title'};
 
   Map<String, dynamic>? _extractVariables(Map<String, dynamic>? env) {
     if (env == null) return null;
@@ -1292,7 +1292,7 @@ class JsEngine {
       ).join('\n');
 
       // 构建额外变量注入代码（排除核心变量，避免覆盖）
-      final coreVars = {'result', 'baseUrl', 'content', 'src', 'book', 'chapter', 'source', 'cookie', 'title'};
+      final coreVars = {'result', 'baseUrl', 'src', 'book', 'chapter', 'source', 'cookie', 'title'};
       final varInjections = <String>[];
       final globalVarInjections = <String>[];
       if (variables != null) {
