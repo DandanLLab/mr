@@ -176,9 +176,20 @@ function _strToU8(str) {
   var bytes = [];
   for (var i = 0; i < str.length; i++) {
     var c = str.charCodeAt(i);
+    // 检测 UTF-16 代理对（emoji 等 U+10000-U+10FFFF 字符），合并为 4 字节 UTF-8
+    // 否则高低代理各自被当作 3 字节 UTF-8 编码，产生 6 字节无效序列
+    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < str.length) {
+      var c2 = str.charCodeAt(i + 1);
+      if (c2 >= 0xDC00 && c2 <= 0xDFFF) {
+        var code = 0x10000 + ((c - 0xD800) << 10) + (c2 - 0xDC00);
+        bytes.push(0xF0 | (code >> 18), 0x80 | ((code >> 12) & 0x3F), 0x80 | ((code >> 6) & 0x3F), 0x80 | (code & 0x3F));
+        i++;  // 跳过低代理
+        continue;
+      }
+    }
     if (c < 128) bytes.push(c);
     else if (c < 2048) bytes.push(192 | (c >> 6), 128 | (c & 63));
-    else bytes.push(224 | (c >> 12), 128 | ((c >> 6) & 63), 128 | (c & 63));
+    else bytes.push(224 | (c >> 12), 128 | ((c >> 6) & 0x3F), 128 | (c & 0x3F));
   }
   return new Uint8Array(bytes);
 }
