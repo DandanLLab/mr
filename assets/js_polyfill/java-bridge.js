@@ -191,11 +191,50 @@ var LZString = {
   decompress: function(str) {
     if (str == null) return '';
     if (str === '') return '';
-    if (typeof __nativeLz !== 'undefined') {
-      var r = __nativeLz.decompressFromBase64(str);
+    // 优先使用 C 原生实现（若已注册）。注意：C 层 __nativeLz 当前仅暴露
+    // decompressFromBase64/Batch/Bin，标准 decompress（resetValue=32768，输入为原始压缩串）未注册，
+    // 故此处 typeof 保护下走纯 JS 兜底，避免误用 decompressFromBase64（resetValue=32）导致语义错位。
+    if (typeof __nativeLz !== 'undefined' && typeof __nativeLz.decompress === 'function') {
+      var r = __nativeLz.decompress(str);
       return r === null ? '' : r;
     }
-    return '';
+    // 纯 JS 实现（对齐 lz-string 官方 decompress：resetValue=32768）。
+    // 关键：输入读取必须用 charCodeAt，否则含高位字节的压缩串会错位（见 project_memory LZString 教训）。
+    var dictionary = [0, 1, 2];
+    var enlargeIn = 4, dictSize = 4, numBits = 3;
+    var entry, w, c, bits, resb, maxpower, power;
+    var data = { val: str.charCodeAt(0), position: 32768, index: 1 };
+    function readBits(n) {
+      bits = 0; maxpower = Math.pow(2, n); power = 1;
+      while (power != maxpower) {
+        resb = data.val & data.position;
+        data.position >>= 1;
+        if (data.position == 0) { data.position = 32768; data.val = str.charCodeAt(data.index++); }
+        bits |= (resb > 0 ? 1 : 0) * power;
+        power <<= 1;
+      }
+      return bits;
+    }
+    var next = readBits(2);
+    if (next === 0) c = String.fromCharCode(readBits(8));
+    else if (next === 1) c = String.fromCharCode(readBits(16));
+    else return '';  // next === 2
+    dictionary[3] = c; w = c;
+    var result = c;
+    while (true) {
+      c = readBits(numBits);
+      if (c === 0) { dictionary[dictSize++] = String.fromCharCode(readBits(8)); enlargeIn--; }
+      else if (c === 1) { dictionary[dictSize++] = String.fromCharCode(readBits(16)); enlargeIn--; }
+      else if (c === 2) return result;
+      if (enlargeIn === 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
+      if (dictionary[c] !== undefined) entry = dictionary[c];
+      else { if (c === dictSize) entry = w + w.charAt(0); else return ''; }
+      result += entry;
+      dictionary[dictSize++] = w + entry.charAt(0);
+      enlargeIn--;
+      if (enlargeIn === 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
+      w = entry;
+    }
   },
   compressToBase64: function(str) {
     return btoa(str);

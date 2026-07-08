@@ -35,5 +35,9 @@ function __reinjectConsole() {
     error: function() { var msg = Array.from(arguments).join(' '); __consoleLogs.push({level: 'error', msg: msg}); },
     info: function() { var msg = Array.from(arguments).join(' '); __consoleLogs.push({level: 'info', msg: msg}); },
     debug: function() { var msg = Array.from(arguments).join(' '); __consoleLogs.push({level: 'debug', msg: msg}); },
+    // 补齐 _getLogs / _clearLogs，与初始 console（java-bridge.js）对齐，
+    // 否则 __flushConsoleLogs 检测到 console._getLogs 非 function 会返回 NEED_REINJECT 陷入循环。
+    _getLogs: function() { return __consoleLogs.slice(); },
+    _clearLogs: function() { __consoleLogs.length = 0; },
   };
 }
