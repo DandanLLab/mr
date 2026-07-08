@@ -178,9 +178,23 @@ function _strToU8(str) {
 }
 
 // ===== LZString 兼容层 → __nativeLz =====
+// 注意：C 原生 __nativeLz.decompressFromBase64 在解压失败或空串时返回 null，
+// 此处统一兜底为 ''，避免下游 JSON.parse(null) → null → null.data 抛 TypeError
 var LZString = {
   decompressFromBase64: function(str) {
-    if (typeof __nativeLz !== 'undefined') return __nativeLz.decompressFromBase64(str);
+    if (typeof __nativeLz !== 'undefined') {
+      var r = __nativeLz.decompressFromBase64(str);
+      return r === null ? '' : r;
+    }
+    return '';
+  },
+  decompress: function(str) {
+    if (str == null) return '';
+    if (str === '') return '';
+    if (typeof __nativeLz !== 'undefined') {
+      var r = __nativeLz.decompressFromBase64(str);
+      return r === null ? '' : r;
+    }
     return '';
   },
   compressToBase64: function(str) {
@@ -854,4 +868,85 @@ function _jsLog(msg, level) {
   if (level === 'error') console.error(msg);
   else if (level === 'warn') console.warn(msg);
   else console.log(msg);
+}
+
+// ===== Dart 侧动态操作辅助函数 =====
+// 以下函数替代 js_engine.dart 中的内联 JS 拼接，
+// Dart 侧通过 evaluate('__setCache(key, value)') 调用。
+
+// 设置 _javaCache 键值对（替代 evaluate('_javaCache[key] = value;')）
+function __setCache(key, value) {
+  _javaCache[key] = value;
+}
+
+// 获取 _javaCache 值（替代 evaluate('_javaCache[key]')）
+function __getCache(key) {
+  return _javaCache[key];
+}
+
+// 清空 _javaCache（替代 evaluate('_javaCache = {};')）
+function __clearCache() {
+  _javaCache = {};
+}
+
+// 求值变量表达式（替代 evaluate('(function(){ try { var __v = expr; ... })()')）
+function __evalVar(expr) {
+  try {
+    var __v = eval(expr);
+    return (typeof __v === 'string' && __v.length > 50) ? __v : '';
+  } catch (e) {
+    return '';
+  }
+}
+
+// 正则替换（替代内联 text.replace(new RegExp(pattern, 'g'), replacement)）
+function __regexReplace(text, pattern, replacement) {
+  try {
+    return String(text).replace(new RegExp(pattern, 'g'), replacement);
+  } catch (e) {
+    return null;
+  }
+}
+
+// CSS 选择器查询第一个（替代内联 java.jsoup.selectFirst(html, selector)）
+function __cssSelect(html, selector) {
+  try {
+    return java.jsoup.selectFirst(html, selector);
+  } catch (e) {
+    return null;
+  }
+}
+
+// JSON 路径查询（替代内联 JSON.parse + 逐级访问）
+function __jsonPath(jsonStr, path) {
+  try {
+    var data = JSON.parse(jsonStr);
+    var p = path.replace(/^\$\./, '');
+    var parts = p.split('.');
+    var result = data;
+    for (var i = 0; i < parts.length; i++) {
+      if (result == null) return null;
+      result = result[parts[i]];
+    }
+    return JSON.stringify(result);
+  } catch (e) {
+    return null;
+  }
+}
+
+// 批量 URL 求值（替代内联批量 URL 提取脚本）
+// varCodeArr: ['var key = "value";', ...]
+// exprArr: ['result', 'java.ajax(...)', ...]
+function __batchEvalUrls(varCodeArr, exprArr) {
+  var __results = [];
+  for (var i = 0; i < varCodeArr.length; i++) {
+    try { eval(varCodeArr[i]); } catch (e) {}
+  }
+  for (var j = 0; j < exprArr.length; j++) {
+    try {
+      var __u = String(eval(exprArr[j]));
+      if (__u.indexOf('http') === 0) __results.push(__u);
+    } catch (e) {}
+  }
+  return JSON.stringify(__results);
 }
