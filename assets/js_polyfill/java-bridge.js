@@ -254,6 +254,9 @@ var LZString = {
     }
   },
   compressToBase64: function(str) {
+    // 注意：这是 stub 实现，仅做 base64 编码，不是真正的 LZ 压缩。
+    // C 层 __nativeLz 未暴露 compress 方法，纯 JS 实现 LZ 压缩算法开销大且书源几乎不用。
+    // 若书源确实需要 LZ 压缩，应在此处补充完整实现或下沉到 C 层。
     return btoa(str);
   },
 };
@@ -856,9 +859,19 @@ var java = {
     var bytes = [];
     for (var i = 0; i < str.length; i++) {
       var c = str.charCodeAt(i);
+      // 检测 UTF-16 代理对（与 _strToU8 保持一致）
+      if (c >= 0xD800 && c <= 0xDBFF && i + 1 < str.length) {
+        var c2 = str.charCodeAt(i + 1);
+        if (c2 >= 0xDC00 && c2 <= 0xDFFF) {
+          var code = 0x10000 + ((c - 0xD800) << 10) + (c2 - 0xDC00);
+          bytes.push(0xF0 | (code >> 18), 0x80 | ((code >> 12) & 0x3F), 0x80 | ((code >> 6) & 0x3F), 0x80 | (code & 0x3F));
+          i++;
+          continue;
+        }
+      }
       if (c < 128) bytes.push(c);
       else if (c < 2048) bytes.push(192 | (c >> 6), 128 | (c & 63));
-      else bytes.push(224 | (c >> 12), 128 | ((c >> 6) & 63), 128 | (c & 63));
+      else bytes.push(224 | (c >> 12), 128 | ((c >> 6) & 0x3F), 128 | (c & 0x3F));
     }
     return bytes;
   },
