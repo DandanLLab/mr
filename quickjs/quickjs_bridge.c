@@ -1015,21 +1015,21 @@ static JSValue js_call_crypto_binary(JSContext *ctx, int op, int argc, JSValueCo
     size_t len0 = 0, len1 = 0, len2 = 0;
     const uint8_t *data0 = NULL, *data1 = NULL, *data2 = NULL;
 
-    // JS_GetArrayBuffer 直接返回内部指针，零拷贝
+    // _get_bytes 兼容 ArrayBuffer 和 TypedArray（Uint8Array 等）
     if (argc > 0) {
-        data0 = JS_GetArrayBuffer(ctx, &len0, argv[0]);
+        data0 = _get_bytes(ctx, argv[0], &len0);
         if (!data0 && min_args > 0) {
             return JS_ThrowTypeError(ctx, "%s: argument 1 must be an ArrayBuffer/Uint8Array", fn_name);
         }
     }
     if (argc > 1) {
-        data1 = JS_GetArrayBuffer(ctx, &len1, argv[1]);
+        data1 = _get_bytes(ctx, argv[1], &len1);
         if (!data1 && min_args > 1) {
             return JS_ThrowTypeError(ctx, "%s: argument 2 must be an ArrayBuffer/Uint8Array", fn_name);
         }
     }
     if (argc > 2) {
-        data2 = JS_GetArrayBuffer(ctx, &len2, argv[2]);
+        data2 = _get_bytes(ctx, argv[2], &len2);
         if (!data2 && min_args > 2) {
             return JS_ThrowTypeError(ctx, "%s: argument 3 must be an ArrayBuffer/Uint8Array", fn_name);
         }
@@ -1058,9 +1058,45 @@ static JSValue js_call_crypto_binary(JSContext *ctx, int op, int argc, JSValueCo
 // 前向声明：_free_array_buf 定义在 L1365+，此处提前声明供 _to_arraybuffer 使用
 static void _free_array_buf(JSRuntime *rt, void *opaque, void *ptr);
 
+// 辅助：从 JSValue 取字节指针和长度（兼容 ArrayBuffer 与 TypedArray）
+// JS_GetArrayBuffer 只接受 JS_CLASS_ARRAY_BUFFER，不认 TypedArray（Uint8Array 等）。
+// 此函数先尝试 ArrayBuffer，失败后用 JS_GetTypedArrayBuffer 提取底层 buffer。
+// 返回 NULL 时已清除异常（不抛新异常），调用方自行处理。
+// 注意：返回的指针在 val（或其底层 buffer）被 GC/detach 前有效。
+static const uint8_t *_get_bytes(JSContext *ctx, JSValueConst val, size_t *len) {
+    const uint8_t *p = JS_GetArrayBuffer(ctx, len, val);
+    if (p) return p;
+
+    // 清除 JS_GetArrayBuffer 抛出的 TypeError
+    JSValue _exc = JS_GetException(ctx);
+    JS_FreeValue(ctx, _exc);
+
+    // TypedArray → 提取底层 ArrayBuffer
+    size_t ta_off, ta_len, ta_bpe;
+    JSValue ta_buf = JS_GetTypedArrayBuffer(ctx, val, &ta_off, &ta_len, &ta_bpe);
+    if (JS_IsException(ta_buf)) {
+        _exc = JS_GetException(ctx);
+        JS_FreeValue(ctx, _exc);
+        *len = 0;
+        return NULL;
+    }
+    size_t ab_len;
+    const uint8_t *ab_data = JS_GetArrayBuffer(ctx, &ab_len, ta_buf);
+    JS_FreeValue(ctx, ta_buf);
+    if (!ab_data || ta_off + ta_len > ab_len) {
+        // 清除可能的异常
+        _exc = JS_GetException(ctx);
+        JS_FreeValue(ctx, _exc);
+        *len = 0;
+        return NULL;
+    }
+    *len = ta_len;
+    return ab_data + ta_off;
+}
+
 // 辅助：从 JSValue 取 ArrayBuffer 指针
 static const uint8_t *get_ab(JSContext *ctx, JSValueConst val, size_t *len, const char *fn_name, int arg_idx) {
-    const uint8_t *p = JS_GetArrayBuffer(ctx, len, val);
+    const uint8_t *p = _get_bytes(ctx, val, len);
     if (!p) {
         JS_ThrowTypeError(ctx, "%s: argument %d must be an ArrayBuffer/Uint8Array", fn_name, arg_idx);
     }
@@ -1068,15 +1104,16 @@ static const uint8_t *get_ab(JSContext *ctx, JSValueConst val, size_t *len, cons
 }
 
 // 辅助：将 JSValue 转换为 ArrayBuffer（防护层）
-// C 层 get_ab 只接受 ArrayBuffer/Uint8Array，对 number[]/string 直接抛 TypeError。
-// 书源可能直接调用 __nativeCrypto.aesDecryptNative() 传入 number[] 或字符串，
+// C 层 get_ab 只接受 ArrayBuffer，对 Uint8Array/number[]/string 直接抛 TypeError。
+// 书源可能直接调用 __nativeCrypto.aesDecryptNative() 传入 Uint8Array/number[]/字符串，
 // 此处统一转换为 ArrayBuffer，避免 C 层拒绝导致整条链路崩溃。
 //
 // 返回值规则：
-//   - val 已是 ArrayBuffer/Uint8Array → 返回 JS_DupValue(val)（调用方需 JS_FreeValue）
-//   - val 是 number[]            → 创建新 ArrayBuffer（malloc 内存移交 QuickJS GC）
-//   - val 是 string              → 创建新 ArrayBuffer（UTF-8 编码，不含 '\0'）
-//   - 转换失败                   → 返回 JS_NULL
+//   - val 已是 ArrayBuffer         → 返回 JS_DupValue(val)（调用方需 JS_FreeValue）
+//   - val 是 TypedArray(Uint8Array) → 提取底层 buffer 并拷贝为新 ArrayBuffer
+//   - val 是 number[]              → 创建新 ArrayBuffer（malloc 内存移交 QuickJS GC）
+//   - val 是 string                → 创建新 ArrayBuffer（UTF-8 编码，不含 '\0'）
+//   - 转换失败                     → 返回 JS_NULL
 // 调用方需对非 NULL 返回值调用 JS_FreeValue 释放引用。
 static JSValue _to_arraybuffer(JSContext *ctx, JSValueConst val) {
     size_t len;
@@ -1086,6 +1123,13 @@ static JSValue _to_arraybuffer(JSContext *ctx, JSValueConst val) {
     /* JS_GetArrayBuffer 失败时已抛出 TypeError，清除异常以便后续转换逻辑正常运行 */
     JSValue _exc = JS_GetException(ctx);
     JS_FreeValue(ctx, _exc);
+
+    // TypedArray（Uint8Array/Int8Array 等）→ 用 _get_bytes 提取底层字节，拷贝为新 ArrayBuffer
+    size_t ta_len = 0;
+    const uint8_t *ta_data = _get_bytes(ctx, val, &ta_len);
+    if (ta_data) {
+        return JS_NewArrayBufferCopy(ctx, ta_data, ta_len);
+    }
 
     // number[] → ArrayBuffer
     if (JS_IsArray(ctx, val)) {
@@ -1404,36 +1448,29 @@ static JSValue js_native_decode_to_bytes(JSContext *ctx, JSValueConst this_val,
     return ret;
 }
 
-// uint8ToStr: ArrayBuffer → UTF-8 字符串（零 JS 循环，零 charCodeAt）
-// 兼容 Uint8Array（QuickJS 中 ArrayBuffer 和 Uint8Array 底层共享 buffer，
-// JS_GetArrayBuffer 对两者都生效）
+// uint8ToStr: ArrayBuffer/Uint8Array → UTF-8 字符串（零 JS 循环，零 charCodeAt）
+// 兼容 TypedArray（Uint8Array 等），通过 _get_bytes 统一提取底层字节
 static JSValue js_native_uint8_to_str(JSContext *ctx, JSValueConst this_val,
-                                      int argc, JSValueConst *argv) {
+                                       int argc, JSValueConst *argv) {
     (void)this_val;
     if (argc < 1) return JS_NewString(ctx, "");
     size_t len;
-    const uint8_t *data = JS_GetArrayBuffer(ctx, &len, argv[0]);
+    const uint8_t *data = _get_bytes(ctx, argv[0], &len);
     if (!data) {
-        /* JS_GetArrayBuffer 已抛出 TypeError，清除异常使调用方拿到空串而非崩溃 */
-        JSValue exc = JS_GetException(ctx);
-        JS_FreeValue(ctx, exc);
         return JS_NewString(ctx, "");
     }
     JSValue ret = JS_NewStringLen(ctx, (const char *)data, len);
     return ret;
 }
 
-// b64FromBytes: ArrayBuffer → base64 字符串
+// b64FromBytes: ArrayBuffer/Uint8Array → base64 字符串
 static JSValue js_native_b64_from_bytes(JSContext *ctx, JSValueConst this_val,
-                                        int argc, JSValueConst *argv) {
+                                         int argc, JSValueConst *argv) {
     (void)this_val;
     if (argc < 1) return JS_NewString(ctx, "");
     size_t len;
-    const uint8_t *data = JS_GetArrayBuffer(ctx, &len, argv[0]);
+    const uint8_t *data = _get_bytes(ctx, argv[0], &len);
     if (!data) {
-        /* JS_GetArrayBuffer 已抛出 TypeError，清除异常使调用方拿到空串而非崩溃 */
-        JSValue exc = JS_GetException(ctx);
-        JS_FreeValue(ctx, exc);
         return JS_NewString(ctx, "");
     }
     if (len == 0) return JS_NewString(ctx, "");
@@ -2079,9 +2116,9 @@ static JSValue js_native_lz_decompress_bin(JSContext *ctx, JSValueConst this_val
     }
 
     size_t input_len = 0;
-    uint8_t *input = JS_GetArrayBuffer(ctx, &input_len, argv[0]);
+    const uint8_t *input = _get_bytes(ctx, argv[0], &input_len);
     if (!input) {
-        return JS_ThrowTypeError(ctx, "decompressFromBase64Bin: argument must be an ArrayBuffer");
+        return JS_ThrowTypeError(ctx, "decompressFromBase64Bin: argument must be an ArrayBuffer/Uint8Array");
     }
 
     if (input_len == 0) {
@@ -2118,18 +2155,17 @@ static JSValue js_native_aes_decrypt_then_lz_bin(JSContext *ctx, JSValueConst th
         return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBin requires 2 ArrayBuffers");
     }
 
-    // base64 密文（零拷贝读取 ArrayBuffer 内部 buffer）
     size_t b64_len = 0;
-    uint8_t *b64 = JS_GetArrayBuffer(ctx, &b64_len, argv[0]);
+    const uint8_t *b64 = _get_bytes(ctx, argv[0], &b64_len);
     if (!b64) {
-        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBin: arg 1 must be ArrayBuffer");
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBin: arg 1 must be ArrayBuffer/Uint8Array");
     }
 
     // 密钥原始字节（避免 UTF-8 编码往返，AES 密钥本就是字节而非文本）
     size_t key_len = 0;
-    uint8_t *key_bytes = JS_GetArrayBuffer(ctx, &key_len, argv[1]);
+    const uint8_t *key_bytes = _get_bytes(ctx, argv[1], &key_len);
     if (!key_bytes) {
-        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBin: arg 2 must be ArrayBuffer");
+        return JS_ThrowTypeError(ctx, "aesDecryptThenLzDecompressBin: arg 2 must be ArrayBuffer/Uint8Array");
     }
 
     if (key_len != 16 && key_len != 24 && key_len != 32) {
@@ -2725,7 +2761,7 @@ static JSValue js_conv_charset_decode(JSContext *ctx, JSValueConst this_val,
     }
 
     size_t data_len = 0;
-    const uint8_t *data = JS_GetArrayBuffer(ctx, &data_len, argv[0]);
+    const uint8_t *data = _get_bytes(ctx, argv[0], &data_len);
     if (!data) {
         return JS_ThrowTypeError(ctx, "charsetDecode: argument 1 must be an ArrayBuffer/Uint8Array");
     }
