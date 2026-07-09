@@ -1002,6 +1002,10 @@ static JSValue js_call_crypto(JSContext *ctx, int op, int argc, JSValueConst *ar
 // ---------- ArrayBuffer 零拷贝路径 ----------
 // 用于大数据：JS 传 Uint8Array/ArrayBuffer，C 侧直接取指针
 // 返回 Uint8Array（JS_NewArrayBufferCopy 会复制，但只复制一次）
+
+// 前向声明：_get_bytes 定义在 L1058+，此处提前声明供 js_call_crypto_binary 使用
+static const uint8_t *_get_bytes(JSContext *ctx, JSValueConst val, size_t *len);
+
 static JSValue js_call_crypto_binary(JSContext *ctx, int op, int argc, JSValueConst *argv,
                                      int min_args, const char *fn_name) {
     crypto_callback_binary cb = get_crypto_cb_binary(ctx);
