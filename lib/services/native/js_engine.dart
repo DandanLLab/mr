@@ -774,7 +774,7 @@ class JsEngine {
     // 日志出锁设计：锁内只记录关键信息，字符串构建移到 AppLogger 中异步处理
     // 避免锁内在 debugPrint 上停留
     final scriptPreview = script.length > 80 ? '${script.substring(0, 80)}...' : script;
-    AppLogger.instance.debug(LogCategory.js, '[JS] eval ${elapsedMs}ms ${isError ? "ERROR" : "OK"} | $scriptPreview',
+    AppLogger.instance.info(LogCategory.js, '[JS] eval ${elapsedMs}ms ${isError ? "ERROR" : "OK"} | $scriptPreview',
       detail: resultOrErr != null && resultOrErr.length > 200 ? '${resultOrErr.substring(0, 200)}...' : (resultOrErr ?? ''));
   }
 

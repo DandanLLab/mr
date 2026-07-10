@@ -471,16 +471,25 @@ class AppLogger {
   }
 
   // ===== JS 引擎专用 =====
-  // 执行数据日志策略：成功时跳过，仅错误时记录
+  // 日志策略：debug 模式下记录完整执行链路（[JS] 前缀，确保调试 tab 可见），
+  // release 模式跳过（性能优化，避免循环刷屏）。
+  // 级别设计：
+  //   - logJsStep / logJsError：info 级别（关键步骤，日志列表默认可见）
+  //   - logJsInput / logJsOutput / logJsExecute / logJsResult / logJsTree：debug 级别
+  //     （详细数据，日志列表默认过滤，但调试 tab 通过 [JS] 前缀注入可见）
 
   void logJsExecute(String engine, String code, {int? codeLength}) {
-    // 执行数据日志：成功执行时不记录，避免刷屏
-    // 仅在出错时由 logJsError 记录
+    if (!kDebugMode) return;
+    final preview = code.length > 200 ? '${code.substring(0, 200)}...' : code;
+    _log(LogLevel.debug, LogCategory.js, '[JS] [$engine] 执行代码',
+        detail: 'len=${codeLength ?? code.length}\n$preview');
   }
 
   void logJsResult(String engine, String? result) {
-    // 执行数据日志：成功结果不记录
-    // 仅 null/空结果可能是异常，但由调用方决定是否记为 error
+    if (!kDebugMode) return;
+    final preview = (result != null && result.length > 200)
+        ? '${result.substring(0, 200)}...' : (result ?? '(null)');
+    _log(LogLevel.debug, LogCategory.js, '[JS] [$engine] 执行结果', detail: preview);
   }
 
   void logJsError(String engine, String errorMsg) {
@@ -488,19 +497,30 @@ class AppLogger {
   }
 
   void logJsInput(String engine, String? input, {String? tag}) {
-    // 执行数据日志：输入不单独记录，避免刷屏
+    if (!kDebugMode) return;
+    final preview = (input != null && input.length > 500)
+        ? '${input.substring(0, 500)}...' : (input ?? '(null)');
+    _log(LogLevel.debug, LogCategory.js, '[JS] [$engine] 输入${tag != null ? " ($tag)" : ""}',
+        detail: preview);
   }
 
   void logJsOutput(String engine, String? output, {String? outputType, String? tag}) {
-    // 执行数据日志：输出不单独记录，避免刷屏
+    if (!kDebugMode) return;
+    final preview = (output != null && output.length > 500)
+        ? '${output.substring(0, 500)}...' : (output ?? '(null)');
+    _log(LogLevel.debug, LogCategory.js,
+        '[JS] [$engine] 输出${outputType != null ? "($outputType)" : ""}${tag != null ? " ($tag)" : ""}',
+        detail: preview);
   }
 
   void logJsTree(String engine, String treeString) {
-    // 执行数据日志：执行树不记录，避免大量循环日志
+    if (!kDebugMode) return;
+    _log(LogLevel.debug, LogCategory.js, '[JS] [$engine] 执行树', detail: treeString);
   }
 
   void logJsStep(String engine, String step, {String? detail}) {
-    // 执行数据日志：步骤不记录，避免大量循环日志
+    if (!kDebugMode) return;
+    _log(LogLevel.info, LogCategory.js, '[JS] [$engine] $step', detail: detail);
   }
 
   // ===== 规则解析专用 =====

@@ -18,6 +18,7 @@ import '../../routes/app_routes.dart';
 import '../../services/storage_service.dart';
 import '../../services/book_data_provider.dart';
 import '../../services/chapter_cache_service.dart';
+import '../../services/image_decode_provider.dart';
 import '../../widgets/change_source_sheet.dart';
 import '../../services/cover_config_service.dart';
 import '../../widgets/book_edit_sheet.dart';
@@ -199,17 +200,7 @@ class _DetailPageState extends State<DetailPage> {
           if (!hasCustomBackground &&
               _book!.coverUrl.isNotEmpty &&
               !CoverConfigService.instance.useDefaultCover)
-            Positioned.fill(
-              child: CachedNetworkImage(
-                imageUrl: _book!.coverUrl,
-                httpHeaders: _buildCoverHeaders(),
-                fit: BoxFit.cover,
-                placeholder: (_, __) =>
-                    Container(color: Theme.of(context).colorScheme.primary),
-                errorWidget: (_, __, ___) =>
-                    Container(color: Theme.of(context).colorScheme.primary),
-              ),
-            ),
+            Positioned.fill(child: _buildBackgroundCoverImage()),
           Positioned.fill(
             child: RepaintBoundary(
               child: BackdropFilter(
@@ -253,6 +244,33 @@ class _DetailPageState extends State<DetailPage> {
       File(path),
       fit: BoxFit.cover,
       errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+    );
+  }
+
+  /// 背景封面图（书源配置了 coverDecodeJs 时走解密链路）
+  Widget _buildBackgroundCoverImage() {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final url = _book!.coverUrl;
+    if (DecodedImageProvider.needsDecode(_bookSource, true)) {
+      return Image(
+        image: DecodedImageProvider(
+          url: url,
+          headers: _buildCoverHeaders(),
+          source: _bookSource!,
+          isCover: true,
+          book: _book,
+        ),
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => Container(color: primaryColor),
+      );
+    }
+    return CachedNetworkImage(
+      imageUrl: url,
+      httpHeaders: _buildCoverHeaders(),
+      fit: BoxFit.cover,
+      placeholder: (_, __) => Container(color: primaryColor),
+      errorWidget: (_, __, ___) => Container(color: primaryColor),
     );
   }
 
@@ -597,6 +615,26 @@ class _DetailPageState extends State<DetailPage> {
     }
 
     if (coverUrl.isNotEmpty) {
+      final placeholder = coverConfig.buildDefaultCoverPlaceholder(
+        bookName: _book!.displayName,
+        bookAuthor: _book!.displayAuthor,
+        isDark: isDark,
+      );
+      // 书源配置了 coverDecodeJs 时走解密链路（借鉴 Legado ImageUtils.decode）
+      if (DecodedImageProvider.needsDecode(_bookSource, true)) {
+        return Image(
+          image: DecodedImageProvider(
+            url: coverUrl,
+            headers: _buildCoverHeaders(),
+            source: _bookSource!,
+            isCover: true,
+            book: _book,
+          ),
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          errorBuilder: (_, __, ___) => placeholder,
+        );
+      }
       final memCacheWidth = coverConfig.loadCoverHighQuality ? null : 240;
       final maxWidthDiskCache = coverConfig.loadCoverHighQuality ? null : 320;
       return CachedNetworkImage(
@@ -605,16 +643,8 @@ class _DetailPageState extends State<DetailPage> {
         fit: BoxFit.cover,
         memCacheWidth: memCacheWidth,
         maxWidthDiskCache: maxWidthDiskCache,
-        placeholder: (_, __) => coverConfig.buildDefaultCoverPlaceholder(
-          bookName: _book!.displayName,
-          bookAuthor: _book!.displayAuthor,
-          isDark: isDark,
-        ),
-        errorWidget: (_, __, ___) => coverConfig.buildDefaultCoverPlaceholder(
-          bookName: _book!.displayName,
-          bookAuthor: _book!.displayAuthor,
-          isDark: isDark,
-        ),
+        placeholder: (_, __) => placeholder,
+        errorWidget: (_, __, ___) => placeholder,
       );
     }
 

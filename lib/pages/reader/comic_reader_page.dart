@@ -18,6 +18,7 @@ import '../../providers/bookshelf_provider.dart';
 import '../../routes/app_routes.dart';
 import '../../services/book_data_provider.dart';
 import '../../services/chapter_cache_service.dart';
+import '../../services/image_decode_provider.dart';
 import '../../services/native/platform_channel.dart';
 import '../../services/reader_bookmark_service.dart';
 import '../../services/source_engine/analyze_url.dart';
@@ -732,13 +733,23 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       0,
       _images.length,
     );
+    final needDecode = DecodedImageProvider.needsDecode(_bookSource, false);
     for (var index = _currentPageIndex + 1; index < end; index++) {
       if (_images[index].startsWith('data:')) continue;
+      final url = _images[index];
       precacheImage(
-        CachedNetworkImageProvider(
-          _images[index],
-          headers: _headersForImage(_images[index]),
-        ),
+        needDecode
+            ? DecodedImageProvider(
+                url: url,
+                headers: _headersForImage(url),
+                source: _bookSource!,
+                isCover: false,
+                book: _book,
+              )
+            : CachedNetworkImageProvider(
+                url,
+                headers: _headersForImage(url),
+              ),
         context,
       );
     }
@@ -1028,6 +1039,36 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       );
     } else if (url.startsWith('data:')) {
       image = _buildImageError(message: 'Base64 图片解析失败');
+    } else if (DecodedImageProvider.needsDecode(_bookSource, false)) {
+      // 书源配置了 imageDecode 时走解密链路（借鉴 Legado ImageUtils.decode）
+      image = Image(
+        image: DecodedImageProvider(
+          url: url,
+          headers: _headersForImage(url),
+          source: _bookSource!,
+          isCover: false,
+          book: _book,
+        ),
+        width: double.infinity,
+        fit: fit,
+        gaplessPlayback: true,
+        filterQuality: _readMode == MangaReadMode.scroll
+            ? FilterQuality.low
+            : FilterQuality.medium,
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          final total = loadingProgress.expectedTotalBytes;
+          final value = (total != null && total > 0)
+              ? loadingProgress.cumulativeBytesLoaded / total
+              : null;
+          _logImageLoadStart(url, value);
+          return _buildImageLoadingIndicator(value, minHeight);
+        },
+        errorBuilder: (_, error, ___) {
+          _logImageLoadError(url, error);
+          return _buildImageError();
+        },
+      );
     } else {
       final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
       final targetCacheWidth =
@@ -1137,6 +1178,63 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     }
 
     return child;
+  }
+
+  /// 记录图片开始加载日志（借鉴原 progressIndicatorBuilder 逻辑）
+  void _logImageLoadStart(String url, double? value) {
+    if (value == null || _imageLoadLog.length >= 500) return;
+    final existingLog = _imageLoadLog.lastWhere(
+      (l) => l.contains(url.substring(0, url.length.clamp(0, 50))),
+      orElse: () => '',
+    );
+    if (existingLog.isNotEmpty) return;
+    final now = DateTime.now();
+    final timeStr =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+    _imageLoadLog.add(
+      '[$timeStr] 开始加载: ${url.substring(0, url.length.clamp(0, 80))}...',
+    );
+  }
+
+  /// 记录图片加载失败日志
+  void _logImageLoadError(String url, Object error) {
+    if (_imageLoadLog.length >= 500) return;
+    final now = DateTime.now();
+    final timeStr =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+    _imageLoadLog.add(
+      '[$timeStr] 加载失败: ${url.substring(0, url.length.clamp(0, 80))} - ${error.toString().substring(0, error.toString().length.clamp(0, 50))}',
+    );
+  }
+
+  /// 构建图片加载中进度指示器
+  Widget _buildImageLoadingIndicator(double? value, double minHeight) {
+    return Container(
+      constraints: BoxConstraints(
+        minHeight: minHeight > 0
+            ? minHeight
+            : MediaQuery.sizeOf(context).height * 0.55,
+      ),
+      color: _readerBackground,
+      alignment: Alignment.center,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(
+            value: value,
+            color: _readerForeground,
+            strokeWidth: 3,
+          ),
+          if (value != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              '${(value * 100).round()}%',
+              style: TextStyle(color: _readerSecondary),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   Widget _buildImageError({String message = '图片加载失败'}) {
