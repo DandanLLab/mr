@@ -204,6 +204,8 @@ class JsEngine {
   // 热路径正则常量
   // 检测代码以 return 开头（顶层 return），允许多行代码内部的 function return 不误判
   static final _returnStartRegex = RegExp(r'^return\b');
+  // 检测代码是否包含 return 关键字（可能在函数内部）
+  static final _returnKeywordRegex = RegExp(r'\breturn\b');
   static final _jsTagRegex = RegExp(r'<js>([\s\S]*?)</js>', caseSensitive: false);
   static final _jsPrefixRegex = RegExp(r'^@js:', caseSensitive: false);
   static final _templateVarRegex = RegExp(r'\{\{([\s\S]*?)\}\}');
@@ -1071,12 +1073,10 @@ if (evalResult.isError) {
   /// 策略：
   /// 1. 代码以 return 开头 → 直接使用（顶层已有 return）
   /// 2. 单行代码 → `return <code>`
-  /// 3. 多行代码 → `return (function(){ <code> })()`
-  ///    使用内层函数包裹（而非 eval），因为：
-  ///    - eval 在 QuickJS 中对顶层 return 语句的兼容性不稳定
-  ///    - 内层函数能通过闭包访问外层变量（result/baseUrl/src 等）
-  ///    - 代码内部的 return 语句从内层函数返回，值被外层 return 返回
-  ///    - 代码无 return 时返回 undefined（调用方按 null 处理）
+  /// 3. 多行代码包含 return 关键字 → `return (function(){ <code> })()`
+  ///    内层函数确保 return 语句从函数返回（不触发 eval 的 return 兼容性问题）
+  /// 4. 多行代码无 return 关键字 → `return eval(<code>)`
+  ///    eval 返回最后一个表达式的值（如 `imgTags;` 的值），内层函数无法做到
   String _wrapJsCode(String code) {
     final trimmed = code.trim();
 
@@ -1091,9 +1091,13 @@ if (evalResult.isError) {
       return 'return $trimmed';
     }
 
-    // 多行代码：用内层函数包裹，确保 return 语句从内层函数返回
-    // 不使用 eval：QuickJS 的 eval 对顶层 return 语句兼容性不稳定
-    return 'return (function() {\n$trimmed\n})();';
+    // 多行代码：根据是否包含 return 关键字选择包裹方式
+    if (_returnKeywordRegex.hasMatch(trimmed)) {
+      // 有 return：用内层函数包裹，return 从内层函数返回
+      return 'return (function() {\n$trimmed\n})();';
+    }
+    // 无 return：用 eval 包裹，返回最后一个表达式的值
+    return 'return eval(${jsonEncode(trimmed)})';
   }
 
   /// 从规则字符串中提取 JS 代码

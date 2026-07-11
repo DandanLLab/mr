@@ -161,6 +161,18 @@ class HttpClient {
     Duration? connectTimeout,
     Duration? readTimeout,
   }) async {
+    // URL 有效性检查：空 URL 或无 host 时提前返回，避免 DioExceptionType.unknown
+    if (url.isEmpty) {
+      debugPrint('❌ HTTP Error: URL 为空');
+      return StrResponse(url: url, body: '', statusCode: 0, headers: {});
+    }
+    final parsedUri = Uri.tryParse(url);
+    if (parsedUri == null || parsedUri.host.isEmpty) {
+      final urlPreview = url.length > 100 ? '${url.substring(0, 100)}...' : url;
+      debugPrint('❌ HTTP Error: URL 无效（无 host）: $urlPreview');
+      return StrResponse(url: url, body: '', statusCode: 0, headers: {});
+    }
+
     // 瞬时网络错误自动重试（指数退避）
     const maxAutoRetries = 2;
     const retryDelays = [Duration(milliseconds: 500), Duration(seconds: 1)];
