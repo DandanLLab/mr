@@ -896,16 +896,43 @@ class JsEngine {
     return result;
   }
 
+  /// 异步执行 JS 代码（用于图片解密等异步场景）
+  ///
+  /// 与 [executeSync] 功能相同，但通过 _evalLock 等待锁释放，
+  /// 不会被 _evalBusy 挡掉返回 null。
+  /// 当图片解密与章节解析等 JS 任务并发时，必须使用此方法。
+  Future<dynamic> executeAsync(String jsCode, dynamic content,
+      {String? baseUrl, JsEngineType? sourceEngine, Map<String, dynamic>? variables}) async {
+    if (!_initialized || _jsRuntime == null) {
+      await init();
+      if (!_initialized || _jsRuntime == null) return null;
+    }
+
+    final extracted = _extractJsCode(jsCode) ?? jsCode;
+    final resolved = resolveEngine(extracted, sourceEngine: sourceEngine);
+
+    return _evalLock.synchronized(() {
+      _evalBusy = true;
+      try {
+        return _executeQuickJSSync(resolved.code, content,
+            baseUrl: baseUrl, variables: variables, skipBusyCheck: true);
+      } finally {
+        _evalBusy = false;
+      }
+    });
+  }
+
   /// QuickJS 同步执行
   /// 支持并发防护 _evalBusy：如果 processJsRule 正持有锁，快速返回 null 避免 QuickJS 崩溃
-  dynamic _executeQuickJSSync(String jsCode, dynamic content, {String? baseUrl, Map<String, dynamic>? variables}) {
+  dynamic _executeQuickJSSync(String jsCode, dynamic content, {String? baseUrl, Map<String, dynamic>? variables, bool skipBusyCheck = false}) {
     if (!_initialized || _jsRuntime == null) {
       return null;
     }
 
     // 并发防护：_evalBusy=true 表示 processJsRule 正通过 _evalLock 占用 QuickJS
     // 同步路径无法等待锁释放，直接返回 null，调用方（analyze_rule）收到 null 自动兜底
-    if (_evalBusy) {
+    // skipBusyCheck=true 时跳过检查（已通过 executeAsync 获取锁）
+    if (_evalBusy && !skipBusyCheck) {
       _lastEvalError = 'JS引擎正忙（processJsRule 占用中），跳过同步执行';
       debugPrint('⚠️ $_lastEvalError');
       AppLogger.instance.warn(LogCategory.parse, _lastEvalError!);

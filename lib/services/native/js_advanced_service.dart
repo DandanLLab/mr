@@ -51,7 +51,8 @@ class JsAdvancedService {
 
     try {
       // 借鉴 legado：result 传入原始字节数组（QuickJS 中为 Uint8Array）
-      final result = JsEngine.instance.executeSync(
+      // 使用 executeAsync 而非 executeSync，避免 _evalBusy 并发冲突导致返回 null
+      final result = await JsEngine.instance.executeAsync(
         ruleJs,
         imageBytes,
         baseUrl: source.bookSourceUrl,
