@@ -171,35 +171,39 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   Future<void> _checkBookmark() async {
-    if (_book == null) return;
+    // 局部变量捕获：避免 await 期间 _book 被置 null
+    final book = _book;
+    if (book == null) return;
     final provider = context.read<ReaderProvider>();
-    await provider.loadBookmarks(_book!.bookUrl);
+    await provider.loadBookmarks(book.bookUrl);
+    if (!mounted) return;
     _hasBookmark = await provider.hasBookmarkForChapter(
-      _book!.bookUrl,
+      book.bookUrl,
       _currentChapterIndex,
     );
     if (mounted) setState(() {});
   }
 
   Future<void> _toggleBookmark() async {
-    if (_book == null) return;
+    final book = _book;
+    if (book == null) return;
     final provider = context.read<ReaderProvider>();
     if (_hasBookmark) {
       // 移除书签
       final bookmarks = provider.bookmarks
           .where(
             (b) =>
-                b.bookUrl == _book!.bookUrl &&
+                b.bookUrl == book.bookUrl &&
                 b.chapterIndex == _currentChapterIndex,
           )
           .toList();
       for (final b in bookmarks) {
-        await provider.removeBookmark(_book!.bookUrl, b.id);
+        await provider.removeBookmark(book.bookUrl, b.id);
       }
     } else {
       // 添加书签
       await provider.addBookmark(
-        bookUrl: _book!.bookUrl,
+        bookUrl: book.bookUrl,
         chapterIndex: _currentChapterIndex,
         chapterTitle: _chapterTitle,
         content: _content.length > 100 ? _content.substring(0, 100) : _content,
@@ -395,25 +399,30 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     try {
       final bookData = StorageService.instance.getBook(widget.bookUrl);
       _book = bookData != null ? Book.fromJson(bookData) : widget.initialBook;
-      if (_book != null) {
-        _dataProvider = createBookDataProvider(_book!);
-        _chapters = await _dataProvider!.getChapterList(_book!);
+      // 局部变量捕获：避免 await 期间 _book 被置 null
+      final book = _book;
+      if (book != null) {
+        final dataProvider = createBookDataProvider(book);
+        _dataProvider = dataProvider;
+        _chapters = await dataProvider.getChapterList(book);
+        // await 后用户可能已退出
+        if (!mounted) return;
         _totalChapters = _chapters.length;
         if (_totalChapters > 0) {
           final initialIndex = widget.resumeProgress
-              ? _book!.durChapterIndex
+              ? book.durChapterIndex
               : widget.chapterIndex;
           _currentChapterIndex = _readableChapterIndex(initialIndex);
-          _initialChapterPos = widget.resumeProgress ? _book!.durChapterPos : 0;
+          _initialChapterPos = widget.resumeProgress ? book.durChapterPos : 0;
           _restoreInitialPosition =
               widget.resumeProgress && _initialChapterPos > 0;
           _sliderValue = _currentChapterIndex.toDouble();
         }
         // 加载书源信息
-        if (_book!.originType == BookOriginType.online &&
-            _book!.sourceUrl != null) {
+        if (book.originType == BookOriginType.online &&
+            book.sourceUrl != null) {
           final sourceData = StorageService.instance.getBookSource(
-            _book!.sourceUrl!,
+            book.sourceUrl!,
           );
           if (sourceData != null) {
             _bookSource = BookSource.fromJson(sourceData);
@@ -465,38 +474,49 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     }
 
     try {
+      // 局部变量捕获：避免 await 期间 _book / _dataProvider 被置 null
+      final book = _book;
+      final dataProvider = _dataProvider;
+      if (book == null || dataProvider == null) {
+        _isChangingChapterByPageView = false;
+        setState(() {
+          _isLoading = false;
+          _content = '无法加载内容';
+        });
+        return;
+      }
       // 1. 优先从预取内存缓存读取（瞬时返回，跳过文件 I/O）
       String? content;
-      if (_book!.originType == BookOriginType.online && chapter.url != null) {
+      if (book.originType == BookOriginType.online && chapter.url != null) {
         content = ChapterPrefetchService.instance.getCachedContent(
-          _book!.bookUrl ?? '',
+          book.bookUrl ?? '',
           chapter.url!,
         );
       }
 
       // 2. 内存未命中则从文件缓存读取
       if ((content == null || content.isEmpty) &&
-          _book!.originType == BookOriginType.online) {
+          book.originType == BookOriginType.online) {
         content = await ChapterCacheService.instance.readChapterContent(
-          _book!,
+          book,
           chapter,
         );
       }
 
       // 3. 缓存没有则从网络获取
       if (content == null || content.isEmpty) {
-        content = await _dataProvider!.getContent(
-          _book!,
+        content = await dataProvider.getContent(
+          book,
           chapter,
           allChapters: _chapters,
         );
         // 保存到缓存
         if (content != null &&
             content.isNotEmpty &&
-            _book!.originType == BookOriginType.online) {
+            book.originType == BookOriginType.online) {
           unawaited(
             ChapterCacheService.instance.saveChapterContent(
-              _book!,
+              book,
               chapter,
               content,
             ),
