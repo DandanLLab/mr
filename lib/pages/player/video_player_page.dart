@@ -186,33 +186,36 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   }
 
   Widget _buildProgressBar() {
+    // 局部变量捕获：避免 build 过程中 _controller 被置 null
+    final controller = _controller;
+    final initialized = controller != null && controller.value.isInitialized;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
           Text(
-            _controller != null && _controller!.value.isInitialized
-                ? _formatDuration(_controller!.value.position)
+            initialized
+                ? _formatDuration(controller.value.position)
                 : '00:00',
             style: const TextStyle(color: Colors.white, fontSize: 12),
           ),
           Expanded(
             child: Slider(
-              value: _controller != null && _controller!.value.isInitialized
-                  ? _controller!.value.position.inMilliseconds
+              value: initialized
+                  ? controller.value.position.inMilliseconds
                       .toDouble()
-                      .clamp(0, _controller!.value.duration.inMilliseconds
+                      .clamp(0, controller.value.duration.inMilliseconds
                           .toDouble())
                   : 0,
               min: 0,
-              max: _controller != null && _controller!.value.isInitialized
-                  ? _controller!.value.duration.inMilliseconds.toDouble()
+              max: initialized
+                  ? controller.value.duration.inMilliseconds.toDouble()
                   : 100,
               activeColor: Colors.white,
               inactiveColor: Colors.white24,
-              onChanged: _controller != null && _controller!.value.isInitialized
+              onChanged: initialized
                   ? (value) {
-                      _controller!.seekTo(
+                      controller.seekTo(
                         Duration(milliseconds: value.toInt()),
                       );
                     }
@@ -220,8 +223,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
             ),
           ),
           Text(
-            _controller != null && _controller!.value.isInitialized
-                ? _formatDuration(_controller!.value.duration)
+            initialized
+                ? _formatDuration(controller.value.duration)
                 : '00:00',
             style: const TextStyle(color: Colors.white, fontSize: 12),
           ),
@@ -260,7 +263,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   }
 
   void _togglePlay() {
-    if (_controller == null || !_controller!.value.isInitialized) {
+    // 局部变量捕获：避免 setState 期间 _controller 被置 null
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('视频未加载，无法播放'),
@@ -272,9 +277,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     setState(() {
       _isPlaying = !_isPlaying;
       if (_isPlaying) {
-        _controller!.play();
+        controller.play();
       } else {
-        _controller!.pause();
+        controller.pause();
       }
     });
   }
@@ -286,18 +291,20 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   }
 
   void _rewind() {
-    if (_controller == null || !_controller!.value.isInitialized) return;
-    final position = _controller!.value.position;
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    final position = controller.value.position;
     final newPosition = position - const Duration(seconds: 10);
-    _controller!.seekTo(newPosition < Duration.zero ? Duration.zero : newPosition);
+    controller.seekTo(newPosition < Duration.zero ? Duration.zero : newPosition);
   }
 
   void _forward() {
-    if (_controller == null || !_controller!.value.isInitialized) return;
-    final position = _controller!.value.position;
-    final duration = _controller!.value.duration;
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    final position = controller.value.position;
+    final duration = controller.value.duration;
     final newPosition = position + const Duration(seconds: 10);
-    _controller!.seekTo(newPosition > duration ? duration : newPosition);
+    controller.seekTo(newPosition > duration ? duration : newPosition);
   }
 
   void _previousEpisode() {
