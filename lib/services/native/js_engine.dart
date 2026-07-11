@@ -1039,18 +1039,27 @@ if (evalResult.isError) {
       final parsed = _parseJsResult(evalResult.stringResult);
       // 诊断：parsed 为空或 null 时记录原始 stringResult，帮助定位解密失败原因
       if (parsed == null || (parsed is String && parsed.isEmpty)) {
-        _lastEvalError = 'JS返回空值: stringResult=${evalResult.stringResult.length > 200 ? '${evalResult.stringResult.substring(0, 200)}...' : evalResult.stringResult}';
-        AppLogger.instance.logJsError('QuickJS', _lastEvalError!);
+        final rawPreview = evalResult.stringResult.length > 80
+            ? '${evalResult.stringResult.substring(0, 80)}...'
+            : evalResult.stringResult;
+        _lastEvalError = 'JS返回空值: stringResult=$rawPreview';
+        AppLogger.instance.error(LogCategory.js,
+            '[QuickJS] 返回空值: $rawPreview',
+            detail: '完整 stringResult: ${evalResult.stringResult}');
       }
       // 同步执行完成日志（info 级别，Release 模式可见）
       AppLogger.instance.logJsStep('QuickJS', '同步执行完成',
         detail: 'resultType=${parsed?.runtimeType}, resultLen=${parsed?.toString().length ?? 0}, isError=${evalResult.isError}');
       return parsed;
     } catch (e) {
-      AppLogger.instance.logJsError('QuickJS', e.toString());
-      _lastEvalError = e.toString();
+      final errStr = e.toString();
+      final errPreview = errStr.length > 80 ? errStr.substring(0, 80) : errStr;
+      AppLogger.instance.error(LogCategory.js,
+          '[QuickJS] 捕获异常: $errPreview',
+          detail: '完整错误: $errStr');
+      _lastEvalError = errStr;
       // 引擎级错误（OOM/段错误兜底）记录到崩溃日志
-      unawaited(CrashLogService.instance.logJsEngineError('QuickJS.eval', e.toString()));
+      unawaited(CrashLogService.instance.logJsEngineError('QuickJS.eval', errStr));
       return null;
     } finally {
       _evalBusy = false;

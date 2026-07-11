@@ -67,9 +67,10 @@ class JsAdvancedService {
       if (result == null) {
         final lastError = JsEngine.instance.lastEvalError;
         final rulePreview = ruleJs.length > 200 ? '${ruleJs.substring(0, 200)}...' : ruleJs;
-        final errBrief = (lastError ?? '(无错误信息)').length > 80
-            ? '${lastError!.substring(0, 80)}...'
-            : (lastError ?? '(无错误信息)');
+        final lastErrorOrMsg = lastError ?? '(无错误信息)';
+        final errBrief = lastErrorOrMsg.length > 80
+            ? '${lastErrorOrMsg.substring(0, 80)}...'
+            : lastErrorOrMsg;
         debugPrint('⚠️ [decodeImage] JS执行返回null: $imageUrl\n'
             '  lastEvalError: $lastError\n'
             '  ruleJs前200字符: $rulePreview');
@@ -132,8 +133,12 @@ class JsAdvancedService {
         return null;
       }
     } catch (e) {
+      final errStr = e.toString();
+      final errPreview = errStr.length > 80 ? errStr.substring(0, 80) : errStr;
       debugPrint('❌ [decodeImage] 解密异常: $imageUrl → $e');
-      AppLogger.instance.logJsError('decodeImage', '图片解密失败: $e');
+      AppLogger.instance.error(LogCategory.js,
+          '[decodeImage] 解密异常: $errPreview',
+          detail: 'URL: $imageUrl\n  完整错误: $errStr');
       return null;
     }
   }
