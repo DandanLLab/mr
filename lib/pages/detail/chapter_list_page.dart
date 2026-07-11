@@ -44,7 +44,6 @@ class _ChapterListPageState extends State<ChapterListPage> {
   Set<int> _expandedVolumes = {};
   final ScrollController _scrollController = ScrollController();
   final PageController _pageController = PageController();
-  BookDataProvider? _dataProvider;
   String? _loadError;
   Set<String> _cachedFiles = {};
   bool _showWordCount = false;
@@ -104,10 +103,9 @@ class _ChapterListPageState extends State<ChapterListPage> {
       if (_book == null) {
         throw StateError('书籍信息不存在');
       }
-      // 局部变量捕获：避免 await 期间 _book / _dataProvider 被修改导致不一致
+      // 局部变量捕获：避免 await 期间 _book 被修改导致不一致
       final book = _book!;
       final dataProvider = createBookDataProvider(book);
-      _dataProvider = dataProvider;
       _chapters = await dataProvider.getChapterList(book);
       // await 后页面可能已退出
       if (!mounted) return;
