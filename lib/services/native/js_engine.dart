@@ -943,6 +943,8 @@ class JsEngine {
     }
 
     _evalBusy = true;
+    // 清空上次错误信息，避免污染本次诊断（成功执行后保持为 null）
+    _lastEvalError = null;
     try {
       // content 序列化：List/Map 直接 jsonEncode，String 也 jsonEncode（加引号转义），其他 toString
       final contentStr = serializeForJs(content);
