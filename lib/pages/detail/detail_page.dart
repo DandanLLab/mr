@@ -948,17 +948,19 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _showChangeSourceDialog() {
-    if (_book == null) return;
+    // 局部变量捕获：避免弹窗显示期间 _book 被置 null
+    final book = _book;
+    if (book == null) return;
 
     ChangeSourceSheet.show(
       context: context,
-      bookName: _book!.displayName,
-      bookAuthor: _book!.displayAuthor,
-      currentSourceUrl: _book!.sourceUrl,
-      currentSourceName: _book!.sourceName,
+      bookName: book.displayName,
+      bookAuthor: book.displayAuthor,
+      currentSourceUrl: book.sourceUrl,
+      currentSourceName: book.sourceName,
       onSourceSelected: (sourceUrl, sourceName, bookData) async {
-        // 切换书源
-        if (_book == null) return;
+        // 回调可能在弹窗显示后任意时刻触发，使用局部变量避免 _book 野指针
+        if (!mounted) return;
 
         try {
           // 显示加载提示
@@ -966,21 +968,22 @@ class _DetailPageState extends State<DetailPage> {
             context,
           ).showSnackBar(const SnackBar(content: Text('正在获取目录...')));
 
-          // 创建新的书籍对象
-          final newBook = _book!.copyWith(
+          // 创建新的书籍对象（用局部 book 而非 _book!）
+          final newBook = book.copyWith(
             sourceUrl: sourceUrl,
             sourceName: sourceName,
-            bookUrl: bookData['bookUrl'] ?? _book!.bookUrl,
-            name: bookData['name'] ?? _book!.name,
-            author: bookData['author'] ?? _book!.author,
-            coverUrl: bookData['coverUrl'] ?? _book!.coverUrl,
-            intro: bookData['intro'] ?? _book!.intro,
-            lastChapter: bookData['lastChapter'] ?? _book!.lastChapter,
+            bookUrl: bookData['bookUrl'] ?? book.bookUrl,
+            name: bookData['name'] ?? book.name,
+            author: bookData['author'] ?? book.author,
+            coverUrl: bookData['coverUrl'] ?? book.coverUrl,
+            intro: bookData['intro'] ?? book.intro,
+            lastChapter: bookData['lastChapter'] ?? book.lastChapter,
           );
 
           // 获取新书源的目录
-          _dataProvider = createBookDataProvider(newBook);
-          final chapters = await _dataProvider!.getChapterList(newBook);
+          final dataProvider = createBookDataProvider(newBook);
+          _dataProvider = dataProvider;
+          final chapters = await dataProvider.getChapterList(newBook);
 
           if (!mounted) return;
 
@@ -1021,10 +1024,13 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _showChangeGroupDialog() {
+    // 局部变量捕获：避免 dialog 显示期间 _book 被置 null
+    final book = _book;
+    if (book == null) return;
     final bookshelfProvider = context.read<BookshelfProvider>();
     final groups = bookshelfProvider.getAllGroups();
     final defaultGroups = ['全部', '本地', '小说', '音频', '漫画', '视频'];
-    String selectedGroup = _book!.groupId ?? '全部';
+    String selectedGroup = book.groupId ?? '全部';
 
     showDialog(
       context: context,
@@ -1133,11 +1139,11 @@ class _DetailPageState extends State<DetailPage> {
                     TextButton(
                       onPressed: () async {
                         Navigator.pop(context);
-                        // 更新分组
+                        // 更新分组（用局部 book 避免 _book! 野指针）
                         final newGroupId = selectedGroup == '全部'
                             ? null
                             : selectedGroup;
-                        final updatedBook = _book!.copyWith(
+                        final updatedBook = book.copyWith(
                           groupId: newGroupId,
                         );
                         await StorageService.instance.addToBookshelf(
@@ -1423,15 +1429,17 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   Future<void> _toggleBookshelf() async {
-    if (_book == null) return;
+    // 局部变量捕获：避免 await showDialog 期间 _book 被置 null
+    final book = _book;
+    if (book == null) return;
     final provider = context.read<BookshelfProvider>();
     if (_isInBookshelf) {
-      if (_book!.deleteAlert ?? false) {
+      if (book.deleteAlert ?? false) {
         final confirmed = await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
             title: const Text('确认移除'),
-            content: Text('确定从书架移除《${_book!.displayName}》吗？'),
+            content: Text('确定从书架移除《${book.displayName}》吗？'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext, false),
@@ -1445,14 +1453,16 @@ class _DetailPageState extends State<DetailPage> {
           ),
         );
         if (confirmed != true) return;
+        // await 后页面可能已退出
+        if (!mounted) return;
       }
-      await provider.removeFromBookshelf(_book!.bookUrl);
+      await provider.removeFromBookshelf(book.bookUrl);
       if (!mounted) return;
       setState(() {
         _isInBookshelf = false;
       });
     } else {
-      await provider.addToBookshelf(_book!);
+      await provider.addToBookshelf(book);
       if (!mounted) return;
       setState(() {
         _isInBookshelf = true;
@@ -1516,10 +1526,12 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _showBookEditSheet() {
+    final book = _book;
+    if (book == null) return;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (context) => BookEditSheet(book: _book!, onSaved: _refreshData),
+      builder: (context) => BookEditSheet(book: book, onSaved: _refreshData),
     );
   }
 
@@ -1551,12 +1563,14 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _searchBookName() async {
-    if (_book == null) return;
+    // 局部变量捕获：避免 await 期间 _book 被置 null
+    final book = _book;
+    if (book == null) return;
 
     // 执行书源回调，如果返回true则不执行默认操作
     final handled = await _executeSourceCallback(
       'clickBookName',
-      result: _book!.displayName,
+      result: book.displayName,
     );
 
     if (!handled && mounted) {
@@ -1564,22 +1578,23 @@ class _DetailPageState extends State<DetailPage> {
       Navigator.pushNamed(
         context,
         AppRoutes.search,
-        arguments: {'keyword': _book!.displayName},
+        arguments: {'keyword': book.displayName},
       );
     }
   }
 
   void _copyBookName() async {
-    if (_book == null) return;
+    final book = _book;
+    if (book == null) return;
 
     // 执行书源回调
     final handled = await _executeSourceCallback(
       'longClickBookName',
-      result: _book!.displayName,
+      result: book.displayName,
     );
 
     if (!handled && mounted) {
-      Clipboard.setData(ClipboardData(text: _book!.displayName));
+      Clipboard.setData(ClipboardData(text: book.displayName));
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('书名已复制')));
@@ -1587,12 +1602,13 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _searchAuthor() async {
-    if (_book == null) return;
+    final book = _book;
+    if (book == null) return;
 
     // 执行书源回调
     final handled = await _executeSourceCallback(
       'clickAuthor',
-      result: _book!.displayAuthor,
+      result: book.displayAuthor,
     );
 
     if (!handled && mounted) {
@@ -1600,22 +1616,23 @@ class _DetailPageState extends State<DetailPage> {
       Navigator.pushNamed(
         context,
         AppRoutes.search,
-        arguments: {'keyword': _book!.displayAuthor},
+        arguments: {'keyword': book.displayAuthor},
       );
     }
   }
 
   void _copyAuthor() async {
-    if (_book == null) return;
+    final book = _book;
+    if (book == null) return;
 
     // 执行书源回调
     final handled = await _executeSourceCallback(
       'longClickAuthor',
-      result: _book!.displayAuthor,
+      result: book.displayAuthor,
     );
 
     if (!handled && mounted) {
-      Clipboard.setData(ClipboardData(text: _book!.displayAuthor));
+      Clipboard.setData(ClipboardData(text: book.displayAuthor));
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('作者已复制')));
