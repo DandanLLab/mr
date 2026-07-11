@@ -254,15 +254,18 @@ Map<String, String> _imageHeaders = const {};
     try {
       final stored = StorageService.instance.getBook(widget.bookUrl);
       _book = stored != null ? Book.fromJson(stored) : widget.initialBook;
-      if (_book == null) {
+      final book = _book;
+      if (book == null) {
         throw StateError('书籍信息不存在');
       }
-      _dataProvider = createBookDataProvider(_book!);
-      _sourceName = _book!.sourceName ?? '';
+      _dataProvider = createBookDataProvider(book);
+      _sourceName = book.sourceName ?? '';
       _chapters = (await _dataProvider!.getChapterList(
-        _book!,
+        book,
       )).where((chapter) => !chapter.isVolume).toList();
-      final sourceUrl = _book!.sourceUrl;
+      // await 后用户可能已退出，使用局部变量避免 _book! 崩溃
+      if (!mounted) return;
+      final sourceUrl = book.sourceUrl;
       if (sourceUrl != null && sourceUrl.isNotEmpty) {
         final sourceData = StorageService.instance.getBookSource(sourceUrl);
         if (sourceData != null) {
@@ -276,8 +279,8 @@ Map<String, String> _imageHeaders = const {};
         throw StateError('目录为空');
       }
       if (widget.resumeProgress) {
-        _currentChapterIndex = _book!.durChapterIndex;
-        _currentPageIndex = _book!.durChapterPos;
+        _currentChapterIndex = book.durChapterIndex;
+        _currentPageIndex = book.durChapterPos;
       }
       if (!_chapters.any((chapter) => chapter.index == _currentChapterIndex)) {
         _currentChapterIndex = _chapters.first.index;
@@ -1891,38 +1894,45 @@ Map<String, String> _imageHeaders = const {};
     _disableAutoPaging();
     setState(() => _showMenu = false);
 
-    if (_book == null || _book!.originType != BookOriginType.online) {
+    // 局部变量捕获：避免回调延迟期间 _book 被置 null
+    final book = _book;
+    if (book == null || book.originType != BookOriginType.online) {
       _showMessage('本地书籍不支持换源');
       return;
     }
 
     ChangeSourceSheet.show(
       context: context,
-      bookName: _book!.displayName,
-      bookAuthor: _book!.displayAuthor,
-      currentSourceUrl: _book!.sourceUrl,
-      currentSourceName: _book!.sourceName,
+      bookName: book.displayName,
+      bookAuthor: book.displayAuthor,
+      currentSourceUrl: book.sourceUrl,
+      currentSourceName: book.sourceName,
       onSourceSelected: (sourceUrl, sourceName, bookData) async {
-        if (_book == null) return;
+        // 回调可能在弹窗显示后任意时刻触发，使用局部变量避免 _book 野指针
+        if (!mounted || _book == null) return;
 
         try {
           _showMessage('正在切换书源...');
 
-          // 创建新的书籍对象
-          final newBook = _book!.copyWith(
+          // 创建新的书籍对象（用局部 book 而非 _book!）
+          final newBook = book.copyWith(
             sourceUrl: sourceUrl,
             sourceName: sourceName,
-            bookUrl: bookData['bookUrl'] ?? _book!.bookUrl,
-            name: bookData['name'] ?? _book!.name,
-            author: bookData['author'] ?? _book!.author,
-            coverUrl: bookData['coverUrl'] ?? _book!.coverUrl,
-            intro: bookData['intro'] ?? _book!.intro,
-            lastChapter: bookData['lastChapter'] ?? _book!.lastChapter,
+            bookUrl: bookData['bookUrl'] ?? book.bookUrl,
+            name: bookData['name'] ?? book.name,
+            author: bookData['author'] ?? book.author,
+            coverUrl: bookData['coverUrl'] ?? book.coverUrl,
+            intro: bookData['intro'] ?? book.intro,
+            lastChapter: bookData['lastChapter'] ?? book.lastChapter,
           );
 
           // 获取新书源的目录
-          _dataProvider = createBookDataProvider(newBook);
-          final chapters = await _dataProvider!.getChapterList(newBook);
+          final dataProvider = createBookDataProvider(newBook);
+          _dataProvider = dataProvider;
+          final chapters = await dataProvider.getChapterList(newBook);
+
+          // await 后页面可能已退出，使用 mounted 检查避免野指针
+          if (!mounted) return;
 
           // 更新书籍
           final updatedBook = newBook.copyWith(
