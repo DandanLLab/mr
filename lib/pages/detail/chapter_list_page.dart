@@ -104,14 +104,19 @@ class _ChapterListPageState extends State<ChapterListPage> {
       if (_book == null) {
         throw StateError('书籍信息不存在');
       }
-      _dataProvider = createBookDataProvider(_book!);
-      _chapters = await _dataProvider!.getChapterList(_book!);
+      // 局部变量捕获：避免 await 期间 _book / _dataProvider 被修改导致不一致
+      final book = _book!;
+      final dataProvider = createBookDataProvider(book);
+      _dataProvider = dataProvider;
+      _chapters = await dataProvider.getChapterList(book);
+      // await 后页面可能已退出
+      if (!mounted) return;
       _filteredChapters = _chapters;
       _groupChaptersByVolume();
       // 加载缓存信息
-      if (_book!.originType == BookOriginType.online) {
+      if (book.originType == BookOriginType.online) {
         _cachedFiles = await ChapterCacheService.instance.getChapterCacheFiles(
-          _book!,
+          book,
         );
       }
       _loadError = null;
