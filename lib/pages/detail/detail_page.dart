@@ -130,29 +130,38 @@ class _DetailPageState extends State<DetailPage> {
       _isRefreshing = true;
     });
 
-    if (_book != null) {
+    // 局部变量捕获：避免 await 期间 _book 被 setState 置 null 导致野指针
+    final initialBook = _book;
+    if (initialBook != null) {
       try {
-        _dataProvider = createBookDataProvider(_book!);
-        if (_book!.originType == BookOriginType.online) {
-          final detailedBook = await _dataProvider!.getBookInfo(_book!.bookUrl);
+        var book = initialBook;
+        final dataProvider = createBookDataProvider(book);
+        _dataProvider = dataProvider;
+        if (book.originType == BookOriginType.online) {
+          final detailedBook = await dataProvider.getBookInfo(book.bookUrl);
+          // await 后页面可能已退出
+          if (!mounted) return;
           if (detailedBook != null) {
-            _book = mergeBookMetadata(detailedBook, _book!);
+            book = mergeBookMetadata(detailedBook, book);
           }
           // 参照 Legado：根据书源类型刷新 mediaType
-          if (_book!.sourceUrl != null) {
+          if (book.sourceUrl != null) {
             final sourceData = StorageService.instance.getBookSource(
-              _book!.sourceUrl!,
+              book.sourceUrl!,
             );
             if (sourceData != null) {
               final source = BookSource.fromJson(sourceData);
               final sourceMediaType = source.bookSourceType.mediaType;
-              if (_book!.mediaType != sourceMediaType) {
-                _book = _book!.copyWith(mediaType: sourceMediaType);
+              if (book.mediaType != sourceMediaType) {
+                book = book.copyWith(mediaType: sourceMediaType);
               }
             }
           }
         }
-        _chapters = await _dataProvider!.getChapterList(_book!);
+        final chapters = await dataProvider.getChapterList(book);
+        if (!mounted) return;
+        _book = book;
+        _chapters = chapters;
       } catch (_) {
         // Keep the currently displayed metadata if refreshing fails.
       }
