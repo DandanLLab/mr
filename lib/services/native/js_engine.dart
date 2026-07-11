@@ -270,6 +270,9 @@ class JsEngine {
   bool _isFlushingLogs = false;
   /// 最近一次 _executeQuickJSSync 的错误信息（供 executeSync 读取后写入 traceNode）
   String? _lastEvalError;
+
+  /// 公开 getter：供 decodeImage 等调用方读取最近一次 JS 执行错误
+  String? get lastEvalError => _lastEvalError;
   /// 并发防护：同步调用中标志，processJsRule 执行时自旋等待
   bool _evalBusy = false;
   final Map<String, String> _installedPackages = {};
@@ -1018,6 +1021,11 @@ AppLogger.instance.logJsError('QuickJS', evalResult.stringResult);
         return null;
       }
       final parsed = _parseJsResult(evalResult.stringResult);
+      // 诊断：parsed 为空或 null 时记录原始 stringResult，帮助定位解密失败原因
+      if (parsed == null || (parsed is String && parsed.isEmpty)) {
+        _lastEvalError = 'JS返回空值: stringResult=${evalResult.stringResult.length > 200 ? '${evalResult.stringResult.substring(0, 200)}...' : evalResult.stringResult}';
+        AppLogger.instance.logJsError('QuickJS', _lastEvalError!);
+      }
       // 同步执行完成日志（info 级别，Release 模式可见）
       AppLogger.instance.logJsStep('QuickJS', '同步执行完成',
         detail: 'resultType=${parsed?.runtimeType}, resultLen=${parsed?.toString().length ?? 0}, isError=${evalResult.isError}');
@@ -1050,16 +1058,9 @@ AppLogger.instance.logJsError('QuickJS', evalResult.stringResult);
       return 'return $trimmed';
     }
 
-    // 多行代码：需要判断最后一行是否是独立表达式
-    final lastLine = lines.last.trim();
-
-    if (lastLine.isEmpty) {
-      return trimmed;
-    }
-
-    // 借鉴 legado：多行代码用 eval 包裹，确保最后一个表达式的值被返回
-    // 这样可以处理跨行表达式（如 JSON.stringify({...})）
-    // eval 在 IIFE 内部执行，最后一个表达式的值就是 eval 的返回值
+    // 多行代码：统一用 eval 包裹，确保最后一个表达式的值被返回
+    // 借鉴 legado：eval 在 IIFE 内部执行，最后一个表达式的值就是 eval 的返回值
+    // 修复：之前最后一行为空时返回 trimmed（无 return），导致 IIFE 返回 undefined
     return 'return eval(${jsonEncode(trimmed)})';
   }
 

@@ -65,7 +65,12 @@ class JsAdvancedService {
       );
 
       if (result == null) {
-        debugPrint('⚠️ [decodeImage] JS执行返回null（引擎忙或脚本错误）: $imageUrl');
+        final lastError = JsEngine.instance.lastEvalError;
+        debugPrint('⚠️ [decodeImage] JS执行返回null: $imageUrl\n'
+            '  lastEvalError: $lastError\n'
+            '  ruleJs前80字符: ${ruleJs.length > 80 ? ruleJs.substring(0, 80) : ruleJs}');
+        AppLogger.instance.logJsError(
+            'decodeImage', 'JS返回null: $imageUrl, error: $lastError');
         return null;
       }
 
@@ -86,7 +91,12 @@ class JsAdvancedService {
 
       final resultStr = result.toString();
       if (resultStr.isEmpty || resultStr == 'null' || resultStr == 'undefined') {
-        debugPrint('⚠️ [decodeImage] JS返回空值: $imageUrl → result=$resultStr');
+        final lastError = JsEngine.instance.lastEvalError;
+        debugPrint('⚠️ [decodeImage] JS返回空值: $imageUrl\n'
+            '  result=$resultStr, type=${result.runtimeType}\n'
+            '  lastEvalError: $lastError');
+        AppLogger.instance.logJsError(
+            'decodeImage', 'JS返回空值: $imageUrl, result=$resultStr, error: $lastError');
         return null;
       }
 

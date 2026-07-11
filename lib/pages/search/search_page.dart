@@ -8,6 +8,7 @@ import '../../models/book.dart';
 import '../../models/book_source.dart';
 import '../../routes/app_routes.dart';
 import '../../services/cover_config_service.dart';
+import '../../services/image_decode_provider.dart';
 import '../../services/app_logger.dart';
 import '../../utils/design_tokens.dart';
 
@@ -690,6 +691,30 @@ class _SearchPageState extends State<SearchPage> {
     }
 
     if (coverUrl.isNotEmpty) {
+      // 查找书源，判断是否需要解密（借鉴 Legado ImageUtils.decode）
+      BookSource? source;
+      if (sourceUrl != null && sourceUrl.isNotEmpty) {
+        source = context
+            .read<SearchProvider>()
+            .bookSources
+            .where((s) => s.bookSourceUrl == sourceUrl)
+            .firstOrNull;
+      }
+      // 书源配置了 coverDecodeJs 时走解密链路
+      if (DecodedImageProvider.needsDecode(source, true)) {
+        return Image(
+          image: DecodedImageProvider(
+            url: coverUrl,
+            headers: _buildCoverHeaders(sourceUrl),
+            source: source!,
+            isCover: true,
+          ),
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          errorBuilder: (_, __, ___) =>
+              _coverPlaceholder(bookName: bookName, bookAuthor: bookAuthor),
+        );
+      }
       final memCacheWidth = coverConfig.loadCoverHighQuality ? null : 240;
       final maxWidthDiskCache = coverConfig.loadCoverHighQuality ? null : 320;
       return CachedNetworkImage(
