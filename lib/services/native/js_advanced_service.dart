@@ -533,7 +533,7 @@ class PayActionResult {
 
   static const notImplemented = PayActionResult();
 
-  bool get isUrl => url != null && url!.isNotEmpty;
+  bool get isUrl => url?.isNotEmpty == true;
   bool get isSuccess => success;
 }
 

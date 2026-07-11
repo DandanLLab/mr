@@ -1762,12 +1762,15 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _showCustomButton() async {
+    // 局部变量捕获：避免 sheet 显示期间 _book / _bookSource 被置 null
+    final book = _book;
+    final source = _bookSource;
     // 检查书源是否有定制按钮
-    if (_bookSource != null && _bookSource!.customButton) {
+    if (source != null && source.customButton) {
       // 书源有定制按钮，执行书源回调
       // TODO: 实现书源回调JS执行
       // 参考 SourceCallBack.callBackBtn
-      final callBackJs = _bookSource!.ruleContent?.callBackJs;
+      final callBackJs = source.ruleContent?.callBackJs;
       if (callBackJs != null && callBackJs.isNotEmpty) {
         // 执行回调JS
         try {
@@ -1784,6 +1787,7 @@ class _DetailPageState extends State<DetailPage> {
     }
 
     // 没有书源定制按钮或回调返回false，显示默认菜单
+    final isOnline = book?.originType == BookOriginType.online;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1821,7 +1825,7 @@ class _DetailPageState extends State<DetailPage> {
                       _refreshData();
                     },
                   ),
-                  if (_book!.originType == BookOriginType.online)
+                  if (isOnline)
                     ListTile(
                       leading: const Icon(Icons.swap_horiz),
                       title: const Text('换源'),
@@ -1830,7 +1834,7 @@ class _DetailPageState extends State<DetailPage> {
                         _showChangeSourceDialog();
                       },
                     ),
-                  if (_book!.originType == BookOriginType.online)
+                  if (isOnline)
                     ListTile(
                       leading: const Icon(Icons.download),
                       title: const Text('下载'),
@@ -1855,14 +1859,16 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _showSetSourceVariable() {
-    if (_bookSource == null) {
+    // 局部变量捕获：避免对话框显示期间 _bookSource 被置 null
+    final source = _bookSource;
+    if (source == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('无书源信息，无法设置源变量')),
       );
       return;
     }
     final controller = TextEditingController(
-      text: _bookSource!.variable ?? '',
+      text: source.variable ?? '',
     );
     showDialog(
       context: context,
@@ -1885,7 +1891,7 @@ class _DetailPageState extends State<DetailPage> {
             onPressed: () {
               final value = controller.text;
               Navigator.pop(context);
-              final updated = _bookSource!.copyWith(variable: value);
+              final updated = source.copyWith(variable: value);
               StorageService.instance.saveBookSource(updated.toJson());
               setState(() => _bookSource = updated);
               ScaffoldMessenger.of(context).showSnackBar(
