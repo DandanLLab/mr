@@ -1676,7 +1676,9 @@ return __returnValue;
       // `new Uint8Array([1,2,3,...])` 字面量导致 QuickJS 解析失败/超时
       if (content is Uint8List) {
         final b64 = base64Encode(content);
-        return "__nativeBase64.decodeToBytes('$b64')";
+        // new Uint8Array(...) 包裹：decodeToBytes 返回 ArrayBuffer（无 .length/不可索引），
+        // Uint8Array 才有 .length 和索引访问，匹配 JS 解密规则对 result 的操作
+        return "new Uint8Array(__nativeBase64.decodeToBytes('$b64'))";
       }
       return jsonEncode(content);
     } else if (content is String) {
