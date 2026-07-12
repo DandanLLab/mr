@@ -96,7 +96,14 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
       expectedTotalBytes: null,
     ));
 
+    // 下载诊断：打印请求 URL 和 headers 的 keys，确认请求头是否传入
+    final headerKeys = key.headers.keys.map((k) => '$k=${_maskValue(key.headers[k])}').join(', ');
+    debugPrint('📥 [DecodedImageProvider] 开始下载: ${key.url}\n'
+        '  请求头: {$headerKeys}');
+
     Uint8List bytes;
+    int? statusCode;
+    Map<String, String> respHeaders = {};
     try {
       final response = await PlatformBridge.instance.dio.get<List<int>>(
         key.url,
@@ -115,6 +122,19 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
         },
       );
       bytes = Uint8List.fromList(response.data ?? const <int>[]);
+      statusCode = response.statusCode;
+      respHeaders = response.headers.map.map(
+        (k, v) => MapEntry(k, v.first),
+      );
+      // 下载诊断：打印状态码、字节数、前16字节、Content-Type
+      final hex = bytes
+          .take(16)
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join(' ');
+      final contentType = respHeaders['content-type'] ?? respHeaders['Content-Type'] ?? '(无)';
+      debugPrint('📥 [DecodedImageProvider] 下载完成: ${key.url}\n'
+          '  状态码: $statusCode, 字节数: ${bytes.length}\n'
+          '  Content-Type: $contentType, 前16字节: $hex');
     } catch (e) {
       debugPrint('⚠️ [DecodedImageProvider] 下载失败: ${key.url} → $e');
       rethrow;
@@ -123,7 +143,10 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
     }
 
     if (bytes.isEmpty) {
-      throw StateError('图片下载响应为空: ${key.url}');
+      // 空响应诊断：打印状态码和响应头，帮助判断是 403/404 还是服务器返回空
+      debugPrint('❌ [DecodedImageProvider] 响应为空: ${key.url}\n'
+          '  状态码: $statusCode, 响应头: $respHeaders');
+      throw StateError('图片下载响应为空: ${key.url} (状态码: $statusCode)');
     }
 
     // 检测 HTML 错误页（服务器返回 200 但内容是 HTML 而非图片）
@@ -189,6 +212,17 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
     if (bytes.length < 6) return false;
     final prefix = String.fromCharCodes(bytes.take(9)).toLowerCase();
     return prefix.startsWith('<!doctype') || prefix.startsWith('<html');
+  }
+
+  /// 脱敏请求头值：过长值（如 Cookie）截断显示，便于诊断
+  static String _maskValue(String? value) {
+    if (value == null || value.isEmpty) return '(空)';
+    // 书源 header 通常是 UA/Referer，需要完整显示便于诊断
+    // 过长的值（如 Cookie）截断显示
+    if (value.length > 120) {
+      return '${value.substring(0, 120)}...(${value.length}字符)';
+    }
+    return value;
   }
 
   @override

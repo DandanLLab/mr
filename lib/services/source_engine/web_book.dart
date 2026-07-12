@@ -372,7 +372,12 @@ class WebBook {
       }
       return jsResult;
     } catch (e) {
-      AppLogger.instance.logJsError('分流', e.toString());
+      final errStr = e.toString();
+      final errPreview = errStr.length > 80 ? errStr.substring(0, 80) : errStr;
+      final codePreview = jsCode.length > 200 ? '${jsCode.substring(0, 200)}...' : jsCode;
+      AppLogger.instance.error(LogCategory.js,
+          '[分流] 捕获异常: $errPreview',
+          detail: '完整错误: $errStr\n  JS代码: $codePreview');
       return null;
     }
   }
@@ -407,9 +412,12 @@ class WebBook {
         return resolved;
       }
       // JS 返回 null/空 → 日志告警 + 返回空，不要用原始 @js: 代码当 URL
+      final resultPreview = jsResult == null
+          ? '(null)'
+          : (jsResult.isEmpty ? '(空字符串)' : (jsResult.length > 200 ? '${jsResult.substring(0, 200)}...' : jsResult));
       AppLogger.instance.warn(LogCategory.network,
           'JS规则返回空: $url',
-          detail: 'JS执行结果=null，书源规则可能有问题');
+          detail: 'JS执行结果: $resultPreview\n  lastEvalError: ${JsEngine.instance.lastEvalError ?? "(无)"}');
       return '';
     }
 
