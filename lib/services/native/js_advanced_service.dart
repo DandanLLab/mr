@@ -84,6 +84,11 @@ class JsAdvancedService {
         // 借鉴 legado 的 debug 模式：失败时输出上下文信息帮助定位问题
         String diagInfo = '';
         try {
+          // 重新加载 jsLib，防止两次 executeAsync 之间其他书源执行导致 jsLib 被切换
+          final jsLib = source.jsLib;
+          if (jsLib != null && jsLib.isNotEmpty) {
+            JsEngine.instance.loadJsLib(source.bookSourceUrl, jsLib);
+          }
           final diag = await JsEngine.instance.executeAsync(
             'JSON.stringify({decodeType: typeof decode, resultType: typeof result, resultIsUint8Array: result instanceof Uint8Array, resultLength: result ? result.length : null, resultConstructor: result ? result.constructor.name : null})',
             imageBytes,
