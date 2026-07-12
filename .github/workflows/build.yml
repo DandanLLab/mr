@@ -284,18 +284,14 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     continue-on-error: true
+    outputs:
+      # 是否因未配 secret 而跳过（供 release job 判断是否下载产物）
+      skipped: ${{ steps.download_cli.outputs.skip }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Java 17
-        # 鸿蒙构建工具 hvigorw 强制要求 JDK 17（与 Android 的 21 不通用）
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
       - name: Setup Node.js 20
-        # hvigorw 依赖 Node.js 运行时
+        # hvigorw / ohpm 均为 Node.js 工具，鸿蒙 Flutter 构建（Dart+C）无需 Java
         uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -310,13 +306,18 @@ jobs:
       - name: Download HarmonyOS CLI
         # 鸿蒙命令行工具（commandline-tools-linux-x64-5.0.3.XXX.zip）需自行下载并配置到 secret
         # 下载地址需在仓库 Settings → Secrets 中配置 HARMONYOS_CLI_URL
+        # 未配置 secret 时优雅跳过（绿色 skipped），而非红色失败
+        id: download_cli
         if: steps.cache-cli.outputs.cache-hit != 'true'
         run: |
           if [ -z "${{ secrets.HARMONYOS_CLI_URL }}" ]; then
-            echo "❌ 未配置 HARMONYOS_CLI_URL secret"
-            echo "请到 https://developer.huawei.com/consumer/cn/download/ 下载 commandline-tools-linux-x64 后"
-            echo "上传到任意可公开访问的位置，并在仓库 Settings → Secrets 配置 HARMONYOS_CLI_URL"
-            exit 1
+            echo "⚠️ 未配置 HARMONYOS_CLI_URL secret，跳过鸿蒙构建"
+            echo "如需启用鸿蒙打包："
+            echo "1. 到 https://developer.huawei.com/consumer/cn/download/ 下载 commandline-tools-linux-x64"
+            echo "2. 上传到任意可公开访问的位置"
+            echo "3. 在仓库 Settings → Secrets 配置 HARMONYOS_CLI_URL"
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
           fi
           mkdir -p ~/commandline-tools
           wget -q -O /tmp/cli.zip "${{ secrets.HARMONYOS_CLI_URL }}"
@@ -330,6 +331,7 @@ jobs:
           ls ~/commandline-tools/
 
       - name: Configure HarmonyOS Environment
+        if: steps.download_cli.outputs.skip != 'true'
         run: |
           CLI_HOME="$HOME/commandline-tools"
           echo "OHPM_HOME=$CLI_HOME/ohpm" >> $GITHUB_ENV
@@ -344,11 +346,13 @@ jobs:
 
       - name: Clone HarmonyOS Flutter SDK
         # 华为 fork 的 Flutter SDK，分支基于 Flutter 3.27.4
+        if: steps.download_cli.outputs.skip != 'true'
         run: |
           git clone --depth 1 https://gitcode.com/openharmony-sig/flutter_flutter.git ~/ohos-flutter
           echo "$HOME/ohos-flutter/bin" >> $GITHUB_PATH
 
       - name: Enable HarmonyOS Platform
+        if: steps.download_cli.outputs.skip != 'true'
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
           flutter --version
@@ -356,6 +360,7 @@ jobs:
 
       - name: Generate ohos Project
         # 项目仓库未提交 ohos/ 目录，CI 中用华为 fork Flutter 生成
+        if: steps.download_cli.outputs.skip != 'true'
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
           flutter create --platforms ohos .
@@ -366,6 +371,7 @@ jobs:
         # 将鸿蒙版 CMakeLists.txt 和 version-script 注入 ohos 工程
         # CMakeLists.txt 引用项目根 quickjs/ 源码，编译 libquickjs_c_bridge.so
         # dart:ffi 通过 DynamicLibrary.open('libquickjs_c_bridge.so') 加载
+        if: steps.download_cli.outputs.skip != 'true'
         run: |
           mkdir -p ohos/entry/src/main/cpp
           cp quickjs/ohos/CMakeLists.txt ohos/entry/src/main/cpp/CMakeLists.txt
@@ -377,6 +383,7 @@ jobs:
         # 在 ohos/entry/build-profile.json5 的 entry 模块注入 externalNativeOptions
         # 让 hvigorw 调用 CMake 编译 libquickjs_c_bridge.so
         # 用 python 正则注入，兼容不同版本鸿蒙 Flutter 生成的文件结构
+        if: steps.download_cli.outputs.skip != 'true'
         run: |
           python3 << 'PYEOF'
           import re, sys
@@ -406,6 +413,7 @@ jobs:
 
       - name: Configure ohos Permissions
         # 在 module.json5 加网络权限（书源 HTTP 请求需要）
+        if: steps.download_cli.outputs.skip != 'true'
         run: |
           python3 << 'PYEOF'
           import re, sys
@@ -439,6 +447,7 @@ jobs:
           cat ohos/entry/src/main/module.json5
 
       - name: Update Version
+        if: steps.download_cli.outputs.skip != 'true'
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
           VERSION="${{ needs.prepare.outputs.version }}"
@@ -448,23 +457,27 @@ jobs:
       - name: Relax Dart SDK Constraint
         # 鸿蒙 Flutter SDK 基于 3.27.4（Dart 3.6.2），项目要求 Dart >=3.12.0
         # CI 中临时放宽到 >=3.6.0，仅影响鸿蒙构建，不改动仓库 pubspec.yaml
+        if: steps.download_cli.outputs.skip != 'true'
         run: |
           sed -i "s/sdk: '>=3.12.0 <4.0.0'/sdk: '>=3.6.0 <4.0.0'/" pubspec.yaml
           echo "=== 放宽后的 SDK 约束 ==="
           grep "sdk:" pubspec.yaml
 
       - name: Install Dependencies
+        if: steps.download_cli.outputs.skip != 'true'
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
           flutter pub get
 
       - name: Build HAP
+        if: steps.download_cli.outputs.skip != 'true'
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
           flutter build hap --release
 
       - name: Rename HAP
         id: hap
+        if: steps.download_cli.outputs.skip != 'true'
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
           TYPE="${{ needs.prepare.outputs.release_type }}"
@@ -482,6 +495,7 @@ jobs:
           ls -lh "${HAP_NAME}"
 
       - name: Upload Artifacts
+        if: steps.download_cli.outputs.skip != 'true' && steps.hap.outputs.hap_name != ''
         uses: actions/upload-artifact@v4
         with:
           name: mr-ohos-${{ needs.prepare.outputs.version }}
@@ -503,10 +517,11 @@ jobs:
           echo "android_result=${{ needs.build-android.result }}" >> $GITHUB_OUTPUT
           echo "ios_result=${{ needs.build-ios.result }}" >> $GITHUB_OUTPUT
           echo "ohos_result=${{ needs.build-ohos.result }}" >> $GITHUB_OUTPUT
+          echo "ohos_skipped=${{ needs.build-ohos.outputs.skipped }}" >> $GITHUB_OUTPUT
           echo "=== 构建结果 ==="
           echo "Android: ${{ needs.build-android.result }}"
           echo "iOS: ${{ needs.build-ios.result }}"
-          echo "HarmonyOS: ${{ needs.build-ohos.result }}"
+          echo "HarmonyOS: ${{ needs.build-ohos.result }} (skipped=${{ needs.build-ohos.outputs.skipped }})"
 
       - name: Download Android Artifact
         if: needs.build-android.result == 'success'
@@ -523,7 +538,7 @@ jobs:
           path: artifacts/ios
 
       - name: Download HarmonyOS Artifact
-        if: needs.build-ohos.result == 'success'
+        if: needs.build-ohos.result == 'success' && needs.build-ohos.outputs.skipped != 'true'
         uses: actions/download-artifact@v4
         with:
           name: mr-ohos-${{ needs.prepare.outputs.version }}
@@ -580,11 +595,15 @@ jobs:
           fi
 
           # 鸿蒙 HarmonyOS 下载说明
-          if [ "${{ needs.build-ohos.result }}" = "success" ]; then
+          OHOS_SKIPPED="${{ needs.build-ohos.outputs.skipped }}"
+          if [ "${{ needs.build-ohos.result }}" = "success" ] && [ "$OHOS_SKIPPED" != "true" ]; then
             BODY="${BODY}### HarmonyOS（鸿蒙）\n"
             BODY="${BODY}- \`.hap\` 文件为鸿蒙安装包\n"
             BODY="${BODY}- 安装方法：通过 hdc 工具安装 \`hdc install xxx.hap\`，或推送到设备后用文件管理器安装\n"
             BODY="${BODY}- 需在鸿蒙系统设置中允许未知来源应用安装\n\n"
+          elif [ "$OHOS_SKIPPED" = "true" ]; then
+            BODY="${BODY}### HarmonyOS（鸿蒙）\n⏭️ 未配置 \`HARMONYOS_CLI_URL\` secret，已跳过鸿蒙打包\n"
+            BODY="${BODY}如需启用：下载 \`commandline-tools-linux-x64\` → 上传到可公开访问位置 → 配置仓库 Secret\n\n"
           else
             BODY="${BODY}### HarmonyOS（鸿蒙）\n⚠️ 打包失败或暂不支持，请查看 Actions 日志\n"
             BODY="${BODY}（鸿蒙 Flutter SDK 当前基于 3.27.4，与项目 Dart 要求可能不兼容）\n\n"
