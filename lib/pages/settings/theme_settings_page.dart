@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:share_plus/share_plus.dart';
+import '../../utils/share_helper.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
@@ -998,7 +998,7 @@ class _ThemeManagePageState extends State<ThemeManagePage> {
 
   void _exportTheme(ThemeConfig theme) {
     final json = theme.toJson();
-    Share.share(json, subject: '主题分享');
+    ShareHelper.shareText(context, json, subject: '主题分享');
   }
 
   Future<void> _copyTheme(ThemeConfig theme) async {

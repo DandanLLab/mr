@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-import '../../models/book_source.dart';
 import '../../services/book_source_import_service.dart';
 import '../../utils/design_tokens.dart';
 

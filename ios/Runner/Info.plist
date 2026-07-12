@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>MR</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>MR</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(FLUTTER_BUILD_NAME)</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIMainStoryboardFile</key>
+	<string>Main</string>
+	<!-- 支持竖屏和横屏 -->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<!-- 隐藏状态栏（由 Flutter 控制） -->
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
+	<key>UIStatusBarHidden</key>
+	<false/>
+	<!-- 网络请求权限：允许 HTTP 明文请求（书源站点多为 HTTP） -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- 允许所有域名的 HTTP 请求 -->
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<!-- 同时允许 WebView 内的 HTTP 内容 -->
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
+	<!-- 文件访问权限：允许应用读取用户通过文件选择器选取的文件 -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<!-- 相册访问权限（封面缓存、保存图片） -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>MR 需要访问相册以保存书籍封面和导出图片</string>
+	<!-- 相机权限（二维码扫描） -->
+	<key>NSCameraUsageDescription</key>
+	<string>MR 需要使用相机扫描二维码以导入书源</string>
+	<!-- 麦克风权限（TTS 朗读相关） -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>MR 需要使用麦克风进行语音相关功能</string>
+	<!-- 本地网络权限（局域网书源、WebDAV） -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>MR 需要访问本地网络以连接局域网内的书源服务器和 WebDAV</string>
+	<!-- 文档类型：支持导入 JSON 书源文件 -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>JSON 书源</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.json</string>
+				<string>public.text</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

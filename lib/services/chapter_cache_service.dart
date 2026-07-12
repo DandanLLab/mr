@@ -22,8 +22,8 @@ class ChapterCacheService {
       final dir = await getApplicationDocumentsDirectory();
       _cachePath = '${dir.path}$_cacheFolderName';
       final cacheDir = Directory(_cachePath!);
-      if (!cacheDir.existsSync()) {
-        cacheDir.createSync(recursive: true);
+      if (!await cacheDir.exists()) {
+        await cacheDir.create(recursive: true);
       }
       debugPrint('✅ ChapterCacheService 初始化成功: $_cachePath');
     } catch (e) {
@@ -52,8 +52,8 @@ class ChapterCacheService {
     await init();
     final folderName = getBookFolderName(book);
     final dir = Directory('$_cachePath/$folderName');
-    if (!dir.existsSync()) {
-      dir.createSync(recursive: true);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
     }
     return dir;
   }
@@ -92,7 +92,7 @@ class ChapterCacheService {
       final dir = await _getBookCacheDir(book);
       final fileName = getChapterFileName(chapter);
       final file = File('${dir.path}/$fileName');
-      if (file.existsSync()) {
+      if (await file.exists()) {
         return await file.readAsString(encoding: utf8);
       }
     } catch (e) {
@@ -107,7 +107,7 @@ class ChapterCacheService {
       final dir = await _getBookCacheDir(book);
       final fileName = getChapterFileName(chapter, suffix: 'cb');
       final file = File('${dir.path}/$fileName');
-      if (file.existsSync()) {
+      if (await file.exists()) {
         final content = await file.readAsString(encoding: utf8);
         final List<dynamic> urls = jsonDecode(content);
         return urls.cast<String>();
@@ -124,7 +124,7 @@ class ChapterCacheService {
       final dir = await _getBookCacheDir(book);
       final fileName = getChapterFileName(chapter, suffix: isComic ? 'cb' : 'nb');
       final file = File('${dir.path}/$fileName');
-      return file.existsSync();
+      return await file.exists();
     } catch (e) {
       return false;
     }
@@ -135,9 +135,10 @@ class ChapterCacheService {
     final files = <String>{};
     try {
       final dir = await _getBookCacheDir(book);
-      if (dir.existsSync()) {
+      if (await dir.exists()) {
         final suffix = isComic ? 'cb' : 'nb';
-        for (final entity in dir.listSync()) {
+        final entities = await dir.list().toList();
+        for (final entity in entities) {
           if (entity is File && entity.path.endsWith('.$suffix')) {
             files.add(entity.uri.pathSegments.last);
           }
@@ -155,7 +156,7 @@ class ChapterCacheService {
       final dir = await _getBookCacheDir(book);
       final fileName = getChapterFileName(chapter, suffix: isComic ? 'cb' : 'nb');
       final file = File('${dir.path}/$fileName');
-      if (file.existsSync()) {
+      if (await file.exists()) {
         await file.delete();
         debugPrint('🗑️ 删除缓存: $fileName');
       }
@@ -168,7 +169,7 @@ class ChapterCacheService {
   Future<void> clearBookCache(Book book) async {
     try {
       final dir = await _getBookCacheDir(book);
-      if (dir.existsSync()) {
+      if (await dir.exists()) {
         await dir.delete(recursive: true);
         debugPrint('🗑️ 清除书籍缓存: ${book.name}');
       }
@@ -182,7 +183,7 @@ class ChapterCacheService {
     try {
       if (_cachePath == null) await init();
       final cacheDir = Directory(_cachePath!);
-      if (cacheDir.existsSync()) {
+      if (await cacheDir.exists()) {
         await cacheDir.delete(recursive: true);
         await cacheDir.create(recursive: true);
         debugPrint('🗑️ 清除所有缓存');
@@ -192,22 +193,35 @@ class ChapterCacheService {
     }
   }
 
-  /// 获取缓存大小
+  /// 获取缓存大小（异步递归遍历，避免阻塞主 isolate）
   Future<int> getCacheSize() async {
     try {
       if (_cachePath == null) await init();
       final cacheDir = Directory(_cachePath!);
-      if (!cacheDir.existsSync()) return 0;
-      int size = 0;
-      for (final entity in cacheDir.listSync(recursive: true)) {
-        if (entity is File) {
-          size += entity.lengthSync();
-        }
-      }
-      return size;
+      if (!await cacheDir.exists()) return 0;
+      return await _getDirectorySize(cacheDir);
     } catch (e) {
       return 0;
     }
+  }
+
+  /// 异步递归计算目录总字节数
+  Future<int> _getDirectorySize(Directory dir) async {
+    int size = 0;
+    try {
+      final entities = await dir.list().toList();
+      for (final entity in entities) {
+        if (entity is File) {
+          try {
+            final stat = await entity.stat();
+            size += stat.size;
+          } catch (_) {}
+        } else if (entity is Directory) {
+          size += await _getDirectorySize(entity);
+        }
+      }
+    } catch (_) {}
+    return size;
   }
 
   /// 格式化缓存大小

@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../utils/share_helper.dart';
 import '../../models/book_source.dart';
 import '../../providers/discovery_provider.dart';
 import '../../services/book_source_import_service.dart';
@@ -1054,7 +1055,8 @@ class _BookSourceManagePageState extends State<BookSourceManagePage> {
 
       if (!mounted) return;
       // 通过系统分享面板导出，用户可选择保存到任意位置
-      await Share.shareXFiles(
+      await ShareHelper.shareFiles(
+        context,
         [XFile(file.path)],
         subject: '导出书源',
         text: '导出 ${sources.length} 个书源',

@@ -330,7 +330,6 @@ class BookSource {
     if (engine == null) return null;
     switch (engine!.toLowerCase()) {
       case 'rhino':
-        return JsEngineType.rhino;
       case 'quickjs':
         return JsEngineType.quickjs;
       default:

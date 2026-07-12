@@ -1,7 +1,7 @@
 name: mr
 description: mr - 一款支持小说、漫画、视频、音频的多媒体阅读器
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.0+100
 
 environment:
   sdk: '>=3.12.0 <4.0.0'
@@ -28,7 +28,6 @@ dependencies:
   
   # 图片/媒体
   cached_network_image: ^3.3.1
-  photo_view: ^0.14.0
   
   # HTML/Markdown 渲染（Jsoup Dart 等价物）
   flutter_html: ^3.0.0-beta.2
@@ -44,11 +43,7 @@ dependencies:
   encrypt: ^5.0.1
   permission_handler: ^11.1.0
   file_picker: ^8.0.0
-  
-  # UI 组件
-  flutter_slidable: ^3.0.1
-  shimmer: ^3.0.0
-  
+
   # 分享/链接/Markdown
   url_launcher: ^6.2.2
   share_plus: ^7.2.1
@@ -56,8 +51,8 @@ dependencies:
   # 二维码扫描
   mobile_scanner: ^6.0.2
 
-  # JS 引擎增强 - Node.js 兼容的脚本执行
-  flutter_js: ^0.8.2
+  # JS 引擎 - 从 C 源码编译的 QuickJS，通过 dart:ffi 直接调用（替代 flutter_js）
+  ffi: ^2.1.0
   # 互斥锁 - JS 引擎并发保护
   synchronized: ^3.3.0
   # WebView 组件 - 用于 webJs 执行和页面渲染（借鉴 legado 的 BackstageWebView）
@@ -77,6 +72,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # 启用 Swift Package Manager（Flutter 3.45+ stable 默认启用）
+  # SPM 启用时生成 Swift 版 GeneratedPluginRegistrant（API: register(with:)）
+  # AppDelegate.swift 使用 register(with: self) 匹配 Swift 版 API
+  config:
+    enable-swift-package-manager: true
   assets:
     - assets/templates/
     - assets/book_sources/

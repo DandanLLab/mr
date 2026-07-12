@@ -15,7 +15,7 @@ class JsAdvancedService {
 
   // ===== 1. 图片解密 (coverDecodeJs / imageDecode) =====
 
-  /// 解密图片（借鉴 legado 的 ImageUtils.decode）
+  /// 解密图片（借鉴 legado ImageUtils.decode）
   ///
   /// [imageBytes] 原始图片字节数组
   /// [imageUrl] 图片 URL
@@ -24,13 +24,13 @@ class JsAdvancedService {
   /// [book] 书籍信息（可选）
   ///
   /// JS 上下文可用变量:
-  /// - result: 图片原始字节数组（Base64 字符串）
+  /// - result: Uint8Array 图片原始字节数组（Legado ByteArray 契约）
   /// - src: 图片 URL
   /// - book: 书籍信息
   /// - source: 书源信息
   /// - baseUrl: 书源 URL
   ///
-  /// JS 应返回解密后的 Base64 字符串
+  /// JS 应返回解密后的 Uint8Array（或 ByteArray 兼容格式）
   Future<Uint8List?> decodeImage(
     Uint8List imageBytes,
     String imageUrl, {
@@ -42,11 +42,10 @@ class JsAdvancedService {
     if (ruleJs == null || ruleJs.isEmpty) return imageBytes;
 
     try {
-      // 借鉴 legado：图片数据以 Base64 传入 JS，JS 返回 Base64
-      final base64Data = base64Encode(imageBytes);
+      // 借鉴 legado：result 传入原始字节数组（QuickJS 中为 Uint8Array）
       final result = JsEngine.instance.executeSync(
         ruleJs,
-        base64Data,
+        imageBytes,     // ← 直传 Uint8List，引擎自动变 new Uint8Array([...])
         baseUrl: source.bookSourceUrl,
         sourceEngine: source.engineType,
         variables: {
@@ -58,7 +57,14 @@ class JsAdvancedService {
 
       if (result == null) return null;
 
-      // JS 返回 Base64 字符串
+      // 兼容三种返回格式：
+      // 1. List<int> / List<num> → Uint8List
+      // 2. Base64 字符串 → base64Decode
+      // 3. 其他字符串 → 原样返回
+      if (result is List) {
+        return Uint8List.fromList(result.cast<int>());
+      }
+
       final resultStr = result.toString();
       if (resultStr.isEmpty || resultStr == 'null' || resultStr == 'undefined') {
         return imageBytes;
@@ -68,8 +74,7 @@ class JsAdvancedService {
       try {
         return base64Decode(resultStr);
       } catch (_) {
-        // 如果不是 Base64，可能是十六进制或其他格式
-        debugPrint('⚠️ 图片解密返回非Base64格式: ${resultStr.substring(0, resultStr.length > 50 ? 50 : resultStr.length)}');
+        debugPrint('⚠️ 图片解密返回非Base64格式: ${resultStr.length > 50 ? resultStr.substring(0, 50) : resultStr}');
         return imageBytes;
       }
     } catch (e) {
@@ -120,6 +125,7 @@ class JsAdvancedService {
 
       final completer = Completer<String?>();
 
+      // 借鉴 legado 的 WebViewPool：复用配置创建 HeadlessWebView
       final headlessWebView = HeadlessInAppWebView(
         initialSettings: InAppWebViewSettings(
           javaScriptEnabled: true,
@@ -192,33 +198,35 @@ class JsAdvancedService {
             : null,
       );
 
-      // 运行 HeadlessWebView
-      await headlessWebView.run();
+      try {
+        // 运行 HeadlessWebView
+        await headlessWebView.run();
 
-      // 加载页面
-      if (html != null && html.isNotEmpty) {
-        await headlessWebView.webViewController?.loadData(
-          data: html,
-          mimeType: 'text/html',
-          encoding: 'utf-8',
-          baseUrl: WebUri(url),
+        // 加载页面
+        if (html != null && html.isNotEmpty) {
+          await headlessWebView.webViewController?.loadData(
+            data: html,
+            mimeType: 'text/html',
+            encoding: 'utf-8',
+            baseUrl: WebUri(url),
+          );
+        } else {
+          await headlessWebView.webViewController?.loadUrl(
+            urlRequest: URLRequest(url: WebUri(url)),
+          );
+        }
+
+        // 借鉴 legado 的超时机制：30 秒超时
+        final result = await completer.future.timeout(
+          const Duration(seconds: 30),
+          onTimeout: () => null,
         );
-      } else {
-        await headlessWebView.webViewController?.loadUrl(
-          urlRequest: URLRequest(url: WebUri(url)),
-        );
+
+        return result;
+      } finally {
+        // 确保任何路径都释放 WebView，防止内存泄漏
+        await headlessWebView.dispose();
       }
-
-      // 借鉴 legado 的超时机制：30 秒超时
-      final result = await completer.future.timeout(
-        const Duration(seconds: 30),
-        onTimeout: () => null,
-      );
-
-      // 清理 WebView
-      await headlessWebView.dispose();
-
-      return result;
     } catch (e) {
       AppLogger.instance.logJsError('executeWebJs', 'WebView JS执行失败: $e');
       return null;
@@ -469,7 +477,6 @@ class JsAdvancedService {
       'loginUi': source.loginUi ?? '',
       'loginCheckJs': source.loginCheckJs ?? '',
       'coverDecodeJs': source.coverDecodeJs ?? '',
-      'jsLib': source.jsLib ?? '',
       'variable': source.variable ?? '',
     };
   }

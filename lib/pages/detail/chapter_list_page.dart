@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../utils/share_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/book.dart';
 import '../../models/chapter.dart';
@@ -530,7 +531,8 @@ class _ChapterListPageState extends State<ChapterListPage> {
       final directory = await getTemporaryDirectory();
       final file = File('${directory.path}${Platform.pathSeparator}$fileName');
       await file.writeAsString(content);
-      await Share.shareXFiles([XFile(file.path)], text: text);
+      if (!mounted) return;
+      await ShareHelper.shareFiles(context, [XFile(file.path)], text: text);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(

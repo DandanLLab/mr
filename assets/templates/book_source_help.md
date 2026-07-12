@@ -1,6 +1,8 @@
 # 书源规则帮助
 
-> 本文档基于阅读(Legado)规则体系，标注了每项功能的实现状态和与 Legado 的差异。
+> 本文档基于阅读（Legado）规则体系，标注每项功能的实现状态及与本应用实际代码的对应关系。
+>
+> 规则引擎核心代码：[lib/services/source_engine/analyze_rule.dart](file:///d:/OpenClaw/.openclaw/workspace/mr/lib/services/source_engine/analyze_rule.dart)
 
 ---
 
@@ -18,15 +20,15 @@
 
 ## 一、规则模式
 
-| 模式 | 前缀 | 状态 | 说明 |
-|------|------|------|------|
-| CSS/JSoup | `@@` / `@CSS:` / 无前缀 | ✅ | 默认模式，使用 `package:html` CSS 选择器 |
-| JSON | `@Json:` / `$.` / `$[` | ✅ | JSONPath 解析，支持递归搜索和过滤器 |
-| XPath | `@XPath:` / `//` | ✅ | XPath 解析，使用 `xml` + `xpath` 包 |
-| JS | `@js:` / `<js>...</js>` / `@quickjs:` / `@rhino:` | ✅ | 双引擎：QuickJS(ES2020) + Rhino(ES5) |
-| Regex | `:` | ✅ | 正则模式，以 `:` 开头 |
-| WebJS | `@webjs:` | 🔧 | WebView JS，需配合 InAppWebView |
-| TypeScript | `@ts:` | ➕ | 自动编译为 JS 后 QuickJS 执行 |
+| 模式 | 前缀 | 状态 | 说明 | 实现位置 |
+|------|------|------|------|----------|
+| CSS/JSoup | `@@` / `@CSS:` / 无前缀 | ✅ | `package:html` CSS 选择器 | `analyze_rule.dart` 规则链 |
+| JSON | `@Json:` / `$.` / `$[` | ✅ | JSONPath 递归搜索 + 过滤器 | `legado_json_path.dart` |
+| XPath | `@XPath:` / `//` | ✅ | `xml` + `xpath` 包 + HTML 自动补全 | `legado_xpath.dart` |
+| JS | `@js:` / `<js>`...`</js>` | ✅ | QuickJS 单引擎（ES2020） | `js_engine.dart` |
+| Regex | `:` | ✅ | 正则模式，以 `:` 开头 | `analyze_rule.dart` |
+| WebJS | `@webjs:` | 🔧 | WebView JS，需 InAppWebView 配合 | `js_advanced_service.dart` |
+| TypeScript | `@ts:` | ➕ | 自动编译为 JS 后 QuickJS 执行 | `analyze_rule.dart` → quickjs |
 
 ---
 
@@ -34,13 +36,13 @@
 
 ### 2.1 元素定位
 
-| 规则 | 状态 | 说明 | 示例 |
+| 语法 | 状态 | 说明 | 示例 |
 |------|------|------|------|
 | `class.xxx` | ✅ | CSS 类选择器 | `class.book-list` |
 | `tag.xxx` | ✅ | 标签选择器 | `tag.div` |
 | `id.xxx` | ✅ | ID 选择器 | `id.main` |
 | `#xxx` | ✅ | 等同于 `id.xxx` | `#main` |
-| `text.xxx` | ✅ | 文本匹配 | `text.章节` |
+| `text.xxx` | ✅ | 文本内容匹配 | `text.章节` |
 | `children` | ✅ | 子元素 | `children` |
 | 标准 CSS 选择器 | ✅ | `querySelectorAll` | `div.class > p` |
 | `@css:selector` | ✅ | 显式 CSS 前缀 | `@css:div.book-list > li` |
@@ -60,15 +62,15 @@
 | `@srcUrl` | ✅ | 等同于 `@src` |
 | `@onclick` | ✅ | onclick 属性，自动提取 JS 中的 URL |
 | `@attr:xxx` | ✅ | 通用属性提取，含 JS 跳转代码自动提取 |
-| `@title` `@alt` `@style` | ✅ | 常用属性快捷方式 |
-| `@data-src` `@data-original` | ✅ | data 属性快捷方式 |
-| `@content` `@name` `@value` | ✅ | 表单属性快捷方式 |
+| `@title` / `@alt` / `@style` | ✅ | 常用属性快捷方式 |
+| `@data-src` / `@data-original` | ✅ | data 属性快捷方式 |
+| `@content` / `@name` / `@value` | ✅ | 表单属性快捷方式 |
 
 ### 2.3 索引选择
 
 | 格式 | 状态 | 说明 | 示例 |
 |------|------|------|------|
-| `.索引` | ✅ | 选择指定索引（0 开始） | `tag.div.0` |
+| `.索引` | ✅ | 按索引选择（0 开始） | `tag.div.0` |
 | `.-1` | ✅ | 负数索引（倒数） | `tag.div.-1` |
 | `:索引` | ✅ | 冒号分隔多索引 | `tag.div.0:2:4` |
 | `[!0,1,2]` | ✅ | 排除模式切片 | `tag.div[!0,1]` |
@@ -79,9 +81,9 @@
 
 | 操作符 | 状态 | 说明 |
 |--------|------|------|
-| `&&` | ✅ | 并集（合并多个规则结果） |
-| `\|\|` | ✅ | 或集（取第一个非空结果即停止） |
-| `%%` | ✅ | 交叉合并（按顺序交替合并） |
+| `&&` | ✅ | 并集：合并多个规则结果 |
+| `\|\|` | ✅ | 或集：取第一个非空结果即停止 |
+| `%%` | ✅ | 交叉合并：按顺序交替合并 |
 
 ---
 
@@ -94,9 +96,11 @@
 | `$[start:end]` | ✅ | 数组切片 | `$[0:10]` |
 | `$..property` | ✅ | 递归搜索 | `$..name` |
 | `$[*]` | ✅ | 通配符 | `$.data[*]` |
-| `$[?(@.key==value)]` | ✅ | 过滤器 | `$.list[?(@.type==1)]` |
+| `$[?(@.key==value)]` | ✅ | 过滤器（支持 == != > < >= <=） | `$.list[?(@.type==1)]` |
 | `{$.rule}` | ✅ | 内嵌规则替换 | `{$.data.id}` |
 | `&&` / `\|\|` / `%%` | ✅ | 组合操作符 | 同 CSS 模式 |
+
+> 实现文件：[lib/services/source_engine/legado_json_path.dart](file:///d:/OpenClaw/.openclaw/workspace/mr/lib/services/source_engine/legado_json_path.dart)
 
 ---
 
@@ -108,8 +112,10 @@
 | `/元素` | ✅ | 绝对路径 | `/html/body/div` |
 | `@属性` | ✅ | 选取属性 | `//a/@href` |
 | `*` | ✅ | 通配符 | `//*` |
-| HTML 自动补全 | ✅ | td/tr/li/option 自动补全 | — |
+| HTML 自动补全 | ✅ | td/tr/li/option 自动包裹 | — |
 | `&&` / `\|\|` / `%%` | ✅ | 组合操作符 | 同 CSS 模式 |
+
+> 实现文件：[lib/services/source_engine/legado_xpath.dart](file:///d:/OpenClaw/.openclaw/workspace/mr/lib/services/source_engine/legado_xpath.dart)
 
 ---
 
@@ -119,9 +125,11 @@
 |------|------|------|
 | `规则##正则` | ✅ | 匹配结果替换为空（删除） |
 | `规则##正则##替换文本` | ✅ | 匹配结果替换为指定文本 |
-| `规则##正则##替换文本###` | ✅ | 三个 `#` 结尾 = 只替换第一个匹配 |
+| `规则##正则##替换文本###` | ✅ | 三个 `#` 结尾 → 只替换第一个匹配 |
 | `$1` `$2` ... `$n` | ✅ | 捕获组反向引用 |
 | `{{}}` 内的 `##` 跳过 | ✅ | 模板表达式内的 `##` 不作为分隔符 |
+
+> 链式规则：多个 `##` 步骤可串接，如 `tag.p@text##作者：##作者:`
 
 ---
 
@@ -142,12 +150,12 @@
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
-| `@put:{key:value}` | ✅ | 存储变量 |
-| `@get:{key}` | ✅ | 读取变量 |
-| 变量查找链 | ✅ | chapter > book > source > 本地 |
-| `java.put(key, value)` | ✅ | JS 内存缓存 |
-| `java.getStr(key)` | ✅ | JS 内存缓存读取 |
-| `source.variable` | ✅ | 书源持久化变量 |
+| `@put:{key:value}` | ✅ | 存储变量到运行时缓存 |
+| `@get:{key}` | ✅ | 读取运行时缓存变量 |
+| 变量查找链 | ✅ | 顺序：本地变量 → book → source → 全局 |
+| `java.put(key, value)` | ✅ | JS 中存取运行时缓存 |
+| `java.getStr(key)` | ✅ | JS 读取运行时缓存 |
+| `source.variable` | ✅ | 书源持久化变量（JSON 字符串） |
 | `$1` `$2` 反向引用 | ✅ | 正则捕获组引用 |
 
 ---
@@ -160,11 +168,11 @@
 | `body` | ✅ | POST 请求体 |
 | `headers` | ✅ | 自定义请求头 |
 | `charset` | ✅ | 响应编码（如 `gbk`） |
-| `webView` | ⚠️ | WebView 加载（需配合 InAppWebView） |
-| `js` | ✅ | URL 级 JS 脚本 |
-| `bodyJs` | ✅ | 响应体 JS 转换 |
+| `webView` | ⚠️ | WebView 加载（需 InAppWebView 配合） |
+| `js` | ✅ | URL 级 JS 脚本（请求前执行） |
+| `bodyJs` | ✅ | 响应体 JS 转换（请求后执行） |
 | `retry` | ✅ | 重试次数 |
-| `type` | ✅ | 响应类型（如 `audio`） |
+| `type` | ✅ | 响应类型（如 `audio` / `image`） |
 | `webJs` | ⚠️ | WebView 中执行的 JS |
 | `dnsIp` | ❌ | 强制 DNS 解析 |
 | `proxy` | ❌ | 代理设置 |
@@ -177,12 +185,12 @@
 | `{{key}}` | ✅ | 搜索关键词 |
 | `{{page}}` | ✅ | 当前页码 |
 | `{{page,1,2,3...}}` | ⚠️ | 分页模板（部分支持） |
-| `{{host}}` | ✅ | 当前 URL 域名 |
-| `{{result}}` | ✅ | 上一步结果 |
+| `{{host}}` | ✅ | 当前书源域名 |
+| `{{result}}` | ✅ | 上一步规则结果 |
 
 ---
 
-## 九、详情页特殊标签
+## 九、内容渲染标签
 
 | 标签 | 状态 | 说明 |
 |------|------|------|
@@ -193,35 +201,25 @@
 
 ---
 
-## 十、图片链接控制
+## 十、与 Legado 的关键差异
 
-| 选项 | 状态 | 说明 |
-|------|------|------|
-| `style` | ⚠️ | 图片样式（center/full/single/left/right） |
-| `width` | ⚠️ | 宽度（像素/百分比） |
-| `click` | ❌ | 点击图片执行 JS |
-| `js` | ❌ | 点击图片执行 JS（旧方式） |
+### 10.1 引擎架构差异
 
----
+| 项目 | Legado（阅读） | 本应用 |
+|------|----------------|--------|
+| JS 引擎 | Rhino（JVM） | QuickJS（C FFI，ES2020） |
+| HTML 解析 | JSoup（Java） | `package:html`（Dart CSS 选择器） |
+| JSON 解析 | Gson + 自定义 JSONPath | Dart json + `legado_json_path.dart` |
+| XPath 解析 | Jaxen | `xml` + `xpath` Dart 包 |
+| HTTP 客户端 | OkHttp | Dio + OkHttp（Android 原生通道） |
+| 平台 | Android only | Flutter 跨平台（Android / iOS / Web / 桌面） |
+| 加密实现 | Java | C 原生（`quickjs/crypto/`，FFI 调用） |
 
-## 十一、与 Legado 的关键差异
-
-### 11.1 引擎架构差异
-
-| 项目 | Legado | 本应用 |
-|------|--------|--------|
-| JS 引擎 | Rhino（JVM） | QuickJS（C）+ Rhino（Android 原生） |
-| HTML 解析 | JSoup（Java） | `package:html`（Dart） |
-| JSON 解析 | Gson + 自定义 JSONPath | Dart json + 自定义 JSONPath |
-| XPath 解析 | Jaxen | `xml` + `xpath`（Dart） |
-| HTTP 客户端 | OkHttp | Dio + OkHttp（Android 原生） |
-| 平台 | Android only | Flutter 跨平台 |
-
-### 11.2 规则解析差异
+### 10.2 规则解析差异
 
 | 差异点 | 说明 |
 |--------|------|
-| CSS 选择器 | Legado 用 JSoup，本应用用 `package:html`，大部分选择器兼容，少数高级伪类（如 `:has()`）不支持 |
+| CSS 选择器 | Legado 用 JSoup（Java），本应用用 `package:html`（Dart）+ `xml/xpath` 包，多数选择器兼容，少数高级伪类（`:has()`）不支持 |
 | `@text` | 行为一致：获取元素及子元素的文本 |
 | `@html` | 行为一致：返回 outerHtml，移除 script/style |
 | `@ownText` | 行为一致：仅自身文本，不含子元素 |
@@ -233,7 +231,7 @@
 | `{{@@.xxx}}` 模板 | 行为一致：子规则模板替换 |
 | `@put` / `@get` | 行为一致：变量存取 |
 
-### 11.3 JS 桥接差异
+### 10.3 JS 桥接差异
 
 | 方法 | Legado | 本应用 |
 |------|--------|--------|
@@ -242,9 +240,10 @@
 | `java.post(url)` | 真实 HTTP 请求 | 预缓存优先，异步模式真实请求 |
 | `java.ajaxAll(urls)` | 并发 HTTP 请求 | 预缓存优先，部分支持 |
 | `java.head(url)` | 真实 HEAD 请求 | 仅从缓存取 |
-| `java.getCookie(tag, key)` | CookieStore 操作 | 仅从缓存取 |
-| `java.getVerificationCode(url)` | 验证码识别 | 仅从缓存取 |
+| `java.getCookie(tag, key)` | CookieStore 操作 | JS 侧内存缓存实现 |
+| `java.getVerificationCode(imageUrl)` | 验证码识别 | 仅从缓存取 |
 | `java.startBrowser(url)` | 打开浏览器 | 空操作 |
+| `java.startBrowserAwait(url, title)` | 浏览器获取页面 | 预缓存优先 |
 | `java.cacheFile(url)` | 缓存文件 | 仅从缓存取 |
 | `java.importScript(path)` | 导入脚本 | 仅从缓存取 |
 | `java.readFile` / `readTxtFile` | 文件读取 | ❌ 未实现 |
@@ -255,7 +254,7 @@
 | `java.createSign` | 签名 | ❌ 未实现 |
 | `java.desEncode` / `desDecode` | DES 加密 | ⚠️ 简化为 AES |
 | `java.toast` / `java.longToast` | Toast 提示 | 仅 console.log |
-| `java.getWebViewUA()` | 真实 UA | 固定字符串 |
+| `java.getWebViewUA()` | 真实 User-Agent | 固定字符串 |
 | `java.randomUUID()` | UUID | ✅ 一致 |
 | `java.androidId()` | Android ID | 伪 ID（基于 UUID） |
 | `java.t2s` / `java.s2t` | 繁简转换 | ⚠️ 简易映射表 |
@@ -264,40 +263,56 @@
 | `java.connect(url)` | HTTP 连接 | 预缓存优先 |
 | `java.getString(ruleStr)` | 规则解析 | ✅ 支持 CSS/JSON/正则/默认模式 |
 | `java.getElements(html, rule)` | 获取元素列表 | ✅ 一致 |
-| `CryptoJS` | Java 实现 | ✅ 桥接 NativeChannel，API 兼容 |
+| `CryptoJS.*` | Java 实现 | ✅ 底层通过 C 原生加密 FFI 实现，API 全兼容 |
 
-### 11.4 本应用独有功能
+### 10.4 本应用独有功能
 
-| 功能 | 说明 |
-|------|------|
-| `@ts:` TypeScript 前缀 | 自动编译 TS 为 JS 后执行 |
-| `@quickjs:` 强制 QuickJS | 指定使用 QuickJS 引擎 |
-| `@rhino:` 强制 Rhino | 指定使用 Rhino 引擎 |
-| ES2020 语法支持 | const/let/箭头函数/模板字符串/async-await 等 |
-| `fetch()` 标准 Web API | 标准 HTTP 请求接口 |
-| `console` 完整实现 | log/warn/error/info/dir/table/time/timeEnd |
-| `btoa()` / `atob()` | Base64 编解码 |
-| `URL` / `URLSearchParams` | URL 解析 |
-| `require()` Node.js 模拟 | http/https/fs/path/crypto 等 |
-| `Buffer` Node.js 模拟 | Buffer 操作 |
-| 跨平台支持 | Android / iOS / Web / Desktop |
-| 预缓存桥接机制 | JS 执行前预缓存 HTTP/加密结果，加速同步执行 |
-| JS 执行追踪树 | 调试时可视化 JS 执行流程 |
+| 功能 | 说明 | 代码位置 |
+|------|------|----------|
+| `@ts:` TypeScript 前缀 | 自动编译 TS 为 JS 后执行 | `analyze_rule.dart` |
+| ES2020 语法支持 | const/let/箭头函数/模板字符串/async-await 等 | QuickJS（ES2020） |
+| `fetch()` 标准 Web API | 内置 HTTP 请求接口 | `quickjs_runtime.dart` |
+| `console` 完整实现 | log/warn/error/info/dir/table/time/timeEnd | `js_engine.dart` |
+| `btoa()` / `atob()` | Base64 编解码 | C 原生 `base64` |
+| `URL` / `URLSearchParams` | URL 解析接口 | `quickjs_runtime.dart` |
+| `require()` Node.js 模拟 | http/https/fs/path/crypto 等 | `quickjs_runtime.dart` |
+| `Buffer` Node.js 模拟 | Buffer 操作 | `quickjs_runtime.dart` |
+| 跨平台支持 | Android / iOS / Web / Desktop | Flutter 框架 |
+| 预缓存桥接机制 | JS 执行前预缓存 HTTP/加密结果，加速同步执行 | `js_engine.dart` |
+| JS 执行追踪树 | 调试页面可视化 JS 执行流程 | `source_debug_service.dart` |
 
 ---
 
-## 十二、规则执行位置
+## 十一、规则执行位置
 
-| 字段 | 状态 | 说明 |
-|------|------|------|
+| 书源字段 | 状态 | 说明 |
+|----------|------|------|
 | `searchUrl` | ✅ | 搜索 URL 生成 |
 | `checkKeyWord` | ✅ | 搜索结果校验 |
 | `bookList` | ✅ | 书籍列表提取 |
 | `bookInfo.init` | ✅ | 详情页初始化 JS |
 | `preUpdateJs` | ✅ | 目录更新前 JS |
 | `formatJs` | ✅ | 章节名格式化 JS |
+| `subContent` | ✅ | 备用正文规则 |
+| `js` | ✅ | 正文 JS 预处理 |
 | `contentRule.js` | ✅ | 正文加载后 JS |
 | `callBackJs` | ✅ | 内容回调 JS |
 | `loginCheckJs` | ✅ | 登录状态检查 JS |
 | `replaceRegex` | ✅ | 正文替换规则 |
 | `webJs` | ⚠️ | WebView JS（需 InAppWebView） |
+| `imageDecode` | ✅ | 图片解码 JS |
+
+---
+
+## 十二、规则调试
+
+本应用提供 `crypto_stats_panel.dart` 调试面板，位于书源调试页，支持：
+
+- **加密性能统计**：C 原生加密方法调用次数、耗时、吞吐量
+- **C 层内存监控**：`memory_tracker` 全局分配/释放/峰值
+- **JS 引擎内存**：`JS_ComputeMemoryUsage` 25 字段全量展示
+- **Promise 状态监控**：输入变量名查询 Promise pending/fulfilled/rejected
+- **JS 值打印**：`JS_PrintValue` 流式输出任意 JS 表达式
+- **手动 GC**：AppBar 按钮一键触发 `JS_RunGC`
+
+> 详见 [debug_api_guide.md](debug_api_guide.md) 与 [book_source_js_help.md](book_source_js_help.md)。

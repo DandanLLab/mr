@@ -1,4 +1,4 @@
-name: Build & Release APK
+name: Build & Release
 
 # 触发条件：
 # 1. push 到 master → 自动打包测试版（dev）
@@ -26,42 +26,48 @@ env:
   JAVA_VERSION: '21'
 
 jobs:
-  build:
-    name: Build APK
+  # ===== 版本号计算（共享）=====
+  prepare:
+    name: Prepare Version
     runs-on: ubuntu-latest
-
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      version_compact: ${{ steps.version.outputs.version_compact }}
+      build_number: ${{ steps.version.outputs.build_number }}
+      commit_count: ${{ steps.version.outputs.commit_count }}
+      build_date: ${{ steps.version.outputs.build_date }}
+      release_type: ${{ steps.release_type.outputs.type }}
     steps:
-      # 1. 拉取代码（全历史，用于计算今日提交数）
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2. 计算版本号：YY.MMDD.今日提交数
-      #    例如 2026年6月20日第3次提交 → 26.0620.3
       - name: Generate Version
         id: version
         run: |
           YY=$(date -u +%y)
           MMDD=$(date -u +%m%d)
           TODAY=$(date -u +%Y-%m-%d)
-          # 统计今天（UTC）的提交次数作为构建序号
           COMMIT_COUNT_TODAY=$(git log --oneline --since="${TODAY}T00:00:00Z" --until="${TODAY}T23:59:59Z" | wc -l | tr -d ' ')
-          # 至少为1，避免0
           if [ "$COMMIT_COUNT_TODAY" -eq 0 ]; then
             COMMIT_COUNT_TODAY=1
           fi
+          TOTAL_COMMITS=$(git rev-list --count HEAD 2>/dev/null || echo 1)
+          BUILD_NUMBER=$(date -u +%s)
           VERSION="${YY}.${MMDD}.${COMMIT_COUNT_TODAY}"
+          VERSION_COMPACT="${YY}${MMDD}${COMMIT_COUNT_TODAY}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version_compact=$VERSION_COMPACT" >> $GITHUB_OUTPUT
+          echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
           echo "commit_count=$COMMIT_COUNT_TODAY" >> $GITHUB_OUTPUT
           echo "build_date=$(date -u +%Y-%m-%d)" >> $GITHUB_OUTPUT
           echo "=========================================="
           echo "  版本号: $VERSION"
+          echo "  紧凑号: $VERSION_COMPACT"
+          echo "  构建号: $BUILD_NUMBER"
           echo "  今日提交数: $COMMIT_COUNT_TODAY"
-          echo "  构建日期: $(date -u +%Y-%m-%d)"
           echo "=========================================="
 
-      # 3. 判断打包类型（push 到 master 默认 dev，手动触发按选择）
       - name: Determine Release Type
         id: release_type
         run: |
@@ -71,21 +77,27 @@ jobs:
             echo "type=dev" >> $GITHUB_OUTPUT
           fi
 
-      # 4. 设置 Java 21
+  # ===== Android APK 打包 =====
+  build-android:
+    name: Build Android
+    needs: prepare
+    # 标准 2 核 7GB runner，靠 CMake 6 道内存防线（-fno-lto / -fno-inline / 等）避免 OOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
 
-      # 5. 设置 Flutter（使用 stable channel，和本地保持一致）
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}
           cache: true
 
-      # 6. 缓存 Gradle 加速构建
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
@@ -95,99 +107,268 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: gradle-${{ runner.os }}-
 
-      # 7. 更新 pubspec.yaml 版本号
       - name: Update Version
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          # Flutter version 格式: x.y.z+buildNumber
-          # 用日期版本号作为 versionName，构建序号作为 versionCode
-          sed -i "s/^version:.*/version: ${VERSION}+${{ steps.version.outputs.commit_count }}/" pubspec.yaml
-          echo "pubspec.yaml version 已更新为: ${VERSION}+${{ steps.version.outputs.commit_count }}"
+          VERSION="${{ needs.prepare.outputs.version }}"
+          sed -i "s/^version:.*/version: ${VERSION}+${{ needs.prepare.outputs.build_number }}/" pubspec.yaml
           grep "^version:" pubspec.yaml
 
-      # 7.5 移除阿里云镜像（GitHub Actions 在国外，使用官方仓库更稳定）
       - name: Remove Aliyun Mirrors
         run: |
           sed -i '/maven.aliyun.com/d' android/settings.gradle.kts
           sed -i '/maven.aliyun.com/d' android/build.gradle.kts
-          echo "=== settings.gradle.kts repositories ==="
-          grep -A5 "repositories" android/settings.gradle.kts | head -8
-          echo "=== build.gradle.kts repositories ==="
-          grep -A5 "repositories" android/build.gradle.kts | head -12
 
-      # 8. 安装依赖
       - name: Install Dependencies
         run: flutter pub get
 
-      # 9. 构建 Release APK（只构建 arm64-v8a，体积更小）
       - name: Build APK
-        run: flutter build apk --release --no-tree-shake-icons
+        run: flutter build apk --release --target-platform=android-arm64 --obfuscate --split-debug-info=build/symbols
+        env:
+          # 2 核 runner：CMake/Ninja 并行度 = CPU 核数
+          CMAKE_BUILD_PARALLEL_LEVEL: 2
 
-      # 10. 重命名 APK 文件
+      - name: Analyze APK Size
+        run: |
+          echo "=== APK 内容分析（按大小排序，Top 30）==="
+          unzip -l build/app/outputs/flutter-apk/app-release.apk | sort -rn -k1 | head -30
+          echo "=== APK 总大小 ==="
+          ls -lh build/app/outputs/flutter-apk/app-release.apk
+
       - name: Rename APK
         id: apk
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          TYPE="${{ steps.release_type.outputs.type }}"
-          BUILD_DATE="${{ steps.version.outputs.build_date }}"
-          APK_NAME="mr_v${VERSION}_${TYPE}_${BUILD_DATE}_arm64.apk"
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TYPE="${{ needs.prepare.outputs.release_type }}"
+          BUILD_DATE="${{ needs.prepare.outputs.build_date }}"
+          APK_NAME="mr_v${{ needs.prepare.outputs.version_compact }}_${TYPE}_${BUILD_DATE}_arm64.apk"
           cp build/app/outputs/flutter-apk/app-release.apk "${APK_NAME}"
           echo "apk_name=$APK_NAME" >> $GITHUB_OUTPUT
-          echo "apk_path=${APK_NAME}" >> $GITHUB_OUTPUT
           ls -lh "${APK_NAME}"
-          echo "=== APK 体积 ==="
-          du -h "${APK_NAME}"
 
-      # 11. 压缩打包（zip）
       - name: Compress APK
         run: |
           APK_NAME="${{ steps.apk.outputs.apk_name }}"
           ZIP_NAME="${APK_NAME%.apk}.zip"
           zip -j "${ZIP_NAME}" "${APK_NAME}"
           echo "zip_name=${ZIP_NAME}" >> $GITHUB_ENV
-          ls -lh "${ZIP_NAME}"
 
-      # 12. 上传构建产物到 Artifacts（每次都上传）
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mr-apk-${{ steps.version.outputs.version }}
+          name: mr-android-${{ needs.prepare.outputs.version }}
           path: |
             ${{ steps.apk.outputs.apk_name }}
             ${{ env.zip_name }}
           retention-days: 30
 
-      # 13. 创建 GitHub Release
+  # ===== iOS 打包（允许失败）=====
+  # 修复历史：项目原本用 SPM 模式但 project.pbxproj 没有 Flutter.framework 引用，
+  # 导致 Library not loaded: @rpath/Flutter.framework/Flutter 闪退。
+  # 现已添加传统 PBXBuildFile 引用 + CI 关闭 SPM 模式确保走传统链接路径。
+  build-ios:
+    name: Build iOS
+    needs: prepare
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+
+      - name: Disable Swift Package Manager
+        # 项目用传统 Flutter.framework 引用模式（project.pbxproj 已配置 PBXBuildFile）
+        # 必须关闭 SPM，否则 Generated.xcconfig 会注入 FLUTTER_FRAMEWORK_SWIFT_PACKAGE_PATH
+        # 导致 Xcode 走 SPM 路径但找不到 packageReferences
+        run: flutter config --no-enable-swift-package-manager
+
+      - name: Update Version
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          sed -i '' "s/^version:.*/version: ${VERSION}+${{ needs.prepare.outputs.build_number }}/" pubspec.yaml
+          grep "^version:" pubspec.yaml
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Verify Build Phases
+        # 校验修复是否生效：project.pbxproj 必须包含 Embed Frameworks 和 Thin Binary (embed_and_thin)
+        # 这两个 phase 负责 Flutter.framework 的嵌入，缺失会导致 Library not loaded 闪退
+        run: |
+          echo "=== 检查 project.pbxproj 中的 Embed Frameworks phase ==="
+          grep -c "Embed Frameworks" ios/Runner.xcodeproj/project.pbxproj || {
+            echo "❌ project.pbxproj 缺少 Embed Frameworks phase！"
+            exit 1
+          }
+          echo "=== 检查 project.pbxproj 中的 Thin Binary phase (embed_and_thin) ==="
+          grep -c "embed_and_thin" ios/Runner.xcodeproj/project.pbxproj || {
+            echo "❌ project.pbxproj 缺少 embed_and_thin 脚本！Flutter.framework 不会被嵌入"
+            exit 1
+          }
+          echo "✅ build phases 完整"
+          echo "=== 检查 Generated.xcconfig 是否还有 SPM 字段 ==="
+          if grep -q "FLUTTER_FRAMEWORK_SWIFT_PACKAGE_PATH" ios/Flutter/Generated.xcconfig; then
+            echo "⚠️ Generated.xcconfig 仍包含 SPM 字段（可能 flutter config 未生效）"
+            grep "FLUTTER_FRAMEWORK_SWIFT_PACKAGE_PATH" ios/Flutter/Generated.xcconfig
+          else
+            echo "✅ SPM 模式已关闭"
+          fi
+
+      - name: Install Pods
+        run: |
+          cd ios
+          rm -rf Pods Podfile.lock
+          pod install --repo-update
+
+      - name: Disable Code Signing
+        run: |
+          cd ios
+          # 填入假 Development Team 骗过 Flutter 检查，--no-codesign 会跳过实际签名
+          sed -i '' 's/DEVELOPMENT_TEAM = "";/DEVELOPMENT_TEAM = "XXXXXX";/g' Runner.xcodeproj/project.pbxproj
+
+      - name: Build iOS (No Codesign)
+        run: flutter build ios --release --no-codesign
+
+      - name: Verify Flutter.framework Embedded
+        # 关键校验：Flutter.framework 必须嵌入 Runner.app/Frameworks/，否则启动闪退
+        run: |
+          echo "=== Runner.app 目录结构 ==="
+          ls -lh build/ios/iphoneos/Runner.app/
+          echo "=== Runner.app/Frameworks 目录 ==="
+          ls -lh build/ios/iphoneos/Runner.app/Frameworks/ 2>/dev/null || {
+            echo "❌ Runner.app/Frameworks 不存在！Flutter.framework 未嵌入"
+            exit 1
+          }
+          echo "=== 检查 Flutter.framework 是否嵌入 ==="
+          if [ -d "build/ios/iphoneos/Runner.app/Frameworks/Flutter.framework" ]; then
+            echo "✅ Flutter.framework 已嵌入"
+            ls -lh build/ios/iphoneos/Runner.app/Frameworks/Flutter.framework/
+          else
+            echo "❌ Flutter.framework 未嵌入到 Runner.app/Frameworks！"
+            exit 1
+          fi
+          echo "=== Runner 二进制大小 ==="
+          ls -lh build/ios/iphoneos/Runner.app/Runner
+          echo "=== Runner.app 总大小 ==="
+          du -sh build/ios/iphoneos/Runner.app
+
+      - name: Create IPA
+        id: ipa
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TYPE="${{ needs.prepare.outputs.release_type }}"
+          BUILD_DATE="${{ needs.prepare.outputs.build_date }}"
+          IPA_NAME="mr_v${{ needs.prepare.outputs.version_compact }}_${TYPE}_${BUILD_DATE}_ios.ipa"
+          mkdir -p Payload
+          cp -r build/ios/iphoneos/Runner.app Payload/
+          zip -r "${IPA_NAME}" Payload
+          echo "ipa_name=${IPA_NAME}" >> $GITHUB_OUTPUT
+          ls -lh "${IPA_NAME}"
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mr-ios-${{ needs.prepare.outputs.version }}
+          path: ${{ steps.ipa.outputs.ipa_name }}
+          retention-days: 30
+
+  # ===== 合并发布（等待所有平台，无论成功失败）=====
+  release:
+    name: Create Release
+    needs: [prepare, build-android, build-ios]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Build Results
+        id: results
+        run: |
+          echo "android_result=${{ needs.build-android.result }}" >> $GITHUB_OUTPUT
+          echo "ios_result=${{ needs.build-ios.result }}" >> $GITHUB_OUTPUT
+          echo "=== 构建结果 ==="
+          echo "Android: ${{ needs.build-android.result }}"
+          echo "iOS: ${{ needs.build-ios.result }}"
+
+      - name: Download Android Artifact
+        if: needs.build-android.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: mr-android-${{ needs.prepare.outputs.version }}
+          path: artifacts/android
+
+      - name: Download iOS Artifact
+        if: needs.build-ios.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: mr-ios-${{ needs.prepare.outputs.version }}
+          path: artifacts/ios
+
+      - name: List Artifacts
+        run: |
+          echo "=== Android ==="
+          ls -lh artifacts/android/ 2>/dev/null || echo "无 Android 产物"
+          echo "=== iOS ==="
+          ls -lh artifacts/ios/ 2>/dev/null || echo "无 iOS 产物"
+
+      - name: Build Release Body
+        id: body
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          VERSION_COMPACT="${{ needs.prepare.outputs.version_compact }}"
+          TYPE="${{ needs.prepare.outputs.release_type }}"
+          BUILD_DATE="${{ needs.prepare.outputs.build_date }}"
+          COMMIT_COUNT="${{ needs.prepare.outputs.commit_count }}"
+
+          TYPE_LABEL="测试版 (dev)"
+          if [ "$TYPE" = "stable" ]; then
+            TYPE_LABEL="正式版 (stable)"
+          fi
+
+          BODY="## MR ${VERSION_COMPACT}\n\n"
+          BODY="${BODY}**打包类型**: ${TYPE_LABEL}\n\n"
+          BODY="${BODY}**构建日期**: ${BUILD_DATE}\n\n"
+          BODY="${BODY}**版本号**: ${VERSION}（pubspec.yaml 格式）\n\n"
+          BODY="${BODY}**构建号**: ${{ needs.prepare.outputs.build_number }}\n\n"
+          BODY="${BODY}---\n\n"
+
+          # Android 下载说明
+          if [ "${{ needs.build-android.result }}" = "success" ]; then
+            BODY="${BODY}### Android\n"
+            BODY="${BODY}- \`.apk\` 文件直接安装\n"
+            BODY="${BODY}- \`.zip\` 文件为压缩包，解压后安装\n"
+            BODY="${BODY}- 安装方法：下载 APK → 允许未知来源 → 安装\n\n"
+          else
+            BODY="${BODY}### Android\n❌ 打包失败，请查看 Actions 日志\n\n"
+          fi
+
+          # iOS 下载说明
+          if [ "${{ needs.build-ios.result }}" = "success" ]; then
+            BODY="${BODY}### iOS\n"
+            BODY="${BODY}- \`.ipa\` 文件需通过侧载工具安装（AltStore/Sideloadly/TrollStore）\n"
+            BODY="${BODY}- 未签名版本，需自签或使用侧载工具\n"
+            BODY="${BODY}- 安装方法：下载 IPA → 使用侧载工具安装\n\n"
+          else
+            BODY="${BODY}### iOS\n⚠️ 打包失败或暂不支持，请查看 Actions 日志\n\n"
+          fi
+
+          # 写入文件避免转义问题
+          echo -e "$BODY" > release_body.md
+          cat release_body.md
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.version }}-${{ steps.release_type.outputs.type }}
-          name: MR ${{ steps.version.outputs.version }} (${{ steps.release_type.outputs.type == 'stable' && '正式版' || '测试版' }})
-          body: |
-            ## MR ${{ steps.version.outputs.version }}
-
-            **打包类型**: ${{ steps.release_type.outputs.type == 'stable' && '正式版 (stable)' || '测试版 (dev)' }}
-
-            **构建日期**: ${{ steps.version.outputs.build_date }}
-
-            **今日提交数**: ${{ steps.version.outputs.commit_count }}
-
-            **版本号规则**: YY.MMDD.今日提交数
-
-            ---
-
-            ### 下载说明
-            - `.apk` 文件直接安装
-            - `.zip` 文件为压缩包，解压后安装
-
-            ### 安装方法
-            1. 下载 APK 文件
-            2. 允许"未知来源"安装
-            3. 点击安装
+          tag_name: v${{ needs.prepare.outputs.version_compact }}-${{ needs.prepare.outputs.release_type }}
+          name: MR ${{ needs.prepare.outputs.version_compact }} (${{ needs.prepare.outputs.release_type == 'stable' && '正式版' || '测试版' }})
+          body_path: release_body.md
           files: |
-            ${{ steps.apk.outputs.apk_name }}
-            ${{ env.zip_name }}
-          prerelease: ${{ steps.release_type.outputs.type != 'stable' }}
+            artifacts/android/*
+            artifacts/ios/*
+          prerelease: ${{ needs.prepare.outputs.release_type != 'stable' }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

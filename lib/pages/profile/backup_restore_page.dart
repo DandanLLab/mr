@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../utils/share_helper.dart';
 import '../../services/storage_service.dart';
 import '../../utils/design_tokens.dart';
 
@@ -127,7 +128,8 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     try {
       final directory = await getApplicationDocumentsDirectory();
       final file = File('${directory.path}/backup/$fileName');
-      await Share.shareXFiles([XFile(file.path)], text: '备份文件');
+      if (!mounted) return;
+      await ShareHelper.shareFiles(context, [XFile(file.path)], text: '备份文件');
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

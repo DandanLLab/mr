@@ -9,9 +9,11 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../utils/share_helper.dart';
 import '../../models/book_source.dart';
 import '../../routes/app_routes.dart';
 import '../../services/app_logger.dart';
+import '../../services/crash_log_service.dart';
 import '../../services/source_debug_service.dart';
 import '../../services/storage_service.dart';
 
@@ -50,6 +52,12 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
   LogLevel _logFilterLevel = LogLevel.verbose;
   LogCategory? _logFilterCategory;
 
+  // setState 节流：调试期间日志高频产生，逐条 setState 会导致 UI 卡死
+  // 用 Timer 批量合并刷新，避免 O(n²) 重建
+  final List<String> _pendingDebugLogs = [];
+  Timer? _flushTimer;
+  bool _appLogsDirty = false; // AppLogger 流已修改 _appLogs，需要刷新 UI
+
   // 发现分类缓存
   List<_ExploreKindItem> _exploreKinds = [];
 
@@ -76,15 +84,17 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
     SourceDebugService.instance.callback = this;
 
     // 订阅 AppLogger 日志流
+    // 注意：不在此处直接 setState，而是标记后由 _scheduleFlush 节流合并刷新，
+    // 否则调试期间每条 AppLogger 日志（JS 执行/网络/解析，数百条/秒）都会触发全量重建。
     _logSubscription = AppLogger.instance.stream.listen((entry) {
       if (!mounted) return;
-      setState(() {
-        _appLogs.add(entry);
-        // 限制日志数量，防止内存无限增长
-        if (_appLogs.length > 500) {
-          _appLogs.removeRange(0, _appLogs.length - 500);
-        }
-      });
+      _appLogs.add(entry);
+      // 日志流节流：只保留最新 500 条，避免 O(n) 内存膨胀
+      if (_appLogs.length > 500) {
+        _appLogs.removeRange(0, _appLogs.length - 500);
+      }
+      _appLogsDirty = true;
+      _scheduleFlush();
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -100,6 +110,10 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
     SourceDebugService.instance.callback = null;
     SourceDebugService.instance.cancelDebug(destroy: true);
 
+    // 取消节流定时器，避免页面销毁后触发 setState
+    _flushTimer?.cancel();
+    _flushTimer = null;
+
     _logSubscription?.cancel();
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -112,8 +126,33 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
   @override
   void printLog(int state, String msg) {
     if (!mounted) return;
+    // 不逐条 setState，缓冲后由 _scheduleFlush 节流合并刷新
+    _pendingDebugLogs.add(msg);
+    _scheduleFlush();
+  }
+
+  /// 节流批量刷新：用 Timer 合并 100ms 内的所有日志更新为一次 setState，
+  /// 避免高频日志逐条触发重建导致 UI 卡死。
+  void _scheduleFlush() {
+    if (_flushTimer != null) return;
+    _flushTimer = Timer(const Duration(milliseconds: 100), _flushPending);
+  }
+
+  void _flushPending() {
+    _flushTimer = null;
+    if (!mounted) return;
+    // 无待处理内容时跳过（Timer 可能被多条日志共享触发）
+    if (_pendingDebugLogs.isEmpty && !_appLogsDirty) return;
     setState(() {
-      _debugLogs.add(msg);
+      if (_pendingDebugLogs.isNotEmpty) {
+        _debugLogs.addAll(_pendingDebugLogs);
+        _pendingDebugLogs.clear();
+        // 只保留最新 500 条
+        if (_debugLogs.length > 500) {
+          _debugLogs.removeRange(0, _debugLogs.length - 500);
+        }
+      }
+      _appLogsDirty = false;
     });
   }
 
@@ -484,6 +523,9 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
               case 'help':
                 _showHelpDialog();
                 break;
+              case 'crash_logs':
+                _showCrashLogsDialog();
+                break;
             }
           },
           itemBuilder: (context) => [
@@ -518,6 +560,26 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
               child: Text('导入书源', style: TextStyle(color: textColor)),
             ),
             PopupMenuItem(
+              value: 'crash_logs',
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  Text('崩溃日志', style: TextStyle(color: textColor)),
+                  if (CrashLogService.instance.hasNewCrash) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            PopupMenuItem(
               value: 'help',
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Text('帮助', style: TextStyle(color: textColor)),
@@ -530,7 +592,6 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
 
   Widget _buildDebugBody() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final hintColor = isDark ? Colors.grey[500] : const Color(0xFF9A9A9A);
     
     return Stack(
       children: [
@@ -538,22 +599,16 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
           Scrollbar(
             controller: _scrollController,
             thumbVisibility: true,
-            child: ListView(
-              controller: _scrollController,
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 28),
-              children: _debugLogs.isEmpty
-                  ? [
-                      const SizedBox(height: 120),
-                      Text(
-                        '等待调试结果...',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: hintColor,
-                        ),
-                      ),
-                    ]
-                  : _debugLogs.map(_buildLogLine).toList(),
-            ),
+            // 使用 ListView.builder 懒加载，避免日志条目多时全量构建导致卡顿
+            child: _debugLogs.isEmpty
+                ? const SizedBox.shrink()
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 28),
+                    itemCount: _debugLogs.length,
+                    itemBuilder: (context, index) =>
+                        _buildLogLine(_debugLogs[index]),
+                  ),
           )
         else
           SingleChildScrollView(
@@ -1052,6 +1107,211 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
     );
   }
 
+  /// 显示崩溃日志列表对话框
+  void _showCrashLogsDialog() {
+    final entries = CrashLogService.instance.entries;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: isDark ? Colors.grey[900] : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        child: Column(
+          children: [
+            // 标题栏
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: isDark ? Colors.grey[850] : const Color(0xFFF5F5F5),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.close,
+                        color: isDark ? Colors.white : Colors.black87),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                  Expanded(
+                    child: Text(
+                      '崩溃日志 (${entries.length})',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w500,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.copy,
+                        color: isDark ? Colors.white : Colors.black87),
+                    tooltip: '复制全部',
+                    onPressed: () {
+                      final text = CrashLogService.instance.exportLogs();
+                      Clipboard.setData(ClipboardData(text: text));
+                      Navigator.pop(ctx);
+                      setState(() {
+                        _debugLogs.add('≡已复制全部崩溃日志到粘贴板');
+                      });
+                    },
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.delete_outline,
+                        color: isDark ? Colors.white : Colors.black87),
+                    tooltip: '清空',
+                    onPressed: () async {
+                      await CrashLogService.instance.clear();
+                      if (!ctx.mounted) return;
+                      Navigator.pop(ctx);
+                      setState(() {});
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            // 崩溃日志列表
+            Expanded(
+              child: entries.isEmpty
+                  ? Center(
+                      child: Text('暂无崩溃日志',
+                          style: TextStyle(
+                              color: isDark ? Colors.grey[500] : Colors.grey)),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(8),
+                      itemCount: entries.length,
+                      itemBuilder: (context, index) {
+                        final entry = entries[entries.length - 1 - index];
+                        return _buildCrashLogCard(entry, isDark);
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    ).then((_) {
+      CrashLogService.instance.markCrashViewed();
+      if (mounted) setState(() {});
+    });
+  }
+
+  Widget _buildCrashLogCard(CrashLogEntry entry, bool isDark) {
+    Color typeColor;
+    switch (entry.type) {
+      case 'flutter':
+        typeColor = Colors.orange;
+        break;
+      case 'zone':
+        typeColor = Colors.red;
+        break;
+      case 'isolate':
+        typeColor = Colors.purple;
+        break;
+      default:
+        typeColor = Colors.blue;
+    }
+
+    return GestureDetector(
+      onTap: () => _showCrashLogDetail(entry),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: isDark ? Colors.grey[800] : const Color(0xFFF5F5F5),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+              color: isDark ? Colors.grey[700]! : const Color(0xFFE0E0E0)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: typeColor.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    entry.type,
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: typeColor,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  entry.time.toString().substring(0, 19),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? Colors.grey[400] : Colors.grey,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              entry.error,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.grey[300] : const Color(0xFF333333),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showCrashLogDetail(CrashLogEntry entry) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('崩溃详情'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              entry.toFullString(),
+              style: TextStyle(
+                fontSize: 12,
+                fontFamily: 'monospace',
+                height: 1.4,
+                color: isDark ? Colors.grey[200] : Colors.grey[800],
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: entry.toFullString()));
+              Navigator.pop(ctx);
+              setState(() {
+                _debugLogs.add('≡已复制崩溃日志到粘贴板');
+              });
+            },
+            child: const Text('复制'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
   final ScrollController _logScrollController = ScrollController();
 
   Widget _buildLogViewerBody() {
@@ -1344,7 +1604,9 @@ class _BookSourceDebugPageState extends State<BookSourceDebugPage>
         _debugLogs.add('≡正在导出日志...');
       });
 
-      await Share.shareXFiles(
+      if (!mounted) return;
+      await ShareHelper.shareFiles(
+        context,
         [XFile(file.path)],
         subject: '导出调试日志',
         text: '导出调试日志',

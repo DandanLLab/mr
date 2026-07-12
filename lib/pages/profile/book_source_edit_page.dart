@@ -642,7 +642,9 @@ class _BookSourceEditPageState extends State<BookSourceEditPage>
   }
 
   void _showLog() {
-    final logs = AppLogger.instance.logs;
+    final allLogs = AppLogger.instance.logs;
+    // 只显示最新 500 条，避免 3 万条日志炸 UI
+    final logs = allLogs.length > 500 ? allLogs.sublist(allLogs.length - 500) : allLogs;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(

@@ -1,11 +1,17 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
-import 'package:flutter_js/flutter_js.dart';
+import 'quickjs_runtime_stub.dart'
+    if (dart.library.io) 'quickjs_runtime.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:path_provider/path_provider.dart';
+import 'package:archive/archive.dart' as archive;
+import 'package:url_launcher/url_launcher.dart' as url_launcher;
 import 'package:synchronized/synchronized.dart';
 import '../app_logger.dart';
+import '../crash_log_service.dart';
 import 'platform_channel.dart';
 import 'shared_js_scope.dart';
 
@@ -15,9 +21,6 @@ import 'shared_js_scope.dart';
 enum JsEngineType {
   /// QuickJS 引擎（flutter_js），原生支持 ES6+
   quickjs,
-
-  /// Rhino 引擎（Android 原生），支持 Java 互操作
-  rhino,
 }
 
 /// 引擎分流解析结果
@@ -31,7 +34,7 @@ class _EngineResolveResult {
 /// JS 执行追踪节点（构建完整执行树）
 class JsTraceNode {
   final String id;
-  final String engine;        // QuickJS / Rhino→QuickJS
+  final String engine;        // QuickJS
   final String caller;        // 调用来源（AnalyzeRule / processJsRule / executeSync 等）
   final String? ruleStep;     // 规则步骤描述（如 "步骤1/2: @href"）
   final String codePreview;   // JS 代码预览
@@ -110,8 +113,8 @@ class JsTracer {
   /// 获取当前栈顶节点
   JsTraceNode? get currentStackTop => _stack.isNotEmpty ? _stack.last : null;
 
-  /// 是否启用追踪
-  bool enabled = true;
+  /// 是否启用追踪（Release 模式禁用，避免构建大执行树导致 OOM）
+  bool enabled = kDebugMode;
 
   /// 追踪 ID 计数器
   int _idCounter = 0;
@@ -180,13 +183,12 @@ class JsTracer {
   }
 }
 
-/// JS/TS 运行时引擎 - 分流双引擎架构
+/// JS/TS 运行时引擎
 ///
 /// 架构设计：
 /// - QuickJS 引擎：处理 ES6+ 语法，作为默认引擎
-/// - Rhino 引擎：处理 Java 互操作（通过 NativeChannel）
 /// - 分流策略：显式声明 > 关键词自动识别 > 默认 QuickJS
-/// - 桥接层：两个引擎共享缓存和变量
+/// - 桥接层：通过 Dart 侧 NativeChannel 桥接 Java 互操作
 class JsEngine {
   static JsEngine? _instance;
   static JsEngine get instance => _instance ??= JsEngine._();
@@ -197,17 +199,12 @@ class JsEngine {
   final Lock _evalLock = Lock();
 
   // 热路径正则常量
-  static final _javaCallRegex = RegExp(r'\bjava\.');
-  static final _es6Regex = RegExp(r'\bconst\b|\blet\b|=>|\basync\b|\bawait\b|\.\.\.|\bclass\b|\bimport\b|`[^`]*\$\{');
   static final _returnRegex = RegExp(r'\breturn\b');
   static final _jsTagRegex = RegExp(r'<js>([\s\S]*?)</js>', caseSensitive: false);
-  static final _jsPrefixRegex = RegExp(r'^@(?:js|rhino|quickjs|java|ts):', caseSensitive: false);
+  static final _jsPrefixRegex = RegExp(r'^@js:', caseSensitive: false);
   static final _templateVarRegex = RegExp(r'\{\{([\s\S]*?)\}\}');
-  static final _rhinoTagStartRegex = RegExp(r'^<rhino>|</rhino>$');
-  static final _quickjsTagStartRegex = RegExp(r'^<quickjs>|</quickjs>$');
-  static final _javaTagStartRegex = RegExp(r'^<java>|</java>$');
-  static final _tsTagStartRegex = RegExp(r'^<ts>|</ts>$');
-  static final _jsTagStartRegex = RegExp(r'^<js>|</js>$');
+  // <js></js> 标签剥离正则
+  static final _engineTagRegex = RegExp(r'^<js>|</js>$', caseSensitive: false);
 
   // _preCacheBridgeCalls 正则常量
   static final _literalPattern = RegExp(
@@ -259,6 +256,12 @@ class JsEngine {
 
   bool _initialized = false;
   JavascriptRuntime? _jsRuntime;
+  /// 日志 flush 防递归标志：_flushConsoleLogs 内部调用 evaluate 时设为 true
+  bool _isFlushingLogs = false;
+  /// 最近一次 _executeQuickJSSync 的错误信息（供 executeSync 读取后写入 traceNode）
+  String? _lastEvalError;
+  /// 并发防护：同步调用中标志，processJsRule 执行时自旋等待
+  bool _evalBusy = false;
   final Map<String, String> _installedPackages = {};
   final Map<String, String> _moduleCache = {};
 
@@ -286,8 +289,29 @@ class JsEngine {
 
   // ===== 引擎桥接层：跨引擎共享缓存 =====
 
-  /// 跨引擎共享缓存（QuickJS 和 Rhino 均可读写）
+  /// 跨引擎共享缓存
   final Map<String, String> _bridgeCache = {};
+
+  /// 缓存 jsonEncode(source Map) 结果
+  /// 同一书源的 source Map 在整个调试过程中不变，
+  /// 但每次 _executeQuickJSRule 都会重新 jsonEncode（CPU 密集型）。
+  /// 1000 章解析时 6000 次 jsonEncode → 缓存后仅 1 次。
+  String? _cachedSourceJson;
+  String? _cachedSourceKey;
+
+  /// 获取缓存的 source JSON 字符串（同一书源复用）
+  String getCachedSourceJson(Map<String, dynamic>? sourceMap) {
+    if (sourceMap == null || sourceMap.isEmpty) return '{}';
+    // 用 bookSourceUrl 作为缓存键（同一书源 source Map 不变）
+    final key = sourceMap['bookSourceUrl'] as String? ?? '';
+    if (key == _cachedSourceKey && _cachedSourceJson != null) {
+      return _cachedSourceJson!;
+    }
+    final encoded = jsonEncode(sourceMap);
+    _cachedSourceJson = encoded;
+    _cachedSourceKey = key;
+    return encoded;
+  }
 
   /// 获取桥接缓存
   String bridgeGet(String key) => _bridgeCache[key] ?? '';
@@ -306,23 +330,32 @@ class JsEngine {
 
   /// 初始化 JS 引擎
   Future<bool> init() async {
-    if (_initialized && _jsRuntime != null) {
-      // 验证全局对象是否仍然存在（防止运行时被意外重置）
-      final check = evaluate('typeof java !== "undefined" && typeof CryptoJS !== "undefined" && typeof _javaCache !== "undefined" && typeof _AES !== "undefined"');
-      if (check == 'true') return true;
-      // 全局对象丢失，需要重新注入
-      _injectJavaBridge();
-      final recheck = evaluate('typeof java !== "undefined"');
-      if (recheck == 'true') return true;
-      // 重新注入也失败，重建运行时
-      _jsRuntime?.dispose();
-      _jsRuntime = null;
-      _initialized = false;
+    // [覆盖安装闪退修复] 仅 Android：在 FFI 调用前通过 MethodChannel 验证 .so 完整性
+    // Android 动态链接 libquickjs_c_bridge.so，覆盖安装时 .so 提取存在竞争，需检查。
+    // iOS 静态链接进 Runner 可执行文件，符号编译期绑定，无 .so 文件也无 checkNativeLib
+    // handler，故 iOS 直接信任，否则 MissingPluginException 会导致引擎启动失败。
+    if (Platform.isAndroid) {
+      try {
+        _nativeLibChecked = await NativeChannel.instance.checkNativeLib('quickjs_c_bridge');
+      } catch (_) {
+        _nativeLibChecked = false;
+      }
+      // native lib 未就绪 → 跳过所有 FFI 调用，避免 SIGSEGV
+      if (!_nativeLibChecked) return false;
+    } else {
+      // iOS / 其他平台：静态链接，无需检查
+      _nativeLibChecked = true;
     }
+
+    // [覆盖安装闪退修复] 快路径：_initialized 为真直接信任，零 FFI 调用
+    // 不做 evaluate() 健康检查，避免 SIGSEGV 裸奔（FFI 段错误 Dart catch 不住）
+    if (_initialized && _jsRuntime != null) return true;
 
     if (_initialized) return true;
     try {
       _jsRuntime = getJavascriptRuntime();
+      // P2: 设置默认 JS 执行超时 5 秒，防止死循环卡死 App
+      _jsRuntime!.setEvalTimeout(5000);
       // 先标记运行时可用，再注入 polyfills
       // 注意：_initialized 在所有注入完成后才设为 true
       await _injectNodePolyfills();
@@ -342,98 +375,173 @@ class JsEngine {
 
       _initialized = true;
       return true;
-    } catch (e) {
+    } catch (e, st) {
+      // FFI lookup 失败（QuickJS 符号未链接到二进制）会在此抛出 ArgumentError
+      // 之前被静默吞掉，现在打印日志便于诊断
+      debugPrint('JsEngine init failed: $e\n$st');
       return false;
     }
   }
 
+  /// [覆盖安装闪退修复] Native lib 完整性安全验证
+  /// 通过 MethodChannel 走到 Java 层检查 .so 文件 + loadLibrary，
+  /// 不执行任何 FFI 调用，100% 避免 SIGSEGV。
+  /// 初始为 false，init() 成功设为 true，dispose() 重置
+  bool _nativeLibChecked = false;
+
   bool get isAvailable => _initialized && _jsRuntime != null;
+
+  // ===== Phase 6: 性能统计接口（代理到 JavascriptRuntime）=====
+
+  /// 获取 C 原生加密累计统计快照
+  /// 包含 AES/MD5/SHA/LZString/AES+LZ 原子组合/批量解压 所有路径
+  /// 返回 null 表示 runtime 未初始化（Web 平台返回零值对象）
+  CryptoStats? getCryptoStats() => _jsRuntime?.getCryptoStats();
+
+  /// 重置统计计数器
+  void resetCryptoStats() => _jsRuntime?.resetCryptoStats();
+
+  // ===== Phase 4: 字节码缓存接口（代理到 JavascriptRuntime）=====
+
+  /// 预编译脚本到字节码缓存（不执行）
+  ///
+  /// 后续 evaluate 同一脚本时跳过词法/语法分析，直接走 JS_EvalFunction。
+  /// 适用于核心库初始化、书源规则预热等场景。
+  /// Web 平台返回 false（不支持）。
+  bool precompile(String script) {
+    if (_jsRuntime == null) return false;
+    return _jsRuntime!.precompile(script);
+  }
+
+  /// 清空字节码缓存
+  ///
+  /// 释放所有缓存条目占用的内存。适用于书源切换、内存压力、调试场景。
+  void clearBytecodeCache() => _jsRuntime?.clearBytecodeCache();
+
+  /// 暴露 CPU 核心数（用于面板显示并行能力，Web 返回 1）
+  int get nativeCpuCount {
+    try {
+      return nativeGetCpuCount();
+    } catch (_) {
+      return 1;
+    }
+  }
+
+  // ===== 参考 quickjs-ng/quickjs-zh：高价值 API 代理 =====
+
+  /// QuickJS 引擎版本号（Web 平台返回 'Web (no QuickJS)'）
+  String get quickJsVersion {
+    try {
+      return nativeGetQuickJsVersion();
+    } catch (_) {
+      return 'unknown';
+    }
+  }
+
+  /// 获取 QuickJS 引擎内部内存统计（20+ 字段，来自 JS_ComputeMemoryUsage）
+  /// 返回 null 表示 runtime 未初始化（Web 平台返回零值对象）
+  JsMemoryStats? getJsMemoryStats() => _jsRuntime?.getJsMemoryStats();
+
+  /// 手动触发 GC（JS_RunGC）
+  void runGc() => _jsRuntime?.runGc();
+
+  /// 检查当前 context 是否有未捕获的异常（不取出）
+  bool get hasException => _jsRuntime?.hasException() ?? false;
+
+  /// 获取 Promise 状态
+  /// 返回: 0=非Promise, 1=pending, 2=fulfilled, 3=rejected
+  int promiseState(String varName) {
+    if (_jsRuntime == null) return 0;
+    try {
+      return _jsRuntime!.promiseState(varName);
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// 流式打印 JS 值（调试用）
+  String? printValue(String jsExpr, {int maxDepth = 0, int maxStringLength = 0}) {
+    if (_jsRuntime == null) return null;
+    try {
+      return _jsRuntime!.printValue(jsExpr,
+          maxDepth: maxDepth, maxStringLength: maxStringLength);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ===== 解析加速：原生字符串工具（代理到 C 层）=====
+
+  /// C 原生 HTML 实体反转义
+  /// 单次扫描替代 Dart RegExp + replaceAllMapped，1300 章×6 字段场景收益显著
+  String unescapeHtmlNative(String input) {
+    try {
+      return nativeUnescapeHtml(input);
+    } catch (_) {
+      return input;
+    }
+  }
+
+  /// C 原生 URL 编码（支持指定字符集：GBK/GB2312/GB18030/UTF-8）
+  /// 通过 quickjs_bridge_charset_url_encode 实现
+  String urlEncodeNative(String input, String charset) {
+    try {
+      return nativeCharsetUrlEncode(input, charset);
+    } catch (_) {
+      return input;
+    }
+  }
+
+  /// C 原生 URL 解码（percent-decode，+ 解码为空格）
+  String urlDecodeNative(String input) {
+    try {
+      return nativeUrlDecode(input);
+    } catch (_) {
+      return input;
+    }
+  }
+
+  // ===== 解析加速：C 原生 HTML 解析 + CSS 选择器 =====
+
+  /// C 原生 HTML 解析 + CSS 查询 + 属性提取（原子调用）
+  ///
+  /// 单次 FFI 完成全部操作，替代 Dart html 包的 querySelectorAll + 多层 fallback。
+  /// 1300 章目录场景下消除 1300 次 html_parser.parse 和 7800 次 CSS 查询的 Dart 开销。
+  ///
+  /// [html] HTML 字符串
+  /// [selector] CSS 选择器（tag .class #id [attr] [attr=val] 后代 子代 :nth-child :eq）
+  /// [attr] 属性名，特殊值: @text @html @outerHtml @tag
+  /// [listMode] true=返回 JSON 数组字符串, false=返回第一个匹配的纯字符串
+  String htmlQueryExtractNative(String html, String selector, String attr, bool listMode) {
+    try {
+      return nativeHtmlQueryExtract(html, selector, attr, listMode);
+    } catch (_) {
+      return listMode ? '[]' : '';
+    }
+  }
 
   // ===== 分流策略 =====
 
-  /// 解析规则代码，确定使用哪个引擎（公开，供 EngineDispatcher 调用）
+  /// 解析规则代码，剥离 @js: 前缀和 <js></js> 标签
   ///
-  /// 优先级：
-  /// 1. 显式前缀声明：@rhino: / @quickjs: / @java: / @ts: / @js:
-  /// 2. 关键词自动识别（无显式声明时）
-  /// 3. 书源级全局声明（sourceEngine 参数）
-  /// 4. 默认 QuickJS
+  /// 只保留 @js: 作为唯一前缀声明，其他引擎类型声明已移除
   _EngineResolveResult resolveEngine(String ruleCode, {JsEngineType? sourceEngine}) {
-    // 1. 显式前缀声明
-    if (ruleCode.startsWith('@rhino:') || ruleCode.startsWith('<rhino>')) {
-      final code = ruleCode.startsWith('@rhino:')
-          ? ruleCode.substring(7)
-          : ruleCode.replaceAll(_rhinoTagStartRegex, '');
-      return _EngineResolveResult(JsEngineType.rhino, code);
-    }
-
-    if (ruleCode.startsWith('@quickjs:') || ruleCode.startsWith('<quickjs>')) {
-      final code = ruleCode.startsWith('@quickjs:')
-          ? ruleCode.substring(9)
-          : ruleCode.replaceAll(_quickjsTagStartRegex, '');
-      return _EngineResolveResult(JsEngineType.quickjs, code);
-    }
-
-    if (ruleCode.startsWith('@java:') || ruleCode.startsWith('<java>')) {
-      final code = ruleCode.startsWith('@java:')
-          ? ruleCode.substring(6)
-          : ruleCode.replaceAll(_javaTagStartRegex, '');
-      return _EngineResolveResult(JsEngineType.rhino, code);
-    }
-
-    if (ruleCode.startsWith('@ts:') || ruleCode.startsWith('<ts>')) {
-      final code = ruleCode.startsWith('@ts:')
-          ? ruleCode.substring(4)
-          : ruleCode.replaceAll(_tsTagStartRegex, '');
-      // TS 编译后由 QuickJS 执行
-      return _EngineResolveResult(JsEngineType.quickjs, code);
-    }
-
-    // 2. @js: 或 <js> 前缀 → 自动识别
     String code = ruleCode;
-    if (ruleCode.startsWith('@js:')) {
-      code = ruleCode.substring(4);
-    } else if (ruleCode.startsWith('<js>')) {
-      code = ruleCode.replaceAll(_jsTagStartRegex, '');
+
+    // 1. 剥离 @js: 前缀
+    if (_jsPrefixRegex.hasMatch(code)) {
+      code = code.replaceFirst(_jsPrefixRegex, '').trim();
     }
 
-    // 自动识别引擎
-    final autoDetected = _autoDetectEngine(code);
-
-    // 3. 如果自动识别不出明确倾向，使用书源级声明
-    if (autoDetected == null && sourceEngine != null) {
-      return _EngineResolveResult(sourceEngine, code);
+    // 2. 剥离 <js></js> 标签
+    if (code.startsWith('<js>')) {
+      code = code.replaceAll(_engineTagRegex, '').trim();
     }
 
-    // 4. 默认 QuickJS
-    return _EngineResolveResult(autoDetected ?? JsEngineType.quickjs, code);
+    return _EngineResolveResult(JsEngineType.quickjs, code);
   }
 
-  /// 关键词自动识别引擎
-  ///
-  /// - 含 ES6 特征（不管有无 java.*）→ QuickJS
-  /// - 含 java. 调用但无 ES6 → QuickJS（桥接需要预缓存）
-  /// - 无法确定 → null（使用书源级声明或默认值）
-  JsEngineType? _autoDetectEngine(String code) {
-    final hasJavaCall = _javaCallRegex.hasMatch(code);
-    final hasES6 = _es6Regex.hasMatch(code);
 
-    if (hasES6) {
-      // ES6 特征 → QuickJS（java.* 通过桥接调用）
-      return JsEngineType.quickjs;
-    }
-
-    if (hasJavaCall && !hasES6) {
-      // 含 java. 调用但无 ES6 → 也走 QuickJS
-      // 原因：java.* 桥接方法（java.ajax/get/post 等）需要预缓存机制，
-      // 只有 QuickJS 路径支持 _preCacheBridgeCalls
-      // Rhino 路径无法预缓存，桥接调用会失败
-      return JsEngineType.quickjs;
-    }
-
-    // 无法确定，返回 null 让上层决定
-    return null;
-  }
 
   // ===== Node.js API 兼容层 =====
 
@@ -738,26 +846,64 @@ class JsEngine {
       // 借鉴 legado：所有 console 输出同步到调试页面
       // 注意：总是覆盖 console，因为 QuickJS 可能已有内置 console 但没有 _getLogs
       var _consoleLogs = [];
+      var _logSeq = 0;
+      function _jsLog(msg, level) {
+        level = level || 'log';
+        _logSeq++;
+        _consoleLogs.push({
+          seq: _logSeq,
+          ts: Date.now(),
+          level: level,
+          msg: typeof msg === 'string' ? msg : (msg && msg.toString ? msg.toString() : String(msg))
+        });
+        // 不限制日志数组长度（用户要求保留完整日志）
+      }
       globalThis.console = {
-        log: function() { var msg = Array.from(arguments).join(' '); _consoleLogs.push({level:'log', msg:msg}); },
-        warn: function() { var msg = Array.from(arguments).join(' '); _consoleLogs.push({level:'warn', msg:msg}); },
-        error: function() { var msg = Array.from(arguments).join(' '); _consoleLogs.push({level:'error', msg:msg}); },
-        info: function() { var msg = Array.from(arguments).join(' '); _consoleLogs.push({level:'info', msg:msg}); },
-        debug: function() { var msg = Array.from(arguments).join(' '); _consoleLogs.push({level:'debug', msg:msg}); },
-        dir: function(obj) { _consoleLogs.push({level:'log', msg: JSON.stringify(obj, null, 2)}); },
-        table: function(data) { _consoleLogs.push({level:'log', msg: JSON.stringify(data, null, 2)}); },
+        log: function() { _jsLog(Array.from(arguments).join(' '), 'log'); },
+        warn: function() { _jsLog(Array.from(arguments).join(' '), 'warn'); },
+        error: function() { _jsLog(Array.from(arguments).join(' '), 'error'); },
+        info: function() { _jsLog(Array.from(arguments).join(' '), 'info'); },
+        debug: function() { _jsLog(Array.from(arguments).join(' '), 'debug'); },
+        trace: function() { _jsLog(Array.from(arguments).join(' '), 'trace'); },
+        dir: function(obj) { _jsLog(JSON.stringify(obj, null, 2), 'log'); },
+        table: function(data) { _jsLog(JSON.stringify(data, null, 2), 'log'); },
         time: function(label) { _consoleLogs._timers = _consoleLogs._timers || {}; _consoleLogs._timers[label] = Date.now(); },
-        timeEnd: function(label) { _consoleLogs._timers = _consoleLogs._timers || {}; if (_consoleLogs._timers[label]) { var ms = Date.now() - _consoleLogs._timers[label]; _consoleLogs.push({level:'info', msg: label + ': ' + ms + 'ms'}); delete _consoleLogs._timers[label]; } },
-        count: function(label) { _consoleLogs._counts = _consoleLogs._counts || {}; _consoleLogs._counts[label] = (_consoleLogs._counts[label] || 0) + 1; _consoleLogs.push({level:'info', msg: label + ': ' + _consoleLogs._counts[label]}); },
-        assert: function(condition) { if (!condition) { var msg = Array.from(arguments).slice(1).join(' ') || 'Assertion failed'; _consoleLogs.push({level:'error', msg: msg}); } },
+        timeEnd: function(label) {
+          _consoleLogs._timers = _consoleLogs._timers || {};
+          if (_consoleLogs._timers[label]) {
+            var ms = Date.now() - _consoleLogs._timers[label];
+            _jsLog(label + ': ' + ms + 'ms', 'info');
+            delete _consoleLogs._timers[label];
+          }
+        },
+        count: function(label) {
+          _consoleLogs._counts = _consoleLogs._counts || {};
+          _consoleLogs._counts[label] = (_consoleLogs._counts[label] || 0) + 1;
+          _jsLog(label + ': ' + _consoleLogs._counts[label], 'info');
+        },
+        assert: function(condition) {
+          if (!condition) {
+            _jsLog(Array.from(arguments).slice(1).join(' ') || 'Assertion failed', 'error');
+          }
+        },
         clear: function() { _consoleLogs.length = 0; },
         _getLogs: function() { return _consoleLogs; },
-        _clearLogs: function() { _consoleLogs.length = 0; },
+        _clearLogs: function() { _consoleLogs.length = 0; _logSeq = 0; },
+        _logSeq: function() { return _logSeq; },
       };
+      // 暴露 _jsLog 为全局，供内部调用
+      globalThis._jsLog = _jsLog;
 
       // ===== btoa/atob 全局函数 =====
-      // Base64 编码/解码，QuickJS 原生可能不提供
-      if (typeof btoa === 'undefined') {
+      // Phase 4-b: 优先走 C 原生 __nativeBase64，消除纯 JS 逐字节循环与中间字符串分配
+      // __nativeBase64.decode/encode 与浏览器 atob/btoa 语义一致（binary string, code point 0-255）
+      if (typeof __nativeBase64 !== 'undefined' && __nativeBase64 &&
+          __nativeBase64.decode && __nativeBase64.encode) {
+        // 直接引用 C 原生函数，零 JS 包装层开销
+        globalThis.atob = __nativeBase64.decode;
+        globalThis.btoa = __nativeBase64.encode;
+      } else if (typeof btoa === 'undefined') {
+        // 回退：纯 JS 实现（仅当 C 原生不可用时，例如非 Android 平台或旧版本）
         var _b64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
         globalThis.btoa = function(str) {
           var output = '';
@@ -790,6 +936,146 @@ class JsEngine {
             if (enc4 !== 64) output += String.fromCharCode(chr3);
           }
           return output;
+        };
+      }
+
+      // ===== LZString 兼容层 =====
+      // 书源规则常引用 LZString.decompressFromBase64，注入全局对象避免 ReferenceError
+      // decompressFromBase64 优先走 C 原生 __nativeLz（Phase 1 加速），无原生时回退纯 JS
+      if (typeof LZString === 'undefined') {
+        var _lzKeyStr = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+        var _lzBase64ToStr = function(input) {
+          var output = "";
+          var ol = 0;
+          var chr1, chr2, chr3;
+          var enc1, enc2, enc3, enc4;
+          var i = 0;
+          input = input.replace(/[^A-Za-z0-9\+\/\=]/g, "");
+          while (i < input.length) {
+            enc1 = _lzKeyStr.indexOf(input.charAt(i++));
+            enc2 = _lzKeyStr.indexOf(input.charAt(i++));
+            enc3 = _lzKeyStr.indexOf(input.charAt(i++));
+            enc4 = _lzKeyStr.indexOf(input.charAt(i++));
+            chr1 = (enc1 << 2) | (enc2 >> 4);
+            chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
+            chr3 = ((enc3 & 3) << 6) | enc4;
+            if (ol % 2 === 0) {
+              output += String.fromCharCode((252 >> 2) | (chr1 & 3));
+              output += String.fromCharCode((chr1 & 240) >> 4 | (chr2 & 15) << 4);
+              output += String.fromCharCode((chr2 & 192) >> 6 | (chr3 & 63));
+            } else {
+              output += String.fromCharCode((252 >> 2) | (chr1 & 3) | (chr2 & 15) << 4);
+              output += String.fromCharCode((chr1 & 192) >> 6 | (chr2 & 63));
+            }
+            ol += 3;
+          }
+          return output;
+        };
+        var _lzDecompress = function(compressed) {
+          if (compressed == null) return "";
+          if (compressed == "") return null;
+          var dictionary = [];
+          var enlargeIn = 4;
+          var dictSize = 4;
+          var numBits = 3;
+          var entry = "";
+          var result = "";
+          var i, w, bits, resb, maxpower, power, c, data = { val: compressed.charAt(0), position: 32768, index: 1 };
+          for (i = 0; i < 3; i += 1) dictionary[i] = i;
+          bits = 0;
+          maxpower = Math.pow(2, 2);
+          power = 1;
+          while (power != maxpower) {
+            resb = data.val & data.position;
+            data.position >>= 1;
+            if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+            bits |= (resb > 0 ? 1 : 0) * power;
+            power <<= 1;
+          }
+          switch (bits) {
+            case 0:
+              bits = 0; maxpower = Math.pow(2, 8); power = 1;
+              while (power != maxpower) {
+                resb = data.val & data.position; data.position >>= 1;
+                if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+                bits |= (resb > 0 ? 1 : 0) * power; power <<= 1;
+              }
+              c = String.fromCharCode(bits);
+              break;
+            case 1:
+              bits = 0; maxpower = Math.pow(2, 16); power = 1;
+              while (power != maxpower) {
+                resb = data.val & data.position; data.position >>= 1;
+                if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+                bits |= (resb > 0 ? 1 : 0) * power; power <<= 1;
+              }
+              c = String.fromCharCode(bits);
+              break;
+            case 2: return "";
+          }
+          dictionary[3] = c; dictSize = 3; entry = c; result += c;
+          while (true) {
+            if (data.index > compressed.length) return "";
+            bits = 0; maxpower = Math.pow(2, numBits); power = 1;
+            while (power != maxpower) {
+              resb = data.val & data.position; data.position >>= 1;
+              if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+              bits |= (resb > 0 ? 1 : 0) * power; power <<= 1;
+            }
+            switch (c = bits) {
+              case 0:
+                bits = 0; maxpower = Math.pow(2, 8); power = 1;
+                while (power != maxpower) {
+                  resb = data.val & data.position; data.position >>= 1;
+                  if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+                  bits |= (resb > 0 ? 1 : 0) * power; power <<= 1;
+                }
+                dictionary[dictSize++] = String.fromCharCode(bits);
+                c = dictSize - 1; enlargeIn--; break;
+              case 1:
+                bits = 0; maxpower = Math.pow(2, 16); power = 1;
+                while (power != maxpower) {
+                  resb = data.val & data.position; data.position >>= 1;
+                  if (data.position == 0) { data.position = 32768; data.val = compressed.charAt(data.index++); }
+                  bits |= (resb > 0 ? 1 : 0) * power; power <<= 1;
+                }
+                dictionary[dictSize++] = String.fromCharCode(bits);
+                c = dictSize - 1; enlargeIn--; break;
+              case 2: return result;
+            }
+            if (enlargeIn == 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
+            if (dictionary[c]) { w = dictionary[c]; }
+            else {
+              if (c === dictSize) { w = entry + entry.charAt(0); }
+              else { return null; }
+            }
+            result += w;
+            dictionary[dictSize++] = entry + w.charAt(0);
+            entry = w;
+            enlargeIn--;
+            if (enlargeIn == 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
+          }
+        };
+        globalThis.LZString = {
+          // 优先走 C 原生（Phase 1 加速），无原生时回退纯 JS
+          decompressFromBase64: function(str) {
+            if (typeof __nativeLz !== 'undefined' && __nativeLz && __nativeLz.decompressFromBase64) {
+              return __nativeLz.decompressFromBase64(str);
+            }
+            return _lzDecompress(_lzBase64ToStr(str));
+          },
+          decompress: function(str) {
+            if (str == null) return "";
+            if (str == "") return null;
+            return _lzDecompress(str);
+          },
+          // 压缩方法暂不支持（书源规则极少使用，遇到再补）
+          compressToBase64: function(str) {
+            throw new Error('LZString.compressToBase64 not supported');
+          },
+          compress: function(str) {
+            throw new Error('LZString.compress not supported');
+          },
         };
       }
     ''';
@@ -1679,6 +1965,16 @@ class JsEngine {
           }
           return results;
         },
+        // java.ajaxTestAll(urlList, timeout) / ajaxTestAll(urlList, timeout, skipRateLimit) — 批量测试 URL
+        // 假声明：返回空结果数组，QuickJS 同步无法并发测试
+        ajaxTestAll: function(urlList, timeout, skipRateLimit) {
+          if (!urlList || !urlList.length) return [];
+          var results = [];
+          for (var i = 0; i < urlList.length; i++) {
+            results.push({ url: urlList[i], body: java.ajax(urlList[i]), code: 200 });
+          }
+          return results;
+        },
 
         // ===== 变量存取（借鉴 legado 的 CacheManager）=====
         put: function(key, value) {
@@ -1768,26 +2064,71 @@ class JsEngine {
           _javaCache[key] = JSON.stringify(value);
         },
 
-        // ===== 加密/解密（优先使用纯 JS _AES 引擎，fallback 到缓存）=====
+        // ===== 加密/解密（优先走 CryptoJS.AES → __nativeCrypto C 原生）=====
         aesEncode: function(data, key, iv) {
           var cacheKey = 'aes_enc:' + data + ':' + key + ':' + (iv || '');
           if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
           try {
-            var mode = iv ? 'CBC' : 'ECB';
-            var result = _AES.encrypt(data, key, iv, mode);
+            var result;
+            if (typeof CryptoJS !== 'undefined' && CryptoJS.AES) {
+              // 走 CryptoJS.AES → __nativeCrypto.aesEncryptNative（C 原生，零 Dart 回调）
+              var cfg = iv ? { iv: CryptoJS.enc.Utf8.parse(iv), mode: CryptoJS.mode.CBC } : { mode: CryptoJS.mode.ECB };
+              result = CryptoJS.AES.encrypt(data, CryptoJS.enc.Utf8.parse(key), cfg).toString();
+            } else {
+              // 回退：纯 JS _AES 引擎
+              var mode = iv ? 'CBC' : 'ECB';
+              result = _AES.encrypt(data, key, iv, mode);
+            }
             _javaCache[cacheKey] = result;
             return result;
-          } catch(e) { return ''; }
+          } catch(e) { _jsLog('AES encrypt failed: ' + e, 'error'); return ''; }
         },
         aesDecode: function(data, key, iv) {
           var cacheKey = 'aes_dec:' + data + ':' + key + ':' + (iv || '');
           if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
           try {
-            var mode = iv ? 'CBC' : 'ECB';
-            var result = _AES.decrypt(data, key, iv, mode);
+            var result;
+            // Phase 5: 全 C 直通（base64 → C 层一站式解码+解密 → ArrayBuffer → UTF-8 字符串）
+            // 零 CryptoJS 包装层，零 JS UTF-8 parse/stringify
+            if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto.aesDecryptFromBase64) {
+              var plainU8 = iv
+                ? __nativeCrypto.aesDecryptFromBase64(data, key, iv)
+                : __nativeCrypto.aesDecryptFromBase64ECB(data, key);
+              if (plainU8 && plainU8.byteLength > 0) {
+                result = _u8ToStr(plainU8);
+                if (result && result.length > 0) {
+                  _javaCache[cacheKey] = result;
+                  return result;
+                }
+              }
+            }
+            // 回退：走 CryptoJS.C 原生路径或纯 JS
+            if (typeof CryptoJS !== 'undefined' && CryptoJS.AES) {
+              var cfg = iv ? { iv: CryptoJS.enc.Utf8.parse(iv), mode: CryptoJS.mode.CBC } : { mode: CryptoJS.mode.ECB };
+              result = CryptoJS.AES.decrypt(data, CryptoJS.enc.Utf8.parse(key), cfg).toString(CryptoJS.enc.Utf8);
+            } else {
+              var mode = iv ? 'CBC' : 'ECB';
+              result = _AES.decrypt(data, key, iv, mode);
+            }
             _javaCache[cacheKey] = result;
             return result;
-          } catch(e) { return ''; }
+          } catch(e) { _jsLog('AES decrypt failed: ' + e, 'error'); return ''; }
+        },
+        // 全 C 直通 AES 解密：base64 密文 → Uint8Array（零 CryptoJS 包装层）
+        // 用于图片解密等需要原始字节而不是字符串的场景
+        aesDecodeBytes: function(data, key, iv) {
+          try {
+            if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto.aesDecryptFromBase64) {
+              if (iv) {
+                return __nativeCrypto.aesDecryptFromBase64(data, key, iv);
+              } else {
+                return __nativeCrypto.aesDecryptFromBase64ECB(data, key);
+              }
+            }
+            // 回退：走标准 aesDecode 后转 bytes
+            var s = java.aesDecode(data, key, iv);
+            return _strToU8(s);
+          } catch(e) { return new Uint8Array(0); }
         },
         md5Encode: function(str) {
           // 优先使用纯 JS _MD5 引擎，fallback 到缓存
@@ -1814,17 +2155,26 @@ class JsEngine {
           if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
           return '';
         },
-        base64Encode: function(str) {
+        // java.base64Encode(str) / base64Encode(str, flags) — Base64 编码
+        // 假声明：兼容 Legado 多重载，flags 暂忽略（NO_WRAP/URL_SAFE 等统一标准 Base64）
+        base64Encode: function(str, flags) {
           try {
             if (typeof btoa === 'function') return btoa(unescape(encodeURIComponent(str)));
           } catch(e) {}
           return '';
         },
-        base64Decode: function(str) {
+        // java.base64Decode(str) / base64Decode(str, charset|flags) — Base64 解码
+        // 假声明：兼容 Legado 多重载，charset 按 UTF-8，flags 忽略
+        base64Decode: function(str, arg2) {
           try {
             if (typeof atob === 'function') return decodeURIComponent(escape(atob(str)));
           } catch(e) {}
           return '';
+        },
+        // java.hexDecodeToByteArray(hex) — Hex 解码为 ByteArray
+        hexDecodeToByteArray: function(hex) {
+          var s = java.hexDecodeToString(hex);
+          return s ? java.strToBytes(s) : [];
         },
 
         // ===== HTML 解析（使用内置 _JsoupLite，不再递归自调用）=====
@@ -1911,7 +2261,9 @@ class JsEngine {
         getTime: function() {
           return Date.now();
         },
-        encodeURI: function(str) {
+        // java.encodeURI(str) / encodeURI(str, enc) — URL 编码
+        // 假声明：兼容 Legado 多重载，enc 指定字符集，暂按 UTF-8 处理
+        encodeURI: function(str, enc) {
           return encodeURIComponent(str);
         },
         hexEncodeToString: function(str) {
@@ -1938,10 +2290,13 @@ class JsEngine {
           },
         },
 
-        // legado 兼容：java.webView(htmlOrJs, baseUrl, extra)
+        // legado 兼容：java.webView(html, url, js, cacheFirst)
         // 在 legado 中，java.webView 用于执行包含 JS 的 HTML 并获取渲染结果
         // QuickJS 同步模式下无法真正渲染 WebView，尝试从缓存获取
-        webView: function(htmlOrJs, baseUrl, extra) {
+        // 假声明：兼容 Legado 4 参签名 webView(html, url, js, cacheFirst)
+        webView: function(html, url, js, cacheFirst) {
+          // 兼容旧签名 webView(htmlOrJs, baseUrl, extra)
+          var htmlOrJs = html, baseUrl = url, extra = js;
           var cacheKey = 'webview:' + (baseUrl || '') + ':' + (htmlOrJs || '').length;
           if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
           // fallback: 如果 htmlOrJs 包含 <script>，尝试直接执行其中的 JS
@@ -1959,6 +2314,25 @@ class JsEngine {
             }
           } catch(e) {}
           return '';
+        },
+        // java.webViewGetSource(html, url, js, sourceRegex, cacheFirst, delayTime) — 抓取 WebView 加载的资源 URL
+        // 假声明：QuickJS 无 WebView，从缓存取
+        webViewGetSource: function(html, url, js, sourceRegex, cacheFirst, delayTime) {
+          var cacheKey = 'webview_src:' + (url || '') + ':' + (sourceRegex || '');
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
+        // java.webViewGetOverrideUrl(html, url, js, overrideUrlRegex, cacheFirst, delayTime) — 抓取 WebView 跳转 URL
+        // 假声明：QuickJS 无 WebView，从缓存取
+        webViewGetOverrideUrl: function(html, url, js, overrideUrlRegex, cacheFirst, delayTime) {
+          var cacheKey = 'webview_override:' + (url || '') + ':' + (overrideUrlRegex || '');
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
+        // java.openVideoPlayer(url, title, isFloat) — 打开视频播放器
+        // 假声明：QuickJS 无播放器，空操作
+        openVideoPlayer: function(url, title, isFloat) {
+          // 走 url_launcher 预缓存触发（在 _preCacheBridgeCalls 6.9 中处理）
         },
 
         // ===== 缓存管理 =====
@@ -1993,13 +2367,19 @@ class JsEngine {
           return '';
         },
         // java.getCookie(tag) / java.getCookie(tag, key) — Cookie 管理
+        // Dart 侧预缓存写入 'cookie:tag'（完整 cookie 字符串），JS 端按需解析 key
         getCookie: function(tag, key) {
-          var cacheKey = 'cookie:' + tag + (key ? ':' + key : '');
-          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
-          return '';
+          var cacheKey = 'cookie:' + tag;
+          if (_javaCache[cacheKey] === undefined) return '';
+          var cookieStr = _javaCache[cacheKey];
+          if (!key) return cookieStr;
+          // 带 key：从 cookie 字符串解析特定 key 的值
+          var match = cookieStr.match(new RegExp('(?:^|;\\s*)' + key + '=([^;]+)'));
+          return match ? match[1] : '';
         },
-        // java.startBrowser(url, title) — 打开浏览器（移动端专用，QuickJS 空操作）
-        startBrowser: function(url, title) {},
+        // java.startBrowser(url, title, html) — 打开浏览器（移动端专用，QuickJS 空操作）
+        // 假声明：兼容 Legado 3 参签名，html 参数暂忽略
+        startBrowser: function(url, title, html) {},
         // java.startBrowserAwait(url, title) — 等待浏览器结果
         startBrowserAwait: function(url, title, refetchAfterSuccess, html) {
           var cacheKey = 'browser:' + url;
@@ -2012,6 +2392,10 @@ class JsEngine {
           if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
           return '';
         },
+
+        // 注：字体反爬（queryTTF/queryBase64TTF/replaceFont）已移除
+        // Legado 自带的字体反爬功能使用频率低，QuickJS 无 TTF 解析能力
+        // 书源若需字体反爬可自行用 JS 实现
 
         // ===== 编解码（对齐 legado JsEncodeUtils）=====
         // java.md5Encode16(str) — 16 位 MD5
@@ -2050,6 +2434,9 @@ class JsEngine {
           if (!hex) return '';
           try { return java.base64Encode(java.hexDecodeToString(hex)); } catch(e) { return ''; }
         },
+        // java.HMacBase64(data, algorithm, key) — Legado 实际命名（等同 HMacBase64Str）
+        // 假声明：作为别名导出，避免书源里调用 HMacBase64 报 undefined
+        HMacBase64: function(data, algorithm, key) { return java.HMacBase64Str(data, algorithm, key); },
         // java.strToBytes(str) / java.strToBytes(str, charset) — 字符串转字节数组
         strToBytes: function(str, charset) {
           var bytes = [];
@@ -2167,38 +2554,178 @@ class JsEngine {
           if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
           return java.randomUUID().replace(/-/g, '').substring(0, 16);
         },
-        // java.cacheFile(url) — 缓存文件到本地
+        // java.cacheFile(url, saveTime) — 缓存文件到本地
+        // 走原生 NativeChannel.httpDownload 桥接，结果在 _javaCache['cache_file:url']
         cacheFile: function(url, saveTime) {
           var cacheKey = 'cache_file:' + url;
           if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
           return '';
         },
-        // java.importScript(path) — 导入脚本
+        // java.downloadFile(url) / downloadFile(content, url) — 下载文件返回路径
+        // 走原生 NativeChannel.httpDownload 桥接，结果在 _javaCache['download_file:url']
+        downloadFile: function(urlOrContent, url) {
+          // 兼容旧签名 downloadFile(content, url)
+          var u = url === undefined ? urlOrContent : url;
+          var cacheKey = 'download_file:' + u;
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          // fallback：返回占位路径
+          return '/tmp/' + java.md5Encode(u).substring(0, 16);
+        },
+        // java.getFile(path) — 获取 File 对象
+        // 假声明：QuickJS 无 File 概念，返回占位对象
+        getFile: function(path) {
+          return { path: path, exists: function() { return false; }, readText: function() { return ''; } };
+        },
+        // java.importScript(path) — 导入脚本（走 dart:io 预缓存）
         importScript: function(path) {
-          var cacheKey = 'import_script:' + path;
+          var cacheKey = 'file_importScript:' + path;
           if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
           return '';
         },
-        // java.readFile(path) / java.readTxtFile(path) — 读取文件
-        readFile: function(path) { return ''; },
-        readTxtFile: function(path, charset) { return ''; },
+        // java.readFile(path) / java.readTxtFile(path, charset) — 读取文件
+        // 走 dart:io 预缓存桥接，结果在 _javaCache['file_readFile:path']
+        readFile: function(path) {
+          var cacheKey = 'file_readFile:' + path;
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
+        readTxtFile: function(path, charset) {
+          var cacheKey = 'file_readTxtFile:' + path;
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
         // java.deleteFile(path) — 删除文件
-        deleteFile: function(path) { return false; },
-        // java.unzipFile(path) / java.un7zFile / java.unrarFile / java.unArchiveFile — 解压
-        unzipFile: function(path) { return ''; },
-        un7zFile: function(path) { return ''; },
-        unrarFile: function(path) { return ''; },
-        unArchiveFile: function(path) { return ''; },
+        // 走 dart:io 预缓存桥接，结果在 _javaCache['file_deleteFile:path']
+        deleteFile: function(path) {
+          var cacheKey = 'file_deleteFile:' + path;
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey] === 'true';
+          return false;
+        },
+        // java.writeFile(path, content) — 写文件（预缓存标记可写）
+        writeFile: function(path, content) {
+          var cacheKey = 'file_writeFile:' + path;
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey] === 'true';
+          return false;
+        },
+        // java.unzipFile(path, password) / un7zFile / unrarFile / unArchiveFile — 解压
+        // 走 archive 包预缓存桥接，支持密码参数
+        unzipFile: function(path, password) {
+          var cacheKey = 'archive_unzipFile:' + path + '::' + (password || '');
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
+        un7zFile: function(path, password) {
+          var cacheKey = 'archive_un7zFile:' + path + '::' + (password || '');
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
+        unrarFile: function(path, password) {
+          var cacheKey = 'archive_unrarFile:' + path + '::' + (password || '');
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
+        unArchiveFile: function(path, password) {
+          var cacheKey = 'archive_unArchiveFile:' + path + '::' + (password || '');
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
         // java.getTxtInFolder(path) — 读取文件夹下所有 txt
-        getTxtInFolder: function(path) { return ''; },
-        // java.openUrl(url) — 打开 URL
+        // 走 dart:io 预缓存桥接，结果在 _javaCache['file_getTxtInFolder:path']
+        getTxtInFolder: function(path) {
+          var cacheKey = 'file_getTxtInFolder:' + path;
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
+        // java.getZipStringContent / getRarStringContent / get7zStringContent — 压缩包内文件读取
+        // 走 archive 包预缓存桥接，支持密码参数（第 4 位）
+        getZipStringContent: function(url, path, charset, password) {
+          var cacheKey = 'archive_getZipStringContent:' + url + ':' + (path || '') + ':' + (password || '');
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
+        getRarStringContent: function(url, path, charset, password) {
+          var cacheKey = 'archive_getRarStringContent:' + url + ':' + (path || '') + ':' + (password || '');
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
+        get7zStringContent: function(url, path, charset, password) {
+          var cacheKey = 'archive_get7zStringContent:' + url + ':' + (path || '') + ':' + (password || '');
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
+        getZipByteArrayContent: function(url, path, password) {
+          // ByteArray 在 JS 中近似为字符串
+          var cacheKey = 'archive_getZipStringContent:' + url + ':' + (path || '') + ':' + (password || '');
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
+        getRarByteArrayContent: function(url, path, password) {
+          var cacheKey = 'archive_getRarStringContent:' + url + ':' + (path || '') + ':' + (password || '');
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
+        get7zByteArrayContent: function(url, path, password) {
+          var cacheKey = 'archive_get7zStringContent:' + url + ':' + (path || '') + ':' + (password || '');
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
+        // java.openUrl(url, mimeType) — 打开 URL（走 url_launcher 预缓存）
         openUrl: function(url, mimeType) {},
-        // java.getReadBookConfig() — 获取阅读配置
-        getReadBookConfig: function() { return '{}'; },
+        // java.getReadBookConfig() — 获取阅读配置（JSON 字符串）
+        // 走 Dart Provider 预缓存桥接，结果在 _javaCache['read_book_config']
+        getReadBookConfig: function() {
+          var cacheKey = 'read_book_config';
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '{}';
+        },
+        // java.getReadBookConfigMap() — 获取阅读配置（Map 版）
+        getReadBookConfigMap: function() {
+          var cacheKey = 'read_book_config';
+          if (_javaCache[cacheKey] !== undefined) {
+            try { return JSON.parse(_javaCache[cacheKey]); } catch(_) {}
+          }
+          return {};
+        },
         // java.getThemeMode() — 获取主题模式
-        getThemeMode: function() { return 'light'; },
-        // java.getThemeConfig() — 获取主题配置
-        getThemeConfig: function() { return '{}'; },
+        // 走 Dart Provider 预缓存桥接，结果在 _javaCache['theme_mode']
+        getThemeMode: function() {
+          var cacheKey = 'theme_mode';
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return 'light';
+        },
+        // java.getThemeConfig() — 获取主题配置（JSON 字符串）
+        getThemeConfig: function() {
+          var cacheKey = 'theme_config';
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '{}';
+        },
+        // java.getThemeConfigMap() — 获取主题配置（Map 版）
+        getThemeConfigMap: function() {
+          var cacheKey = 'theme_config';
+          if (_javaCache[cacheKey] !== undefined) {
+            try { return JSON.parse(_javaCache[cacheKey]); } catch(_) {}
+          }
+          return {};
+        },
+        // java.getSource() — 获取当前书源对象
+        // 走 Dart Provider 预缓存桥接，结果在 _javaCache['source']
+        getSource: function() {
+          var cacheKey = 'source';
+          if (_javaCache[cacheKey] !== undefined) {
+            try { return JSON.parse(_javaCache[cacheKey]); } catch(_) {}
+          }
+          return {};
+        },
+        // java.getTag() — 获取书源标签
+        getTag: function() {
+          var cacheKey = 'tag';
+          if (_javaCache[cacheKey] !== undefined) return _javaCache[cacheKey];
+          return '';
+        },
+        // java.logType(any) — 打印类型信息（调试用）
+        logType: function(any) {
+          console.log('[logType] ' + typeof any + ': ' + (any === null ? 'null' : String(any).substring(0, 100)));
+        },
         // java.toURL(urlStr) — 创建 URL 对象
         toURL: function(urlStr, base) {
           try {
@@ -2241,16 +2768,67 @@ class JsEngine {
           return decoded ? java.aesDecode(decoded, key, iv) : '';
         },
         // java.createSymmetricCrypto(transformation, key, iv) — 创建对称加密器
+        // 假声明：对齐 Hutool SymmetricCrypto 接口
+        // 让书源里 cipher.decryptStr(data) / cipher.encryptStr(data) / cipher.encryptHex(data) 等调用
+        // 以为自己跑在 Rhino+Android 上，实则跑在 QuickJS 上
         createSymmetricCrypto: function(transformation, key, iv) {
-          // 简化实现：返回一个包含 encrypt/decrypt 方法的对象
           var keyStr = typeof key === 'string' ? key : (key ? String(key) : '');
           var ivStr = typeof iv === 'string' ? iv : (iv ? String(iv) : '');
-          return {
-            encrypt: function(data) { return java.aesEncode(data, keyStr, ivStr); },
-            decrypt: function(data) { return java.aesDecode(data, keyStr, ivStr); },
+          // DES/3DES/PBE 等暂降级为 AES（实际书源极少用真 DES，多为占位）
+          var algo = typeof transformation === 'string' ? transformation : 'AES/CBC/PKCS5Padding';
+
+          // Base64 字符串 ↔ Hex 字符串互转（Hutool 内置，这里假声明）
+          function _b64ToHex(b64) {
+            try {
+              var raw = java.base64Decode(b64); // UTF-8 字符串
+              var hex = '';
+              for (var i = 0; i < raw.length; i++) {
+                var c = raw.charCodeAt(i) & 0xff;
+                hex += (c < 16 ? '0' : '') + c.toString(16);
+              }
+              return hex;
+            } catch (e) { return ''; }
+          }
+          function _hexToB64(hex) {
+            try {
+              var raw = '';
+              for (var i = 0; i + 1 < hex.length; i += 2) {
+                raw += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+              }
+              return java.base64Encode(raw);
+            } catch (e) { return ''; }
+          }
+
+          var crypto = {
+            // 加密为字符串（默认输出 Base64，对齐 Hutool encryptStr 默认行为）
+            encryptStr: function(data, charset) { return java.aesEncode(data, keyStr, ivStr); },
+            // 解密字符串（输入 Base64，输出 UTF-8 明文，对齐 Hutool decryptStr）
+            decryptStr: function(data, charset) { return java.aesDecode(data, keyStr, ivStr); },
+            // 加密为 Base64
             encryptBase64: function(data) { return java.aesEncodeToBase64String(data, keyStr, '', ivStr); },
-            decryptBase64: function(data) { return java.aesBase64DecodeToString(data, keyStr, '', ivStr); }
+            // 解密 Base64
+            decryptBase64: function(data) { return java.aesBase64DecodeToString(data, keyStr, '', ivStr); },
+            // 加密为 Hex
+            encryptHex: function(data) {
+              var b64 = java.aesEncodeToBase64String(data, keyStr, '', ivStr);
+              return b64 ? _b64ToHex(b64) : '';
+            },
+            // 解密 Hex
+            decryptHex: function(hex) {
+              var b64 = _hexToB64(hex);
+              return b64 ? java.aesBase64DecodeToString(b64, keyStr, '', ivStr) : '';
+            },
+            // 加密为字节数组（QuickJS 无 ByteArray，用 Base64 字符串近似）
+            encrypt: function(data) { return java.aesEncode(data, keyStr, ivStr); },
+            // 解密字节数组
+            decrypt: function(data) { return java.aesDecode(data, keyStr, ivStr); },
+            // 链式设置 IV（对齐 Hutool setIv，返回自身）
+            setIv: function(newIv) {
+              ivStr = typeof newIv === 'string' ? newIv : String(newIv || '');
+              return crypto;
+            }
           };
+          return crypto;
         },
         // java.desEncodeToString / desDecodeToString — DES 兼容（简化为 AES）
         desEncodeToString: function(data, key, transformation, iv) {
@@ -2272,13 +2850,66 @@ class JsEngine {
         tripleDESDecodeArgsBase64Str: function(data, key, mode, padding, iv) {
           return java.aesBase64DecodeToString(data, key, '', iv);
         },
+        // 假声明：补全 Legado 缺失的 3DES 重载
+        // java.tripleDESDecodeStr(data, key, mode, padding, iv) — 3DES 不带 Base64 解密
+        tripleDESDecodeStr: function(data, key, mode, padding, iv) {
+          return java.aesDecode(data, key, iv);
+        },
+        // java.tripleDESEncodeArgsBase64Str(data, key, mode, padding, iv) — 3DES 带 Base64 加密
+        tripleDESEncodeArgsBase64Str: function(data, key, mode, padding, iv) {
+          return java.aesEncodeToBase64String(data, key, '', iv);
+        },
         // java.createAsymmetricCrypto(transformation) — 创建非对称加密器
+        // 假声明：QuickJS 无 RSA/ECC 实现，返回空操作对象
         createAsymmetricCrypto: function(transformation) {
-          return { encrypt: function(data) { return ''; }, decrypt: function(data) { return ''; } };
+          return {
+            encrypt: function(data) { return ''; },
+            decrypt: function(data) { return ''; },
+            encryptStr: function(data) { return ''; },
+            decryptStr: function(data) { return ''; },
+            encryptBase64: function(data) { return ''; },
+            decryptBase64: function(data) { return ''; }
+          };
         },
         // java.createSign(algorithm) — 创建签名器
+        // 假声明：返回空签名器
         createSign: function(algorithm) {
-          return { sign: function(data) { return ''; }, verify: function(data, sig) { return false; } };
+          return {
+            sign: function(data) { return ''; },
+            verify: function(data, sig) { return false; },
+            signBase64: function(data) { return ''; },
+            verifyBase64: function(data, sig) { return false; }
+          };
+        },
+        // ===== AES 参数版（对齐 legado JsEncodeUtils 的 Args/ByteArray 重载）=====
+        // 假声明：mode/padding 暂忽略，统一按 AES/CBC/PKCS5Padding 处理
+        // java.aesEncodeArgsBase64Str(data, key, mode, padding, iv) — AES 参数化加密（web 端兼容）
+        aesEncodeArgsBase64Str: function(data, key, mode, padding, iv) {
+          return java.aesEncodeToBase64String(data, key, '', iv);
+        },
+        // java.aesDecodeArgsBase64Str(data, key, mode, padding, iv) — AES 参数化解密
+        aesDecodeArgsBase64Str: function(data, key, mode, padding, iv) {
+          return java.aesBase64DecodeToString(data, key, '', iv);
+        },
+        // java.aesDecodeToByteArray(str, key, transformation, iv) — AES 解密返回 ByteArray
+        aesDecodeToByteArray: function(str, key, transformation, iv) {
+          var result = java.aesDecode(str, key, iv);
+          return result ? java.strToBytes(result) : [];
+        },
+        // java.aesEncodeToByteArray(data, key, transformation, iv) — AES 加密返回 ByteArray
+        aesEncodeToByteArray: function(data, key, transformation, iv) {
+          var result = java.aesEncode(data, key, iv);
+          return result ? java.strToBytes(result) : [];
+        },
+        // java.aesBase64DecodeToByteArray(str, key, transformation, iv) — AES Base64 解密返回 ByteArray
+        aesBase64DecodeToByteArray: function(str, key, transformation, iv) {
+          var result = java.aesBase64DecodeToString(str, key, transformation, iv);
+          return result ? java.strToBytes(result) : [];
+        },
+        // java.aesEncodeToBase64ByteArray(data, key, transformation, iv) — AES 加密 Base64 返回 ByteArray
+        aesEncodeToBase64ByteArray: function(data, key, transformation, iv) {
+          var result = java.aesEncodeToBase64String(data, key, transformation, iv);
+          return result ? java.strToBytes(result) : [];
         },
 
         // ===== 元素操作（借鉴 legado JsExtensions）=====
@@ -2371,8 +3002,47 @@ class JsEngine {
           put: function(key, value) { _javaCache[key] = typeof value === 'object' ? JSON.stringify(value) : String(value); },
           getStr: function(key, def) { return _javaCache[key] || (def || ''); },
           log: function(msg) { console.log('[JavaBridge] ' + msg); },
-          aesEncode: function(data, key, iv) { try { return _AES.encrypt(data, key, iv, iv ? 'CBC' : 'ECB'); } catch(e) { return ''; } },
-          aesDecode: function(data, key, iv) { try { return _AES.decrypt(data, key, iv, iv ? 'CBC' : 'ECB'); } catch(e) { return ''; } },
+          aesEncode: function(data, key, iv) {
+            try {
+              var mode = iv ? 'CBC' : 'ECB';
+              if (typeof CryptoJS !== 'undefined' && CryptoJS.AES) {
+                var cfg = iv ? { iv: CryptoJS.enc.Utf8.parse(iv), mode: CryptoJS.mode.CBC } : { mode: CryptoJS.mode.ECB };
+                return CryptoJS.AES.encrypt(data, CryptoJS.enc.Utf8.parse(key), cfg).toString();
+              }
+              return _AES.encrypt(data, key, iv, mode);
+            } catch(e) { return ''; }
+          },
+          aesDecode: function(data, key, iv) {
+            try {
+              var mode = iv ? 'CBC' : 'ECB';
+              // Phase 5: 全 C 直通（base64 字符串 → C 层一站式解码+解密 → ArrayBuffer → UTF-8）
+              if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto.aesDecryptFromBase64) {
+                var plainU8 = iv
+                  ? __nativeCrypto.aesDecryptFromBase64(data, key, iv)
+                  : __nativeCrypto.aesDecryptFromBase64ECB(data, key);
+                if (plainU8 && plainU8.byteLength > 0) {
+                  var r = _u8ToStr(plainU8);
+                  if (r && r.length > 0) return r;
+                }
+              }
+              // 回退到 CryptoJS 路径（优先走 C 原生）
+              if (typeof CryptoJS !== 'undefined' && CryptoJS.AES) {
+                var cfg = iv ? { iv: CryptoJS.enc.Utf8.parse(iv), mode: CryptoJS.mode.CBC } : { mode: CryptoJS.mode.ECB };
+                return CryptoJS.AES.decrypt(data, CryptoJS.enc.Utf8.parse(key), cfg).toString(CryptoJS.enc.Utf8);
+              }
+              return _AES.decrypt(data, key, iv, mode);
+            } catch(e) { _jsLog('AES decrypt failed: ' + e, 'error'); return ''; }
+          },
+          aesDecodeBytes: function(data, key, iv) {
+            try {
+              if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto.aesDecryptFromBase64) {
+                if (iv) return __nativeCrypto.aesDecryptFromBase64(data, key, iv);
+                return __nativeCrypto.aesDecryptFromBase64ECB(data, key);
+              }
+              var s = java.aesDecode(data, key, iv);
+              return _strToU8(s);
+            } catch(e) { return new Uint8Array(0); }
+          },
           md5Encode: function(str) { var k = 'md5:' + str; if (_javaCache[k] !== undefined) return _javaCache[k]; return ''; },
           base64Encode: function(str) { try { return btoa(unescape(encodeURIComponent(str))); } catch(e) { return ''; } },
           base64Decode: function(str) { try { return decodeURIComponent(escape(atob(str))); } catch(e) { return ''; } },
@@ -2403,30 +3073,367 @@ class JsEngine {
         globalThis.getWebViewUA = function() { return java.getWebViewUA(); };
         globalThis.ajax = function(url, opt) { return java.ajax(url, opt); };
         globalThis.timeFormatUTC = function(ts, fmt, offset) { return java.timeFormatUTC(ts, fmt, offset); };
+
+        // ===== 自动挂载所有 java 方法到 globalThis（对齐 Legado 行为）=====
+        // Legado 中 JsExtensions 是接口实现，Rhino 直接把这些方法挂到全局
+        // 书源可以直接写 getCookie() / readFile() 而不用 java.getCookie() / java.readFile()
+        // 这里遍历 java 对象所有 function 类型的属性，自动挂载到 globalThis
+        // 跳过子对象（jsoup/regex/webview/cache）和已显式挂载的方法
+        (function() {
+          var _alreadyMounted = {
+            getString: true, put: true, getStr: true,
+            base64Encode: true, base64Decode: true,
+            md5Encode: true, sha256Encode: true,
+            aesEncode: true, aesDecode: true,
+            getWebViewUA: true, ajax: true, timeFormatUTC: true
+          };
+          Object.keys(java).forEach(function(k) {
+            // 跳过子对象、已挂载的、私有方法（_开头）
+            if (_alreadyMounted[k] || k.charAt(0) === '_') return;
+            try {
+              if (typeof java[k] === 'function' && typeof globalThis[k] === 'undefined') {
+                globalThis[k] = function() {
+                  // 用 apply 保证 this 指向 java 对象（访问内部 _javaCache 等）
+                  return java[k].apply(java, arguments);
+                };
+              }
+            } catch (e) {}
+          });
+        })();
       ''');
     } catch (_) {}
 
-    // 4. 注入 CryptoJS（使用纯 JS _AES 引擎，支持 WordArray 格式）
+    // 4. 注入 CryptoJS（优先走原生 __nativeCrypto，失败回退纯 JS _AES 引擎）
+    // 自动路径选择：数据 < 1KB 走字符串路径，>= 1KB 走 ArrayBuffer 零拷贝路径
     final cryptoCode = '''
+      // 辅助：字符串转 Uint8Array（UTF-8 编码）
+      function _strToU8(s) {
+        var u8 = new Uint8Array(s.length * 4);
+        var n = 0;
+        for (var i = 0; i < s.length; i++) {
+          var c = s.charCodeAt(i);
+          if (c < 0x80) { u8[n++] = c; }
+          else if (c < 0x800) { u8[n++] = 0xC0 | (c >> 6); u8[n++] = 0x80 | (c & 0x3F); }
+          else { u8[n++] = 0xE0 | (c >> 12); u8[n++] = 0x80 | ((c >> 6) & 0x3F); u8[n++] = 0x80 | (c & 0x3F); }
+        }
+        return u8.subarray(0, n);
+      }
+      // 辅助：Uint8Array 转字符串（C 原生，零 JS 循环）
+      function _u8ToStr(u8) {
+        return __nativeBase64.uint8ToStr(u8);
+      }
+      // 辅助：base64 转 Uint8Array（C 原生，零 JS 循环）
+      function _b64ToU8(b64) {
+        return __nativeBase64.decodeToBytes(b64);
+      }
+      // 辅助：Uint8Array 转 base64（C 原生，零 JS 循环）
+      function _u8ToB64(u8) {
+        return __nativeBase64.b64FromBytes(u8);
+      }
+      // 辅助：Uint8Array 转 hex 字符串（小写）
+      function _u8ToHex(u8) {
+        var hex = '';
+        for (var i = 0; i < u8.length; i++) {
+          var b = u8[i];
+          hex += (b < 16 ? '0' : '') + b.toString(16);
+        }
+        return hex;
+      }
+      // 辅助：自动选择路径阈值（1KB）
+      var _CRYPTO_BINARY_THRESHOLD = 1024;
+
       var CryptoJS = {
         AES: {
           encrypt: function(data, key, cfg) {
             var iv = cfg && cfg.iv ? cfg.iv : null;
             var mode = (cfg && cfg.mode === CryptoJS.mode.ECB) ? 'ECB' : 'CBC';
+
+            // Phase 5: 全 C 直通加密路径（明文字符串 → C 层加密 → base64 密文字符串）
+            // 消除 _strToU8 → aesEncryptNative → _u8ToB64 的来回复制，一次 C 调用完成
+            if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto &&
+                __nativeCrypto.aesEncryptFromBase64) {
+              try {
+                var dataStr = typeof data === 'string' ? data :
+                    (data && data.toString ? data.toString() : String(data));
+                var dataB64 = java.base64Encode(dataStr);
+                var keyStr = CryptoJS.enc.Utf8.stringify(key);
+                var ivStr = iv ? CryptoJS.enc.Utf8.stringify(iv) : '';
+                var ctB64;
+                if (mode === 'CBC' && iv) {
+                  ctB64 = __nativeCrypto.aesEncryptFromBase64(dataB64, keyStr, ivStr);
+                } else if (mode === 'ECB') {
+                  ctB64 = __nativeCrypto.aesEncryptFromBase64ECB(dataB64, keyStr);
+                } else {
+                  throw new Error('unsupported mode: ' + mode);
+                }
+                if (ctB64 && ctB64.length > 0) {
+                  return {
+                    toString: function() { return ctB64; },
+                    ciphertext: { toString: function(enc) { return ctB64; } }
+                  };
+                }
+              } catch (e) {}
+            }
+
+            // 优先走 C 原生 AES 加密（ArrayBuffer 模式，零 Dart 回调）
+            if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto &&
+                __nativeCrypto.aesEncryptNative) {
+              try {
+                var dataStr;
+                if (typeof data === 'string') {
+                  dataStr = data;
+                } else if (data && data.toString) {
+                  dataStr = data.toString();
+                } else {
+                  dataStr = String(data);
+                }
+                var keyStr = CryptoJS.enc.Utf8.stringify(key);
+                var dataU8 = _strToU8(dataStr);
+                var keyU8 = _strToU8(keyStr);
+                if (mode === 'CBC' && iv) {
+                  var ivStr = CryptoJS.enc.Utf8.stringify(iv);
+                  var ivU8 = _strToU8(ivStr);
+                  var cipherU8 = __nativeCrypto.aesEncryptNative(dataU8, keyU8, ivU8);
+                  var resultB64 = _u8ToB64(cipherU8);
+                  return {
+                    toString: function() { return resultB64; },
+                    ciphertext: { toString: function(enc) { return resultB64; } }
+                  };
+                } else if (mode === 'ECB') {
+                  var cipherU8 = __nativeCrypto.aesEncryptNativeECB(dataU8, keyU8);
+                  var resultB64 = _u8ToB64(cipherU8);
+                  return {
+                    toString: function() { return resultB64; },
+                    ciphertext: { toString: function(enc) { return resultB64; } }
+                  };
+                }
+              } catch (e) {
+                // C 原生失败，回退到 Dart 回调或纯 JS
+              }
+            }
+
+            // 回退：Dart 回调路径
+            if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto &&
+                __nativeCrypto.aesEncrypt && mode === 'CBC') {
+              try {
+                var dataStr;
+                if (typeof data === 'string') {
+                  dataStr = data;
+                } else if (data && data.toString) {
+                  dataStr = data.toString();
+                } else {
+                  dataStr = String(data);
+                }
+                var keyStr = CryptoJS.enc.Utf8.stringify(key);
+                var ivStr = iv ? CryptoJS.enc.Utf8.stringify(iv) : '';
+                var nativeResult = __nativeCrypto.aesEncrypt(dataStr, keyStr, ivStr);
+                if (nativeResult !== null && nativeResult !== undefined) {
+                  return {
+                    toString: function() { return nativeResult; },
+                    ciphertext: { toString: function(enc) { return nativeResult; } }
+                  };
+                }
+              } catch (e) {}
+            }
+
+            // 最终回退：纯 JS _AES 引擎
             var result = _AES.encrypt(data, key, iv, mode);
             return { toString: function() { return result; }, ciphertext: { toString: function(enc) { return result; } } };
           },
           decrypt: function(data, key, cfg) {
             var iv = cfg && cfg.iv ? cfg.iv : null;
             var mode = (cfg && cfg.mode === CryptoJS.mode.ECB) ? 'ECB' : 'CBC';
+
+            // Phase 5: 全 C 直通路径（base64 字符串 → C 层一站式解码+解密 → ArrayBuffer → UTF-8）
+            // 消除 _b64ToU8 → aesDecryptNative → _u8ToStr 的来回复制，一次 C 调用完成
+            if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto &&
+                __nativeCrypto.aesDecryptFromBase64) {
+              try {
+                var dataB64;
+                if (typeof data === 'string') {
+                  dataB64 = data;
+                } else if (data && data.ciphertext && typeof data.ciphertext.toString === 'function') {
+                  dataB64 = data.ciphertext.toString(CryptoJS.enc.Base64);
+                } else {
+                  dataB64 = String(data);
+                }
+                var keyStr = CryptoJS.enc.Utf8.stringify(key);
+                var ivStr = iv ? CryptoJS.enc.Utf8.stringify(iv) : '';
+                var plainU8;
+                if (mode === 'CBC' && iv) {
+                  plainU8 = __nativeCrypto.aesDecryptFromBase64(dataB64, keyStr, ivStr);
+                } else if (mode === 'ECB') {
+                  plainU8 = __nativeCrypto.aesDecryptFromBase64ECB(dataB64, keyStr);
+                } else {
+                  throw new Error('unsupported mode: ' + mode);
+                }
+                if (plainU8 && plainU8.byteLength > 0) {
+                  var nativeResult = _u8ToStr(plainU8);
+                  if (nativeResult !== null && nativeResult !== undefined) {
+                    return {
+                      toString: function(enc) {
+                        if (enc === CryptoJS.enc.Base64) {
+                          return java.base64Encode(nativeResult) || '';
+                        }
+                        return nativeResult;
+                      }
+                    };
+                  }
+                }
+              } catch (e) {}
+            }
+
+            // 优先走 C 原生 AES 解密（零 Dart 回调）
+            if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto &&
+                __nativeCrypto.aesDecryptNative) {
+              try {
+                // 提取 base64 密文
+                var dataB64;
+                if (typeof data === 'string') {
+                  dataB64 = data;
+                } else if (data && data.ciphertext && typeof data.ciphertext.toString === 'function') {
+                  dataB64 = data.ciphertext.toString(CryptoJS.enc.Base64);
+                } else {
+                  dataB64 = String(data);
+                }
+
+                var keyStr = CryptoJS.enc.Utf8.stringify(key);
+                var cipherU8 = _b64ToU8(dataB64);
+                var keyU8 = _strToU8(keyStr);
+                var plainU8;
+                if (mode === 'CBC' && iv) {
+                  var ivStr = CryptoJS.enc.Utf8.stringify(iv);
+                  var ivU8 = _strToU8(ivStr);
+                  plainU8 = __nativeCrypto.aesDecryptNative(cipherU8, keyU8, ivU8);
+                } else if (mode === 'ECB') {
+                  plainU8 = __nativeCrypto.aesDecryptNativeECB(cipherU8, keyU8);
+                } else {
+                  throw new Error('unsupported mode: ' + mode);
+                }
+                var nativeResult = _u8ToStr(plainU8);
+                if (nativeResult !== null && nativeResult !== undefined) {
+                  return {
+                    toString: function(enc) {
+                      if (enc === CryptoJS.enc.Base64) {
+                        return java.base64Encode(nativeResult) || '';
+                      }
+                      return nativeResult;
+                    }
+                  };
+                }
+              } catch (e) {
+                // C 原生失败，回退到 Dart 回调或纯 JS
+              }
+            }
+
+            // 回退：Dart 回调路径
+            if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto &&
+                __nativeCrypto.aesDecrypt && mode === 'CBC') {
+              try {
+                var dataB64;
+                if (typeof data === 'string') {
+                  dataB64 = data;
+                } else if (data && data.ciphertext && typeof data.ciphertext.toString === 'function') {
+                  dataB64 = data.ciphertext.toString(CryptoJS.enc.Base64);
+                } else {
+                  dataB64 = String(data);
+                }
+                var keyStr = CryptoJS.enc.Utf8.stringify(key);
+                var ivStr = iv ? CryptoJS.enc.Utf8.stringify(iv) : '';
+                var nativeResult = __nativeCrypto.aesDecrypt(dataB64, keyStr, ivStr);
+                if (nativeResult !== null && nativeResult !== undefined) {
+                  return {
+                    toString: function(enc) {
+                      if (enc === CryptoJS.enc.Base64) {
+                        return java.base64Encode(nativeResult) || '';
+                      }
+                      return nativeResult;
+                    }
+                  };
+                }
+              } catch (e) {}
+            }
+
+            // 最终回退：纯 JS _AES 引擎
             var result = _AES.decrypt(data, key, iv, mode);
             return { toString: function(enc) { return result; } };
           },
         },
-        MD5: function(str) { return { toString: function() { return java.md5Encode(str); } }; },
-        SHA1: function(str) { return { toString: function() { return java.sha1Encode ? java.sha1Encode(str) : ''; } }; },
-        SHA256: function(str) { return { toString: function() { return java.sha256Encode ? java.sha256Encode(str) : ''; } }; },
-        HmacSHA256: function(data, key) { return { toString: function() { return java.hmacSHA256 ? java.hmacSHA256(data, key) : ''; } }; },
+        MD5: function(str) {
+          // 优先走 C 原生实现（零 Dart 回调）
+          if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto && __nativeCrypto.md5Native) {
+            try {
+              var u8 = _strToU8(str);
+              var r8 = __nativeCrypto.md5Native(u8);
+              var r = _u8ToHex(r8);
+              if (r) return { toString: function() { return r; } };
+            } catch (e) {}
+          }
+          // 回退到 Dart 回调
+          if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto && __nativeCrypto.md5) {
+            try {
+              var r = __nativeCrypto.md5(str);
+              if (r) return { toString: function() { return r; } };
+            } catch (e) {}
+          }
+          return { toString: function() { return java.md5Encode(str); } };
+        },
+        SHA1: function(str) {
+          // 优先走 C 原生实现
+          if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto && __nativeCrypto.sha1Native) {
+            try {
+              var u8 = _strToU8(str);
+              var r8 = __nativeCrypto.sha1Native(u8);
+              var r = _u8ToHex(r8);
+              if (r) return { toString: function() { return r; } };
+            } catch (e) {}
+          }
+          if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto && __nativeCrypto.sha1) {
+            try {
+              var r = __nativeCrypto.sha1(str);
+              if (r) return { toString: function() { return r; } };
+            } catch (e) {}
+          }
+          return { toString: function() { return java.sha1Encode ? java.sha1Encode(str) : ''; } };
+        },
+        SHA256: function(str) {
+          // 优先走 C 原生实现
+          if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto && __nativeCrypto.sha256Native) {
+            try {
+              var u8 = _strToU8(str);
+              var r8 = __nativeCrypto.sha256Native(u8);
+              var r = _u8ToHex(r8);
+              if (r) return { toString: function() { return r; } };
+            } catch (e) {}
+          }
+          if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto && __nativeCrypto.sha256) {
+            try {
+              var r = __nativeCrypto.sha256(str);
+              if (r) return { toString: function() { return r; } };
+            } catch (e) {}
+          }
+          return { toString: function() { return java.sha256Encode ? java.sha256Encode(str) : ''; } };
+        },
+        HmacSHA256: function(data, key) {
+          var keyStr = (typeof key === 'string') ? key : CryptoJS.enc.Utf8.stringify(key);
+          // 优先走 C 原生实现
+          if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto && __nativeCrypto.hmacSHA256Native) {
+            try {
+              var dataU8 = _strToU8(data);
+              var keyU8 = _strToU8(keyStr);
+              var r8 = __nativeCrypto.hmacSHA256Native(dataU8, keyU8);
+              var r = _u8ToHex(r8);
+              if (r) return { toString: function() { return r; } };
+            } catch (e) {}
+          }
+          if (typeof __nativeCrypto !== 'undefined' && __nativeCrypto && __nativeCrypto.hmacSHA256) {
+            try {
+              var r = __nativeCrypto.hmacSHA256(data, keyStr);
+              if (r) return { toString: function() { return r; } };
+            } catch (e) {}
+          }
+          return { toString: function() { return java.hmacSHA256 ? java.hmacSHA256(data, key) : ''; } };
+        },
         enc: {
           Utf8: {
             parse: function(s) { return _AES.utf8Parse(s); },
@@ -2496,6 +3503,49 @@ class JsEngine {
         },
         algo: {},
       };
+
+      // ===== globalThis.crypto 自动降级封装 =====
+      // 对业务透明：内部先探测原生函数是否存在，否则自动 fallback 到 CryptoJS
+      // JS 开发者无需手动写 try { __nativeCrypto.xxx } catch { CryptoJS.xxx }
+      globalThis.crypto = {
+        // 哈希算法：返回 hex 字符串
+        md5: function(data) {
+          try { return CryptoJS.MD5(data).toString(); }
+          catch (e) { return ''; }
+        },
+        sha1: function(data) {
+          try { return CryptoJS.SHA1(data).toString(); }
+          catch (e) { return ''; }
+        },
+        sha256: function(data) {
+          try { return CryptoJS.SHA256(data).toString(); }
+          catch (e) { return ''; }
+        },
+        hmacSHA256: function(data, key) {
+          try { return CryptoJS.HmacSHA256(data, key).toString(); }
+          catch (e) { return ''; }
+        },
+        // AES 加解密：返回 base64 字符串 / 明文字符串
+        aesEncrypt: function(data, key, iv) {
+          try {
+            var cfg = iv ? { iv: CryptoJS.enc.Utf8.parse(iv) } : null;
+            return CryptoJS.AES.encrypt(data, CryptoJS.enc.Utf8.parse(key), cfg).toString();
+          } catch (e) { return ''; }
+        },
+        aesDecrypt: function(data, key, iv) {
+          try {
+            var cfg = iv ? { iv: CryptoJS.enc.Utf8.parse(iv) } : null;
+            return CryptoJS.AES.decrypt(data, CryptoJS.enc.Utf8.parse(key), cfg).toString(CryptoJS.enc.Utf8);
+          } catch (e) { return ''; }
+        },
+        // 兼容 Web Crypto API（简化版）
+        getRandomValues: function(typedArray) {
+          for (var i = 0; i < typedArray.length; i++) {
+            typedArray[i] = Math.floor(Math.random() * 256);
+          }
+          return typedArray;
+        },
+      };
     ''';
     try {
       evaluate(cryptoCode);
@@ -2504,54 +3554,6 @@ class JsEngine {
 
     // 5. 最终验证
     evaluate('typeof java !== "undefined" && typeof CryptoJS !== "undefined" && typeof _javaCache !== "undefined" && typeof _AES !== "undefined"');
-  }
-
-  // ===== TypeScript 编译支持 =====
-
-  // TypeScript 编译正则常量化（避免每次调用创建 RegExp）
-  static final _tsTypeAnnotationRegex = RegExp(r'(\w+)\s*:\s*[\w\[\]<>\|&\s]+([,\)])');
-  static final _tsReturnTypeRegex = RegExp(r'\)\s*:\s*[\w\[\]<>\|&\s]+\s*([=>{])');
-  static final _tsVarTypeRegex = RegExp(r'(const|let|var)\s+(\w+)\s*:\s*[\w\[\]<>\|&\s]+=\s*');
-  static final _tsInterfaceRegex = RegExp(r'interface\s+\w+\s*\{[^}]*\}', multiLine: true);
-  static final _tsTypeAliasRegex = RegExp(r'type\s+\w+\s*=\s*[^;]+;');
-  static final _tsAsCastRegex = RegExp(r'\s+as\s+[\w\[\]<>\|&]+');
-  static final _tsGenericRegex = RegExp(r'(\w+)<[^>]+>\(');
-  static final _tsEnumRegex = RegExp(r'enum\s+(\w+)\s*\{([^}]+)\}');
-  static final _tsOptionalChainRegex = RegExp(r'(\w+)\?\.(?:(\w+)\()?');
-  static final _tsNullishCoalescingRegex = RegExp(r'(\w+)\s*\?\?\s*');
-  static final _tsAccessModifierRegex = RegExp(r'\b(public|private|protected|readonly)\s+');
-  static final _tsAbstractRegex = RegExp(r'\babstract\s+');
-  static final _tsImplementsRegex = RegExp(r'\s+implements\s+[\w,\s]+');
-
-  Future<String> compileTypeScript(String tsCode) async {
-    String js = tsCode;
-
-    js = js.replaceAllMapped(_tsTypeAnnotationRegex, (m) => '${m[1]}${m[2]}');
-    js = js.replaceAllMapped(_tsReturnTypeRegex, (m) => ') ${m[1]}');
-    js = js.replaceAllMapped(_tsVarTypeRegex, (m) => '${m[1]} ${m[2]} = ');
-    js = js.replaceAll(_tsInterfaceRegex, '');
-    js = js.replaceAll(_tsTypeAliasRegex, '');
-    js = js.replaceAllMapped(_tsAsCastRegex, (m) => '');
-    js = js.replaceAllMapped(_tsGenericRegex, (m) => '${m[1]}(');
-    js = js.replaceAllMapped(_tsEnumRegex, (m) {
-        final name = m[1];
-        final body = m[2];
-        final entries = body!.split(',').asMap().entries.map((e) {
-          final trimmed = e.value.trim();
-          if (trimmed.contains('=')) {
-            return trimmed;
-          }
-          return '$trimmed = ${e.key}';
-        }).join(', ');
-        return 'var $name = { $entries };';
-      });
-    js = js.replaceAllMapped(_tsOptionalChainRegex, (m) => m[2] != null ? '(${m[1]} && ${m[1]}.${m[2]}(' : '(${m[1]} && ${m[1]}.');
-    js = js.replaceAllMapped(_tsNullishCoalescingRegex, (m) => '(${m[1]} != null ? ${m[1]} : ');
-    js = js.replaceAll(_tsAccessModifierRegex, '');
-    js = js.replaceAll(_tsAbstractRegex, '');
-    js = js.replaceAllMapped(_tsImplementsRegex, (m) => '');
-
-    return js;
   }
 
   // ===== 自定义库管理 =====
@@ -2657,13 +3659,75 @@ class JsEngine {
 
   dynamic evaluate(String script) {
     if (_jsRuntime == null) return null;
+    // [并发安全] 如果 processJsRule/batchEvaluate 正持有 _evalLock，
+    // 同步 evaluate 无法等待锁，直接返回 null 避免并发调用 _bridgeEval 导致 SIGSEGV
+    if (_evalBusy) {
+      debugPrint('⚠️ evaluate 跳过：JS引擎正忙（_evalLock 占用中）');
+      return null;
+    }
+    _evalBusy = true;
+    final sw = Stopwatch()..start();
+    String? resultStr;
+    bool isError = false;
+    String? errMsg;
     try {
       final result = _jsRuntime!.evaluate(script);
-      if (result.isError) {
-        return null;
-      }
-      return result.stringResult;
+      isError = result.isError;
+      resultStr = result.stringResult;
+      return resultStr;
     } catch (e) {
+      isError = true;
+      errMsg = e.toString();
+      return null;
+    } finally {
+      _evalBusy = false;
+      sw.stop();
+      // 自动 flush JS console 日志（防递归：日志 flush 内部调用 evaluate 时不再次 flush）
+      if (!_isFlushingLogs) {
+        _flushConsoleLogs();
+        // 输出执行链路：脚本预览 + 行数 + 耗时 + 结果
+        _logExecutionTrace(script, sw.elapsedMilliseconds, isError, errMsg ?? resultStr);
+      }
+    }
+  }
+
+  /// 输出 JS 执行链路追踪：脚本预览 + 行数 + 耗时 + 结果
+  void _logExecutionTrace(String script, int elapsedMs, bool isError, String? resultOrErr) {
+    if (!kDebugMode) return;
+    // 日志出锁设计：锁内只记录关键信息，字符串构建移到 AppLogger 中异步处理
+    // 避免锁内在 debugPrint 上停留
+    AppLogger.instance.debug(LogCategory.js, '[JS eval ${elapsedMs}ms ${isError ? "ERROR" : "OK"}] ${script.length > 80 ? "${script.substring(0, 80)}..." : script}',
+      detail: resultOrErr != null && resultOrErr.length > 200 ? '${resultOrErr.substring(0, 200)}...' : (resultOrErr ?? ''));
+  }
+
+  /// 批量 JS 执行（轻量路径，用于目录/搜索列表批量解析）
+  ///
+  /// 跳过 processJsRule 的重路径：不执行 _preCacheBridgeCalls 正则扫描、
+  /// 不构建巨大 wrappedScript、不执行 JsTracer。
+  /// 通过 _evalLock 串行保证线程安全。
+  /// 仅在出错时记录日志（正常路径零日志）。
+  ///
+  /// [script] 完整的 JS 脚本（调用方已构造好，含变量注入）
+  /// 返回 evaluate 的原始字符串结果
+  Future<String?> batchEvaluate(String script) async {
+    if (_jsRuntime == null) return null;
+    try {
+      return _evalLock.synchronized(() {
+        _evalBusy = true;
+        try {
+          final result = _jsRuntime!.evaluate(script);
+          if (result.isError) {
+            // 仅在出错时记录日志
+            AppLogger.instance.logJsError('batchEvaluate', result.stringResult);
+            return null;
+          }
+          return result.stringResult;
+        } finally {
+          _evalBusy = false;
+        }
+      });
+    } catch (e) {
+      AppLogger.instance.logJsError('batchEvaluate', e.toString());
       return null;
     }
   }
@@ -2681,25 +3745,25 @@ class JsEngine {
     }
   }
 
-  Future<dynamic> evaluateTypeScript(String tsCode) async {
-    final jsCode = await compileTypeScript(tsCode);
-    return evaluate(jsCode);
-  }
-
   /// 同步执行 JS 代码（用于 AnalyzeRule 规则解析）
-  /// 默认走 QuickJS，如果代码含 java. 且无 ES6 特征，自动走 Rhino
+  /// 默认走 QuickJS
+  /// 注意：此方法是同步的，不要直接调用 QuickJS FFI 的面板方法（getJsMemoryStats 等）
+  /// 调试面板已移除自动刷新 FFI 调用，避免并发崩溃
   dynamic executeSync(String jsCode, dynamic content, {String? baseUrl, JsEngineType? sourceEngine, Map<String, dynamic>? variables, String? ruleStep}) {
     // 先提取 JS 代码（去掉 <js></js> 标签或 @js: 前缀）
     final extracted = _extractJsCode(jsCode) ?? jsCode;
     final resolved = resolveEngine(extracted, sourceEngine: sourceEngine);
 
-    final engineTag = resolved.engine == JsEngineType.rhino ? 'Rhino→QuickJS' : 'QuickJS';
+    final engineTag = 'QuickJS';
     final codePreview = resolved.code;
 
-    if (kDebugMode) {
-      AppLogger.instance.debug(LogCategory.js, '[$engineTag] 同步执行JS',
-        detail: 'code=$codePreview, content=${content?.toString().length ?? 0}chars');
-    }
+    // 显式增加 QuickJS 执行计数（统一计数入口）
+    AppLogger.instance.incrementQuickjsCount();
+    // JS 执行链路日志（info 级别，Release 模式可见）：输出完整代码与输入
+    AppLogger.instance.logJsExecute(engineTag, codePreview);
+    AppLogger.instance.logJsStep(engineTag, '同步执行JS 开始',
+      detail: 'ruleStep=${ruleStep ?? "N/A"}, codeLen=${codePreview.length}, contentLen=${content?.toString().length ?? 0}');
+    AppLogger.instance.logJsInput(engineTag, content?.toString(), tag: 'sync');
 
     // 追踪树：创建节点
     JsTraceNode? traceNode;
@@ -2725,30 +3789,52 @@ class JsEngine {
       tracer.push(traceNode);
     }
 
-    if (resolved.engine == JsEngineType.rhino) {
-      // Rhino 不支持同步调用（MethodChannel 是异步的），降级到 QuickJS
-    }
-
-    final result = _executeQuickJSSync(resolved.code, content, baseUrl: baseUrl, variables: variables);
-
-    // 追踪树：记录输出
-    if (traceNode != null) {
-      final outputStr = result?.toString();
-      final outputShort = outputStr != null && outputStr.length > 200 ? '${outputStr.substring(0, 200)}...' : outputStr;
-      JsTracer.instance.pop(
-        outputPreview: outputShort,
-        outputType: result?.runtimeType.toString(),
-      );
+    dynamic result;
+    Object? caughtError;
+    String? evalError;
+    _lastEvalError = null;
+    try {
+      result = _executeQuickJSSync(resolved.code, content, baseUrl: baseUrl, variables: variables);
+      evalError = _lastEvalError;
+    } catch (e) {
+      caughtError = e;
+      rethrow;
+    } finally {
+      // 追踪树：记录输出（无论成功或异常都 pop，保证栈平衡）
+      if (traceNode != null) {
+        final outputStr = result?.toString();
+        // 输出完整内容到日志（不再截断），便于调试页面查看
+        JsTracer.instance.pop(
+          outputPreview: outputStr,
+          outputType: result?.runtimeType.toString(),
+          error: caughtError?.toString() ?? evalError,
+        );
+      }
+      // 输出完整执行结果到日志链路
+      AppLogger.instance.logJsOutput(engineTag, result?.toString(),
+        outputType: result?.runtimeType.toString(), tag: 'sync');
     }
 
     return result;
   }
 
   /// QuickJS 同步执行
+  /// 支持并发防护 _evalBusy：如果 processJsRule 正持有锁，快速返回 null 避免 QuickJS 崩溃
   dynamic _executeQuickJSSync(String jsCode, dynamic content, {String? baseUrl, Map<String, dynamic>? variables}) {
     if (!_initialized || _jsRuntime == null) {
       return null;
     }
+
+    // 并发防护：_evalBusy=true 表示 processJsRule 正通过 _evalLock 占用 QuickJS
+    // 同步路径无法等待锁释放，直接返回 null，调用方（analyze_rule）收到 null 自动兜底
+    if (_evalBusy) {
+      _lastEvalError = 'JS引擎正忙（processJsRule 占用中），跳过同步执行';
+      debugPrint('⚠️ $_lastEvalError');
+      AppLogger.instance.warn(LogCategory.parse, _lastEvalError!);
+      return null;
+    }
+
+    _evalBusy = true;
     try {
       // content 序列化：List/Map 直接 jsonEncode，String 也 jsonEncode（加引号转义），其他 toString
       final contentStr = serializeForJs(content);
@@ -2803,6 +3889,10 @@ class JsEngine {
 
           var __returnValue = (function() { $wrappedCode })();
           if (typeof __returnValue === 'object' && __returnValue !== null) {
+            // Uint8Array 转普通数组再 JSON（Legado ByteArray 契约）
+            if (__returnValue instanceof Uint8Array) {
+              return JSON.stringify(Array.from(__returnValue));
+            }
             return JSON.stringify(__returnValue);
           }
           return __returnValue;
@@ -2812,26 +3902,23 @@ class JsEngine {
       _flushConsoleLogs();
       if (evalResult.isError) {
         AppLogger.instance.logJsError('QuickJS', evalResult.stringResult);
-        // 追踪树：记录错误
-        if (JsTracer.instance.enabled && JsTracer.instance._stack.isNotEmpty) {
-          JsTracer.instance._stack.last.error = evalResult.stringResult;
-        }
+        // 追踪树：记录错误（由 executeSync 的 finally 统一 pop，这里只暂存错误信息）
+        _lastEvalError = evalResult.stringResult;
         return null;
       }
       final parsed = _parseJsResult(evalResult.stringResult);
-      if (kDebugMode) {
-        final resultPreview = parsed?.toString().length ?? 0;
-        AppLogger.instance.debug(LogCategory.js, '[QuickJS] 同步执行完成',
-          detail: 'resultType=${parsed?.runtimeType}, resultLen=$resultPreview, isError=${evalResult.isError}');
-      }
+      // 同步执行完成日志（info 级别，Release 模式可见）
+      AppLogger.instance.logJsStep('QuickJS', '同步执行完成',
+        detail: 'resultType=${parsed?.runtimeType}, resultLen=${parsed?.toString().length ?? 0}, isError=${evalResult.isError}');
       return parsed;
     } catch (e) {
       AppLogger.instance.logJsError('QuickJS', e.toString());
-      // 追踪树：记录异常
-      if (JsTracer.instance.enabled && JsTracer.instance._stack.isNotEmpty) {
-        JsTracer.instance._stack.last.error = e.toString();
-      }
+      _lastEvalError = e.toString();
+      // 引擎级错误（OOM/段错误兜底）记录到崩溃日志
+      unawaited(CrashLogService.instance.logJsEngineError('QuickJS.eval', e.toString()));
       return null;
+    } finally {
+      _evalBusy = false;
     }
   }
 
@@ -2866,7 +3953,7 @@ class JsEngine {
   }
 
   /// 从规则字符串中提取 JS 代码
-  /// 支持：<js>code</js>、@js:code、@rhino:code、@quickjs:code
+  /// 支持：<js>code</js>、@js:code
   String? _extractJsCode(String rule) {
     // <js>code</js> 格式
     final jsTagMatch = _jsTagRegex.firstMatch(rule);
@@ -2874,7 +3961,7 @@ class JsEngine {
       return jsTagMatch.group(1)?.trim();
     }
 
-    // @js:code、@rhino:code、@quickjs:code、@java:code、@ts:code 格式
+    // @js:code 格式
     if (_jsPrefixRegex.hasMatch(rule)) {
       return rule.replaceFirst(_jsPrefixRegex, '').trim();
     }
@@ -2901,12 +3988,10 @@ class JsEngine {
     final extracted = _extractJsCode(jsCode) ?? jsCode;
     final resolved = resolveEngine(extracted, sourceEngine: sourceEngine);
 
-    if (kDebugMode) {
-      AppLogger.instance.logJsExecute(
-        resolved.engine == JsEngineType.rhino ? 'Rhino' : 'QuickJS',
-        resolved.code,
-      );
-    }
+    // 显式增加 QuickJS 执行计数（统一计数入口）
+    AppLogger.instance.incrementQuickjsCount();
+    // JS 执行链路日志（info 级别，Release 模式可见）：打印完整 JS 代码
+    AppLogger.instance.logJsExecute('QuickJS', resolved.code);
 
     // 合并 env：传入的 env 优先，补充 baseUrl
     final mergedEnv = <String, dynamic>{
@@ -2921,12 +4006,6 @@ class JsEngine {
     // 否则用 content（String 类型，会被 jsonEncode 加引号）
     final actualResult = dynamicContent ?? content;
 
-    if (resolved.engine == JsEngineType.rhino) {
-      // Rhino 路径：result 参数是 String?，需要正确序列化
-      final rhinoResult = actualResult is String ? actualResult : serializeContent(actualResult);
-      return _executeRhinoRule(resolved.code, result: rhinoResult.isEmpty ? content : rhinoResult, env: mergedEnv);
-    }
-
     // 借鉴 legado 的 preCache 机制：在执行 JS 前，预缓存 java.ajax/get/post 的结果
     try {
       await _preCacheBridgeCalls(resolved.code, env: mergedEnv);
@@ -2934,14 +4013,24 @@ class JsEngine {
       AppLogger.instance.warn(LogCategory.js, '预缓存桥接调用失败，继续执行JS', detail: e.toString());
     }
 
-    // 调试：输出 processJsRule 的 result 参数类型和长度
-    if (kDebugMode) {
-      AppLogger.instance.debug(LogCategory.js, '[processJsRule] result type=${actualResult.runtimeType}, len=${actualResult is String ? actualResult.length : (actualResult is List ? actualResult.length : '?')}');
-    }
+    // 输出 processJsRule 入参信息（info 级别，Release 模式可见）
+    AppLogger.instance.logJsInput('QuickJS',
+      actualResult is String ? actualResult : actualResult?.toString(),
+      tag: 'processJsRule');
+    AppLogger.instance.logJsStep('QuickJS', '[processJsRule] 入参',
+      detail: 'result type=${actualResult.runtimeType}, len=${actualResult is String ? actualResult.length : (actualResult is List ? actualResult.length : '?')}, baseUrl=$baseUrl');
 
-    return _evalLock.synchronized(() =>
-      _executeQuickJSRule(resolved.code, result: actualResult, env: mergedEnv, variables: _extractVariables(mergedEnv))
-    );
+    // 让出事件循环，避免长时间 JS 执行阻塞 UI 刷新
+    await Future(() {});
+
+    return _evalLock.synchronized(() {
+      _evalBusy = true;
+      try {
+        return _executeQuickJSRule(resolved.code, result: actualResult, env: mergedEnv, variables: _extractVariables(mergedEnv));
+      } finally {
+        _evalBusy = false;
+      }
+    });
   }
 
   /// 处理带书籍上下文的 JS 规则
@@ -2962,18 +4051,6 @@ class JsEngine {
     // 先提取 JS 代码
     final extracted = _extractJsCode(jsCode) ?? jsCode;
     final resolved = resolveEngine(extracted, sourceEngine: sourceEngine);
-
-    final env = <String, dynamic>{
-      'book': book ?? {},
-      'chapter': chapter ?? {},
-      'source': source ?? {},
-      'cookie': <String, String>{},
-      'baseUrl': book?['bookUrl'] ?? '',
-    };
-
-    if (resolved.engine == JsEngineType.rhino) {
-      return _executeRhinoRule(resolved.code, result: content, env: env);
-    }
 
     return _evalLock.synchronized(() async {
       try {
@@ -3011,11 +4088,17 @@ class JsEngine {
 
           var __returnValue = (function() { $wrappedCode })();
           if (typeof __returnValue === 'object' && __returnValue !== null) {
+            // Uint8Array 转普通数组再 JSON（Legado ByteArray 契约）
+            if (__returnValue instanceof Uint8Array) {
+              return JSON.stringify(Array.from(__returnValue));
+            }
             return JSON.stringify(__returnValue);
           }
           return __returnValue;
         })();
       ''';
+      // 先 yield 让出事件循环
+      await Future(() {});
       final evalResult = _jsRuntime!.evaluate(wrappedScript);
       _flushConsoleLogs();
       if (evalResult.isError) {
@@ -3023,22 +4106,18 @@ class JsEngine {
         return null;
       }
       return evalResult.stringResult;
-    } catch (e) {
-      AppLogger.instance.logJsError('QuickJS', e.toString());
-      return null;
-    }
+      } catch (e) {
+        AppLogger.instance.logJsError('QuickJS', e.toString());
+        return null;
+      }
     });
   }
 
-  /// 执行书源规则（统一入口，支持分流）
+  /// 执行书源规则（统一入口）
   ///
-  /// 规则前缀路由：
-  /// - @rhino: / <rhino> → Rhino 引擎
-  /// - @quickjs: / <quickjs> → QuickJS 引擎
-  /// - @java: / <java> → Rhino 引擎（Java 互操作）
-  /// - @ts: / <ts> → TS 编译后 QuickJS 执行
-  /// - @js: / <js> → 自动识别引擎
-  /// - 无前缀 → 自动识别引擎
+  /// 规则前缀：
+  /// - @js: / <js> → 剥离前缀后走 QuickJS
+  /// - 无前缀 → 直接走 QuickJS
   Future<String?> evaluateBookRule(String ruleCode, {
     dynamic result,
     Map<String, dynamic>? env,
@@ -3046,17 +4125,6 @@ class JsEngine {
   }) async {
     final resolved = resolveEngine(ruleCode, sourceEngine: sourceEngine);
     var code = resolved.code;
-
-    // TS 需要先编译
-    if (ruleCode.startsWith('@ts:') || ruleCode.startsWith('<ts>')) {
-      code = await compileTypeScript(code);
-    }
-
-    if (resolved.engine == JsEngineType.rhino) {
-      // Rhino 路径：result 需要序列化为 String
-      final rhinoResult = result is String ? result : serializeContent(result);
-      return _executeRhinoRule(code, result: rhinoResult.isEmpty ? null : rhinoResult, env: env);
-    }
 
     return _evalLock.synchronized(() =>
       _executeQuickJSRule(code, result: result, env: env)
@@ -3094,29 +4162,36 @@ class JsEngine {
     try {
       // 断点1：记录原始JS代码
       final codePreview = jsCode;
-      if (kDebugMode) {
-        AppLogger.instance.debug(LogCategory.js, '[QuickJS] 开始异步执行',
-          detail: codePreview);
-      }
+      // JS 执行链路日志（info 级别，Release 模式可见）：打印完整 JS 代码
+      AppLogger.instance.logJsStep('QuickJS', '[QuickJS] 开始异步执行',
+        detail: 'ruleStep=${ruleStep ?? "N/A"}, codeLen=${codePreview.length}');
+      AppLogger.instance.logJsInput('QuickJS',
+        result is String ? result : result?.toString(),
+        tag: 'async');
 
       // 追踪树：创建节点
       if (JsTracer.instance.enabled) {
         final tracer = JsTracer.instance;
-        // 安全生成 inputPreview：List/Map 用 jsonEncode，String 截断，其他 toString
+        // 安全生成 inputPreview：List/Map 用 jsonEncode（截断），String 截断，其他 toString
         String? inputPreview;
         if (result is List || result is Map) {
           final encoded = jsonEncode(result);
-          inputPreview = encoded;
+          inputPreview = encoded.length > 500 ? '${encoded.substring(0, 500)}...' : encoded;
         } else if (result is String) {
-          inputPreview = result;
+          inputPreview = result.length > 500 ? '${result.substring(0, 500)}...' : result;
         } else {
           inputPreview = result?.toString();
+          if (inputPreview != null && inputPreview.length > 500) {
+            inputPreview = '${inputPreview.substring(0, 500)}...';
+          }
         }
+        final codePreviewTrunc = codePreview.length > 500
+            ? '${codePreview.substring(0, 500)}...' : codePreview;
         if (tracer._stack.isEmpty) {
-          traceNode = tracer.beginRoot('_executeQuickJSRule', 'QuickJS', codePreview,
+          traceNode = tracer.beginRoot('_executeQuickJSRule', 'QuickJS', codePreviewTrunc,
             inputPreview: inputPreview, ruleStep: ruleStep);
         } else {
-          traceNode = tracer.addChild('_executeQuickJSRule', 'QuickJS', codePreview,
+          traceNode = tracer.addChild('_executeQuickJSRule', 'QuickJS', codePreviewTrunc,
             inputPreview: inputPreview, ruleStep: ruleStep);
         }
         tracer.push(traceNode);
@@ -3125,11 +4200,9 @@ class JsEngine {
       // 自动补 return
       final wrappedCode = _wrapJsCode(jsCode);
 
-      // 断点2：记录包装后的代码
-      if (kDebugMode) {
-        AppLogger.instance.debug(LogCategory.js, '[QuickJS] 代码包装完成',
-          detail: wrappedCode);
-      }
+      // 断点2：记录包装后的代码（info 级别，Release 模式可见）
+      AppLogger.instance.logJsStep('QuickJS', '[QuickJS] 代码包装完成',
+        detail: wrappedCode);
 
       // 构建共享作用域变量注入（借鉴 legado 的 scope 链）
       final sharedVars = <String, String>{};
@@ -3227,12 +4300,17 @@ class JsEngine {
 
           var __returnValue = (function() { $wrappedCode })();
           if (typeof __returnValue === 'object' && __returnValue !== null) {
+            // Uint8Array 转普通数组再 JSON（Legado ByteArray 契约）
+            if (__returnValue instanceof Uint8Array) {
+              return JSON.stringify(Array.from(__returnValue));
+            }
             return JSON.stringify(__returnValue);
           }
           return __returnValue;
         })();
       ''';
-
+      // 先 yield 让出事件循环，避免长时间 JS 执行阻塞 UI 刷新
+      await Future(() {});
       final evalResult = _jsRuntime!.evaluate(wrappedScript);
 
       // 提取 console 缓存的日志，同步到 AppLogger（借鉴 legado 的调试输出机制）
@@ -3241,10 +4319,9 @@ class JsEngine {
       // 断点3：记录执行结果
       final evalResultStr = evalResult.stringResult;
       final resultShort = evalResultStr;
-      if (kDebugMode) {
-        AppLogger.instance.debug(LogCategory.js, '[QuickJS] 异步执行完成',
-          detail: 'isError=${evalResult.isError}, result=$resultShort');
-      }
+      // 异步执行完成日志（info 级别，Release 模式可见）
+      AppLogger.instance.logJsStep('QuickJS', '[QuickJS] 异步执行完成',
+        detail: 'isError=${evalResult.isError}, result=$resultShort');
 
       if (evalResult.isError) {
         AppLogger.instance.logJsError('QuickJS', evalResult.stringResult);
@@ -3256,6 +4333,8 @@ class JsEngine {
             error: resultShort,
           );
         }
+        // 输出执行树到日志（info 级别）
+        _logCurrentTraceTree();
         return null;
       }
       final strResult = evalResult.stringResult;
@@ -3266,6 +4345,10 @@ class JsEngine {
           outputType: 'String',
         );
       }
+      // 输出完整执行结果到日志链路（info 级别）
+      AppLogger.instance.logJsOutput('QuickJS', strResult, outputType: 'String', tag: 'async');
+      // 输出执行树到日志（info 级别）
+      _logCurrentTraceTree();
       // undefined → 返回空字符串而不是 null（书源规则可能不需要返回值）
       if (strResult == 'undefined') return '';
       // null → 返回 Dart null，避免 "null" 字符串被当作有效结果
@@ -3280,10 +4363,22 @@ class JsEngine {
           error: e.toString(),
         );
       }
+      // 异常时也输出执行树
+      _logCurrentTraceTree();
       // 即使异常也尝试提取 console 日志
       _flushConsoleLogs();
       return null;
     }
+  }
+
+  /// 输出当前 JsTracer 执行树到日志（info 级别）
+  /// 当栈为空时（根节点已 pop）才输出整棵树，避免中途输出碎片
+  void _logCurrentTraceTree() {
+    if (!JsTracer.instance.enabled) return;
+    // 仅当追踪栈为空时输出整棵树（说明根节点已完成）
+    if (!JsTracer.instance.isStackEmpty) return;
+    final treeStr = JsTracer.instance.getTreeString();
+    AppLogger.instance.logJsTree('QuickJS', treeStr);
   }
 
   /// 提取 QuickJS 中 console 缓存的日志，同步到 AppLogger
@@ -3293,6 +4388,9 @@ class JsEngine {
     if (!_initialized || _jsRuntime == null) return;
     // Release 模式跳过日志提取（性能优化）
     if (kReleaseMode) return;
+    // 防递归：内部调用 evaluate 时不再次触发 _flushConsoleLogs
+    if (_isFlushingLogs) return;
+    _isFlushingLogs = true;
     try {
       // 单次 evaluate：检查+获取+清除日志
       final result = evaluate('''(function(){
@@ -3334,48 +4432,8 @@ class JsEngine {
             AppLogger.instance.info(LogCategory.js, msg);
         }
       }
-    } catch (_) {}
-  }
-
-  // ===== Rhino 规则执行（通过 NativeChannel）=====
-
-  Future<String?> _executeRhinoRule(String code, {
-    String? result,
-    Map<String, dynamic>? env,
-  }) async {
-    if (kIsWeb) return null;
-    try {
-      // 同步桥接缓存到 Rhino 环境
-      final bindings = <String, dynamic>{
-        'result': result ?? '',
-        'baseUrl': env?['baseUrl'] ?? '',
-        ...?env,
-        '_bridgeCache': Map<String, String>.from(_bridgeCache),
-      };
-
-      // 判断走 evaluateJavaRule 还是 executeScript
-      // 含 Legado 规则前缀 → evaluateJavaRule（支持 @css:/@text:/@attr: 等）
-      // 纯 JS 代码 → executeScript（通用 Rhino 执行）
-      final isLegadoRule = code.startsWith('@css:') ||
-          code.startsWith('@text:') ||
-          code.startsWith('@attr:') ||
-          code.startsWith('java:');
-
-      if (isLegadoRule) {
-        return await NativeChannel.instance.evaluateJavaRule(
-          code,
-          result: result,
-          env: bindings,
-        );
-      }
-
-      return await NativeChannel.instance.executeScript(
-        code,
-        bindings: bindings,
-      );
-    } catch (e) {
-      AppLogger.instance.logJsError('Rhino', e.toString());
-      return null;
+    } catch (_) {} finally {
+      _isFlushingLogs = false;
     }
   }
 
@@ -3395,6 +4453,10 @@ class JsEngine {
   /// 序列化 content 为 JSON 字符串（用于嵌入 JS 脚本）
   static String serializeForJs(dynamic content) {
     if (content is List || content is Map) {
+      // Uint8List → JS new Uint8Array([...])，匹配 Legado ByteArray 契约
+      if (content is Uint8List) {
+        return 'new Uint8Array([${content.join(',')}])';
+      }
       return jsonEncode(content);
     } else if (content is String) {
       return jsonEncode(content);
@@ -3416,6 +4478,8 @@ class JsEngine {
           return text.replace(new RegExp(pattern, 'g'), replacement);
         })();
       ''';
+      // 先 yield 让出事件循环
+      await Future(() {});
       final evalResult = _jsRuntime!.evaluate(script);
       if (evalResult.isError) return null;
       return evalResult.stringResult;
@@ -3424,6 +4488,7 @@ class JsEngine {
     }
   }
 
+  /// cssSelect（异步，每次调用前 yield）
   Future<String?> cssSelect(String html, String selector) async {
     if (!_initialized || _jsRuntime == null) return null;
     try {
@@ -3432,6 +4497,8 @@ class JsEngine {
           return java.jsoup.selectFirst(${jsonEncode(html)}, ${jsonEncode(selector)});
         })();
       ''';
+      // 先 yield 让出事件循环
+      await Future(() {});
       final evalResult = _jsRuntime!.evaluate(script);
       if (evalResult.isError) return null;
       return evalResult.stringResult;
@@ -3460,6 +4527,8 @@ class JsEngine {
           return JSON.stringify(result);
         })();
       ''';
+      // 先 yield 让出事件循环
+      await Future(() {});
       final evalResult = _jsRuntime!.evaluate(script);
       if (evalResult.isError) return null;
       return evalResult.stringResult;
@@ -3563,6 +4632,20 @@ class JsEngine {
     _jsLibCache.remove(sourceUrl);
   }
 
+  /// 清除 JS 侧 _javaCache（桥接预缓存结果）
+  /// 防止调试多个书源/规则时 _javaCache 无限膨胀导致 QuickJS 堆 OOM
+  void clearJavaCache() {
+    if (_jsRuntime == null || !_initialized) return;
+    if (!_nativeLibChecked) return; // native lib 未就绪 → 跳过，不崩溃
+    try {
+      evaluate('_javaCache = {};');
+      _cachedKeys.clear();
+      _bridgeCache.clear();
+    } catch (e) {
+      debugPrint('清除 _javaCache 失败: $e');
+    }
+  }
+
   Future<void> loadSharedScope(String sourceUrl, String? jsLib) async {
     if (jsLib == null || jsLib.trim().isEmpty) return;
     if (_sharedScopeVars.containsKey(sourceUrl)) return;
@@ -3621,7 +4704,43 @@ class JsEngine {
   /// 通过 NativeChannel 预获取结果，写入 _javaCache
   /// 借鉴 legado 的 preCacheHttpResults 机制，但自动扫描而非手动传入
   /// 优化：快速预检，无桥接调用时直接跳过
-  static final _bridgeCallPattern = RegExp(r'\bjava\.(ajax|get|post|head|connect|aesEncode|aesDecode|md5Encode|sha1Encode|sha256Encode|hmacSHA256|base64Encode|base64Decode)\b|\bCryptoJS\b|\bfetch\s*\(');
+  static final _bridgeCallPattern = RegExp(
+    r'\bjava\.(ajax|get|post|head|connect|aesEncode|aesDecode|md5Encode|sha1Encode|sha256Encode|hmacSHA256|base64Encode|base64Decode|webView|webViewGetSource|webViewGetOverrideUrl|startBrowserAwait|getVerificationCode|downloadFile|cacheFile|readFile|readTxtFile|writeFile|deleteFile|getTxtInFolder|importScript|unzipFile|un7zFile|unrarFile|unArchiveFile|getZipStringContent|getRarStringContent|get7zStringContent|startBrowser|openUrl|openVideoPlayer|getWebViewUA|androidId|randomUUID)\b|\bCryptoJS\b|\bfetch\s*\(',
+  );
+
+  /// 扫描 java.webView/getSource/getOverrideUrl 调用，提取字面量参数
+  /// 参数顺序：webView(html, url, js, cacheFirst), webViewGetSource(html, url, js, sourceRegex, ...), webViewGetOverrideUrl(html, url, js, overrideUrlRegex, ...)
+  /// startBrowserAwait(url, title, ...), getVerificationCode(imageUrl)
+  static final _webViewCallPattern = RegExp(
+    r"""java\.(webView|webViewGetSource|webViewGetOverrideUrl|startBrowserAwait|getVerificationCode)\s*\(\s*([^)]*)\)""",
+    multiLine: true,
+  );
+
+  /// 扫描 java.downloadFile/cacheFile 调用，提取 URL 字面量
+  static final _downloadCallPattern = RegExp(
+    r"""java\.(downloadFile|cacheFile)\s*\(\s*["']([^"']+)["']""",
+    multiLine: true,
+  );
+
+  /// 扫描文件操作调用：readFile/readTxtFile/writeFile/deleteFile/getTxtInFolder/importScript
+  /// 参数为字面量路径
+  static final _fileCallPattern = RegExp(
+    r"""java\.(readFile|readTxtFile|writeFile|deleteFile|getTxtInFolder|importScript)\s*\(\s*["']([^"']+)["']""",
+    multiLine: true,
+  );
+
+  /// 扫描压缩包操作：unzipFile/un7zFile/unrarFile/unArchiveFile(path, [password])
+  /// getZipStringContent/getRarStringContent/get7zStringContent(url, path, [charset], [password])
+  static final _archiveCallPattern = RegExp(
+    r"""java\.(unzipFile|un7zFile|unrarFile|unArchiveFile|getZipStringContent|getRarStringContent|get7zStringContent)\s*\(\s*([^)]*)\)""",
+    multiLine: true,
+  );
+
+  /// 扫描 URL 启动调用：startBrowser/openUrl/openVideoPlayer/getWebViewUA
+  static final _urlLaunchPattern = RegExp(
+    r"""java\.(startBrowser|openUrl|openVideoPlayer)\s*\(\s*["']([^"']+)["']""",
+    multiLine: true,
+  );
 
   Future<void> _preCacheBridgeCalls(String jsCode, {Map<String, dynamic>? env}) async {
     if (_jsRuntime == null) return;
@@ -3630,6 +4749,21 @@ class JsEngine {
 
     final baseUrl = env?['baseUrl'] as String? ?? '';
     final httpUrls = <String>{};
+
+    // 0. 预缓存设备信息 & WebView UA & 配置（同步可计算，直接写入 _javaCache）
+    try {
+      final deviceInfo = await NativeChannel.instance.getDeviceInfo();
+      if (deviceInfo != null) {
+        await preCacheHttpResults({
+          'webview_ua': _defaultWebViewUA(deviceInfo),
+          'device_info': jsonEncode(deviceInfo),
+        });
+      } else {
+        await preCacheHttpResults({
+          'webview_ua': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+        });
+      }
+    } catch (_) {}
 
     // 1. 扫描字面量 URL: java.ajax("url"), java.get("url"), java.post("url"), fetch("url")
     for (final match in _literalPattern.allMatches(jsCode)) {
@@ -3727,9 +4861,16 @@ class JsEngine {
       AppLogger.instance.debug(LogCategory.js, '预缓存 ${httpUrls.length} 个HTTP请求');
       // 从 env 中获取自定义 headers（书源配置的 header 字段）
       final customHeaders = env?['headers'] as Map<String, String>?;
-      final futures = httpUrls.map((url) async {
+      final results = await _runWithConcurrency(() => httpUrls.map((url) async {
         try {
-          final result = await NativeChannel.instance.httpGet(url, headers: customHeaders);
+          String? result;
+          if (url.startsWith('http://')) {
+            final r = nativeHttpGet(url,
+                headers: customHeaders?.entries.map((e) => '${e.key}: ${e.value}').join('\r\n'));
+            result = r?['body'] as String?;
+          } else {
+            result = await NativeChannel.instance.httpGet(url, headers: customHeaders);
+          }
           if (result != null) {
             return MapEntry('http_get:$url', result);
           }
@@ -3737,9 +4878,7 @@ class JsEngine {
           AppLogger.instance.warn(LogCategory.js, '预缓存HTTP失败: $url', detail: e.toString());
         }
         return null;
-      });
-
-      final results = await Future.wait(futures);
+      }));
       final cacheEntries = <String, String>{};
       for (final entry in results) {
         if (entry != null) {
@@ -3761,8 +4900,8 @@ class JsEngine {
           if (str != null) {
             final cacheKey = 'md5:$str';
             if (!_isCached(cacheKey)) {
-              final result = await NativeChannel.instance.md5(str);
-              if (result != null) cryptoResults[cacheKey] = result;
+              final result = nativeMd5(str);
+              cryptoResults[cacheKey] = result;
             }
           }
         }
@@ -3773,10 +4912,8 @@ class JsEngine {
           if (str != null) {
             final cacheKey = 'sha1:$str';
             if (!_isCached(cacheKey)) {
-              try {
-                final result = await NativeChannel.instance.sha1(str);
-                if (result != null) cryptoResults[cacheKey] = result;
-              } catch (_) {}
+              final result = nativeSha1(str);
+              if (result.isNotEmpty) cryptoResults[cacheKey] = result;
             }
           }
         }
@@ -3788,8 +4925,8 @@ class JsEngine {
             final cacheKey = 'sha256:$str';
             if (!_isCached(cacheKey)) {
               try {
-                final result = await NativeChannel.instance.sha256(str);
-                if (result != null) cryptoResults[cacheKey] = result;
+                final result = nativeSha256(str);
+                if (result.isNotEmpty) cryptoResults[cacheKey] = result;
               } catch (_) {}
             }
           }
@@ -3803,8 +4940,8 @@ class JsEngine {
             final cacheKey = 'hmac_sha256:$data:$key';
             if (!_isCached(cacheKey)) {
               try {
-                final result = await NativeChannel.instance.hmacSHA256(data, key);
-                if (result != null) cryptoResults[cacheKey] = result;
+                final result = nativeHmacSha256(data, key);
+                if (result.isNotEmpty) cryptoResults[cacheKey] = result;
               } catch (_) {}
             }
           }
@@ -3837,13 +4974,20 @@ class JsEngine {
         }
         if (postUrls.isNotEmpty) {
           final customHeaders = env?['headers'] as Map<String, String>?;
-          final postFutures = postUrls.entries.map((entry) async {
+          final postResults = await _runWithConcurrency(() => postUrls.entries.map((entry) async {
             try {
-              final result = await NativeChannel.instance.httpPost(
-                entry.key,
-                body: entry.value,
-                headers: customHeaders,
-              );
+              String? result;
+              if (entry.key.startsWith('http://')) {
+                final hdr = customHeaders?.entries.map((e) => '${e.key}: ${e.value}').join('\r\n');
+                final r = nativeHttpPost(entry.key, entry.value, headers: hdr);
+                result = r?['body'] as String?;
+              } else {
+                result = await NativeChannel.instance.httpPost(
+                  entry.key,
+                  body: entry.value,
+                  headers: customHeaders,
+                );
+              }
               if (result != null) {
                 return MapEntry('http_post:${entry.key}', result);
               }
@@ -3851,8 +4995,7 @@ class JsEngine {
               AppLogger.instance.warn(LogCategory.js, '预缓存POST失败: ${entry.key}', detail: e.toString());
             }
             return null;
-          });
-          final postResults = await Future.wait(postFutures);
+          }));
           final postCacheEntries = <String, String>{};
           for (final entry in postResults) {
             if (entry != null) postCacheEntries[entry.key] = entry.value;
@@ -3880,7 +5023,7 @@ class JsEngine {
         }
         if (headUrls.isNotEmpty) {
           final customHeaders = env?['headers'] as Map<String, String>?;
-          final headFutures = headUrls.map((url) async {
+          final headResults = await _runWithConcurrency(() => headUrls.map((url) async {
             try {
               final result = await NativeChannel.instance.httpHead(url, headers: customHeaders);
               if (result != null) {
@@ -3891,8 +5034,7 @@ class JsEngine {
               AppLogger.instance.warn(LogCategory.js, '预缓存HEAD失败: $url', detail: e.toString());
             }
             return null;
-          });
-          final headResults = await Future.wait(headFutures);
+          }));
           final headCacheEntries = <String, String>{};
           for (final entry in headResults) {
             if (entry != null) headCacheEntries[entry.key] = entry.value;
@@ -3912,7 +5054,7 @@ class JsEngine {
           }
         }
         if (cookieUrls.isNotEmpty) {
-          final cookieFutures = cookieUrls.map((tag) async {
+          final cookieResults = await _runWithConcurrency(() => cookieUrls.map((tag) async {
             try {
               final result = await NativeChannel.instance.getCookie(tag);
               if (result != null) {
@@ -3922,8 +5064,7 @@ class JsEngine {
               AppLogger.instance.warn(LogCategory.js, '预缓存Cookie失败: $tag', detail: e.toString());
             }
             return null;
-          });
-          final cookieResults = await Future.wait(cookieFutures);
+          }));
           final cookieCacheEntries = <String, String>{};
           for (final entry in cookieResults) {
             if (entry != null) cookieCacheEntries[entry.key] = entry.value;
@@ -3934,6 +5075,373 @@ class JsEngine {
         }
       }),
     ]);
+
+    // 6.5 预缓存 WebView 调用（接入 NativeChannel.executeWebViewJs）
+    // 扫描 java.webView/webViewGetSource/webViewGetOverrideUrl/startBrowserAwait/getVerificationCode
+    final webViewFutures = <Future<MapEntry<String, String>?>>[];
+    for (final match in _webViewCallPattern.allMatches(jsCode)) {
+      final method = match.group(1)!;
+      final argsStr = match.group(2) ?? '';
+      // 简单参数分割（不支持嵌套括号，但 Legado 书源基本是字面量）
+      final args = _splitArgs(argsStr);
+      if (args.isEmpty) continue;
+
+      // 各方法对应不同的缓存 key
+      String cacheKey;
+      String? url, jsCode, sourceRegex, overrideRegex, html, imageUrl;
+      switch (method) {
+        case 'webView':
+          // webView(html, url, js, cacheFirst)
+          if (args.length < 2) continue;
+          html = _stripQuotes(args[0]);
+          url = _stripQuotes(args[1]);
+          jsCode = args.length >= 3 ? _stripQuotes(args[2]) : '';
+          cacheKey = 'webview:${url ?? ''}:${(html ?? '').length}';
+          break;
+        case 'webViewGetSource':
+          // webViewGetSource(html, url, js, sourceRegex, cacheFirst, delayTime)
+          if (args.length < 4) continue;
+          html = _stripQuotes(args[0]);
+          url = _stripQuotes(args[1]);
+          jsCode = _stripQuotes(args[2]);
+          sourceRegex = _stripQuotes(args[3]);
+          cacheKey = 'webview_src:${url ?? ''}:${sourceRegex ?? ''}';
+          break;
+        case 'webViewGetOverrideUrl':
+          // webViewGetOverrideUrl(html, url, js, overrideUrlRegex, cacheFirst, delayTime)
+          if (args.length < 4) continue;
+          html = _stripQuotes(args[0]);
+          url = _stripQuotes(args[1]);
+          jsCode = _stripQuotes(args[2]);
+          overrideRegex = _stripQuotes(args[3]);
+          cacheKey = 'webview_override:${url ?? ''}:${overrideRegex ?? ''}';
+          break;
+        case 'startBrowserAwait':
+          // startBrowserAwait(url, title, refetchAfterSuccess, html)
+          if (args.isEmpty) continue;
+          url = _stripQuotes(args[0]);
+          cacheKey = 'browser:${url ?? ''}';
+          jsCode = ''; // 浏览器等待通常不需要 JS
+          break;
+        case 'getVerificationCode':
+          // getVerificationCode(imageUrl)
+          if (args.isEmpty) continue;
+          imageUrl = _stripQuotes(args[0]);
+          cacheKey = 'captcha:${imageUrl ?? ''}';
+          url = imageUrl; // 复用 url 字段
+          jsCode = '';
+          break;
+        default:
+          continue;
+      }
+
+      if (url == null || url.isEmpty || !url.startsWith('http')) continue;
+
+      webViewFutures.add(() async {
+        try {
+          final result = await NativeChannel.instance.executeWebViewJs(
+            url: url!,
+            jsCode: jsCode ?? 'document.documentElement.outerHTML',
+            sourceRegex: sourceRegex,
+            html: html,
+            delayTime: 500, // 默认延迟 500ms 等 WebView 渲染
+          );
+          if (result != null && result.isNotEmpty) {
+            return MapEntry(cacheKey, result);
+          }
+        } catch (_) {}
+        return null;
+      }());
+    }
+    if (webViewFutures.isNotEmpty) {
+      final webResults = await Future.wait(webViewFutures);
+      final webCacheEntries = <String, String>{};
+      for (final entry in webResults) {
+        if (entry != null) webCacheEntries[entry.key] = entry.value;
+      }
+      if (webCacheEntries.isNotEmpty) {
+        await preCacheHttpResults(webCacheEntries);
+      }
+    }
+
+    // 6.6 预缓存下载文件调用（接入 NativeChannel.httpDownload）
+    final downloadFutures = <Future<MapEntry<String, String>?>>[];
+    for (final match in _downloadCallPattern.allMatches(jsCode)) {
+      final method = match.group(1)!;
+      final url = match.group(2)!;
+      if (!url.startsWith('http')) continue;
+      final absoluteUrl = _resolveUrl(url, baseUrl);
+      // 缓存 key 同 JS 侧 java.cacheFile/java.downloadFile 用的 key
+      final cacheKey = method == 'cacheFile' ? 'cache_file:$absoluteUrl' : 'download_file:$absoluteUrl';
+      // 保存路径：用 url md5 作为文件名
+      var saveName = nativeMd5(absoluteUrl);
+      if (saveName.isEmpty) saveName = absoluteUrl.hashCode.toString();
+      final savePath = '/tmp/mr_$saveName';
+
+      downloadFutures.add(() async {
+        try {
+          final result = await NativeChannel.instance.httpDownload(absoluteUrl, savePath);
+          if (result != null && result.isNotEmpty) {
+            return MapEntry(cacheKey, result);
+          }
+        } catch (_) {}
+        return null;
+      }());
+    }
+    if (downloadFutures.isNotEmpty) {
+      final dlResults = await Future.wait(downloadFutures);
+      final dlCacheEntries = <String, String>{};
+      for (final entry in dlResults) {
+        if (entry != null) dlCacheEntries[entry.key] = entry.value;
+      }
+      if (dlCacheEntries.isNotEmpty) {
+        await preCacheHttpResults(dlCacheEntries);
+      }
+    }
+
+    // 6.7-6.9 并行预缓存：文件操作 / 压缩包 / URL 启动（彼此独立，并行执行）
+    final parallelFutures = <Future<void>>[];
+
+    // 6.7 预缓存文件操作（接入 dart:io + path_provider）
+    // 扫描 java.readFile/readTxtFile/writeFile/deleteFile/getTxtInFolder/importScript
+    if (_fileCallPattern.hasMatch(jsCode)) {
+      parallelFutures.add(() async {
+        final fileCacheEntries = <String, String>{};
+        // 获取应用文档目录作为相对路径根
+        Directory? docDir;
+        try {
+          docDir = await getApplicationDocumentsDirectory();
+        } catch (_) {}
+        final docPath = docDir?.path ?? '/tmp';
+
+        // 每个 match 独立 I/O，并发执行
+        final matchFutures = <Future<MapEntry<String, String>?>>[];
+        for (final match in _fileCallPattern.allMatches(jsCode)) {
+          final method = match.group(1)!;
+          final path = match.group(2)!;
+          // 解析路径：绝对路径直接用，相对路径相对于 docPath
+          final absPath = (path.startsWith('/') ||
+                  RegExp(r'^[A-Za-z]:[\\/]').hasMatch(path))
+              ? path
+              : '$docPath/$path';
+          final cacheKey = 'file_$method:$path';
+
+          matchFutures.add(() async {
+            try {
+              switch (method) {
+                case 'readFile':
+                case 'readTxtFile':
+                  final file = File(absPath);
+                  if (await file.exists()) {
+                    return MapEntry(cacheKey, await file.readAsString());
+                  }
+                  break;
+                case 'writeFile':
+                  // writeFile(path, content) - content 在 JS 端是动态的，这里只标记文件可写
+                  final file = File(absPath);
+                  await file.create(recursive: true);
+                  return MapEntry(cacheKey, 'true');
+                case 'deleteFile':
+                  final file = File(absPath);
+                  if (await file.exists()) {
+                    await file.delete();
+                    return MapEntry(cacheKey, 'true');
+                  }
+                  return MapEntry(cacheKey, 'false');
+                case 'getTxtInFolder':
+                  final dir = Directory(absPath);
+                  if (await dir.exists()) {
+                    final buffer = StringBuffer();
+                    await for (final entity in dir.list()) {
+                      if (entity is File &&
+                          entity.path.toLowerCase().endsWith('.txt')) {
+                        try {
+                          buffer.writeln(await entity.readAsString());
+                        } catch (_) {}
+                      }
+                    }
+                    return MapEntry(cacheKey, buffer.toString());
+                  }
+                  break;
+                case 'importScript':
+                  final file = File(absPath);
+                  if (await file.exists()) {
+                    return MapEntry(cacheKey, await file.readAsString());
+                  }
+                  break;
+              }
+            } catch (_) {}
+            return null;
+          }());
+        }
+        final results = await Future.wait(matchFutures);
+        for (final entry in results) {
+          if (entry != null) fileCacheEntries[entry.key] = entry.value;
+        }
+        if (fileCacheEntries.isNotEmpty) {
+          await preCacheHttpResults(fileCacheEntries);
+        }
+      }());
+    }
+
+    // 6.8 预缓存压缩包操作（接入 archive 包，支持密码）
+    // 扫描 java.unzipFile/un7zFile/unrarFile/unArchiveFile/getZipStringContent 等
+    if (_archiveCallPattern.hasMatch(jsCode)) {
+      parallelFutures.add(() async {
+        final archiveCacheEntries = <String, String>{};
+        Directory? tempDir;
+        try {
+          tempDir = await getTemporaryDirectory();
+        } catch (_) {}
+        final tempPath = tempDir?.path ?? '/tmp';
+
+        // 每个 archive 操作独立，并发执行
+        final matchFutures = <Future<MapEntry<String, String>?>>[];
+        for (final match in _archiveCallPattern.allMatches(jsCode)) {
+          final method = match.group(1)!;
+          final argsStr = match.group(2) ?? '';
+          final args = _splitArgs(argsStr);
+          if (args.isEmpty) continue;
+
+          matchFutures.add(() async {
+            // 第一个参数可能是文件路径或 URL
+            final firstArg = _stripQuotes(args[0]) ?? args[0];
+            // 密码参数（unzipFile/unArchiveFile 的第 2 参数，getZipStringContent 的第 4 参数）
+            String? password;
+            if (method == 'unzipFile' || method == 'un7zFile' ||
+                method == 'unrarFile' || method == 'unArchiveFile') {
+              if (args.length >= 2) password = _stripQuotes(args[1]);
+            } else if (method.contains('StringContent')) {
+              // getZipStringContent(url, path, [charset], [password])
+              if (args.length >= 4) {
+                password = _stripQuotes(args[3]);
+              } else if (args.length >= 3 && _looksLikePassword(args[2])) {
+                password = _stripQuotes(args[2]);
+              }
+            }
+
+            // 解析路径：本地文件或 URL（URL 时先下载到本地）
+            String localPath;
+            if (firstArg.startsWith('http://') || firstArg.startsWith('https://')) {
+              // URL：先下载（如果尚未下载）
+              var saveName = nativeMd5(firstArg);
+              if (saveName.isEmpty) saveName = 'archive_${DateTime.now().millisecondsSinceEpoch}';
+              localPath = '$tempPath/$saveName';
+              try {
+                await NativeChannel.instance.httpDownload(firstArg, localPath);
+              } catch (_) {
+                return null;
+              }
+            } else if (firstArg.startsWith('/') ||
+                RegExp(r'^[A-Za-z]:[\\/]').hasMatch(firstArg)) {
+              localPath = firstArg;
+            } else {
+              localPath = '$tempPath/$firstArg';
+            }
+
+            // 内部路径（getZipStringContent 的第 2 参数）
+            String? innerPath;
+            if (method.contains('StringContent') && args.length >= 2) {
+              innerPath = _stripQuotes(args[1]);
+            }
+
+            final cacheKey =
+                'archive_$method:$firstArg:${innerPath ?? ''}:${password ?? ''}';
+
+            try {
+              final file = File(localPath);
+              if (!await file.exists()) return null;
+              final bytes = await file.readAsBytes();
+
+              // 尝试 ZIP 解压（archive 3.x 仅支持 ZIP，RAR/7z 暂不支持，密码仅 ZIP 有效）
+              archive.Archive? archiveObj;
+              try {
+                final zipDecoder = archive.ZipDecoder();
+                if (password != null && password.isNotEmpty) {
+                  archiveObj = zipDecoder.decodeBytes(bytes, password: password);
+                } else {
+                  archiveObj = zipDecoder.decodeBytes(bytes);
+                }
+              } catch (_) {
+                return null;
+              }
+
+              switch (method) {
+                case 'unzipFile':
+                case 'un7zFile':
+                case 'unrarFile':
+                case 'unArchiveFile':
+                  // 解压到临时目录
+                  final extractDir =
+                      '$tempPath/extracted_${DateTime.now().millisecondsSinceEpoch}';
+                  final outDir = Directory(extractDir);
+                  await outDir.create(recursive: true);
+                  for (final archFile in archiveObj) {
+                    if (!archFile.isFile) continue;
+                    final outPath = '$extractDir/${archFile.name}';
+                    final outFile = File(outPath);
+                    await outFile.parent.create(recursive: true);
+                    await outFile.writeAsBytes(archFile.content as List<int>);
+                  }
+                  return MapEntry(cacheKey, extractDir);
+                case 'getZipStringContent':
+                case 'getRarStringContent':
+                case 'get7zStringContent':
+                  if (innerPath == null || innerPath.isEmpty) return null;
+                  for (final archFile in archiveObj) {
+                    if (archFile.name == innerPath ||
+                        archFile.name.endsWith('/$innerPath')) {
+                      if (archFile.isFile) {
+                        return MapEntry(
+                          cacheKey,
+                          utf8.decode(archFile.content as List<int>,
+                              allowMalformed: true),
+                        );
+                      }
+                      break;
+                    }
+                  }
+                  break;
+              }
+            } catch (_) {}
+            return null;
+          }());
+        }
+        final results = await Future.wait(matchFutures);
+        for (final entry in results) {
+          if (entry != null) archiveCacheEntries[entry.key] = entry.value;
+        }
+        if (archiveCacheEntries.isNotEmpty) {
+          await preCacheHttpResults(archiveCacheEntries);
+        }
+      }());
+    }
+
+    // 6.9 预缓存 URL 启动操作（接入 url_launcher）
+    // 扫描 java.startBrowser/openUrl/openVideoPlayer，并行启动
+    if (_urlLaunchPattern.hasMatch(jsCode)) {
+      parallelFutures.add(() async {
+        final launchFutures = <Future<void>>[];
+        for (final match in _urlLaunchPattern.allMatches(jsCode)) {
+          final url = match.group(2)!;
+          launchFutures.add(() async {
+            try {
+              await url_launcher.launchUrl(
+                Uri.parse(url),
+                mode: url_launcher.LaunchMode.platformDefault,
+              );
+            } catch (_) {}
+          }());
+        }
+        // 并发执行所有 launchUrl 调用
+        await Future.wait(launchFutures);
+      }());
+    }
+
+    // 并行执行 6.7/6.8/6.9
+    if (parallelFutures.isNotEmpty) {
+      await Future.wait(parallelFutures);
+    }
 
     // 7. 预缓存 HTML 解析结果（使用 Dart 原生 html 包）
 
@@ -4166,6 +5674,27 @@ class JsEngine {
     return _cachedKeys.contains(key);
   }
 
+  /// 并发受限的批量执行器：限制同时运行的 Future 数量，防止 OOM
+  /// 书源 JS 若含大量 java.ajax() 调用，无限制并发会导致响应体同时驻留内存
+  static const int _maxConcurrentRequests = 4;
+  Future<List<T?>> _runWithConcurrency<T>(
+    Iterable<Future<T?>> Function() futureBuilder,
+  ) async {
+    final futures = futureBuilder().toList();
+    if (futures.isEmpty) return [];
+    final results = <T?>[];
+    for (var i = 0; i < futures.length; i += _maxConcurrentRequests) {
+      final batch = futures.sublist(
+        i,
+        (i + _maxConcurrentRequests > futures.length)
+            ? futures.length
+            : i + _maxConcurrentRequests,
+      );
+      results.addAll(await Future.wait(batch));
+    }
+    return results;
+  }
+
   /// 解析相对URL
   String _resolveUrl(String url, String baseUrl) {
     if (url.startsWith('http://') || url.startsWith('https://')) {
@@ -4177,6 +5706,75 @@ class JsEngine {
     } catch (_) {
       return url;
     }
+  }
+
+  /// 分割 JS 函数调用的参数字符串（简化版，不支持嵌套括号/字符串内逗号）
+  /// 用于 WebView 调用参数提取，Legado 书源基本是字面量参数
+  List<String> _splitArgs(String argsStr) {
+    if (argsStr.isEmpty) return [];
+    final result = <String>[];
+    final current = StringBuffer();
+    var inSingle = false, inDouble = false, depth = 0;
+    for (var i = 0; i < argsStr.length; i++) {
+      final c = argsStr[i];
+      if (c == '\\' && i + 1 < argsStr.length) {
+        current.write(c);
+        current.write(argsStr[++i]);
+        continue;
+      }
+      if (c == "'" && !inDouble) inSingle = !inSingle;
+      if (c == '"' && !inSingle) inDouble = !inDouble;
+      if (!inSingle && !inDouble) {
+        if (c == '(' || c == '[' || c == '{') depth++;
+        if (c == ')' || c == ']' || c == '}') depth--;
+        if (c == ',' && depth == 0) {
+          result.add(current.toString().trim());
+          current.clear();
+          continue;
+        }
+      }
+      current.write(c);
+    }
+    if (current.isNotEmpty) result.add(current.toString().trim());
+    return result;
+  }
+
+  /// 去除字符串两端的引号
+  String? _stripQuotes(String? s) {
+    if (s == null) return null;
+    s = s.trim();
+    if (s.length >= 2 && ((s.startsWith("'") && s.endsWith("'")) ||
+        (s.startsWith('"') && s.endsWith('"')))) {
+      // 尝试 JSON 解码字面量
+      try {
+        return jsonDecode(s) as String;
+      } catch (_) {
+        return s.substring(1, s.length - 1);
+      }
+    }
+    return s.isEmpty ? null : s;
+  }
+
+  /// 判断参数字符串是否像是密码（而非 charset）
+  /// charset 通常是 utf-8/gbk/gb2312/ascii/iso-8859-1 等，不以此开头的视为密码
+  bool _looksLikePassword(String? s) {
+    if (s == null) return false;
+    final lower = s.toLowerCase();
+    final charsets = ['utf', 'gb', 'iso', 'ascii', 'latin', 'unicode', 'utf-8', 'gbk', 'gb2312', 'big5'];
+    for (final cs in charsets) {
+      if (lower.startsWith(cs)) return false;
+    }
+    return true;
+  }
+
+  /// 根据 deviceInfo 生成默认 WebView UA
+  String _defaultWebViewUA(Map<String, dynamic> deviceInfo) {
+    final model = deviceInfo['model']?.toString() ?? 'unknown';
+    final release = deviceInfo['version'] is Map
+        ? (deviceInfo['version']['release']?.toString() ?? '14')
+        : '14';
+    // Mozilla/5.0 (Linux; Android 14; <model>) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36
+    return 'Mozilla/5.0 (Linux; Android $release; $model) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
   }
 
   // ===== 脚本编译缓存（借鉴 legado 的 scriptCache）=====
