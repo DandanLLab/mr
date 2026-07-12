@@ -55,8 +55,10 @@ static void _ensure_globals(void) {
 // ---------- AES Key Schedule 缓存 ----------
 // 同 key 复用轮密钥，避免每次 JS 调用都重新 aes_init
 #define AES_KEY_CACHE_SIZE 4
+#define AES_MAX_KEY_LEN 32                   // AES-256 最大 32 字节
 typedef struct {
-    uint64_t hash;                          // key 的 FNV-1a 哈希
+    uint64_t hash;                          // key 的 FNV-1a 哈希（快速预筛）
+    uint8_t key[AES_MAX_KEY_LEN];          // 原始 key 内容（防 hash 碰撞）
     uint8_t round_key[240];                // 展开的轮密钥
     int rounds;                             // 轮数 10/12/14
     size_t key_len;                         // 16/24/32
@@ -243,12 +245,18 @@ static void _bytecode_cache_clear(QuickJSBridge *bridge) {
 // ---------- AES Key Schedule 缓存 ----------
 
 // 查找 key schedule 缓存，命中返回复制后的轮密钥，未命中返回 NULL
+// [Bug 修复] 原实现只比较 hash 和 key_len，未比较实际 key 内容，
+// FNV-1a hash 碰撞时会返回错误的轮密钥导致解密失败（bad padding or key）
 static int _aes_key_cache_lookup(QuickJSBridge *bridge, const uint8_t *key, size_t key_len,
                                   uint8_t *out_round_key, int *out_rounds) {
     uint64_t hash = _fnv1a_hash((const char *)key, key_len);
     for (int i = 0; i < AES_KEY_CACHE_SIZE; i++) {
         aes_key_cache_entry_t *e = &bridge->aes_key_cache[i];
         if (e->in_use && e->hash == hash && e->key_len == key_len) {
+            // hash 和长度匹配后，必须比较实际 key 内容防止碰撞
+            if (memcmp(e->key, key, key_len) != 0) {
+                continue;  // hash 碰撞，跳过
+            }
             e->hits++;
             memcpy(out_round_key, e->round_key, e->rounds * 16);
             *out_rounds = e->rounds;
@@ -285,6 +293,7 @@ static void _aes_key_cache_store(QuickJSBridge *bridge, const uint8_t *key, size
     if (target < 0) return;
     aes_key_cache_entry_t *e = &bridge->aes_key_cache[target];
     e->hash = _fnv1a_hash((const char *)key, key_len);
+    memcpy(e->key, key, key_len);  // 存储原始 key 内容用于碰撞检测
     memcpy(e->round_key, round_key, rounds * 16);
     e->rounds = rounds;
     e->key_len = key_len;
