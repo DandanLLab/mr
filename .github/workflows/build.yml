@@ -344,14 +344,54 @@ jobs:
             echo "⚠️ 包不含 SDK 目录，可能需单独下载 OpenHarmony SDK"
           fi
 
-      - name: Patch pubspec for HarmonyOS
-        # 鸿蒙 Flutter SDK 基于 3.27.4，有两处不兼容需临时打补丁（仅影响鸿蒙构建）：
-        # 1. Dart SDK 约束：项目要求 >=3.12.0，放宽到 >=3.6.0
-        # 2. flutter.config 节点：Flutter 3.45+ 新增字段，3.27.4 不识别会报
-        #    "Unexpected child config found under flutter"
-        # 必须在任何 flutter 命令之前执行，否则 flutter create/pub get 都会报错
+      - name: Clone HarmonyOS Flutter SDK
+        # 华为 fork 的 Flutter SDK，动态获取最高 release 版本分支
+        # 仓库：https://gitcode.com/openharmony-sig/flutter_flutter
+        # 分支命名规则：oh-<Flutter版本>-release（如 oh-3.41.9-release）
+        # 本地用 Flutter 3.41.7，云端鸿蒙 fork 最高 release 为 3.41.9，版本对齐
         run: |
-          sed -i "s/sdk: '>=3.12.0 <4.0.0'/sdk: '>=3.6.0 <4.0.0'/" pubspec.yaml
+          # 动态获取所有 oh-*-release 分支，选版本号最高的
+          LATEST_RELEASE=$(git ls-remote --heads https://gitcode.com/openharmony-sig/flutter_flutter.git \
+            | sed -n 's|.*refs/heads/oh-\([0-9.]*\)-release|\1|p' \
+            | sort -V \
+            | tail -1)
+          if [ -z "$LATEST_RELEASE" ]; then
+            echo "❌ 未找到 oh-*-release 分支"
+            exit 1
+          fi
+          BRANCH="oh-${LATEST_RELEASE}-release"
+          echo "=== 最新 release 分支: $BRANCH (Flutter $LATEST_RELEASE) ==="
+          git clone --depth 1 --branch "$BRANCH" https://gitcode.com/openharmony-sig/flutter_flutter.git ~/ohos-flutter
+          echo "$HOME/ohos-flutter/bin" >> $GITHUB_PATH
+          # 浅克隆丢失 git tag，手动打 tag 让 git describe --tags 返回正确版本
+          # 否则 Flutter 报告 0.0.0-unknown，pub 依赖求解失败
+          cd ~/ohos-flutter
+          git tag "$LATEST_RELEASE"
+          rm -f bin/cache/flutter.version.json
+          export PATH="$HOME/ohos-flutter/bin:$PATH"
+          echo "=== flutter --version ==="
+          flutter --version
+          # 提取 Dart 版本供后续 Patch 步骤使用
+          DART_VERSION=$(flutter --version | grep -oP 'Dart \K[0-9.]+')
+          echo "OHOS_FLUTTER_VERSION=$LATEST_RELEASE" >> $GITHUB_ENV
+          echo "OHOS_DART_VERSION=$DART_VERSION" >> $GITHUB_ENV
+          echo "=== 鸿蒙 Flutter $LATEST_RELEASE / Dart $DART_VERSION ==="
+
+      - name: Patch pubspec for HarmonyOS
+        # 鸿蒙 Flutter SDK 可能与项目 Dart SDK 约束不兼容，动态放宽到当前版本
+        # 同时删除 flutter.config 节点（Flutter 3.45+ 新增字段，旧版不识别）
+        # 在 Clone 之后执行（需要 OHOS_DART_VERSION 环境变量），
+        # 在 Enable/Generate/pub get 之前执行（这些命令会解析 pubspec.yaml）
+        run: |
+          # 动态放宽 Dart SDK 约束到当前鸿蒙 Flutter 的 Dart 版本
+          DART_VERSION="${{ env.OHOS_DART_VERSION }}"
+          if [ -n "$DART_VERSION" ]; then
+            sed -i "s/sdk: '>=3.12.0 <4.0.0'/sdk: '>=${DART_VERSION} <4.0.0'/" pubspec.yaml
+            echo "=== 放宽 Dart SDK 约束到 >=${DART_VERSION} ==="
+          else
+            echo "⚠️ 未获取到 Dart 版本，跳过 SDK 约束放宽"
+          fi
+          grep "sdk:" pubspec.yaml
           python3 << 'PYEOF'
           import re
           with open('pubspec.yaml', 'r', encoding='utf-8') as f:
@@ -366,37 +406,12 @@ jobs:
           if new_content == content:
               print('⚠️ 未找到 flutter.config 节点，可能已被移除')
           else:
-              print('✅ 已移除 flutter.config 节点（SPM 配置，鸿蒙 Flutter 3.27.4 不识别）')
+              print('✅ 已移除 flutter.config 节点（SPM 配置，鸿蒙 Flutter 可能不识别）')
           with open('pubspec.yaml', 'w', encoding='utf-8') as f:
               f.write(new_content)
           PYEOF
           echo "=== 打补丁后的 flutter 节点 ==="
           sed -n '/^flutter:/,/^[a-z]/p' pubspec.yaml
-
-      - name: Clone HarmonyOS Flutter SDK
-        # 华为 fork 的 Flutter SDK，分支基于 Flutter 3.27.4
-        run: |
-          git clone --depth 1 https://gitcode.com/openharmony-sig/flutter_flutter.git ~/ohos-flutter
-          echo "$HOME/ohos-flutter/bin" >> $GITHUB_PATH
-
-      - name: Fix Flutter SDK Version
-        # 浅克隆（--depth 1）丢失 git tag，Flutter 报告版本 0.0.0-unknown
-        # 导致 pub 依赖求解失败（flutter_tts 等插件要求 Flutter >=1.10.0）
-        # 手动写入 flutter.version.json，让 Flutter 报告 3.27.4
-        run: |
-          mkdir -p ~/ohos-flutter/bin/cache
-          cat > ~/ohos-flutter/bin/cache/flutter.version.json << 'EOF'
-          {
-            "frameworkVersion": "3.27.4",
-            "channel": "unknown",
-            "repositoryUrl": "https://gitcode.com/openharmony-sig/flutter_flutter.git",
-            "frameworkRevision": "unknown",
-            "frameworkCommitDate": "2026-06-30"
-          }
-          EOF
-          export PATH="$HOME/ohos-flutter/bin:$PATH"
-          echo "=== flutter --version ==="
-          flutter --version
 
       - name: Enable HarmonyOS Platform
         run: |
