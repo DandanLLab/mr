@@ -1053,9 +1053,13 @@ if (evalResult.isError) {
             ? '${evalResult.stringResult.substring(0, 80)}...'
             : evalResult.stringResult;
         _lastEvalError = 'JS返回空值: stringResult=$rawPreview';
+        // 强制提取 console 日志（即使 Release 模式），帮助定位 null 根因
+        // decryptImage 等函数内部 try-catch 的异常只通过 console.error 记录，
+        // Release 模式下 _flushConsoleLogs 会跳过提取，导致诊断信息丢失
+        final consoleLogs = _extractConsoleLogsForDiagnosis();
         AppLogger.instance.error(LogCategory.js,
             '[QuickJS] 返回空值: $rawPreview',
-            detail: '完整 stringResult: ${evalResult.stringResult}');
+            detail: '完整 stringResult: ${evalResult.stringResult}${consoleLogs.isNotEmpty ? '\nconsole日志: $consoleLogs' : ''}');
       }
       // 同步执行完成日志（info 级别，Release 模式可见）
       AppLogger.instance.logJsStep('QuickJS', '同步执行完成',
@@ -1695,6 +1699,29 @@ return __returnValue;
       // 诊断日志：提取过程异常（如 runtime 被销毁、JSON 解析失败等）
       AppLogger.instance.warn(LogCategory.js, 'console 日志提取异常',
           detail: e.toString());
+    } finally {
+      _isFlushingLogs = false;
+    }
+  }
+
+  /// 诊断用：提取 console 日志（不受 Release 模式限制）
+  /// 仅在 JS 返回 null/空值时调用，帮助定位根因
+  /// 返回 console 日志的 JSON 字符串（如 '[{"level":"error","msg":"..."}]'），
+  /// 如果无日志或提取失败返回空字符串
+  String _extractConsoleLogsForDiagnosis() {
+    if (!_initialized || _jsRuntime == null) return '';
+    if (_isFlushingLogs) return '';
+    _isFlushingLogs = true;
+    try {
+      final evalResult = _jsRuntime!.evaluate('__flushConsoleLogs()');
+      if (evalResult.isError) return '';
+      final result = evalResult.stringResult;
+      if (result.isEmpty || result == 'undefined' || result == '[]' || result == 'NEED_REINJECT') {
+        return '';
+      }
+      return result;
+    } catch (_) {
+      return '';
     } finally {
       _isFlushingLogs = false;
     }
