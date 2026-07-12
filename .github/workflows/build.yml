@@ -344,6 +344,35 @@ jobs:
             echo "⚠️ 包不含 SDK 目录，可能需单独下载 OpenHarmony SDK"
           fi
 
+      - name: Patch pubspec for HarmonyOS
+        # 鸿蒙 Flutter SDK 基于 3.27.4，有两处不兼容需临时打补丁（仅影响鸿蒙构建）：
+        # 1. Dart SDK 约束：项目要求 >=3.12.0，放宽到 >=3.6.0
+        # 2. flutter.config 节点：Flutter 3.45+ 新增字段，3.27.4 不识别会报
+        #    "Unexpected child config found under flutter"
+        # 必须在任何 flutter 命令之前执行，否则 flutter create/pub get 都会报错
+        run: |
+          sed -i "s/sdk: '>=3.12.0 <4.0.0'/sdk: '>=3.6.0 <4.0.0'/" pubspec.yaml
+          python3 << 'PYEOF'
+          import re
+          with open('pubspec.yaml', 'r', encoding='utf-8') as f:
+              content = f.read()
+          # 删除 flutter: 下的 config: 节点（含其所有缩进更深的子行）
+          new_content = re.sub(
+              r'^  config:\n(?:    .*\n)+',
+              '',
+              content,
+              flags=re.MULTILINE
+          )
+          if new_content == content:
+              print('⚠️ 未找到 flutter.config 节点，可能已被移除')
+          else:
+              print('✅ 已移除 flutter.config 节点（SPM 配置，鸿蒙 Flutter 3.27.4 不识别）')
+          with open('pubspec.yaml', 'w', encoding='utf-8') as f:
+              f.write(new_content)
+          PYEOF
+          echo "=== 打补丁后的 flutter 节点 ==="
+          sed -n '/^flutter:/,/^[a-z]/p' pubspec.yaml
+
       - name: Clone HarmonyOS Flutter SDK
         # 华为 fork 的 Flutter SDK，分支基于 Flutter 3.27.4
         run: |
@@ -446,14 +475,6 @@ jobs:
           VERSION="${{ needs.prepare.outputs.version }}"
           sed -i "s/^version:.*/version: ${VERSION}+${{ needs.prepare.outputs.build_number }}/" pubspec.yaml
           grep "^version:" pubspec.yaml
-
-      - name: Relax Dart SDK Constraint
-        # 鸿蒙 Flutter SDK 基于 3.27.4（Dart 3.6.2），项目要求 Dart >=3.12.0
-        # CI 中临时放宽到 >=3.6.0，仅影响鸿蒙构建，不改动仓库 pubspec.yaml
-        run: |
-          sed -i "s/sdk: '>=3.12.0 <4.0.0'/sdk: '>=3.6.0 <4.0.0'/" pubspec.yaml
-          echo "=== 放宽后的 SDK 约束 ==="
-          grep "sdk:" pubspec.yaml
 
       - name: Install Dependencies
         run: |
