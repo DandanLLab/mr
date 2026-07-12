@@ -119,16 +119,34 @@ class JsAdvancedService {
             'decodeName: typeof decode !== "undefined" ? decode.name : null,'
             'decodeLength: typeof decode !== "undefined" ? decode.length : null,'
             'decodeSrc: typeof decode !== "undefined" ? decode.toString().substring(0, 300) : "undefined",'
+            // 关键诊断：用 Function.prototype.toString.call(decode) 绕过实例方法覆写
+            // jsLib 可能覆写 decode.toString 实例方法伪装成 native code，
+            // 但 Function.prototype.toString 本身没被覆写（toStringNative=true）
+            // 调用原始 toString 可拿到真实函数源码
+            'decodeRealSrc: typeof decode !== "undefined" ? Function.prototype.toString.call(decode).substring(0, 500) : "undefined",'
+            // 检测 decode.toString 是否被覆写为实例方法
+            'decodeToStringOwn: typeof decode !== "undefined" ? decode.hasOwnProperty("toString") : false,'
             // jsvmp 伪装检测：Function.prototype.toString 是否被覆写
             // 正常情况 toString 是 native function，jsvmp 会覆写它使所有函数显示为 [native code]
             'toStringNative: Function.prototype.toString.toString().indexOf("[native code]") >= 0,'
             // 尝试通过 Object.prototype.toString 拿到真实类型标签
             'decodeObjectTag: typeof decode !== "undefined" ? Object.prototype.toString.call(decode) : null,'
+            // bind 检测：bind 创建的函数 toString() 返回 [native code]，且 name 以 "bound " 开头
+            'decodeIsBound: typeof decode !== "undefined" ? (decode.name && decode.name.indexOf("bound ") === 0) : false,'
+            // prototype 检测：bind 创建的函数没有 prototype
+            'decodeHasProto: typeof decode !== "undefined" ? decode.hasOwnProperty("prototype") : false,'
+            // decodeSimple 检测：globalFunctions 列表里有 decodeSimple，可能也是解密函数
+            'decodeSimpleType: typeof decodeSimple,'
+            'decodeSimpleResult: typeof decodeSimple === "function" ? (function(){try{var r=decodeSimple(result);return{ok:true,isNull:r===null,len:r?r.length:null,first16:r?Array.from(r.slice(0,16)).map(function(b){return b.toString(16).padStart(2,"0")}).join(" "):null}}catch(e){return{ok:false,err:e.toString()}}})() : null,'
             'resultType: typeof result,'
             'resultIsUint8Array: result instanceof Uint8Array,'
             'resultLen: result ? result.length : null,'
             'resultFirst16: result ? Array.from(result.slice(0,16)).map(function(b){return b.toString(16).padStart(2,"0")}).join(" ") : null,'
             'callUint8Array: (function(){try{var r=decode(result);return{ok:true,type:typeof r,isNull:r===null,isUint8Array:r instanceof Uint8Array,len:r?r.length:null,stack:r===null?new Error().stack.substring(0,200):null}}catch(e){return{ok:false,err:e.toString(),stack:e.stack?e.stack.substring(0,200):null}}})(),'
+            // Reflect.apply 调用：用 null 作为 this，看是否有不同的结果
+            'callReflectApply: (function(){try{var r=Reflect.apply(decode,null,[result]);return{ok:true,isNull:r===null,len:r?r.length:null}}catch(e){return{ok:false,err:e.toString()}}})(),'
+            // call(globalThis, result)：用 globalThis 作为 this
+            'callWithGlobalThis: (function(){try{var r=decode.call(globalThis,result);return{ok:true,isNull:r===null,len:r?r.length:null}}catch(e){return{ok:false,err:e.toString()}}})(),'
             'callArray: (function(){try{var r=decode(Array.from(result));return{ok:true,isNull:r===null,len:r?r.length:null}}catch(e){return{ok:false,err:e.toString()}}})(),'
             'callBuffer: (function(){try{var r=decode(result.buffer);return{ok:true,isNull:r===null,len:r?r.length:null}}catch(e){return{ok:false,err:e.toString()}}})()'
             '})',
