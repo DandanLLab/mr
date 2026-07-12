@@ -1869,7 +1869,7 @@ return __returnValue;
         final check = _jsRuntime!.evaluate(
           'JSON.stringify({decodeType:typeof decode, decodeName:typeof decode!=="undefined"?decode.name:null, '
           'newGlobalCount: ${_currentJsLibFunctions.length}, '
-          'newGlobals: ${jsonEncode(_currentJsLibFunctions.take(50).toList)}}'
+          'newGlobals: ${jsonEncode(jsonEncode(_currentJsLibFunctions.take(50).toList))}}'
         );
         debugPrint('🔍 [loadJsLib] 加载后诊断 ($sourceUrl): ${check.stringResult}');
       } catch (_) {}
