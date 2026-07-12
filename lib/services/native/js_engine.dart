@@ -1821,25 +1821,24 @@ return __returnValue;
     // 提取 jsLib 中定义的函数名（用于后续清除）
     _extractFunctionNames(jsLib);
 
-    // 关键修复：先删除 jsLib 中定义的函数名对应的全局 native 函数
-    // 原因：QuickJS 全局作用域可能已存在同名的 native 函数（如 flutter_js 注册的 decode），
-    //       jsLib 中的 function/var 声明无法覆盖已存在的全局属性，
-    //       导致 jsvmp 混淆代码暴露的 decode 函数被 native decode 遮蔽
-    if (_currentJsLibFunctions.isNotEmpty && _jsRuntime != null) {
-      try {
-        final deleteCode = _currentJsLibFunctions
-            .map((fn) => 'try{delete globalThis.$fn}catch(e){}')
-            .join(';');
-        _jsRuntime!.evaluate(deleteCode);
-      } catch (e) {
-        debugPrint('⚠️ [loadJsLib] 删除冲突全局函数失败: $e');
-      }
-    }
-
     // 把 jsLib eval 到全局作用域（等价于 legado 的 RhinoScriptEngine.eval(jsLib, scope)）
+    // 注意：不再预先 delete globalThis.decode 等函数
+    // 原因：经排查，QuickJS/flutter_js/C 桥接均未注册全局 decode 函数，
+    //       [native code] 外观是 jsvmp 混淆的伪装（Function.prototype.toString 被覆写），
+    //       预先 delete 反而会删除 jsLib 自己定义的函数
     try {
       _jsRuntime?.evaluate(jsLib);
       _currentJsLibSourceUrl = sourceUrl;
+      // 诊断：加载后检查 decode 是否存在（帮助排查 jsvmp 函数暴露问题）
+      if (kDebugMode && _jsRuntime != null) {
+        try {
+          final check = _jsRuntime!.evaluate(
+            'JSON.stringify({decodeType:typeof decode, decodeName:typeof decode!=="undefined"?decode.name:null, '
+            'funcCount: Object.getOwnPropertyNames(globalThis).filter(function(k){return typeof globalThis[k]==="function";}).length})'
+          );
+          debugPrint('🔍 [loadJsLib] 加载后诊断 ($sourceUrl): ${check.stringResult}');
+        } catch (_) {}
+      }
     } catch (e) {
       // jsLib 加载失败时记录诊断日志，避免调用方看到 'function not defined' 却不知根因
       final preview = jsLib.length > 200 ? '${jsLib.substring(0, 200)}...' : jsLib;
@@ -1885,6 +1884,30 @@ return __returnValue;
 
   /// 获取书源的 jsLib 代码
   String? getJsLib(String sourceUrl) => _jsLibCache[sourceUrl];
+
+  /// 诊断：获取当前 jsLib 加载状态和全局函数列表
+  /// 用于排查 jsvmp 混淆代码的函数暴露问题
+  Future<String> diagnoseGlobalState() async {
+    if (_jsRuntime == null || !_initialized) return '(引擎未初始化)';
+    try {
+      final result = await _evalLock.synchronized(() async {
+        return _jsRuntime!.evaluate(
+          'JSON.stringify({'
+          'currentJsLibSourceUrl: typeof globalThis.__currentJsLibSourceUrl !== "undefined" ? globalThis.__currentJsLibSourceUrl : null,'
+          'decodeType: typeof decode,'
+          'decodeName: typeof decode !== "undefined" ? decode.name : null,'
+          'decodeLength: typeof decode !== "undefined" ? decode.length : null,'
+          'decodeHasPrototype: typeof decode !== "undefined" ? typeof decode.prototype : null,'
+          'decodeSrc: typeof decode !== "undefined" ? decode.toString().substring(0, 200) : null,'
+          'globalFunctions: Object.getOwnPropertyNames(globalThis).filter(function(k){return typeof globalThis[k] === "function" && k.charAt(0) !== "_";}).join(",")'
+          '})'
+        );
+      });
+      return result.stringResult;
+    } catch (e) {
+      return '诊断异常: $e';
+    }
+  }
 
   /// 清除书源的 jsLib 缓存
   void clearJsLib(String sourceUrl) {

@@ -84,17 +84,32 @@ class JsAdvancedService {
             ? '${lastErrorOrMsg.substring(0, 80)}...'
             : lastErrorOrMsg;
 
-        // 诊断：检查 decode 函数是否存在、result 的类型和长度
-        // 借鉴 legado 的 debug 模式：失败时输出上下文信息帮助定位问题
+        // 诊断：全面检查 decode 函数身份和不同输入格式下的行为
+        // jsvmp 混淆会把函数伪装成 [native code]，需要多角度验证
         String diagInfo = '';
         try {
+          // 先获取全局状态诊断（不依赖 result 变量）
+          final globalDiag = await JsEngine.instance.diagnoseGlobalState();
+          debugPrint('🔍 [decodeImage] 全局状态: $globalDiag');
+
           // 重新加载 jsLib，防止两次 executeAsync 之间其他书源执行导致 jsLib 被切换
           final jsLib = source.jsLib;
           if (jsLib != null && jsLib.isNotEmpty) {
             JsEngine.instance.loadJsLib(source.bookSourceUrl, jsLib);
           }
           final diag = await JsEngine.instance.executeAsync(
-            'JSON.stringify({decodeSrc: typeof decode !== "undefined" ? decode.toString().substring(0, 500) : "undefined", decodeDescriptor: typeof decode !== "undefined" ? (function(){var d=Object.getOwnPropertyDescriptor(globalThis,"decode");return d?{configurable:d.configurable,writable:d.writable}:null})() : null, callResult: (function(){try{var r=decode(result);return{ok:true,type:typeof r,isNull:r===null,isUint8Array:r instanceof Uint8Array,len:r?r.length:null}}catch(e){return{ok:false,err:e.toString()}}})()})',
+            'JSON.stringify({'
+            'decodeType: typeof decode,'
+            'decodeName: typeof decode !== "undefined" ? decode.name : null,'
+            'decodeLength: typeof decode !== "undefined" ? decode.length : null,'
+            'decodeSrc: typeof decode !== "undefined" ? decode.toString().substring(0, 300) : "undefined",'
+            'resultType: typeof result,'
+            'resultIsUint8Array: result instanceof Uint8Array,'
+            'resultLen: result ? result.length : null,'
+            'callUint8Array: (function(){try{var r=decode(result);return{ok:true,type:typeof r,isNull:r===null,isUint8Array:r instanceof Uint8Array,len:r?r.length:null}}catch(e){return{ok:false,err:e.toString()}}})(),'
+            'callArray: (function(){try{var r=decode(Array.from(result));return{ok:true,isNull:r===null,len:r?r.length:null}}catch(e){return{ok:false,err:e.toString()}}})(),'
+            'callBuffer: (function(){try{var r=decode(result.buffer);return{ok:true,isNull:r===null,len:r?r.length:null}}catch(e){return{ok:false,err:e.toString()}}})()'
+            '})',
             imageBytes,
             baseUrl: source.bookSourceUrl,
             sourceEngine: source.engineType,
