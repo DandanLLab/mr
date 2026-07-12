@@ -1807,13 +1807,24 @@ return __returnValue;
   /// 2. 同一书源只加载一次，切换书源时先清除旧的全局函数
   /// 3. 用 _currentJsLibSourceUrl 追踪当前加载了哪个书源的 jsLib
   void loadJsLib(String sourceUrl, String jsLib) {
-    if (jsLib.trim().isEmpty) return;
+    if (jsLib.trim().isEmpty) {
+      AppLogger.instance.warn(LogCategory.js,
+          '[loadJsLib] jsLib 为空，跳过加载: $sourceUrl');
+      return;
+    }
+
+    AppLogger.instance.info(LogCategory.js,
+        '[loadJsLib] 开始加载: $sourceUrl, jsLib长度=${jsLib.length}');
 
     // 缓存 jsLib 代码
     _jsLibCache[sourceUrl] = jsLib;
 
     // 如果当前已加载的就是同一个书源，不需要重新加载
-    if (_currentJsLibSourceUrl == sourceUrl) return;
+    if (_currentJsLibSourceUrl == sourceUrl) {
+      AppLogger.instance.info(LogCategory.js,
+          '[loadJsLib] 同一书源，跳过加载: $sourceUrl');
+      return;
+    }
 
     // 切换书源：先清除旧的 jsLib 全局函数
     _clearCurrentJsLib();
@@ -1836,6 +1847,8 @@ return __returnValue;
     try {
       _jsRuntime?.evaluate(jsLib);
       _currentJsLibSourceUrl = sourceUrl;
+      AppLogger.instance.info(LogCategory.js,
+          '[loadJsLib] eval 成功: $sourceUrl');
     } catch (e) {
       final preview = jsLib.length > 200 ? '${jsLib.substring(0, 200)}...' : jsLib;
       AppLogger.instance.error(LogCategory.js,
@@ -1852,6 +1865,17 @@ return __returnValue;
         );
         final afterProps = afterR.stringResult;
         _computeNewGlobals(beforeProps, afterProps);
+        AppLogger.instance.info(LogCategory.js,
+            '[loadJsLib] 新增全局函数: ${_currentJsLibFunctions.length}个: ${_currentJsLibFunctions.take(10).join(", ")}');
+      } catch (_) {}
+    }
+
+    // 验证 search 函数是否在全局
+    if (_jsRuntime != null) {
+      try {
+        final r = _jsRuntime!.evaluate('typeof search');
+        AppLogger.instance.info(LogCategory.js,
+            '[loadJsLib] 验证: typeof search = ${r.stringResult}');
       } catch (_) {}
     }
   }
