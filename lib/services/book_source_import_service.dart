@@ -127,6 +127,12 @@ class BookSourceImportService {
     final exploreUrlMeta = _extractMeta(jsCodeTrimmed, 'exploreUrl') ?? _extractJsVar(jsCodeTrimmed, 'exploreUrl');
     final headerMeta = _extractMeta(jsCodeTrimmed, 'header') ?? _extractJsVar(jsCodeTrimmed, 'header');
 
+    // 提取图片解密规则
+    // coverDecodeJs 是 BookSource 顶层字段（封面解密）
+    // imageDecode 是 ContentRule 字段（正文图片解密）
+    final coverDecodeMeta = _extractMeta(jsCodeTrimmed, 'coverDecode');
+    final imageDecodeMeta = _extractMeta(jsCodeTrimmed, 'imageDecode');
+
     final source = BookSource(
       bookSourceUrl: url,
       bookSourceName: name,
@@ -135,6 +141,7 @@ class BookSourceImportService {
       engine: 'quickjs',
       sourceFormat: 'js',
       header: headerMeta,
+      coverDecodeJs: coverDecodeMeta,
       searchUrl: searchUrlMeta ?? '',
       exploreUrl: exploreUrlMeta ?? '',
       ruleSearch: hasSearch ? SearchRule(
@@ -177,6 +184,7 @@ class BookSourceImportService {
       ) : null,
       ruleContent: hasContent ? ContentRule(
         content: '<js>content(result)</js>',
+        imageDecode: imageDecodeMeta,
         nextContentUrl: hasNextContentUrl ? '<js>nextContentUrl(result)</js>' : null,
       ) : null,
     );
@@ -300,7 +308,10 @@ class BookSourceImportService {
   }
 
   /// 从 JS 书源代码中提取 @key 元数据注释
-  /// 支持多行：从 @key 行开始，收集后续以 // 开头的连续注释行
+  /// 支持多行：从 @key 行开始，收集后续连续注释行
+  /// 支持两种注释格式：
+  ///   1. 行注释：// @key value
+  ///   2. 块注释：* @key value（在 /** */ 块中）
   static String? _extractMeta(String code, String key) {
     final lines = code.split('\n');
     final buffer = StringBuffer();
@@ -309,18 +320,24 @@ class BookSourceImportService {
     for (final line in lines) {
       final trimmed = line.trim();
       if (!collecting) {
-        final m = RegExp('^//\\s*@' + key + r'\s+(.*)$').firstMatch(trimmed);
+        // 同时匹配 // @key 和 * @key 两种注释格式
+        final m = RegExp('^(?://|\\*)\\s*@' + key + r'\s+(.*)$')
+            .firstMatch(trimmed);
         if (m != null) {
           collecting = true;
           final rest = m.group(1)?.trim() ?? '';
           if (rest.isNotEmpty) buffer.write(rest);
         }
       } else {
-        // 继续收集以 // 开头的连续注释行
-        if (trimmed.startsWith('//')) {
-          final content = trimmed.substring(2).trim();
+        // 继续收集以 // 或 * 开头的连续注释行
+        if (trimmed.startsWith('//') || trimmed.startsWith('*')) {
+          final content = trimmed.startsWith('//')
+              ? trimmed.substring(2).trim()
+              : trimmed.substring(1).trim();
           // 遇到新的 @key 标记则停止
           if (RegExp(r'^@\w+').hasMatch(content)) break;
+          // 遇到块注释结束标记 */ 则停止
+          if (content.startsWith('*/')) break;
           buffer.writeln();
           buffer.write(content);
         } else {
