@@ -146,7 +146,8 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
       // 空响应诊断：打印状态码和响应头，帮助判断是 403/404 还是服务器返回空
       debugPrint('❌ [DecodedImageProvider] 响应为空: ${key.url}\n'
           '  状态码: $statusCode, 响应头: $respHeaders');
-      throw StateError('图片下载响应为空: ${key.url} (状态码: $statusCode)');
+      final statusInfo = statusCode != null ? '(状态码: $statusCode)' : '(无状态码)';
+      throw StateError('图片下载响应为空: ${key.url} $statusInfo');
     }
 
     // 检测 HTML 错误页（服务器返回 200 但内容是 HTML 而非图片）
