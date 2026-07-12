@@ -127,6 +127,11 @@ class BookSourceImportService {
     final exploreUrlMeta = _extractMeta(jsCodeTrimmed, 'exploreUrl') ?? _extractJsVar(jsCodeTrimmed, 'exploreUrl');
     final headerMeta = _extractMeta(jsCodeTrimmed, 'header') ?? _extractJsVar(jsCodeTrimmed, 'header');
 
+    // 提取书源类型（0=文字 1=音频 2=图片 3=文件 4=视频）
+    // 对齐 _buildSource() 的 @type 提取逻辑
+    final typeStr = _extractMeta(jsCodeTrimmed, 'type') ?? _extractJsVar(jsCodeTrimmed, 'type');
+    final sourceType = typeStr != null ? int.tryParse(typeStr) ?? 0 : 0;
+
     // 提取图片解密规则
     // coverDecodeJs 是 BookSource 顶层字段（封面解密）
     // imageDecode 是 ContentRule 字段（正文图片解密）
