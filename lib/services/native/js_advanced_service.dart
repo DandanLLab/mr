@@ -45,9 +45,13 @@ class JsAdvancedService {
         .take(16)
         .map((b) => b.toRadixString(16).padLeft(2, '0'))
         .join(' ');
+    final jsLibPreview = source.jsLib != null
+        ? (source.jsLib!.length > 500 ? '${source.jsLib!.substring(0, 500)}...' : source.jsLib!)
+        : '(无jsLib)';
     debugPrint('🔓 [decodeImage] 开始解密: $imageUrl\n'
         '  原始大小: ${imageBytes.length} bytes, 前16字节: $origHex\n'
-        '  imageDecode规则: ${ruleJs.length > 100 ? '${ruleJs.substring(0, 100)}...' : ruleJs}');
+        '  imageDecode规则: ${ruleJs.length > 100 ? '${ruleJs.substring(0, 100)}...' : ruleJs}\n'
+        '  jsLib前500字符: $jsLibPreview');
 
     try {
       // 加载书源 jsLib（借鉴 WebBook._loadJsLib）

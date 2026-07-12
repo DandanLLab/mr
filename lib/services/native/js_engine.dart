@@ -1821,6 +1821,21 @@ return __returnValue;
     // 提取 jsLib 中定义的函数名（用于后续清除）
     _extractFunctionNames(jsLib);
 
+    // 关键修复：先删除 jsLib 中定义的函数名对应的全局 native 函数
+    // 原因：QuickJS 全局作用域可能已存在同名的 native 函数（如 flutter_js 注册的 decode），
+    //       jsLib 中的 function/var 声明无法覆盖已存在的全局属性，
+    //       导致 jsvmp 混淆代码暴露的 decode 函数被 native decode 遮蔽
+    if (_currentJsLibFunctions.isNotEmpty && _jsRuntime != null) {
+      try {
+        final deleteCode = _currentJsLibFunctions
+            .map((fn) => 'try{delete globalThis.$fn}catch(e){}')
+            .join(';');
+        _jsRuntime!.evaluate(deleteCode);
+      } catch (e) {
+        debugPrint('⚠️ [loadJsLib] 删除冲突全局函数失败: $e');
+      }
+    }
+
     // 把 jsLib eval 到全局作用域（等价于 legado 的 RhinoScriptEngine.eval(jsLib, scope)）
     try {
       _jsRuntime?.evaluate(jsLib);
