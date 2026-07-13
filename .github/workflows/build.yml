@@ -516,38 +516,55 @@ jobs:
           flutter pub get
 
       - name: Build HAP
-        # npm 包 @hmtools/hmos-cli-lite-linux 的默认签名材料损坏（is illegal）
-        # 方案一：删除 res 文件夹，让 hvigor 重新生成调试签名
-        # 方案二：清除 build-profile.json5 的 signingConfigs
-        # 双管齐下，debug 模式构建
+        # 使用本地生成的鸿蒙调试签名材料（sign/ohos/ 目录）
+        # 签名文件：debug.p12 + debug.cer + debug.p7b（EC 密钥，SHA256withECDSA）
+        # 密码：0000001B2A3C4D5E6F7A8B9C0D1E2F3（鸿蒙调试签名固定约定）
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
-          # 方案一：删除 npm 包里损坏的签名材料，让 hvigor 自动重新生成
+          # 1. 复制本地生成的签名材料到 ohos/sign/
+          mkdir -p ohos/sign
+          cp sign/ohos/debug.p12 ohos/sign/
+          cp sign/ohos/debug.cer ohos/sign/
+          cp sign/ohos/debug.p7b ohos/sign/
+          echo "=== 签名材料 ==="
+          ls -la ohos/sign/
+          # 2. 删除 npm 包里损坏的默认签名材料
           CLI_RES=$(npm root -g)/@hmtools/hmos-cli-lite-linux/command-line-tools/hvigor/hvigor-ohos-plugin/res
-          echo "=== 删除损坏的签名材料 ==="
-          echo "路径: $CLI_RES"
-          if [ -d "$CLI_RES" ]; then
-            rm -rf "$CLI_RES"
-            echo "✅ 已删除 res 文件夹"
-          else
-            echo "⚠️ res 文件夹不存在，尝试通配符查找"
-            rm -rf /opt/hostedtoolcache/node/*/x64/lib/node_modules/@hmtools/hmos-cli-lite-linux/command-line-tools/hvigor/hvigor-ohos-plugin/res 2>/dev/null || true
-          fi
-          # 方案二：清除 build-profile.json5 中的 signingConfigs
+          rm -rf "$CLI_RES" 2>/dev/null || true
+          rm -rf /opt/hostedtoolcache/node/*/x64/lib/node_modules/@hmtools/hmos-cli-lite-linux/command-line-tools/hvigor/hvigor-ohos-plugin/res 2>/dev/null || true
+          # 3. 注入 signingConfigs 到 build-profile.json5
           python3 -c "
           import re
-          for p in ['ohos/build-profile.json5', 'ohos/entry/build-profile.json5']:
-              try:
-                  with open(p, 'r', encoding='utf-8') as f: c = f.read()
-                  n = re.sub(r'\"signingConfigs\"\s*:\s*\[[^\]]*\],?', '', c, flags=re.DOTALL)
-                  if n != c:
-                      with open(p, 'w', encoding='utf-8') as f: f.write(n)
-                      print(f'✅ {p}: 已清除 signingConfigs')
-                  else:
-                      print(f'⚠️ {p}: 无 signingConfigs')
-              except FileNotFoundError:
-                  print(f'⚠️ {p}: 文件不存在')
+          path = 'ohos/build-profile.json5'
+          with open(path, 'r', encoding='utf-8') as f:
+              content = f.read()
+          # 用正则删除已有 signingConfigs（如有）
+          content = re.sub(r'\"signingConfigs\"\s*:\s*\[[^\]]*\],?', '', content, flags=re.DOTALL)
+          # 直接字符串注入 signingConfigs
+          sign_config = '''
+            \"signingConfigs\": [
+              {
+                \"name\": \"default\",
+                \"type\": \"HarmonyOS\",
+                \"material\": {
+                  \"storeFile\": \"./sign/debug.p12\",
+                  \"storePassword\": \"0000001B2A3C4D5E6F7A8B9C0D1E2F3\",
+                  \"keyAlias\": \"debugKey\",
+                  \"keyPassword\": \"0000001B2A3C4D5E6F7A8B9C0D1E2F3\",
+                  \"signAlg\": \"SHA256withECDSA\",
+                  \"profile\": \"./sign/debug.p7b\",
+                  \"certpath\": \"./sign/debug.cer\"
+                }
+              }
+            ],'''
+          # 在 app 对象的开头插入 signingConfigs
+          content = re.sub(r'(\"app\"\s*:\s*\{)', r'\\1' + sign_config, content, count=1)
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(content)
+          print('已注入 signingConfigs')
           "
+          echo "=== build-profile.json5 ==="
+          cat ohos/build-profile.json5
           echo "=== 尝试构建 debug HAP ==="
           set +e
           flutter build hap --debug --verbose > /tmp/hap-build.log 2>&1
@@ -556,8 +573,6 @@ jobs:
           echo "=== 构建退出码: $BUILD_EXIT ==="
           echo "=== hvigor 错误上下文 ==="
           grep -B 2 -A 25 "hvigor ERROR\|Error Message\|Try the following\|illegal\|Signing" /tmp/hap-build.log
-          echo "=== build-profile.json5 ==="
-          cat ohos/build-profile.json5
           echo "=== 最后 80 行 ==="
           tail -80 /tmp/hap-build.log
           exit $BUILD_EXIT
