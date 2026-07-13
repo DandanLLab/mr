@@ -268,49 +268,67 @@ jobs:
 
   # ===== 鸿蒙 HarmonyOS 打包（允许失败）=====
   # 鸿蒙 Flutter SDK 为华为 fork（https://gitcode.com/openharmony-sig/flutter_flutter）
-  # CI 使用官方 Command Line Tools Docker 镜像（华为官方工具链，非社区 npm 包）
-  # 镜像源: https://xuxiaowei.io/t/harmonyos-command-line-tools-docker/519
-  # 镜像版本: 5.1.0.849（hvigorw 5.18.6, ohpm 5.1.3, Java 17, Node 18）
+  # CI 使用华为官方 npm registry 安装 hvigor 工具链（非第三方 Docker 镜像）
+  # registry: @ohos:registry=https://repo.harmonyos.com/npm/
   build-ohos:
     name: Build HarmonyOS
     needs: prepare
     runs-on: ubuntu-latest
     continue-on-error: true
-    # 使用华为官方 Command Line Tools Docker 镜像（替代社区 npm 包）
-    # 镜像内置 hvigorw + ohpm + SDK + Java 17，res/material 目录完整无损
-    # 镜像源: https://xuxiaowei.io/t/harmonyos-command-line-tools-docker/519
-    container: registry.cn-qingdao.aliyuncs.com/xuxiaoweicomcn/hmos-command:5.1.0.849
-    env:
-      LANG: C.UTF-8
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify HarmonyOS Tools
-        # 验证 Docker 镜像内置的工具链，并设置环境变量
+      - name: Setup Node.js 18
+        # hvigor 要求 Node.js 18（与官方 commandline-tools 一致）
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup Java 17
+        # hvigor 构建需要 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install HarmonyOS Tools (Official npm)
+        # 使用华为官方 npm registry 安装 hvigor + hvigor-ohos-plugin
+        # 官方包的 res/material 目录完整无损，不再需要 rm -rf hack
+        # 同时安装 @hmtools/hmos-cli-lite-linux 仅提供 ohpm
         run: |
-          echo "=== 工具版本 ==="
-          node -v
-          hvigorw -v
-          ohpm -v
+          set -e
+          # 配置华为官方 npm registry
+          npm config set @ohos:registry=https://repo.harmonyos.com/npm/
+          # 安装官方 hvigor 和 hvigor-ohos-plugin
+          npm install -g @ohos/hvigor @ohos/hvigor-ohos-plugin
+          # 验证安装
+          echo "=== hvigor 版本 ==="
+          hvigor -v
+          echo "=== hvigor-ohos-plugin res/material ==="
+          PLUGIN_DIR=$(npm root -g)/@ohos/hvigor-ohos-plugin
+          find "$PLUGIN_DIR/res" -type f 2>/dev/null | head -20 || echo "无 res/material"
+          # 安装 ohpm（来自社区包，仅用 ohpm，不用其 hvigor）
+          npm install -g @hmtools/hmos-cli-lite-linux
+          NPM_GLOBAL=$(npm root -g)
+          PKG_DIR="$NPM_GLOBAL/@hmtools/hmos-cli-lite-linux"
+          # 探测 ohpm 位置（可能有多层嵌套）
+          OHPM_HOME=$(find "$PKG_DIR" -name "ohpm" -type d 2>/dev/null -exec dirname {} \; | head -1)
+          if [ -n "$OHPM_HOME" ]; then
+            echo "OHPM_HOME=$OHPM_HOME/ohpm" >> $GITHUB_ENV
+            echo "$OHPM_HOME/ohpm/bin" >> $GITHUB_PATH
+            echo "$OHPM_HOME/bin" >> $GITHUB_PATH
+            # SDK 环境变量
+            if [ -d "$OHPM_HOME/sdk" ]; then
+              echo "HOS_SDK_HOME=$OHPM_HOME/sdk" >> $GITHUB_ENV
+              echo "OHOS_SDK_HOME=$OHPM_HOME/sdk" >> $GITHUB_ENV
+            fi
+          fi
+          # 配置 ohpm registry
+          ohpm config set registry https://ohpm.openharmony.cn/ohpm/ 2>/dev/null || true
+          echo "=== 工具链验证 ==="
+          which hvigor && hvigor -v
+          which ohpm && ohpm -v
           java -version 2>&1 | head -1
-          echo "=== 工具路径 ==="
-          HVIGORW_PATH=$(which hvigorw)
-          echo "hvigorw: $HVIGORW_PATH"
-          OHPM_PATH=$(which ohpm)
-          echo "ohpm: $OHPM_PATH"
-          # 推导 commandline-tools 根目录
-          CLI_HOME=$(dirname $(dirname $HVIGORW_PATH))
-          echo "CLI_HOME: $CLI_HOME"
-          ls -la "$CLI_HOME"
-          # 设置环境变量
-          echo "OHPM_HOME=$CLI_HOME/ohpm" >> $GITHUB_ENV
-          echo "HOS_SDK_HOME=$CLI_HOME/sdk" >> $GITHUB_ENV
-          echo "OHOS_SDK_HOME=$CLI_HOME/sdk" >> $GITHUB_ENV
-          echo "$CLI_HOME/bin" >> $GITHUB_PATH
-          echo "=== SDK 目录 ==="
-          ls "$CLI_HOME/sdk" 2>/dev/null | head -10 || echo "⚠️ 无 SDK 目录"
-          echo "=== res/material 目录 ==="
-          find "$CLI_HOME" -path "*/res/material" -type d 2>/dev/null | head -5 || echo "无 res/material"
 
       - name: Clone HarmonyOS Flutter SDK
         # 华为 fork 的 Flutter SDK，动态获取最高 release 版本分支
@@ -489,7 +507,7 @@ jobs:
           flutter pub get
 
       - name: Build HAP
-        # 使用官方 Docker 镜像的完整 hvigor 工具链构建
+        # 使用官方 npm 安装的 hvigor 工具链构建
         # 签名材料预提交在 ohos/sign/，build-profile.json5 已配置 signingConfigs
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
