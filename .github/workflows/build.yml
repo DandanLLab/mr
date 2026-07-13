@@ -538,8 +538,10 @@ jobs:
                   print(f'⚠️ {p}: 文件不存在')
           "
           echo "=== 尝试构建 debug HAP ==="
+          set +e
           flutter build hap --debug --verbose > /tmp/hap-build.log 2>&1
           BUILD_EXIT=$?
+          set -e
           echo "=== 构建退出码: $BUILD_EXIT ==="
           echo "=== 错误行 ==="
           grep -iE "error|fail|exception|illegal|sign|hvigor" /tmp/hap-build.log | head -30
