@@ -424,26 +424,26 @@ jobs:
         # 同时创建临时项目提取官方调试签名材料（确保 p7b 格式合法）
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
-          # 1. 创建临时项目提取官方签名材料
-          flutter create --platforms ohos /tmp/ohos-template
+          # 1. 创建临时项目提取官方签名材料（Dart 包名必须用下划线）
+          flutter create --platforms ohos /tmp/ohos_template
           echo "=== 临时项目签名材料 ==="
-          ls -la /tmp/ohos-template/ohos/sign/ 2>/dev/null || echo "⚠️ 临时项目无 sign 目录"
+          ls -la /tmp/ohos_template/ohos/sign/ 2>/dev/null || echo "⚠️ 临时项目无 sign 目录"
           echo "=== 临时项目 build-profile.json5 ==="
-          cat /tmp/ohos-template/ohos/build-profile.json5 2>/dev/null || echo "⚠️ 无 build-profile.json5"
+          cat /tmp/ohos_template/ohos/build-profile.json5 2>/dev/null || echo "⚠️ 无 build-profile.json5"
           # 2. 生成本项目 ohos 工程骨架
           flutter create --platforms ohos .
           echo "=== ohos 目录结构 ==="
           ls -la ohos/
           # 3. 用官方签名材料覆盖（防止手动生成的 p7b 格式不合法）
-          if [ -d /tmp/ohos-template/ohos/sign ]; then
+          if [ -d /tmp/ohos_template/ohos/sign ]; then
             mkdir -p ohos/sign
-            cp -f /tmp/ohos-template/ohos/sign/* ohos/sign/
+            cp -f /tmp/ohos_template/ohos/sign/* ohos/sign/
             echo "✅ 已用官方签名材料覆盖"
             ls -la ohos/sign/
           fi
           # 4. 用官方 build-profile.json5 的 signingConfigs 覆盖我们的
-          if [ -f /tmp/ohos-template/ohos/build-profile.json5 ]; then
-            cp -f /tmp/ohos-template/ohos/build-profile.json5 ohos/build-profile.json5
+          if [ -f /tmp/ohos_template/ohos/build-profile.json5 ]; then
+            cp -f /tmp/ohos_template/ohos/build-profile.json5 ohos/build-profile.json5
             echo "✅ 已用官方 build-profile.json5 覆盖"
             cat ohos/build-profile.json5
           fi
