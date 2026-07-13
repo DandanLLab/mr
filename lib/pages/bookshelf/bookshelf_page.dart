@@ -11,7 +11,6 @@ import '../../routes/app_routes.dart';
 import '../../services/local_book/local_book_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/cover_config_service.dart';
-import '../../services/image_decode_provider.dart';
 import '../../utils/design_tokens.dart';
 
 /// 书架布局类型
@@ -264,15 +263,60 @@ class _BookshelfPageState extends State<BookshelfPage>
                             ),
                           ),
                         ),
-                        // 搜索按钮
-                        IconButton(
-                          icon: Icon(
-                            Icons.search,
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
-                          tooltip: '搜索',
-                          onPressed: () {
-                            Navigator.pushNamed(context, AppRoutes.search);
+                        // 搜索入口
+                        Builder(
+                          builder: (context) {
+                            final scheme = Theme.of(context).colorScheme;
+                            final isDark = scheme.brightness == Brightness.dark;
+                            final background = isDark
+                                ? scheme.surfaceContainerHighest
+                                : scheme.primaryContainer.withValues(alpha: 0.72);
+                            final foreground = isDark
+                                ? scheme.onSurface
+                                : scheme.onPrimaryContainer;
+                            final border = isDark
+                                ? scheme.outlineVariant
+                                : scheme.primary.withValues(alpha: 0.42);
+                            return Padding(
+                              padding: const EdgeInsets.only(left: 4),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(
+                                  DesignTokens.searchRadius,
+                                ),
+                                onTap: () => Navigator.pushNamed(
+                                  context,
+                                  AppRoutes.search,
+                                ),
+                                child: Container(
+                                  height: 36,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: DesignTokens.spacingMd,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: background,
+                                    borderRadius: BorderRadius.circular(
+                                      DesignTokens.searchRadius,
+                                    ),
+                                    border: Border.all(color: border),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.search,
+                                        size: 20,
+                                        color: foreground,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '搜索',
+                                        style: TextStyle(color: foreground),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
                           },
                         ),
                         // 更多菜单
@@ -2362,29 +2406,6 @@ class _BookshelfPageState extends State<BookshelfPage>
 
     // 有网络封面
     if (coverUrl.isNotEmpty) {
-      // 查找书源，判断是否需要解密（借鉴 Legado ImageUtils.decode）
-      final source = _findBookSource(book);
-      if (DecodedImageProvider.needsDecode(source, true)) {
-        return Image(
-          image: DecodedImageProvider(
-            url: coverUrl,
-            headers: _buildCoverHeaders(book),
-            source: source!,
-            isCover: true,
-            book: book,
-          ),
-          fit: BoxFit.cover,
-          width: double.infinity,
-          height: double.infinity,
-          gaplessPlayback: true,
-          errorBuilder: (_, __, ___) =>
-              coverConfig.buildDefaultCoverPlaceholder(
-            bookName: book.displayName,
-            bookAuthor: book.displayAuthor,
-            isDark: isDark,
-          ),
-        );
-      }
       // 高清封面设置：非高清时使用缩略图缓存尺寸
       final memCacheWidth = coverConfig.loadCoverHighQuality ? null : 240;
       final maxWidthDiskCache = coverConfig.loadCoverHighQuality ? null : 320;
@@ -2404,10 +2425,10 @@ class _BookshelfPageState extends State<BookshelfPage>
         ),
         errorWidget: (context, url, error) =>
             coverConfig.buildDefaultCoverPlaceholder(
-          bookName: book.displayName,
-          bookAuthor: book.displayAuthor,
-          isDark: isDark,
-        ),
+              bookName: book.displayName,
+              bookAuthor: book.displayAuthor,
+              isDark: isDark,
+            ),
       );
     }
 
@@ -2417,19 +2438,6 @@ class _BookshelfPageState extends State<BookshelfPage>
       bookAuthor: book.displayAuthor,
       isDark: isDark,
     );
-  }
-
-  /// 根据书籍的 sourceUrl 查找书源（用于封面解密判断和请求头构建）
-  BookSource? _findBookSource(Book book) {
-    final sourceUrl = book.sourceUrl;
-    if (sourceUrl == null || sourceUrl.isEmpty) return null;
-    final sourceData = StorageService.instance.getBookSource(sourceUrl);
-    if (sourceData == null) return null;
-    try {
-      return BookSource.fromJson(sourceData);
-    } catch (_) {
-      return null;
-    }
   }
 
   /// 根据书籍所属书源构建封面图请求头
@@ -2442,8 +2450,16 @@ class _BookshelfPageState extends State<BookshelfPage>
     final sourceUrl = book.sourceUrl;
     if (sourceUrl == null || sourceUrl.isEmpty) return headers;
 
-    final source = _findBookSource(book);
-    if (source == null) return headers;
+    // 从 StorageService 查找对应书源
+    final sourceData = StorageService.instance.getBookSource(sourceUrl);
+    if (sourceData == null) return headers;
+
+    BookSource? source;
+    try {
+      source = BookSource.fromJson(sourceData);
+    } catch (_) {
+      return headers;
+    }
 
     // 解析书源的 header 字段（可能是 JSON 格式或 Key: Value 按行格式）
     final headerStr = source.header;

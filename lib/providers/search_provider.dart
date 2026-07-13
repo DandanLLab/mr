@@ -31,6 +31,7 @@ class SearchProvider extends ChangeNotifier {
   Set<String> _selectedSourceUrls;
   final List<Map<String, dynamic>> _searchResults = [];
   bool _isLoading = false;
+  bool _singleSourceRouteActive = false;
   String? _error;
   List<String> _searchHistory = [];
   String _currentKeyword = '';
@@ -111,9 +112,19 @@ class SearchProvider extends ChangeNotifier {
   }
 
   void selectSingleSource(String sourceUrl) {
+    _singleSourceRouteActive = true;
     _selectedSourceUrls = {
       if (_bookSources.any((s) => s.bookSourceUrl == sourceUrl)) sourceUrl,
     };
+    notifyListeners();
+  }
+
+  void restoreMultiSourceSelectionAfterSingleSourceRoute() {
+    if (!_singleSourceRouteActive) return;
+    _singleSourceRouteActive = false;
+    _selectedSourceUrls = _bookSources
+        .map((source) => source.bookSourceUrl)
+        .toSet();
     notifyListeners();
   }
 
