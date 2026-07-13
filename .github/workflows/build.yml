@@ -284,17 +284,11 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Setup Java 17
-        # hvigor 构建需要 JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
       - name: Install HarmonyOS Tools (Official npm)
         # 使用华为官方 npm registry 安装 hvigor + hvigor-ohos-plugin
         # 官方包的 res/material 目录完整无损，不再需要 rm -rf hack
         # 同时安装 @hmtools/hmos-cli-lite-linux 仅提供 ohpm
+        # 鸿蒙 5+ 不支持 Java，hvigor 为 Node.js 工具，无需 JDK
         run: |
           set -e
           # 配置华为官方 npm registry
@@ -328,7 +322,6 @@ jobs:
           echo "=== 工具链验证 ==="
           which hvigor && hvigor -v
           which ohpm && ohpm -v
-          java -version 2>&1 | head -1
 
       - name: Clone HarmonyOS Flutter SDK
         # 华为 fork 的 Flutter SDK，动态获取最高 release 版本分支
