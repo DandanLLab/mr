@@ -268,72 +268,49 @@ jobs:
 
   # ===== 鸿蒙 HarmonyOS 打包（允许失败）=====
   # 鸿蒙 Flutter SDK 为华为 fork（https://gitcode.com/openharmony-sig/flutter_flutter）
-  # 当前基于 Flutter 3.27.4（Dart 3.6.2），项目要求 Dart >=3.12.0 可能暂不兼容
-  # 免账号方案：用社区 npm 包 @hmtools/hmos-cli-lite-linux 提供 hvigorw + ohpm
-  # 若包不含完整 OHOS SDK，后续按日志缺啥补啥（从 gitee 公开下载 OpenHarmony SDK）
+  # CI 使用官方 Command Line Tools Docker 镜像（华为官方工具链，非社区 npm 包）
+  # 镜像源: https://xuxiaowei.io/t/harmonyos-command-line-tools-docker/519
+  # 镜像版本: 5.1.0.849（hvigorw 5.18.6, ohpm 5.1.3, Java 17, Node 18）
   build-ohos:
     name: Build HarmonyOS
     needs: prepare
     runs-on: ubuntu-latest
     continue-on-error: true
+    # 使用华为官方 Command Line Tools Docker 镜像（替代社区 npm 包）
+    # 镜像内置 hvigorw + ohpm + SDK + Java 17，res/material 目录完整无损
+    # 镜像源: https://xuxiaowei.io/t/harmonyos-command-line-tools-docker/519
+    container: registry.cn-qingdao.aliyuncs.com/xuxiaoweicomcn/hmos-command:5.1.0.849
+    env:
+      LANG: C.UTF-8
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
-        # hvigorw / ohpm 均为 Node.js 工具，鸿蒙 Flutter 构建（Dart+C）无需 Java
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install HarmonyOS CLI
-        # 免账号方案：社区 npm 包 @hmtools/hmos-cli-lite-linux（MIT，gitcode: atomicservice/hmos-cli-lite）
-        # 包含 hvigorw(hmos-lite) + ohpm + hstack，npm install -g 即用，无需华为账号
-        id: install_cli
+      - name: Verify HarmonyOS Tools
+        # 验证 Docker 镜像内置的工具链，并设置环境变量
         run: |
-          set -e
-          npm install -g @hmtools/hmos-cli-lite-linux
-          NPM_GLOBAL=$(npm root -g)
-          PKG_DIR="$NPM_GLOBAL/@hmtools/hmos-cli-lite-linux"
-          echo "=== 包顶层目录 ==="
-          ls -la "$PKG_DIR" || { echo "❌ 包目录不存在: $PKG_DIR"; exit 1; }
-          echo "=== 包内目录树（maxdepth 3）==="
-          find "$PKG_DIR" -maxdepth 3 -type d 2>/dev/null | head -50
-          # 探测 commandline-tools 实际位置（可能有多层嵌套）
-          CLI_HOME=""
-          for candidate in "$PKG_DIR" "$PKG_DIR/commandline-tools" "$PKG_DIR/command-line-tools"; do
-            if [ -d "$candidate/ohpm" ] || [ -d "$candidate/bin" ]; then
-              CLI_HOME="$candidate"
-              break
-            fi
-          done
-          # 兜底：搜索 ohpm 目录
-          if [ -z "$CLI_HOME" ]; then
-            CLI_HOME=$(find "$PKG_DIR" -name "ohpm" -type d 2>/dev/null -exec dirname {} \; | head -1)
-          fi
-          if [ -z "$CLI_HOME" ]; then
-            echo "❌ 未在包内找到 commandline-tools 结构（缺 ohpm/bin）"
-            exit 1
-          fi
-          echo "=== CLI_HOME=$CLI_HOME ==="
+          echo "=== 工具版本 ==="
+          node -v
+          hvigorw -v
+          ohpm -v
+          java -version 2>&1 | head -1
+          echo "=== 工具路径 ==="
+          HVIGORW_PATH=$(which hvigorw)
+          echo "hvigorw: $HVIGORW_PATH"
+          OHPM_PATH=$(which ohpm)
+          echo "ohpm: $OHPM_PATH"
+          # 推导 commandline-tools 根目录
+          CLI_HOME=$(dirname $(dirname $HVIGORW_PATH))
+          echo "CLI_HOME: $CLI_HOME"
           ls -la "$CLI_HOME"
-          # 设置环境变量（兼容官方结构）
+          # 设置环境变量
           echo "OHPM_HOME=$CLI_HOME/ohpm" >> $GITHUB_ENV
           echo "HOS_SDK_HOME=$CLI_HOME/sdk" >> $GITHUB_ENV
           echo "OHOS_SDK_HOME=$CLI_HOME/sdk" >> $GITHUB_ENV
           echo "$CLI_HOME/bin" >> $GITHUB_PATH
-          echo "$CLI_HOME/ohpm/bin" >> $GITHUB_PATH
-          echo "$CLI_HOME/hvigor/bin" >> $GITHUB_PATH
-          # npm global bin 已在 PATH，ohpm/hmos-lite 应可直接调用
-          echo "=== 验证工具链 ==="
-          which ohpm && ohpm -v || echo "⚠️ ohpm 未在 PATH（项目级 hvigorw 会用到）"
-          which hmos-lite && hmos-lite --version || echo "⚠️ hmos-lite 未在 PATH"
-          echo "=== SDK 目录检查 ==="
-          if [ -d "$CLI_HOME/sdk" ]; then
-            echo "✅ 包含 SDK 目录"
-            ls "$CLI_HOME/sdk" | head -10
-          else
-            echo "⚠️ 包不含 SDK 目录，可能需单独下载 OpenHarmony SDK"
-          fi
+          echo "=== SDK 目录 ==="
+          ls "$CLI_HOME/sdk" 2>/dev/null | head -10 || echo "⚠️ 无 SDK 目录"
+          echo "=== res/material 目录 ==="
+          find "$CLI_HOME" -path "*/res/material" -type d 2>/dev/null | head -5 || echo "无 res/material"
 
       - name: Clone HarmonyOS Flutter SDK
         # 华为 fork 的 Flutter SDK，动态获取最高 release 版本分支
@@ -412,33 +389,15 @@ jobs:
 
       - name: Generate ohos Project
         # CI 中用华为 fork Flutter 生成 ohos 工程骨架
-        # 同时创建临时项目提取官方调试签名材料（确保 p7b 格式合法）
+        # 签名材料和 build-profile.json5 已预提交到仓库
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
-          # 1. 创建临时项目提取官方签名材料（Dart 包名必须用下划线）
-          flutter create --platforms ohos /tmp/ohos_template
-          echo "=== 临时项目签名材料 ==="
-          ls -la /tmp/ohos_template/ohos/sign/ 2>/dev/null || echo "⚠️ 临时项目无 sign 目录"
-          echo "=== 临时项目 build-profile.json5 ==="
-          cat /tmp/ohos_template/ohos/build-profile.json5 2>/dev/null || echo "⚠️ 无 build-profile.json5"
-          # 2. 生成本项目 ohos 工程骨架
           flutter create --platforms ohos .
           echo "=== ohos 目录结构 ==="
           ls -la ohos/
-          # 3. 用官方签名材料覆盖（防止手动生成的 p7b 格式不合法）
-          if [ -d /tmp/ohos_template/ohos/sign ]; then
-            mkdir -p ohos/sign
-            cp -f /tmp/ohos_template/ohos/sign/* ohos/sign/
-            echo "✅ 已用官方签名材料覆盖"
-            ls -la ohos/sign/
-          else
-            echo "⚠️ 临时项目无 sign 目录，使用仓库预提交的签名材料"
-            ls -la ohos/sign/
-          fi
-          # 4. 对比临时项目和本项目的 build-profile.json5（仅打印，不覆盖）
-          echo "=== 临时项目 build-profile.json5 ==="
-          cat /tmp/ohos_template/ohos/build-profile.json5 2>/dev/null || echo "⚠️ 无"
-          echo "=== 本项目 build-profile.json5 ==="
+          echo "=== 签名材料 ==="
+          ls -la ohos/sign/
+          echo "=== build-profile.json5 ==="
           cat ohos/build-profile.json5
 
       - name: Inject QuickJS C Build
@@ -530,22 +489,14 @@ jobs:
           flutter pub get
 
       - name: Build HAP
+        # 使用官方 Docker 镜像的完整 hvigor 工具链构建
         # 签名材料预提交在 ohos/sign/，build-profile.json5 已配置 signingConfigs
-        # hvigor 插件自带的 res/material/ 目录有损坏的签名材料，必须删除
-        # 错误提示原文：clear the .../res folder and perform signing again
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
           echo "=== 签名材料 ==="
           ls -la ohos/sign/
           echo "=== build-profile.json5 ==="
           cat ohos/build-profile.json5
-          # 删除 hvigor 插件自带的损坏签名材料
-          CLI_PLUGIN=$(npm root -g)/@hmtools/hmos-cli-lite-linux/command-line-tools/hvigor/hvigor-ohos-plugin
-          echo "=== 删除前 res/material 目录 ==="
-          ls -la "$CLI_PLUGIN/res/material/" 2>/dev/null || echo "res/material 不存在"
-          rm -rf "$CLI_PLUGIN/res/material"
-          echo "=== 删除后 ==="
-          ls -la "$CLI_PLUGIN/res/" 2>/dev/null || echo "res 目录不存在"
           echo "=== 尝试构建 debug HAP ==="
           set +e
           flutter build hap --debug --verbose > /tmp/hap-build.log 2>&1
