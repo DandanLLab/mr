@@ -284,10 +284,10 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Install HarmonyOS Tools (Official npm)
-        # 配置华为官方 npm registry，让 hvigorw 的 pnpm install 从官方源拉包
-        # 官方包的 res/material 目录完整无损，不再需要 rm -rf hack
-        # 彻底移除第三方社区包 @hmtools/hmos-cli-lite-linux
+      - name: Install HarmonyOS Tools (Official npm + SDK)
+        # hvigor + hvigor-ohos-plugin 从华为官方 npm registry 安装
+        # SDK 不在 npm 上，从 @hmtools 包提取 SDK 目录后不加入 PATH
+        # 删除 @hmtools 的损坏 res/material/，避免干扰官方插件
         # 鸿蒙 5+ 不支持 Java，hvigor 为 Node.js 工具，无需 JDK
         run: |
           set -e
@@ -295,6 +295,25 @@ jobs:
           npm config set @ohos:registry=https://repo.harmonyos.com/npm/
           echo "=== .npmrc ==="
           cat ~/.npmrc
+
+          # SDK 不在 npm registry 上，从 @hmtools 提取 SDK 目录
+          # 仅用 SDK 文件，不用其 hvigor/ohpm，不加入 PATH
+          npm install -g @hmtools/hmos-cli-lite-linux
+          NPM_GLOBAL=$(npm root -g)
+          PKG_DIR="$NPM_GLOBAL/@hmtools/hmos-cli-lite-linux"
+          # 探测 SDK 位置
+          SDK_HOME=$(find "$PKG_DIR" -name "sdk" -type d 2>/dev/null | head -1)
+          if [ -n "$SDK_HOME" ]; then
+            echo "HOS_SDK_HOME=$SDK_HOME" >> $GITHUB_ENV
+            echo "OHOS_SDK_HOME=$SDK_HOME" >> $GITHUB_ENV
+            echo "=== SDK 目录: $SDK_HOME ==="
+            ls "$SDK_HOME" | head -10
+          else
+            echo "⚠️ 未找到 SDK 目录"
+          fi
+          # 删除 @hmtools 的损坏 res/material/，避免 hvigor 加载到它
+          find "$PKG_DIR" -path "*/res/material" -type d -exec rm -rf {} + 2>/dev/null || true
+          echo "=== 已清除 @hmtools 的 res/material ==="
           echo "=== Node.js 版本 ==="
           node -v
 
