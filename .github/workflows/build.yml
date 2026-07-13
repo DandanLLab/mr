@@ -426,37 +426,29 @@ jobs:
           path = 'ohos/build-profile.json5'
           with open(path, 'r', encoding='utf-8') as f:
               content = f.read()
-          signing_block = '''"signingConfigs": [
-      {
-        "name": "default",
-        "type": "HarmonyOS",
-        "material": {
-          "storeFile": "./sign/debug.p12",
-          "storePassword": "0000001B2A3C4D5E6F7A8B9C0D1E2F3",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001B2A3C4D5E6F7A8B9C0D1E2F3",
-          "signAlg": "SHA256withECDSA",
-          "profile": "./sign/debug.p7b",
-          "certpath": "./sign/debug.cer"
-        }
-      }
-    ]'''
-          # 替换 signingConfigs（空数组或已有内容）
+          signing_config = {
+              "name": "default",
+              "type": "HarmonyOS",
+              "material": {
+                  "storeFile": "./sign/debug.p12",
+                  "storePassword": "0000001B2A3C4D5E6F7A8B9C0D1E2F3",
+                  "keyAlias": "debugKey",
+                  "keyPassword": "0000001B2A3C4D5E6F7A8B9C0D1E2F3",
+                  "signAlg": "SHA256withECDSA",
+                  "profile": "./sign/debug.p7b",
+                  "certpath": "./sign/debug.cer"
+              }
+          }
+          signing_block = '"signingConfigs": ' + json.dumps([signing_config], indent=6, ensure_ascii=False)
           if '"signingConfigs"' in content:
               content = re.sub(r'"signingConfigs"\s*:\s*\[.*?\]', signing_block, content, count=1, flags=re.DOTALL)
           else:
               content = re.sub(r'("app"\s*:\s*\{)', r'\1\n    ' + signing_block + ',', content, count=1)
-          # 给 product 加 signingConfig
           if '"signingConfig"' not in content:
-              content = re.sub(
-                  r'("products"\s*:\s*\[\s*\{)',
-                  r'\1\n        "signingConfig": "default",',
-                  content,
-                  count=1
-              )
+              content = re.sub(r'("products"\s*:\s*\[\s*\{)', r'\1\n        "signingConfig": "default",', content, count=1)
           with open(path, 'w', encoding='utf-8') as f:
               f.write(content)
-          print('✅ 已注入 signingConfigs')
+          print('done')
           PYEOF
           echo "=== 注入后的 build-profile.json5 ==="
           cat ohos/build-profile.json5
