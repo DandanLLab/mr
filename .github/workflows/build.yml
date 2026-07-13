@@ -268,59 +268,20 @@ jobs:
 
   # ===== 鸿蒙 HarmonyOS 打包（允许失败）=====
   # 鸿蒙 Flutter SDK 为华为 fork（https://gitcode.com/openharmony-sig/flutter_flutter）
-  # CI 使用华为官方 Command Line Tools（含 Node.js 18 + hvigorw + ohpm + SDK + hdc）
-  # 官方文档：https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-command-line-building-app
-  # 下载地址：https://developer.huawei.com/consumer/cn/download/command-line-tools-for-hmos
-  # 需在仓库 Settings → Secrets → Actions 配置 HARMONYOS_CLI_URL（zip 下载链接）
+  # Docker 镜像基于华为官方 Command Line Tools 6.1.0.830 打包
+  # 源码：https://gitlab.xuxiaowei.com.cn/xuxiaowei-io/hmos-command
+  # 包含：Node 18 + hvigorw 6.23.5 + ohpm 6.1.1 + hdc + JDK 17 + SDK
   build-ohos:
     name: Build HarmonyOS
     needs: prepare
     runs-on: ubuntu-latest
     continue-on-error: true
+    container:
+      image: registry.cn-qingdao.aliyuncs.com/xuxiaoweicomcn/hmos-command:6.1.0.830
+      env:
+        LANG: C.UTF-8
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup JDK 17
-        # 官方文档要求 JDK 17（签名工具 hap-sign-tool.jar 需要 Java）
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Download & Setup Command Line Tools
-        # Command Line Tools 包含 Node.js 18 + hvigorw + ohpm + SDK + hdc
-        # 需在仓库 Settings → Secrets → Actions 配置 HARMONYOS_CLI_URL
-        # 下载地址：https://developer.huawei.com/consumer/cn/download/command-line-tools-for-hmos
-        env:
-          CLI_URL: ${{ secrets.HARMONYOS_CLI_URL }}
-        run: |
-          set -e
-          if [ -z "$CLI_URL" ]; then
-            echo "❌ 未配置 HARMONYOS_CLI_URL secret"
-            echo "请从 https://developer.huawei.com/consumer/cn/download/command-line-tools-for-hmos 下载"
-            echo "上传到 GitHub Release 后将下载链接配置为 HARMONYOS_CLI_URL secret"
-            exit 1
-          fi
-          echo "=== 下载 Command Line Tools ==="
-          wget -q --no-check-certificate "$CLI_URL" -O /tmp/commandline-tools.zip
-          echo "=== 解压到 /opt ==="
-          unzip -q /tmp/commandline-tools.zip -d /opt/
-          rm /tmp/commandline-tools.zip
-          CMD_DIR="/opt"
-          # 设置环境变量（按官方文档）
-          export NODE_HOME=${CMD_DIR}/command-line-tools/tool/node
-          export HDC_HOME=${CMD_DIR}/command-line-tools/sdk/default/openharmony/toolchains
-          echo "NODE_HOME=${NODE_HOME}" >> $GITHUB_ENV
-          echo "HDC_HOME=${HDC_HOME}" >> $GITHUB_ENV
-          echo "${CMD_DIR}/command-line-tools/bin" >> $GITHUB_PATH
-          echo "${NODE_HOME}/bin" >> $GITHUB_PATH
-          echo "${HDC_HOME}" >> $GITHUB_PATH
-          # 验证工具链
-          echo "=== 验证工具链 ==="
-          node -v
-          hvigorw -v
-          ohpm -v
-          java -version
 
       - name: Configure npm & ohpm Registry
         # 按官方文档配置 npm 和 ohpm 镜像仓库
@@ -329,6 +290,11 @@ jobs:
           npm config set @ohos:registry https://repo.harmonyos.com/npm/
           ohpm config set registry https://ohpm.openharmony.cn/ohpm/
           ohpm config set strict_ssl false
+          echo "=== 验证工具链 ==="
+          node -v
+          hvigorw -v
+          ohpm -v
+          java -version
           echo "=== .npmrc ==="
           cat ~/.npmrc
 
