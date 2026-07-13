@@ -420,12 +420,33 @@ jobs:
           flutter config --enable-ohos
 
       - name: Generate ohos Project
-        # 项目仓库未提交 ohos/ 目录，CI 中用华为 fork Flutter 生成
+        # CI 中用华为 fork Flutter 生成 ohos 工程骨架
+        # 同时创建临时项目提取官方调试签名材料（确保 p7b 格式合法）
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
+          # 1. 创建临时项目提取官方签名材料
+          flutter create --platforms ohos /tmp/ohos-template
+          echo "=== 临时项目签名材料 ==="
+          ls -la /tmp/ohos-template/ohos/sign/ 2>/dev/null || echo "⚠️ 临时项目无 sign 目录"
+          echo "=== 临时项目 build-profile.json5 ==="
+          cat /tmp/ohos-template/ohos/build-profile.json5 2>/dev/null || echo "⚠️ 无 build-profile.json5"
+          # 2. 生成本项目 ohos 工程骨架
           flutter create --platforms ohos .
           echo "=== ohos 目录结构 ==="
           ls -la ohos/
+          # 3. 用官方签名材料覆盖（防止手动生成的 p7b 格式不合法）
+          if [ -d /tmp/ohos-template/ohos/sign ]; then
+            mkdir -p ohos/sign
+            cp -f /tmp/ohos-template/ohos/sign/* ohos/sign/
+            echo "✅ 已用官方签名材料覆盖"
+            ls -la ohos/sign/
+          fi
+          # 4. 用官方 build-profile.json5 的 signingConfigs 覆盖我们的
+          if [ -f /tmp/ohos-template/ohos/build-profile.json5 ]; then
+            cp -f /tmp/ohos-template/ohos/build-profile.json5 ohos/build-profile.json5
+            echo "✅ 已用官方 build-profile.json5 覆盖"
+            cat ohos/build-profile.json5
+          fi
 
       - name: Inject QuickJS C Build
         # 将鸿蒙版 CMakeLists.txt 和 version-script 注入 ohos 工程
@@ -516,18 +537,12 @@ jobs:
           flutter pub get
 
       - name: Build HAP
-        # 签名材料已预提交到 ohos/sign/ 目录，build-profile.json5 已配置好 signingConfigs
-        # 签名文件：debug.p12 + debug.cer + debug.p7b（EC 密钥，SHA256withECDSA）
-        # 密码：0000001B2A3C4D5E6F7A8B9C0D1E2F3（鸿蒙调试签名固定约定）
+        # 签名材料来自 Flutter SDK 模板（官方调试签名，确保 p7b 格式合法）
+        # build-profile.json5 使用 flutter create 生成的官方 signingConfigs
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
-          # 确认签名材料已就位
           echo "=== 签名材料 ==="
           ls -la ohos/sign/
-          # 删除 npm 包里损坏的默认签名材料
-          CLI_RES=$(npm root -g)/@hmtools/hmos-cli-lite-linux/command-line-tools/hvigor/hvigor-ohos-plugin/res
-          rm -rf "$CLI_RES" 2>/dev/null || true
-          rm -rf /opt/hostedtoolcache/node/*/x64/lib/node_modules/@hmtools/hmos-cli-lite-linux/command-line-tools/hvigor/hvigor-ohos-plugin/res 2>/dev/null || true
           echo "=== build-profile.json5 ==="
           cat ohos/build-profile.json5
           echo "=== 尝试构建 debug HAP ==="
