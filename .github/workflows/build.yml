@@ -554,12 +554,10 @@ jobs:
           BUILD_EXIT=$?
           set -e
           echo "=== 构建退出码: $BUILD_EXIT ==="
-          echo "=== hvigor 错误上下文 ==="
-          grep -B 2 -A 25 "hvigor ERROR\|Error Message\|Try the following\|illegal\|Signing\|FAILED\|Cause:" /tmp/hap-build.log
-          echo "=== 完整构建日志（前 200 行）==="
-          head -200 /tmp/hap-build.log
-          echo "=== 完整构建日志（后 100 行）==="
-          tail -100 /tmp/hap-build.log
+          echo "=== 错误上下文 ==="
+          grep -B 5 -A 10 "error|Error|FAILED|Exception|Cause:|kernel_snapshot" /tmp/hap-build.log || true
+          echo "=== 完整构建日志 ==="
+          cat /tmp/hap-build.log
           exit $BUILD_EXIT
 
       - name: Rename HAP
