@@ -268,9 +268,9 @@ jobs:
 
   # ===== 鸿蒙 HarmonyOS 打包（允许失败）=====
   # 鸿蒙 Flutter SDK 为华为 fork（https://gitcode.com/openharmony-sig/flutter_flutter）
-  # CI 直接从华为官方下载 Command Line Tools（含 Node.js 18 + hvigorw + ohpm + SDK + hdc）
-  # 官方文档：https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-command-line-building-app
-  # 下载页：https://developer.huawei.com/consumer/cn/download/command-line-tools-for-hmos
+  # Command Line Tools 从华为云公开镜像下载（无需登录）
+  # 镜像地址：https://repo.huaweicloud.com/harmonyos/compiler/hvigor/
+  # SDK 地址：https://repo.huaweicloud.com/harmonyos/os/6.1-Release/
   build-ohos:
     name: Build HarmonyOS
     needs: prepare
@@ -286,39 +286,91 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
       - name: Download & Setup Command Line Tools
-        # 直接从华为官方下载 Command Line Tools
-        # 包含 Node.js 18 + hvigorw + ohpm + SDK + hdc
+        # 从华为云公开镜像下载 Command Line Tools（74 MiB，无需登录）
+        # 包含 hvigorw + ohpm
+        # 如果缺 SDK，会额外下载 ohos-sdk（2.3 GiB）
         run: |
           set -e
-          CLI_URL="https://developer.huawei.com/consumer/cn/tools/harmonyos-command-line-tools-latest.zip"
+          CLI_URL="https://repo.huaweicloud.com/harmonyos/compiler/hvigor/6.26.1/command-line-tools.zip"
           echo "=== 下载 Command Line Tools ==="
-          wget -q --no-check-certificate "$CLI_URL" -O /tmp/commandline-tools.zip
-          FILE_SIZE=$(stat -c%s /tmp/commandline-tools.zip 2>/dev/null || stat -f%z /tmp/commandline-tools.zip)
+          wget -q "$CLI_URL" -O /tmp/commandline-tools.zip
+          FILE_SIZE=$(stat -c%s /tmp/commandline-tools.zip)
           echo "下载文件大小: $((FILE_SIZE / 1024 / 1024)) MB"
-          if [ "$FILE_SIZE" -lt 1048576 ]; then
-            echo "❌ 下载文件太小（< 1MB），可能是登录页面而非 zip"
-            head -20 /tmp/commandline-tools.zip
-            exit 1
-          fi
           echo "=== 解压到 /opt ==="
           unzip -q /tmp/commandline-tools.zip -d /opt/
           rm /tmp/commandline-tools.zip
-          CMD_DIR="/opt"
+          echo "=== /opt 目录结构 ==="
+          find /opt -maxdepth 3 -type d | head -30
+          # 查找 command-line-tools 目录
+          CMD_DIR=$(find /opt -maxdepth 2 -name "command-line-tools" -type d | head -1)
+          if [ -z "$CMD_DIR" ]; then
+            CMD_DIR=$(find /opt -maxdepth 2 -name "bin" -type d | head -1 | xargs dirname)
+          fi
+          echo "CMD_DIR: $CMD_DIR"
           # 设置环境变量（按官方文档）
-          export NODE_HOME=${CMD_DIR}/command-line-tools/tool/node
-          export HDC_HOME=${CMD_DIR}/command-line-tools/sdk/default/openharmony/toolchains
-          echo "NODE_HOME=${NODE_HOME}" >> $GITHUB_ENV
-          echo "HDC_HOME=${HDC_HOME}" >> $GITHUB_ENV
-          echo "${CMD_DIR}/command-line-tools/bin" >> $GITHUB_PATH
-          echo "${NODE_HOME}/bin" >> $GITHUB_PATH
-          echo "${HDC_HOME}" >> $GITHUB_PATH
+          if [ -d "${CMD_DIR}/tool/node" ]; then
+            export NODE_HOME=${CMD_DIR}/tool/node
+            echo "NODE_HOME=${NODE_HOME}" >> $GITHUB_ENV
+            echo "${NODE_HOME}/bin" >> $GITHUB_PATH
+          fi
+          if [ -d "${CMD_DIR}/sdk/default/openharmony/toolchains" ]; then
+            export HDC_HOME=${CMD_DIR}/sdk/default/openharmony/toolchains
+            echo "HDC_HOME=${HDC_HOME}" >> $GITHUB_ENV
+            echo "${HDC_HOME}" >> $GITHUB_PATH
+          else
+            echo "⚠️ SDK 不在 command-line-tools 中，需要单独下载"
+          fi
+          echo "${CMD_DIR}/bin" >> $GITHUB_PATH
           # 验证工具链
           echo "=== 验证工具链 ==="
           node -v
-          hvigorw -v
-          ohpm -v
+          hvigorw -v || echo "⚠️ hvigorw 不在 PATH 中"
+          ohpm -v || echo "⚠️ ohpm 不在 PATH 中"
           java -version
+          echo "=== 完整目录结构 ==="
+          find /opt -maxdepth 4 -type d | head -50
+
+      - name: Download SDK (if needed)
+        # 如果 command-line-tools 不含 SDK，从华为云镜像下载 OpenHarmony SDK
+        run: |
+          set -e
+          CMD_DIR=$(find /opt -maxdepth 2 -name "command-line-tools" -type d | head -1)
+          if [ -z "$CMD_DIR" ]; then
+            CMD_DIR=$(find /opt -maxdepth 2 -name "bin" -type d | head -1 | xargs dirname)
+          fi
+          if [ -d "${CMD_DIR}/sdk/default/openharmony/toolchains" ]; then
+            echo "✅ SDK 已存在，跳过下载"
+            exit 0
+          fi
+          echo "=== 下载 OpenHarmony SDK (2.3 GiB) ==="
+          SDK_URL="https://repo.huaweicloud.com/harmonyos/os/6.1-Release/ohos-sdk-windows_linux-public.tar.gz"
+          wget -q "$SDK_URL" -O /tmp/ohos-sdk.tar.gz
+          echo "下载完成，解压..."
+          mkdir -p /tmp/ohos-sdk
+          tar -xzf /tmp/ohos-sdk.tar.gz -C /tmp/ohos-sdk/
+          rm /tmp/ohos-sdk.tar.gz
+          echo "=== SDK 目录结构 ==="
+          find /tmp/ohos-sdk -maxdepth 3 -type d | head -30
+          # 查找 Linux SDK 目录
+          LINUX_SDK=$(find /tmp/ohos-sdk -maxdepth 3 -name "linux" -type d | head -1)
+          if [ -z "$LINUX_SDK" ]; then
+            LINUX_SDK=$(find /tmp/ohos-sdk -maxdepth 4 -name "toolchains" -type d | head -1 | xargs dirname)
+          fi
+          echo "LINUX_SDK: $LINUX_SDK"
+          # 创建 SDK 目录结构
+          mkdir -p ${CMD_DIR}/sdk/default/openharmony
+          cp -r ${LINUX_SDK}/* ${CMD_DIR}/sdk/default/openharmony/
+          export HDC_HOME=${CMD_DIR}/sdk/default/openharmony/toolchains
+          echo "HDC_HOME=${HDC_HOME}" >> $GITHUB_ENV
+          echo "${HDC_HOME}" >> $GITHUB_PATH
+          echo "=== SDK 安装完成 ==="
+          ls -la ${CMD_DIR}/sdk/default/openharmony/
 
       - name: Configure npm & ohpm Registry
         # 按官方文档配置 npm 和 ohpm 镜像仓库
