@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:provider/provider.dart';
@@ -898,9 +897,6 @@ Map<String, String> _imageHeaders = const {};
   Widget _buildScrollReader() {
     return CustomScrollView(
       controller: _scrollController,
-      scrollCacheExtent: ScrollCacheExtent.pixels(
-        MediaQuery.sizeOf(context).height * 2,
-      ),
       slivers: [
         SliverList.builder(
           itemCount: _allImages.length,
