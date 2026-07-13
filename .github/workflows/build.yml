@@ -516,18 +516,29 @@ jobs:
           flutter pub get
 
       - name: Build HAP
-        # 鸿蒙 release/debug 构建可能因签名材料损坏失败
-        # npm 包 @hmtools/hmos-cli-lite-linux 的默认签名材料可能 "is illegal"
-        # 清除 signingConfigs + 输出完整错误日志定位问题
+        # npm 包 @hmtools/hmos-cli-lite-linux 的默认签名材料损坏（is illegal）
+        # 方案一：删除 res 文件夹，让 hvigor 重新生成调试签名
+        # 方案二：清除 build-profile.json5 的 signingConfigs
+        # 双管齐下，debug 模式构建
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
-          # 清除 build-profile.json5 中的 signingConfigs，避免签名材料校验
+          # 方案一：删除 npm 包里损坏的签名材料，让 hvigor 自动重新生成
+          CLI_RES=$(npm root -g)/@hmtools/hmos-cli-lite-linux/command-line-tools/hvigor/hvigor-ohos-plugin/res
+          echo "=== 删除损坏的签名材料 ==="
+          echo "路径: $CLI_RES"
+          if [ -d "$CLI_RES" ]; then
+            rm -rf "$CLI_RES"
+            echo "✅ 已删除 res 文件夹"
+          else
+            echo "⚠️ res 文件夹不存在，尝试通配符查找"
+            rm -rf /opt/hostedtoolcache/node/*/x64/lib/node_modules/@hmtools/hmos-cli-lite-linux/command-line-tools/hvigor/hvigor-ohos-plugin/res 2>/dev/null || true
+          fi
+          # 方案二：清除 build-profile.json5 中的 signingConfigs
           python3 -c "
           import re
           for p in ['ohos/build-profile.json5', 'ohos/entry/build-profile.json5']:
               try:
                   with open(p, 'r', encoding='utf-8') as f: c = f.read()
-                  # 删除 signingConfigs 字段（含多行数组内容）
                   n = re.sub(r'\"signingConfigs\"\s*:\s*\[[^\]]*\],?', '', c, flags=re.DOTALL)
                   if n != c:
                       with open(p, 'w', encoding='utf-8') as f: f.write(n)
@@ -545,7 +556,7 @@ jobs:
           echo "=== 构建退出码: $BUILD_EXIT ==="
           echo "=== hvigor 错误上下文 ==="
           grep -B 2 -A 25 "hvigor ERROR\|Error Message\|Try the following\|illegal\|Signing" /tmp/hap-build.log
-          echo "=== build-profile.json5（清除后）==="
+          echo "=== build-profile.json5 ==="
           cat ohos/build-profile.json5
           echo "=== 最后 80 行 ==="
           tail -80 /tmp/hap-build.log
