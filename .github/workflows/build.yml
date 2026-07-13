@@ -477,26 +477,30 @@ jobs:
           if 'externalNativeOptions' in content:
               print('⚠️ externalNativeOptions 已存在，跳过')
               sys.exit(0)
-          # 在 "type": "entry" 前插入 externalNativeOptions
+          # externalNativeOptions 必须在 buildOption 对象内
           ext = '''"externalNativeOptions": {
-                "path": "./src/main/cpp/CMakeLists.txt",
-                "arguments": "",
-                "cppFlags": "",
-                "abiFilters": ["arm64-v8a"]
-              },'''
-          new_content = re.sub(r'("type"\s*:\s*"entry")', ext + r'\n            \1', content, count=1)
+        "path": "./src/main/cpp/CMakeLists.txt",
+        "arguments": "",
+        "cppFlags": "",
+        "abiFilters": ["arm64-v8a"]
+      }'''
+          # 匹配 "buildOption": { } 空对象，替换为带 externalNativeOptions 的
+          new_content = re.sub(
+              r'"buildOption"\s*:\s*\{\s*\}',
+              '"buildOption": {\n    ' + ext + '\n  }',
+              content, count=1)
           if new_content == content:
-              print('⚠️ 未找到 "type": "entry"，在最后一个 } 前插入')
-              # 去掉末尾的 } 和空白，加逗号后插入 ext（不带尾逗号），再加 }
-              stripped = content.rstrip()
-              if stripped.endswith('}'):
-                  stripped = stripped[:-1].rstrip()
-              if stripped.endswith(','):
-                  stripped = stripped[:-1].rstrip()
-              new_content = stripped + ',\n  ' + ext.rstrip(',') + '\n}\n'
+              # 匹配 "buildOption": { 后面有内容的情况
+              new_content = re.sub(
+                  r'("buildOption"\s*:\s*\{)',
+                  r'\1\n    ' + ext + ',',
+                  content, count=1)
+          if new_content == content:
+            print('⚠️ 未找到 buildOption，跳过注入')
+            sys.exit(0)
           with open(path, 'w', encoding='utf-8') as f:
               f.write(new_content)
-          print('✅ 已注入 externalNativeOptions')
+          print('✅ 已在 buildOption 内注入 externalNativeOptions')
           PYEOF
           echo "=== build-profile.json5 ==="
           cat ohos/entry/build-profile.json5
