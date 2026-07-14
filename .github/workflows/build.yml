@@ -418,6 +418,12 @@ jobs:
           ls -la ohos/
           echo "=== 签名材料 ==="
           ls -la ohos/sign/
+          # DevEco Studio 生成 p12 时会同时创建 material 文件夹（存储签名辅助文件）
+          # SignHap 会 stat storeFile 所在目录下的 material 文件夹，缺失则 ENOENT
+          # CI 中用 keytool 修改密码的 p12 没有此文件夹，需手动创建空目录通过 stat 检查
+          mkdir -p ohos/sign/material
+          echo "=== 创建 material 目录 ==="
+          ls -la ohos/sign/material/
           echo "=== 生成的 build-profile.json5 ==="
           cat ohos/build-profile.json5
           # 注入 signingConfigs
