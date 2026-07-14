@@ -539,53 +539,62 @@ jobs:
           export PATH="$HOME/ohos-flutter/bin:$PATH"
           flutter pub get
 
-      - name: Patch flutter_ohos SDK Compatibility
-        # flutter_ohos 插件使用了 SDK 5.1.0 中不存在的 API（isCapsLockOn / isNumLockOn / getGlobalWindowMode）
-        # 在 ohpm install 后 patch 这些文件，替换为安全默认值
-        run: |
-          FLUTTER_OHOS_DIR=$(find ohos/oh_modules -type d -path "*/@ohos/flutter_ohos/src/main/ets" | head -1)
-          if [ -z "$FLUTTER_OHOS_DIR" ]; then
-            echo "⚠️ 未找到 flutter_ohos 目录，跳过 patch"
-            exit 0
-          fi
-          echo "=== Patching flutter_ohos at: $FLUTTER_OHOS_DIR ==="
-
-          # KeyEventHandler.ets: isCapsLockOn / isNumLockOn 不存在
-          KEH="$FLUTTER_OHOS_DIR/embedding/ohos/KeyEventHandler.ets"
-          if [ -f "$KEH" ]; then
-            sed -i 's/\.isCapsLockOn/false/g' "$KEH"
-            sed -i 's/\.isNumLockOn/false/g' "$KEH"
-            echo "✅ Patched KeyEventHandler.ets"
-          fi
-
-          # PiPVisibilityBridge.ets: getGlobalWindowMode / GlobalWindowMode 不存在
-          PIP="$FLUTTER_OHOS_DIR/embedding/ohos/PiPVisibilityBridge.ets"
-          if [ -f "$PIP" ]; then
-            sed -i 's/window\.getGlobalWindowMode()/1/g' "$PIP"
-            sed -i 's/window\.GlobalWindowMode/number/g' "$PIP"
-            echo "✅ Patched PiPVisibilityBridge.ets"
-          fi
-
       - name: Build HAP
         # 使用官方 Command Line Tools 的 hvigorw 构建
-        # 签名材料预提交在 ohos/sign/，build-profile.json5 已注入 signingConfigs
+        # 两阶段构建：第一次触发 ohpm install 并在 ArkTS 编译失败，
+        # 然后 patch flutter_ohos 不兼容 API，第二次构建通过
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
           echo "=== 签名材料 ==="
           ls -la ohos/sign/
           echo "=== build-profile.json5 ==="
           cat ohos/build-profile.json5
-          echo "=== 尝试构建 debug HAP ==="
+
+          # 第一阶段：触发 ohpm install（会在 CompileArkTS 失败）
+          echo "=== 第一阶段：ohpm install + 触发编译 ==="
           set +e
-          flutter build hap --debug --verbose > /tmp/hap-build.log 2>&1
-          BUILD_EXIT=$?
+          flutter build hap --debug --verbose > /tmp/hap-build-1.log 2>&1
+          BUILD1_EXIT=$?
           set -e
-          echo "=== 构建退出码: $BUILD_EXIT ==="
-          echo "=== 错误上下文 ==="
-          grep -B 5 -A 10 "error|Error|FAILED|Exception|Cause:|kernel_snapshot" /tmp/hap-build.log || true
-          echo "=== 完整构建日志 ==="
-          cat /tmp/hap-build.log
-          exit $BUILD_EXIT
+          echo "=== 第一阶段退出码: $BUILD1_EXIT ==="
+
+          # patch flutter_ohos 不兼容 API（ohpm install 后才存在 oh_modules）
+          echo "=== Patching flutter_ohos ==="
+          FLUTTER_OHOS_DIR=$(find ohos/oh_modules -type d -path "*/@ohos/flutter_ohos/src/main/ets" | head -1)
+          if [ -n "$FLUTTER_OHOS_DIR" ]; then
+            echo "找到 flutter_ohos: $FLUTTER_OHOS_DIR"
+            KEH="$FLUTTER_OHOS_DIR/embedding/ohos/KeyEventHandler.ets"
+            if [ -f "$KEH" ]; then
+              sed -i 's/\.isCapsLockOn/false/g' "$KEH"
+              sed -i 's/\.isNumLockOn/false/g' "$KEH"
+              echo "✅ Patched KeyEventHandler.ets"
+            fi
+            PIP="$FLUTTER_OHOS_DIR/embedding/ohos/PiPVisibilityBridge.ets"
+            if [ -f "$PIP" ]; then
+              sed -i 's/window\.getGlobalWindowMode()/1/g' "$PIP"
+              sed -i 's/window\.GlobalWindowMode/number/g' "$PIP"
+              echo "✅ Patched PiPVisibilityBridge.ets"
+            fi
+          else
+            echo "⚠️ 未找到 flutter_ohos 目录"
+          fi
+
+          # 第二阶段：patch 后重新构建
+          echo "=== 第二阶段：patch 后重新构建 ==="
+          set +e
+          flutter build hap --debug --verbose > /tmp/hap-build-2.log 2>&1
+          BUILD2_EXIT=$?
+          set -e
+          echo "=== 第二阶段退出码: $BUILD2_EXIT ==="
+
+          # 输出最终日志
+          if [ $BUILD2_EXIT -ne 0 ]; then
+            echo "=== 错误上下文 ==="
+            grep -B 5 -A 10 "error|Error|FAILED|Exception|Cause:" /tmp/hap-build-2.log || true
+            echo "=== 完整构建日志 ==="
+            cat /tmp/hap-build-2.log
+          fi
+          exit $BUILD2_EXIT
 
       - name: Rename HAP
         id: hap
