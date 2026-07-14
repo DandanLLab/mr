@@ -539,6 +539,33 @@ jobs:
           export PATH="$HOME/ohos-flutter/bin:$PATH"
           flutter pub get
 
+      - name: Patch flutter_ohos SDK Compatibility
+        # flutter_ohos 插件使用了 SDK 5.1.0 中不存在的 API（isCapsLockOn / isNumLockOn / getGlobalWindowMode）
+        # 在 ohpm install 后 patch 这些文件，替换为安全默认值
+        run: |
+          FLUTTER_OHOS_DIR=$(find ohos/oh_modules -type d -path "*/@ohos/flutter_ohos/src/main/ets" | head -1)
+          if [ -z "$FLUTTER_OHOS_DIR" ]; then
+            echo "⚠️ 未找到 flutter_ohos 目录，跳过 patch"
+            exit 0
+          fi
+          echo "=== Patching flutter_ohos at: $FLUTTER_OHOS_DIR ==="
+
+          # KeyEventHandler.ets: isCapsLockOn / isNumLockOn 不存在
+          KEH="$FLUTTER_OHOS_DIR/embedding/ohos/KeyEventHandler.ets"
+          if [ -f "$KEH" ]; then
+            sed -i 's/\.isCapsLockOn/false/g' "$KEH"
+            sed -i 's/\.isNumLockOn/false/g' "$KEH"
+            echo "✅ Patched KeyEventHandler.ets"
+          fi
+
+          # PiPVisibilityBridge.ets: getGlobalWindowMode / GlobalWindowMode 不存在
+          PIP="$FLUTTER_OHOS_DIR/embedding/ohos/PiPVisibilityBridge.ets"
+          if [ -f "$PIP" ]; then
+            sed -i 's/window\.getGlobalWindowMode()/1/g' "$PIP"
+            sed -i 's/window\.GlobalWindowMode/number/g' "$PIP"
+            echo "✅ Patched PiPVisibilityBridge.ets"
+          fi
+
       - name: Build HAP
         # 使用官方 Command Line Tools 的 hvigorw 构建
         # 签名材料预提交在 ohos/sign/，build-profile.json5 已注入 signingConfigs
