@@ -771,14 +771,16 @@ Map<String, String> _imageHeaders = const {};
   void _precacheSingle(String url) {
     if (url.startsWith('data:')) return;
     if (_precachedUrls.contains(url)) return;
+    final source = _bookSource;
+    final needDecode = DecodedImageProvider.needsDecode(source, false);
+    if (needDecode && source == null) return;
     _precachedUrls.add(url);
-    final needDecode = DecodedImageProvider.needsDecode(_bookSource, false);
     precacheImage(
       needDecode
           ? DecodedImageProvider(
               url: url,
               headers: _headersForImage(url),
-              source: _bookSource!,
+              source: source!,
               isCover: false,
               book: _book,
             )
@@ -1890,14 +1892,22 @@ Map<String, String> _imageHeaders = const {};
       return;
     }
     // 书源配置了 imageDecode 时走解密链路预缓存，否则走普通网络缓存
-    final needDecode = DecodedImageProvider.needsDecode(_bookSource, false);
+    final source = _bookSource;
+    final needDecode = DecodedImageProvider.needsDecode(source, false);
+    if (needDecode && source == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('书源信息丢失，无法缓存')),
+      );
+      return;
+    }
     try {
       await precacheImage(
         needDecode
             ? DecodedImageProvider(
                 url: url,
                 headers: _headersForImage(url),
-                source: _bookSource!,
+                source: source!,
                 isCover: false,
                 book: _book,
               )
