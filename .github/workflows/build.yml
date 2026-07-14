@@ -409,54 +409,13 @@ jobs:
 
       - name: Generate ohos Project
         # CI 中用华为 fork Flutter 生成 ohos 工程骨架
-        # 签名材料预提交在 ohos/sign/，build-profile.json5 由 flutter create 生成
-        # 生成后注入 signingConfigs（compatibleSdkVersion 由 SDK 版本决定）
+        # 不签名：生成未签名 HAP，用户自行用 DevEco Studio 签名后安装
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
           flutter create --platforms ohos .
           echo "=== ohos 目录结构 ==="
           ls -la ohos/
-          echo "=== 签名材料 ==="
-          ls -la ohos/sign/
-          # DevEco Studio 生成 p12 时会同时创建 material 文件夹（存储签名辅助文件）
-          # SignHap 会 stat storeFile 所在目录下的 material 文件夹，缺失则 ENOENT
-          # CI 中用 keytool 修改密码的 p12 没有此文件夹，需手动创建空目录通过 stat 检查
-          mkdir -p ohos/sign/material
-          echo "=== 创建 material 目录 ==="
-          ls -la ohos/sign/material/
           echo "=== 生成的 build-profile.json5 ==="
-          cat ohos/build-profile.json5
-          # 注入 signingConfigs
-          python3 << 'PYEOF'
-          import json, re, sys
-          path = 'ohos/build-profile.json5'
-          with open(path, 'r', encoding='utf-8') as f:
-              content = f.read()
-          signing_config = {
-              "name": "default",
-              "type": "HarmonyOS",
-              "material": {
-                  "storeFile": "./sign/debug.p12",
-                  "storePassword": "0000001B2A3C4D5E6F7A8B9C0D1E2F30",
-                  "keyAlias": "debugkey",
-                  "keyPassword": "0000001B2A3C4D5E6F7A8B9C0D1E2F30",
-                  "signAlg": "SHA256withECDSA",
-                  "profile": "./sign/debug.p7b",
-                  "certpath": "./sign/debug.cer"
-              }
-          }
-          signing_block = '"signingConfigs": ' + json.dumps([signing_config], indent=6, ensure_ascii=False)
-          if '"signingConfigs"' in content:
-              content = re.sub(r'"signingConfigs"\s*:\s*\[.*?\]', signing_block, content, count=1, flags=re.DOTALL)
-          else:
-              content = re.sub(r'("app"\s*:\s*\{)', r'\1\n    ' + signing_block + ',', content, count=1)
-          if '"signingConfig"' not in content:
-              content = re.sub(r'("products"\s*:\s*\[\s*\{)', r'\1\n        "signingConfig": "default",', content, count=1)
-          with open(path, 'w', encoding='utf-8') as f:
-              f.write(content)
-          print('done')
-          PYEOF
-          echo "=== 注入后的 build-profile.json5 ==="
           cat ohos/build-profile.json5
 
       - name: Inject QuickJS C Build
@@ -546,15 +505,11 @@ jobs:
           flutter pub get
 
       - name: Build HAP
-        # 使用官方 Command Line Tools 的 hvigorw 构建
+        # 不签名构建：生成未签名 HAP，用户自行用 DevEco Studio 签名后安装
         # 两阶段构建：第一次触发 ohpm install 并在 ArkTS 编译失败，
         # 然后 patch flutter_ohos 不兼容 API，第二次构建通过
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
-          echo "=== 签名材料 ==="
-          ls -la ohos/sign/
-          echo "=== build-profile.json5 ==="
-          cat ohos/build-profile.json5
 
           # 第一阶段：触发 ohpm install（会在 CompileArkTS 失败）
           echo "=== 第一阶段：ohpm install + 触发编译 ==="
@@ -598,63 +553,19 @@ jobs:
           set -e
           echo "=== 第二阶段退出码: $BUILD2_EXIT ==="
 
-          # SignHap 可能因 material 目录为空而失败（DevEco Studio 加密密码机制）
-          # 此时 PackageHap 已完成，unsigned HAP 已生成
-          # 用 hap-sign-tool.jar 手动签名，跳过 SignHap 的密码解密逻辑
+          # 列出所有 .hap 产物
+          echo "=== 列出所有 .hap 文件 ==="
+          find . -name "*.hap" -type f 2>/dev/null || echo "未找到任何 .hap 文件"
+
           if [ $BUILD2_EXIT -ne 0 ]; then
-            echo "=== SignHap 失败，尝试手动签名 ==="
-            echo "=== 列出所有 .hap 文件 ==="
-            find . -name "*.hap" -type f 2>/dev/null || echo "未找到任何 .hap 文件"
-            echo "=== 查找 unsigned HAP ==="
-            # 兼容多种命名：*-unsigned.hap / entry-default-unsigned.hap / 任意 .hap
+            echo "=== 错误上下文 ==="
+            grep -B 5 -A 10 "error|Error|FAILED|Exception|Cause:" /tmp/hap-build-2.log || true
+            # 即使构建失败，如果有 unsigned HAP 产物也继续上传
             UNSIGNED_HAP=$(find . -name "*-unsigned.hap" -type f 2>/dev/null | head -1)
-            if [ -z "$UNSIGNED_HAP" ]; then
-              UNSIGNED_HAP=$(find . -name "*.hap" -type f 2>/dev/null | head -1)
-            fi
-            echo "unsigned HAP: $UNSIGNED_HAP"
-            echo "=== 查找 hap-sign-tool.jar ==="
-            HAP_SIGN_TOOL=$(find /opt -name "hap-sign-tool.jar" -type f 2>/dev/null | head -1)
-            echo "hap-sign-tool.jar: $HAP_SIGN_TOOL"
-            if [ -n "$UNSIGNED_HAP" ] && [ -n "$HAP_SIGN_TOOL" ]; then
-              SIGNED_HAP="build/ohos/outputs/default/entry-default-signed.hap"
-              mkdir -p "$(dirname "$SIGNED_HAP")"
-              echo "=== 手动签名 HAP ==="
-              java -jar "$HAP_SIGN_TOOL" sign-app \
-                -keyAlias "debugkey" \
-                -signAlg "SHA256withECDSA" \
-                -mode "localSign" \
-                -appCertFile "ohos/sign/debug.cer" \
-                -profileFile "ohos/sign/debug.p7b" \
-                -inFile "$UNSIGNED_HAP" \
-                -keystoreFile "ohos/sign/debug.p12" \
-                -outFile "$SIGNED_HAP" \
-                -keyPwd "0000001B2A3C4D5E6F7A8B9C0D1E2F30" \
-                -keystorePwd "0000001B2A3C4D5E6F7A8B9C0D1E2F30"
-              SIGN_EXIT=$?
-              echo "=== 手动签名退出码: $SIGN_EXIT ==="
-              if [ $SIGN_EXIT -eq 0 ]; then
-                echo "✅ 手动签名成功"
-                BUILD2_EXIT=0
-              else
-                echo "❌ 手动签名失败（debug.p7b 是空占位文件，无法签名）"
-                echo "=== 回退到未签名 HAP ==="
-                # debug.p7b 是 Flutter SDK 模板的空占位文件，无法用于签名
-                # 直接上传未签名 HAP，用户可自行签名后安装
-                if [ -n "$UNSIGNED_HAP" ]; then
-                  echo "✅ 使用未签名 HAP 作为产物: $UNSIGNED_HAP"
-                  BUILD2_EXIT=0
-                else
-                  echo "❌ 未找到未签名 HAP"
-                  echo "=== 错误上下文 ==="
-                  grep -B 5 -A 10 "error|Error|FAILED|Exception|Cause:" /tmp/hap-build-2.log || true
-                  echo "=== 完整构建日志 ==="
-                  cat /tmp/hap-build-2.log
-                fi
-              fi
+            if [ -n "$UNSIGNED_HAP" ]; then
+              echo "✅ 构建失败但有 unsigned HAP 产物: $UNSIGNED_HAP"
+              BUILD2_EXIT=0
             else
-              echo "❌ 未找到 unsigned HAP 或 hap-sign-tool.jar"
-              echo "=== 错误上下文 ==="
-              grep -B 5 -A 10 "error|Error|FAILED|Exception|Cause:" /tmp/hap-build-2.log || true
               echo "=== 完整构建日志 ==="
               cat /tmp/hap-build-2.log
             fi
