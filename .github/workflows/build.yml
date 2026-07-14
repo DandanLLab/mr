@@ -603,8 +603,14 @@ jobs:
           # 用 hap-sign-tool.jar 手动签名，跳过 SignHap 的密码解密逻辑
           if [ $BUILD2_EXIT -ne 0 ]; then
             echo "=== SignHap 失败，尝试手动签名 ==="
+            echo "=== 列出所有 .hap 文件 ==="
+            find . -name "*.hap" -type f 2>/dev/null || echo "未找到任何 .hap 文件"
             echo "=== 查找 unsigned HAP ==="
-            UNSIGNED_HAP=$(find build -name "*-unsigned.hap" -type f | head -1)
+            # 兼容多种命名：*-unsigned.hap / entry-default-unsigned.hap / 任意 .hap
+            UNSIGNED_HAP=$(find . -name "*-unsigned.hap" -type f 2>/dev/null | head -1)
+            if [ -z "$UNSIGNED_HAP" ]; then
+              UNSIGNED_HAP=$(find . -name "*.hap" -type f 2>/dev/null | head -1)
+            fi
             echo "unsigned HAP: $UNSIGNED_HAP"
             echo "=== 查找 hap-sign-tool.jar ==="
             HAP_SIGN_TOOL=$(find /opt -name "hap-sign-tool.jar" -type f 2>/dev/null | head -1)
