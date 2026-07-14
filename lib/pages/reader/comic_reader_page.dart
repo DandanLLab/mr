@@ -89,6 +89,9 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   bool _grayscaleImages = false;
   bool _eyeCareMode = false;
   bool _keepScreenOn = false;
+  /// 已 precache 的图片 URL 集合，避免重复 precacheImage 调用
+  /// 章节切换时清空，防止内存无限增长
+  final Set<String> _precachedUrls = {};
 final List<String> _imageLoadLog = [];
 Map<String, String> _imageHeaders = const {};
   final Map<String, Map<String, String>> _imageOptionHeaders = {};
@@ -311,6 +314,8 @@ Map<String, String> _imageHeaders = const {};
       _showMenu = false;
     });
     _resetZoom();
+    // 章节切换时清空预缓存记录，避免 Set 无限增长
+    _precachedUrls.clear();
 
     try {
       List<String> images;
@@ -722,6 +727,8 @@ Map<String, String> _imageHeaders = const {};
       _images = _imagesForChapterListIndex(chapterIdx);
       _imageKeys.clear();
       _imageKeys.addAll(List.generate(_images.length, (_) => GlobalKey()));
+      // 章节切换时清空预缓存记录
+      _precachedUrls.clear();
     }
     if (save) _scheduleProgressSave();
   }
@@ -731,32 +738,69 @@ Map<String, String> _imageHeaders = const {};
     _footerTimer = Timer(const Duration(milliseconds: 400), _saveProgress);
   }
 
+  /// 预缓存图片
+  ///
+  /// 策略（借鉴 Legado）：只预缓存「下一张」图片，避免一次性 precache 大量图片
+  /// 造成内存压力和重复缓存。
+  /// - 当前页不是章节最后一张：预缓存当前页 + 1（同章节下一张）
+  /// - 当前页是章节最后一张：预缓存下一章的第一张（跨章节预加载）
   void _preloadImages() {
-    if (!mounted || _images.isEmpty || _preloadCount == 0) return;
+    if (!mounted || _images.isEmpty) return;
     if (_readMode == MangaReadMode.scroll) return;
-    final end = (_currentPageIndex + _preloadCount + 1).clamp(
-      0,
-      _images.length,
+    if (_preloadCount == 0) return;
+
+    // 1. 同章节：预缓存下一张
+    final nextIdx = _currentPageIndex + 1;
+    if (nextIdx < _images.length) {
+      _precacheSingle(_images[nextIdx]);
+      return;
+    }
+
+    // 2. 当前页是章节最后一张：预缓存下一章第一张
+    if (_chapters.isEmpty || _bookSource == null) return;
+    final position = _chapters.indexWhere(
+      (chapter) => chapter.index == _currentChapterIndex,
     );
+    if (position < 0 || position >= _chapters.length - 1) return;
+    final nextChapter = _chapters[position + 1];
+    // 异步加载下一章第一张图的 URL（不阻塞当前 UI）
+    _precacheNextChapterFirstImage(nextChapter);
+  }
+
+  /// 预缓存单张图片（带去重，避免同一 URL 重复 precacheImage 调用）
+  void _precacheSingle(String url) {
+    if (url.startsWith('data:')) return;
+    if (_precachedUrls.contains(url)) return;
+    _precachedUrls.add(url);
     final needDecode = DecodedImageProvider.needsDecode(_bookSource, false);
-    for (var index = _currentPageIndex + 1; index < end; index++) {
-      if (_images[index].startsWith('data:')) continue;
-      final url = _images[index];
-      precacheImage(
-        needDecode
-            ? DecodedImageProvider(
-                url: url,
-                headers: _headersForImage(url),
-                source: _bookSource!,
-                isCover: false,
-                book: _book,
-              )
-            : CachedNetworkImageProvider(
-                url,
-                headers: _headersForImage(url),
-              ),
-        context,
-      );
+    precacheImage(
+      needDecode
+          ? DecodedImageProvider(
+              url: url,
+              headers: _headersForImage(url),
+              source: _bookSource!,
+              isCover: false,
+              book: _book,
+            )
+          : CachedNetworkImageProvider(
+              url,
+              headers: _headersForImage(url),
+            ),
+      context,
+    );
+  }
+
+  /// 异步加载下一章第一张图片的 URL 并预缓存
+  Future<void> _precacheNextChapterFirstImage(Chapter nextChapter) async {
+    final book = _book;
+    final dataProvider = _dataProvider;
+    if (book == null || dataProvider == null) return;
+    try {
+      final images = await _loadChapterImages(nextChapter);
+      if (images.isEmpty || !mounted) return;
+      _precacheSingle(images.first);
+    } catch (_) {
+      // 预缓存失败不影响阅读
     }
   }
 
@@ -1831,35 +1875,47 @@ Map<String, String> _imageHeaders = const {};
     );
   }
 
+  /// 缓存当前看到的一张图片
+  ///
+  /// 策略（借鉴 Legado）：只缓存「当前页」这一张图片，避免一次性 precache 整章图片
+  /// 造成流量浪费和内存压力。用户翻到下一页时再缓存下一页。
   Future<void> _downloadCurrentChapter() async {
     if (_images.isEmpty) return;
+    final url = _images[_currentPageIndex];
+    if (url.startsWith('data:')) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('当前为 Base64 图片，无需缓存')),
+      );
+      return;
+    }
     // 书源配置了 imageDecode 时走解密链路预缓存，否则走普通网络缓存
     final needDecode = DecodedImageProvider.needsDecode(_bookSource, false);
-    final tasks = _images
-        .where((url) => !url.startsWith('data:'))
-        .map(
-          (url) => precacheImage(
-            needDecode
-                ? DecodedImageProvider(
-                    url: url,
-                    headers: _headersForImage(url),
-                    source: _bookSource!,
-                    isCover: false,
-                    book: _book,
-                  )
-                : CachedNetworkImageProvider(
-                    url,
-                    headers: _headersForImage(url),
-                  ),
-            context,
-          ),
-        )
-        .toList();
-    await Future.wait(tasks);
+    try {
+      await precacheImage(
+        needDecode
+            ? DecodedImageProvider(
+                url: url,
+                headers: _headersForImage(url),
+                source: _bookSource!,
+                isCover: false,
+                book: _book,
+              )
+            : CachedNetworkImageProvider(
+                url,
+                headers: _headersForImage(url),
+              ),
+        context,
+      );
+    } catch (_) {
+      // 缓存失败忽略
+    }
+    // 记录已缓存，避免 _preloadImages 重复 precache
+    _precachedUrls.add(url);
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('已加入预缓存')));
+    ).showSnackBar(const SnackBar(content: Text('已缓存当前页')));
   }
 
   void _handleTap(TapUpDetails details) {

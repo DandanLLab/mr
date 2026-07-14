@@ -730,7 +730,7 @@ class _SearchPageState extends State<SearchPage> {
         return Image(
           image: DecodedImageProvider(
             url: coverUrl,
-            headers: _buildCoverHeaders(sourceUrl),
+            headers: _buildCoverHeaders(source),
             source: source!,
             isCover: true,
           ),
@@ -744,7 +744,7 @@ class _SearchPageState extends State<SearchPage> {
       final maxWidthDiskCache = coverConfig.loadCoverHighQuality ? null : 320;
       return CachedNetworkImage(
         imageUrl: coverUrl,
-        httpHeaders: _buildCoverHeaders(sourceUrl),
+        httpHeaders: _buildCoverHeaders(source),
         fit: BoxFit.cover,
         memCacheWidth: memCacheWidth,
         maxWidthDiskCache: maxWidthDiskCache,
@@ -763,16 +763,9 @@ class _SearchPageState extends State<SearchPage> {
   /// 很多书源网站有防盗链机制，加载封面图时必须带 Referer 和 User-Agent，
   /// 否则返回 403 Forbidden。这里从书源的 header 字段提取请求头，
   /// 并自动补充 Referer（书源 URL）和默认 User-Agent。
-  Map<String, String> _buildCoverHeaders(String? sourceUrl) {
+  /// 构建封面图请求头（直接复用已查找到的书源，避免重复遍历）
+  Map<String, String> _buildCoverHeaders(BookSource? source) {
     final headers = <String, String>{};
-    if (sourceUrl == null || sourceUrl.isEmpty) return headers;
-
-    // 从 SearchProvider 查找对应书源
-    final source = context
-        .read<SearchProvider>()
-        .bookSources
-        .where((s) => s.bookSourceUrl == sourceUrl)
-        .firstOrNull;
     if (source == null) return headers;
 
     // 解析书源的 header 字段（可能是 JSON 格式或 Key: Value 按行格式）
@@ -804,7 +797,10 @@ class _SearchPageState extends State<SearchPage> {
     }
 
     // 补充 Referer（使用书源 URL 作为来源页，绕过防盗链）
-    headers.putIfAbsent('Referer', () => _extractBaseUrl(sourceUrl));
+    final sourceUrl = source.bookSourceUrl;
+    if (sourceUrl.isNotEmpty) {
+      headers.putIfAbsent('Referer', () => _extractBaseUrl(sourceUrl));
+    }
 
     // 补充默认 User-Agent
     headers.putIfAbsent(
