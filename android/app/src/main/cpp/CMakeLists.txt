@@ -4,12 +4,13 @@ project(quickjs_c_bridge C)
 # QuickJS C 源码目录（项目根目录 quickjs/，iOS 和 Android 共享）
 # PROJECT_ROOT_DIR 由 build.gradle.kts 传入，指向项目根目录
 # 与 iOS Podfile 的 :path => '../quickjs' 引用同一份源码
-set(QUICKJS_SRC_DIR ${PROJECT_ROOT_DIR}/quickjs)
+file(TO_CMAKE_PATH "${PROJECT_ROOT_DIR}" PROJECT_ROOT_DIR_CMAKE)
+set(QUICKJS_SRC_DIR ${PROJECT_ROOT_DIR_CMAKE}/quickjs)
 
 # QuickJS 源码文件
 # 不编译 quickjs-libc.c（Android 上不需要标准库辅助函数，且部分 POSIX 调用不兼容）
 # native_core 模块（桥接初始化与扩展入口）
-set(NATIVE_CORE_DIR ${PROJECT_ROOT_DIR}/native_core)
+set(NATIVE_CORE_DIR ${PROJECT_ROOT_DIR_CMAKE}/native_core)
 
 set(QUICKJS_SOURCES
     ${QUICKJS_SRC_DIR}/quickjs.c

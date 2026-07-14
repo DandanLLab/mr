@@ -9,17 +9,12 @@ class ReaderSettingsSheet extends StatefulWidget {
   final double lineHeight;
   final double letterSpacing;
   final double paragraphSpacing;
-  final double horizontalPadding;
-  final double verticalPadding;
   final String paragraphIndent;
   final int fontWeightIndex;
   final String fontFamily;
   final Color backgroundColor;
   final String? backgroundImagePath;
   final bool showReadingInfo;
-  final bool showChapterTitle;
-  final bool showClock;
-  final bool showProgress;
   final int pageAnim;
   final int pageAnimDurationMs;
   final double screenBrightness;
@@ -31,22 +26,49 @@ class ReaderSettingsSheet extends StatefulWidget {
   final int autoPageIntervalSeconds;
   final List<int> tapZones;
   final bool isNightMode;
+  final int chineseConverterType;
+  final bool fontWeightFine;
+  final int textBoldFine;
+  final int titleBoldFine;
+  final int titleMode;
+  final int titleSize;
+  final int titleTopSpacing;
+  final int titleBottomSpacing;
+  final double paddingTop;
+  final double paddingBottom;
+  final double paddingLeft;
+  final double paddingRight;
+  final double headerPaddingTop;
+  final double headerPaddingBottom;
+  final double headerPaddingLeft;
+  final double headerPaddingRight;
+  final double footerPaddingTop;
+  final double footerPaddingBottom;
+  final double footerPaddingLeft;
+  final double footerPaddingRight;
+  final bool showHeaderLine;
+  final bool showFooterLine;
+  final int headerMode;
+  final int footerMode;
+  final int tipHeaderLeft;
+  final int tipHeaderMiddle;
+  final int tipHeaderRight;
+  final int tipFooterLeft;
+  final int tipFooterMiddle;
+  final int tipFooterRight;
+  final int headerFontSize;
+  final int footerFontSize;
 
   final ValueChanged<double> onFontSizeChanged;
   final ValueChanged<double> onLineHeightChanged;
   final ValueChanged<double> onLetterSpacingChanged;
   final ValueChanged<double> onParagraphSpacingChanged;
-  final ValueChanged<double> onHorizontalPaddingChanged;
-  final ValueChanged<double> onVerticalPaddingChanged;
   final ValueChanged<String> onParagraphIndentChanged;
   final ValueChanged<int> onFontWeightChanged;
   final ValueChanged<String> onFontFamilyChanged;
   final ValueChanged<Color> onBackgroundColorChanged;
   final ValueChanged<String?> onBackgroundImageChanged;
   final ValueChanged<bool> onShowReadingInfoChanged;
-  final ValueChanged<bool> onShowChapterTitleChanged;
-  final ValueChanged<bool> onShowClockChanged;
-  final ValueChanged<bool> onShowProgressChanged;
   final ValueChanged<int> onPageAnimChanged;
   final ValueChanged<int> onPageAnimDurationChanged;
   final ValueChanged<double> onScreenBrightnessChanged;
@@ -58,6 +80,38 @@ class ReaderSettingsSheet extends StatefulWidget {
   final ValueChanged<int> onAutoPageIntervalChanged;
   final ValueChanged<List<int>> onTapZonesChanged;
   final ValueChanged<bool> onNightModeChanged;
+  final ValueChanged<int> onChineseConverterTypeChanged;
+  final ValueChanged<bool> onFontWeightFineChanged;
+  final ValueChanged<int> onTextBoldFineChanged;
+  final ValueChanged<int> onTitleBoldFineChanged;
+  final ValueChanged<int> onTitleModeChanged;
+  final ValueChanged<int> onTitleSizeChanged;
+  final ValueChanged<int> onTitleTopSpacingChanged;
+  final ValueChanged<int> onTitleBottomSpacingChanged;
+  final ValueChanged<double> onPaddingTopChanged;
+  final ValueChanged<double> onPaddingBottomChanged;
+  final ValueChanged<double> onPaddingLeftChanged;
+  final ValueChanged<double> onPaddingRightChanged;
+  final ValueChanged<double> onHeaderPaddingTopChanged;
+  final ValueChanged<double> onHeaderPaddingBottomChanged;
+  final ValueChanged<double> onHeaderPaddingLeftChanged;
+  final ValueChanged<double> onHeaderPaddingRightChanged;
+  final ValueChanged<double> onFooterPaddingTopChanged;
+  final ValueChanged<double> onFooterPaddingBottomChanged;
+  final ValueChanged<double> onFooterPaddingLeftChanged;
+  final ValueChanged<double> onFooterPaddingRightChanged;
+  final ValueChanged<bool> onShowHeaderLineChanged;
+  final ValueChanged<bool> onShowFooterLineChanged;
+  final ValueChanged<int> onHeaderModeChanged;
+  final ValueChanged<int> onFooterModeChanged;
+  final ValueChanged<int> onTipHeaderLeftChanged;
+  final ValueChanged<int> onTipHeaderMiddleChanged;
+  final ValueChanged<int> onTipHeaderRightChanged;
+  final ValueChanged<int> onTipFooterLeftChanged;
+  final ValueChanged<int> onTipFooterMiddleChanged;
+  final ValueChanged<int> onTipFooterRightChanged;
+  final ValueChanged<int> onHeaderFontSizeChanged;
+  final ValueChanged<int> onFooterFontSizeChanged;
   final VoidCallback? onClose;
 
   const ReaderSettingsSheet({
@@ -66,17 +120,12 @@ class ReaderSettingsSheet extends StatefulWidget {
     required this.lineHeight,
     required this.letterSpacing,
     required this.paragraphSpacing,
-    required this.horizontalPadding,
-    required this.verticalPadding,
     required this.paragraphIndent,
     required this.fontWeightIndex,
     required this.fontFamily,
     required this.backgroundColor,
     this.backgroundImagePath,
     required this.showReadingInfo,
-    required this.showChapterTitle,
-    required this.showClock,
-    required this.showProgress,
     required this.pageAnim,
     required this.pageAnimDurationMs,
     required this.screenBrightness,
@@ -88,21 +137,48 @@ class ReaderSettingsSheet extends StatefulWidget {
     required this.autoPageIntervalSeconds,
     required this.tapZones,
     required this.isNightMode,
+    required this.chineseConverterType,
+    required this.fontWeightFine,
+    required this.textBoldFine,
+    required this.titleBoldFine,
+    required this.titleMode,
+    required this.titleSize,
+    required this.titleTopSpacing,
+    required this.titleBottomSpacing,
+    required this.paddingTop,
+    required this.paddingBottom,
+    required this.paddingLeft,
+    required this.paddingRight,
+    required this.headerPaddingTop,
+    required this.headerPaddingBottom,
+    required this.headerPaddingLeft,
+    required this.headerPaddingRight,
+    required this.footerPaddingTop,
+    required this.footerPaddingBottom,
+    required this.footerPaddingLeft,
+    required this.footerPaddingRight,
+    required this.showHeaderLine,
+    required this.showFooterLine,
+    required this.headerMode,
+    required this.footerMode,
+    required this.tipHeaderLeft,
+    required this.tipHeaderMiddle,
+    required this.tipHeaderRight,
+    required this.tipFooterLeft,
+    required this.tipFooterMiddle,
+    required this.tipFooterRight,
+    required this.headerFontSize,
+    required this.footerFontSize,
     required this.onFontSizeChanged,
     required this.onLineHeightChanged,
     required this.onLetterSpacingChanged,
     required this.onParagraphSpacingChanged,
-    required this.onHorizontalPaddingChanged,
-    required this.onVerticalPaddingChanged,
     required this.onParagraphIndentChanged,
     required this.onFontWeightChanged,
     required this.onFontFamilyChanged,
     required this.onBackgroundColorChanged,
     required this.onBackgroundImageChanged,
     required this.onShowReadingInfoChanged,
-    required this.onShowChapterTitleChanged,
-    required this.onShowClockChanged,
-    required this.onShowProgressChanged,
     required this.onPageAnimChanged,
     required this.onPageAnimDurationChanged,
     required this.onScreenBrightnessChanged,
@@ -114,6 +190,38 @@ class ReaderSettingsSheet extends StatefulWidget {
     required this.onAutoPageIntervalChanged,
     required this.onTapZonesChanged,
     required this.onNightModeChanged,
+    required this.onChineseConverterTypeChanged,
+    required this.onFontWeightFineChanged,
+    required this.onTextBoldFineChanged,
+    required this.onTitleBoldFineChanged,
+    required this.onTitleModeChanged,
+    required this.onTitleSizeChanged,
+    required this.onTitleTopSpacingChanged,
+    required this.onTitleBottomSpacingChanged,
+    required this.onPaddingTopChanged,
+    required this.onPaddingBottomChanged,
+    required this.onPaddingLeftChanged,
+    required this.onPaddingRightChanged,
+    required this.onHeaderPaddingTopChanged,
+    required this.onHeaderPaddingBottomChanged,
+    required this.onHeaderPaddingLeftChanged,
+    required this.onHeaderPaddingRightChanged,
+    required this.onFooterPaddingTopChanged,
+    required this.onFooterPaddingBottomChanged,
+    required this.onFooterPaddingLeftChanged,
+    required this.onFooterPaddingRightChanged,
+    required this.onShowHeaderLineChanged,
+    required this.onShowFooterLineChanged,
+    required this.onHeaderModeChanged,
+    required this.onFooterModeChanged,
+    required this.onTipHeaderLeftChanged,
+    required this.onTipHeaderMiddleChanged,
+    required this.onTipHeaderRightChanged,
+    required this.onTipFooterLeftChanged,
+    required this.onTipFooterMiddleChanged,
+    required this.onTipFooterRightChanged,
+    required this.onHeaderFontSizeChanged,
+    required this.onFooterFontSizeChanged,
     this.onClose,
   });
 
@@ -144,17 +252,12 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
   late double _lineHeight;
   late double _letterSpacing;
   late double _paragraphSpacing;
-  late double _horizontalPadding;
-  late double _verticalPadding;
   late String _paragraphIndent;
   late int _fontWeightIndex;
   late String _fontFamily;
   late Color _backgroundColor;
   String? _backgroundImagePath;
   late bool _showReadingInfo;
-  late bool _showChapterTitle;
-  late bool _showClock;
-  late bool _showProgress;
   late int _pageAnim;
   late int _pageAnimDurationMs;
   late double _screenBrightness;
@@ -164,6 +267,38 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
   late bool _enableLongPressMenu;
   late int _autoScrollSpeed;
   late int _autoPageIntervalSeconds;
+  late int _chineseConverterType;
+  late bool _fontWeightFine;
+  late int _textBoldFine;
+  late int _titleBoldFine;
+  late int _titleMode;
+  late int _titleSize;
+  late int _titleTopSpacing;
+  late int _titleBottomSpacing;
+  late double _paddingTop;
+  late double _paddingBottom;
+  late double _paddingLeft;
+  late double _paddingRight;
+  late double _headerPaddingTop;
+  late double _headerPaddingBottom;
+  late double _headerPaddingLeft;
+  late double _headerPaddingRight;
+  late double _footerPaddingTop;
+  late double _footerPaddingBottom;
+  late double _footerPaddingLeft;
+  late double _footerPaddingRight;
+  late bool _showHeaderLine;
+  late bool _showFooterLine;
+  late int _headerMode;
+  late int _footerMode;
+  late int _tipHeaderLeft;
+  late int _tipHeaderMiddle;
+  late int _tipHeaderRight;
+  late int _tipFooterLeft;
+  late int _tipFooterMiddle;
+  late int _tipFooterRight;
+  late int _headerFontSize;
+  late int _footerFontSize;
 
   bool get _isDark =>
       _backgroundColor.computeLuminance() < 0.2 || widget.isNightMode;
@@ -174,6 +309,18 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
   Color get _textColor =>
       _isDark ? Colors.white.withValues(alpha: 0.86) : Colors.black87;
   Color get _subColor => _isDark ? Colors.white60 : Colors.black54;
+  ButtonStyle get _segmentedStyle => ButtonStyle(
+    foregroundColor: WidgetStateProperty.resolveWith((states) {
+      return states.contains(WidgetState.selected)
+          ? Theme.of(context).colorScheme.primary
+          : _textColor;
+    }),
+    backgroundColor: WidgetStateProperty.resolveWith((states) {
+      return states.contains(WidgetState.selected)
+          ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.16)
+          : _controlColor;
+    }),
+  );
 
   @override
   void initState() {
@@ -182,17 +329,12 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
     _lineHeight = widget.lineHeight;
     _letterSpacing = widget.letterSpacing;
     _paragraphSpacing = widget.paragraphSpacing;
-    _horizontalPadding = widget.horizontalPadding;
-    _verticalPadding = widget.verticalPadding;
     _paragraphIndent = widget.paragraphIndent;
     _fontWeightIndex = widget.fontWeightIndex;
     _fontFamily = widget.fontFamily;
     _backgroundColor = widget.backgroundColor;
     _backgroundImagePath = widget.backgroundImagePath;
     _showReadingInfo = widget.showReadingInfo;
-    _showChapterTitle = widget.showChapterTitle;
-    _showClock = widget.showClock;
-    _showProgress = widget.showProgress;
     _pageAnim = widget.pageAnim;
     _pageAnimDurationMs = widget.pageAnimDurationMs;
     _screenBrightness = widget.screenBrightness;
@@ -202,6 +344,38 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
     _enableLongPressMenu = widget.enableLongPressMenu;
     _autoScrollSpeed = widget.autoScrollSpeed;
     _autoPageIntervalSeconds = widget.autoPageIntervalSeconds;
+    _chineseConverterType = widget.chineseConverterType;
+    _fontWeightFine = widget.fontWeightFine;
+    _textBoldFine = widget.textBoldFine;
+    _titleBoldFine = widget.titleBoldFine;
+    _titleMode = widget.titleMode;
+    _titleSize = widget.titleSize;
+    _titleTopSpacing = widget.titleTopSpacing;
+    _titleBottomSpacing = widget.titleBottomSpacing;
+    _paddingTop = widget.paddingTop;
+    _paddingBottom = widget.paddingBottom;
+    _paddingLeft = widget.paddingLeft;
+    _paddingRight = widget.paddingRight;
+    _headerPaddingTop = widget.headerPaddingTop;
+    _headerPaddingBottom = widget.headerPaddingBottom;
+    _headerPaddingLeft = widget.headerPaddingLeft;
+    _headerPaddingRight = widget.headerPaddingRight;
+    _footerPaddingTop = widget.footerPaddingTop;
+    _footerPaddingBottom = widget.footerPaddingBottom;
+    _footerPaddingLeft = widget.footerPaddingLeft;
+    _footerPaddingRight = widget.footerPaddingRight;
+    _showHeaderLine = widget.showHeaderLine;
+    _showFooterLine = widget.showFooterLine;
+    _headerMode = widget.headerMode;
+    _footerMode = widget.footerMode;
+    _tipHeaderLeft = widget.tipHeaderLeft;
+    _tipHeaderMiddle = widget.tipHeaderMiddle;
+    _tipHeaderRight = widget.tipHeaderRight;
+    _tipFooterLeft = widget.tipFooterLeft;
+    _tipFooterMiddle = widget.tipFooterMiddle;
+    _tipFooterRight = widget.tipFooterRight;
+    _headerFontSize = widget.headerFontSize;
+    _footerFontSize = widget.footerFontSize;
   }
 
   @override
@@ -289,13 +463,13 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          _smallButton(_fontWeightLabel(), _cycleFontWeight),
+          _smallButton(_fontWeightLabel(), _showFontWeightDialog),
           const Spacer(),
           _smallButton('字体', _showFontDialog),
           const Spacer(),
           _smallButton('缩进', _showIndentDialog),
           const Spacer(),
-          _smallButton('繁简', _showConverterHint),
+          _smallButton(_converterLabel(), _showConverterDialog),
           const Spacer(),
           _smallButton('边距', _showPaddingDialog),
           const Spacer(),
@@ -324,6 +498,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
   }
 
   String _fontWeightLabel() {
+    if (_fontWeightFine) return '字重$_textBoldFine';
     switch (_fontWeightIndex) {
       case 0:
         return '细体';
@@ -334,10 +509,112 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
     }
   }
 
-  void _cycleFontWeight() {
-    final value = (_fontWeightIndex + 1) % 3;
-    setState(() => _fontWeightIndex = value);
-    widget.onFontWeightChanged(value);
+  String _converterLabel() {
+    return switch (_chineseConverterType) {
+      1 => '简→繁',
+      2 => '繁→简',
+      _ => '繁简',
+    };
+  }
+
+  void _showFontWeightDialog() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _panelColor,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: StatefulBuilder(
+          builder: (context, setSheetState) {
+            void update(VoidCallback callback) {
+              setState(callback);
+              setSheetState(() {});
+            }
+
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(child: _dialogTitle('字体粗细')),
+                      Text('精细模式', style: TextStyle(color: _textColor)),
+                      Switch(
+                        value: _fontWeightFine,
+                        onChanged: (value) {
+                          update(() => _fontWeightFine = value);
+                          widget.onFontWeightFineChanged(value);
+                        },
+                      ),
+                    ],
+                  ),
+                  if (!_fontWeightFine)
+                    SegmentedButton<int>(
+                      style: _segmentedStyle,
+                      segments: const [
+                        ButtonSegment(value: 0, label: Text('细体')),
+                        ButtonSegment(value: 1, label: Text('常规')),
+                        ButtonSegment(value: 2, label: Text('粗体')),
+                      ],
+                      selected: {_fontWeightIndex},
+                      onSelectionChanged: (values) {
+                        final value = values.first;
+                        update(() => _fontWeightIndex = value);
+                        widget.onFontWeightChanged(value);
+                      },
+                    )
+                  else ...[
+                    _dialogSlider('正文', _textBoldFine.toDouble(), 100, 900, (
+                      value,
+                    ) {
+                      final weight = (value / 100).round() * 100;
+                      update(() => _textBoldFine = weight);
+                      widget.onTextBoldFineChanged(weight);
+                    }),
+                    _dialogSlider('标题', _titleBoldFine.toDouble(), 100, 900, (
+                      value,
+                    ) {
+                      final weight = (value / 100).round() * 100;
+                      update(() => _titleBoldFine = weight);
+                      widget.onTitleBoldFineChanged(weight);
+                    }),
+                  ],
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _showConverterDialog() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _panelColor,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _sheetOption('不转换', _chineseConverterType == 0, () {
+              _setConverterType(0);
+            }),
+            _sheetOption('简体转繁体', _chineseConverterType == 1, () {
+              _setConverterType(1);
+            }),
+            _sheetOption('繁体转简体', _chineseConverterType == 2, () {
+              _setConverterType(2);
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _setConverterType(int value) {
+    Navigator.pop(context);
+    setState(() => _chineseConverterType = value);
+    widget.onChineseConverterTypeChanged(value);
   }
 
   Widget _detailSlider({
@@ -656,22 +933,92 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: _panelColor,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _dialogTitle('正文边距'),
-              _dialogSlider('上下边距', _verticalPadding, 0, 60, (v) {
-                setState(() => _verticalPadding = v);
-                widget.onVerticalPaddingChanged(v);
-              }),
-              _dialogSlider('左右边距', _horizontalPadding, 0, 60, (v) {
-                setState(() => _horizontalPadding = v);
-                widget.onHorizontalPaddingChanged(v);
-              }),
-            ],
+      isScrollControlled: true,
+      builder: (context) => FractionallySizedBox(
+        heightFactor: 0.82,
+        child: SafeArea(
+          child: StatefulBuilder(
+            builder: (context, setSheetState) {
+              void update(VoidCallback callback) {
+                setState(callback);
+                setSheetState(() {});
+              }
+
+              Widget slider(
+                String label,
+                double value,
+                ValueChanged<double> onChanged,
+              ) {
+                return _dialogSlider(label, value, 0, 60, onChanged);
+              }
+
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+                children: [
+                  _dialogTitle('正文边距'),
+                  slider('上边距', _paddingTop, (value) {
+                    update(() => _paddingTop = value);
+                    widget.onPaddingTopChanged(value);
+                  }),
+                  slider('下边距', _paddingBottom, (value) {
+                    update(() => _paddingBottom = value);
+                    widget.onPaddingBottomChanged(value);
+                  }),
+                  slider('左边距', _paddingLeft, (value) {
+                    update(() => _paddingLeft = value);
+                    widget.onPaddingLeftChanged(value);
+                  }),
+                  slider('右边距', _paddingRight, (value) {
+                    update(() => _paddingRight = value);
+                    widget.onPaddingRightChanged(value);
+                  }),
+                  _divider(),
+                  _dialogTitle('页眉边距'),
+                  slider('上边距', _headerPaddingTop, (value) {
+                    update(() => _headerPaddingTop = value);
+                    widget.onHeaderPaddingTopChanged(value);
+                  }),
+                  slider('下边距', _headerPaddingBottom, (value) {
+                    update(() => _headerPaddingBottom = value);
+                    widget.onHeaderPaddingBottomChanged(value);
+                  }),
+                  slider('左边距', _headerPaddingLeft, (value) {
+                    update(() => _headerPaddingLeft = value);
+                    widget.onHeaderPaddingLeftChanged(value);
+                  }),
+                  slider('右边距', _headerPaddingRight, (value) {
+                    update(() => _headerPaddingRight = value);
+                    widget.onHeaderPaddingRightChanged(value);
+                  }),
+                  _switchTile('显示页眉分隔线', _showHeaderLine, (value) {
+                    update(() => _showHeaderLine = value);
+                    widget.onShowHeaderLineChanged(value);
+                  }),
+                  _divider(),
+                  _dialogTitle('页脚边距'),
+                  slider('上边距', _footerPaddingTop, (value) {
+                    update(() => _footerPaddingTop = value);
+                    widget.onFooterPaddingTopChanged(value);
+                  }),
+                  slider('下边距', _footerPaddingBottom, (value) {
+                    update(() => _footerPaddingBottom = value);
+                    widget.onFooterPaddingBottomChanged(value);
+                  }),
+                  slider('左边距', _footerPaddingLeft, (value) {
+                    update(() => _footerPaddingLeft = value);
+                    widget.onFooterPaddingLeftChanged(value);
+                  }),
+                  slider('右边距', _footerPaddingRight, (value) {
+                    update(() => _footerPaddingRight = value);
+                    widget.onFooterPaddingRightChanged(value);
+                  }),
+                  _switchTile('显示页脚分隔线', _showFooterLine, (value) {
+                    update(() => _showFooterLine = value);
+                    widget.onShowFooterLineChanged(value);
+                  }),
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -702,7 +1049,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
     return Row(
       children: [
         SizedBox(
-          width: 24,
+          width: 68,
           child: Text(label, style: TextStyle(color: _textColor)),
         ),
         Expanded(
@@ -742,28 +1089,174 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: _panelColor,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _switchTile('显示阅读信息', _showReadingInfo, (v) {
-              setState(() => _showReadingInfo = v);
-              widget.onShowReadingInfoChanged(v);
-            }),
-            _switchTile('章节标题', _showChapterTitle, (v) {
-              setState(() => _showChapterTitle = v);
-              widget.onShowChapterTitleChanged(v);
-            }),
-            _switchTile('时间', _showClock, (v) {
-              setState(() => _showClock = v);
-              widget.onShowClockChanged(v);
-            }),
-            _switchTile('进度', _showProgress, (v) {
-              setState(() => _showProgress = v);
-              widget.onShowProgressChanged(v);
-            }),
-          ],
+      isScrollControlled: true,
+      builder: (context) => FractionallySizedBox(
+        heightFactor: 0.86,
+        child: SafeArea(
+          child: StatefulBuilder(
+            builder: (context, setSheetState) {
+              void update(VoidCallback callback) {
+                setState(callback);
+                setSheetState(() {});
+              }
+
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                children: [
+                  _dialogTitle('章节标题'),
+                  const SizedBox(height: 8),
+                  SegmentedButton<int>(
+                    style: _segmentedStyle,
+                    segments: const [
+                      ButtonSegment(value: 0, label: Text('居左')),
+                      ButtonSegment(value: 1, label: Text('居中')),
+                      ButtonSegment(value: 3, label: Text('居右')),
+                      ButtonSegment(value: 2, label: Text('隐藏')),
+                    ],
+                    selected: {_titleMode},
+                    onSelectionChanged: (values) {
+                      final value = values.first;
+                      update(() {
+                        _titleMode = value;
+                      });
+                      widget.onTitleModeChanged(value);
+                    },
+                  ),
+                  _dialogSlider('标题增量', _titleSize.toDouble(), -2, 12, (value) {
+                    final size = value.round();
+                    update(() => _titleSize = size);
+                    widget.onTitleSizeChanged(size);
+                  }),
+                  _dialogSlider('标题上距', _titleTopSpacing.toDouble(), 0, 60, (
+                    value,
+                  ) {
+                    final spacing = value.round();
+                    update(() => _titleTopSpacing = spacing);
+                    widget.onTitleTopSpacingChanged(spacing);
+                  }),
+                  _dialogSlider('标题下距', _titleBottomSpacing.toDouble(), 0, 60, (
+                    value,
+                  ) {
+                    final spacing = value.round();
+                    update(() => _titleBottomSpacing = spacing);
+                    widget.onTitleBottomSpacingChanged(spacing);
+                  }),
+                  _divider(),
+                  _dialogTitle('页眉'),
+                  const SizedBox(height: 8),
+                  SegmentedButton<int>(
+                    style: _segmentedStyle,
+                    segments: const [
+                      ButtonSegment(value: 0, label: Text('自动')),
+                      ButtonSegment(value: 1, label: Text('显示')),
+                      ButtonSegment(value: 2, label: Text('隐藏')),
+                    ],
+                    selected: {_headerMode},
+                    onSelectionChanged: (values) {
+                      final value = values.first;
+                      update(() => _headerMode = value);
+                      widget.onHeaderModeChanged(value);
+                    },
+                  ),
+                  _tipSelector('左侧', _tipHeaderLeft, (value) {
+                    update(() => _tipHeaderLeft = value);
+                    widget.onTipHeaderLeftChanged(value);
+                  }),
+                  _tipSelector('中间', _tipHeaderMiddle, (value) {
+                    update(() => _tipHeaderMiddle = value);
+                    widget.onTipHeaderMiddleChanged(value);
+                  }),
+                  _tipSelector('右侧', _tipHeaderRight, (value) {
+                    update(() => _tipHeaderRight = value);
+                    widget.onTipHeaderRightChanged(value);
+                  }),
+                  _dialogSlider('页眉字号', _headerFontSize.toDouble(), 8, 20, (
+                    value,
+                  ) {
+                    final size = value.round();
+                    update(() => _headerFontSize = size);
+                    widget.onHeaderFontSizeChanged(size);
+                  }),
+                  _divider(),
+                  _dialogTitle('页脚'),
+                  const SizedBox(height: 8),
+                  SegmentedButton<int>(
+                    style: _segmentedStyle,
+                    segments: const [
+                      ButtonSegment(value: 0, label: Text('显示')),
+                      ButtonSegment(value: 1, label: Text('隐藏')),
+                    ],
+                    selected: {_footerMode},
+                    onSelectionChanged: (values) {
+                      final value = values.first;
+                      update(() => _footerMode = value);
+                      widget.onFooterModeChanged(value);
+                    },
+                  ),
+                  _tipSelector('左侧', _tipFooterLeft, (value) {
+                    update(() => _tipFooterLeft = value);
+                    widget.onTipFooterLeftChanged(value);
+                  }),
+                  _tipSelector('中间', _tipFooterMiddle, (value) {
+                    update(() => _tipFooterMiddle = value);
+                    widget.onTipFooterMiddleChanged(value);
+                  }),
+                  _tipSelector('右侧', _tipFooterRight, (value) {
+                    update(() => _tipFooterRight = value);
+                    widget.onTipFooterRightChanged(value);
+                  }),
+                  _dialogSlider('页脚字号', _footerFontSize.toDouble(), 8, 20, (
+                    value,
+                  ) {
+                    final size = value.round();
+                    update(() => _footerFontSize = size);
+                    widget.onFooterFontSizeChanged(size);
+                  }),
+                  _switchTile('显示阅读信息', _showReadingInfo, (value) {
+                    update(() => _showReadingInfo = value);
+                    widget.onShowReadingInfoChanged(value);
+                  }),
+                ],
+              );
+            },
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _tipSelector(String label, int value, ValueChanged<int> onChanged) {
+    const options = <int, String>{
+      0: '无',
+      7: '书名',
+      1: '章节名',
+      2: '时间',
+      4: '页码',
+      5: '总进度',
+      6: '页码 / 总页数',
+    };
+    final selected = options.containsKey(value) ? value : 0;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: DropdownButtonFormField<int>(
+        initialValue: selected,
+        dropdownColor: _controlColor,
+        style: TextStyle(color: _textColor),
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: TextStyle(color: _subColor),
+          border: const OutlineInputBorder(),
+          isDense: true,
+        ),
+        items: options.entries
+            .map(
+              (entry) =>
+                  DropdownMenuItem(value: entry.key, child: Text(entry.value)),
+            )
+            .toList(),
+        onChanged: (newValue) {
+          if (newValue != null) onChanged(newValue);
+        },
       ),
     );
   }
@@ -897,11 +1390,5 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
     } catch (e) {
       debugPrint('[ReaderSettings] pick background image failed: $e');
     }
-  }
-
-  void _showConverterHint() {
-    ScaffoldMessenger.maybeOf(
-      context,
-    )?.showSnackBar(const SnackBar(content: Text('繁简转换设置暂未接入')));
   }
 }
