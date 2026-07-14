@@ -63,6 +63,8 @@ dependencies:
   flutter_tts: ^3.8.5
   # 屏幕常亮
   wakelock_plus: ^1.2.8
+  # 编码转换 - TXT 本地书 GBK 检测
+  charset: ^2.0.0
 
 dev_dependencies:
   flutter_test:
