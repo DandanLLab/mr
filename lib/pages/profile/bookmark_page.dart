@@ -1,8 +1,11 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/reader_bookmark_service.dart';
 import '../../services/storage_service.dart';
+import '../../services/image_decode_provider.dart';
 import '../../models/book.dart';
+import '../../models/book_source.dart';
 import '../../routes/app_routes.dart';
 import '../../utils/design_tokens.dart';
 
@@ -117,18 +120,7 @@ class _BookmarkPageState extends State<BookmarkPage> {
           borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
           clipBehavior: Clip.hardEdge,
           child: book.coverUrl.isNotEmpty
-              ? CachedNetworkImage(
-                  imageUrl: book.coverUrl,
-                  width: 40,
-                  height: 56,
-                  fit: BoxFit.cover,
-                  errorWidget: (_, __, ___) => Container(
-                    width: 40,
-                    height: 56,
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                    child: const Icon(Icons.book, size: 20),
-                  ),
-                )
+              ? _buildCover(book)
               : Container(
                   width: 40,
                   height: 56,
@@ -207,6 +199,100 @@ class _BookmarkPageState extends State<BookmarkPage> {
     } else {
       return '${time.month}/${time.day}';
     }
+  }
+
+  /// 根据 Book 的 sourceUrl 查找书源（用于封面解密判断和请求头构建）
+  BookSource? _findBookSource(Book book) {
+    final sourceUrl = book.sourceUrl;
+    if (sourceUrl == null || sourceUrl.isEmpty) return null;
+    final sourceData = StorageService.instance.getBookSource(sourceUrl);
+    if (sourceData == null) return null;
+    try {
+      return BookSource.fromJson(sourceData);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 根据书源构建封面图请求头
+  Map<String, String> _buildCoverHeaders(BookSource source) {
+    final headers = <String, String>{};
+    final headerStr = source.header;
+    if (headerStr != null && headerStr.isNotEmpty) {
+      try {
+        final decoded = json.decode(headerStr);
+        if (decoded is Map) {
+          decoded.forEach((key, value) {
+            final val = value.toString();
+            if (val.isNotEmpty) {
+              headers[key.toString()] = val;
+            }
+          });
+        }
+      } catch (_) {
+        for (final line in headerStr.split('\n')) {
+          final parts = line.split(':');
+          if (parts.length >= 2) {
+            final key = parts[0].trim();
+            final val = parts.sublist(1).join(':').trim();
+            if (key.isNotEmpty && val.isNotEmpty) {
+              headers[key] = val;
+            }
+          }
+        }
+      }
+    }
+    final sourceUrl = source.bookSourceUrl;
+    if (sourceUrl.isNotEmpty) {
+      final uri = Uri.tryParse(sourceUrl);
+      if (uri != null && uri.hasScheme && uri.host.isNotEmpty) {
+        headers.putIfAbsent('Referer', () => '${uri.scheme}://${uri.host}');
+      }
+    }
+    headers.putIfAbsent(
+      'User-Agent',
+      () => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+          '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    );
+    return headers;
+  }
+
+  /// 构建封面图（书源配置了 coverDecodeJs 时走解密链路）
+  Widget _buildCover(Book book) {
+    final source = _findBookSource(book);
+    if (source != null && DecodedImageProvider.needsDecode(source, true)) {
+      return Image(
+        image: DecodedImageProvider(
+          url: book.coverUrl,
+          headers: _buildCoverHeaders(source),
+          source: source,
+          isCover: true,
+          book: book,
+        ),
+        width: 40,
+        height: 56,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => Container(
+          width: 40,
+          height: 56,
+          color: Theme.of(context).colorScheme.outlineVariant,
+          child: const Icon(Icons.book, size: 20),
+        ),
+      );
+    }
+    return CachedNetworkImage(
+      imageUrl: book.coverUrl,
+      width: 40,
+      height: 56,
+      fit: BoxFit.cover,
+      errorWidget: (_, __, ___) => Container(
+        width: 40,
+        height: 56,
+        color: Theme.of(context).colorScheme.outlineVariant,
+        child: const Icon(Icons.book, size: 20),
+      ),
+    );
   }
 
   void _showClearConfirm() {

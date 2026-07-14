@@ -1,8 +1,13 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/read_record_service.dart';
+import '../../services/storage_service.dart';
 import '../../services/cover_config_service.dart';
+import '../../services/image_decode_provider.dart';
+import '../../models/book.dart';
+import '../../models/book_source.dart';
 import '../../routes/app_routes.dart';
 import '../../widgets/swipe_action_container.dart';
 import '../../utils/design_tokens.dart';
@@ -655,14 +660,12 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                   borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                   clipBehavior: Clip.hardEdge,
                   child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
-                      ? CachedNetworkImage(
-                          imageUrl: record.coverUrl,
-                          fit: BoxFit.cover,
-                          cacheKey: record.coverUrl,
-                          memCacheWidth: 100,
-                          maxWidthDiskCache: 200,
-                          placeholder: (_, __) => _buildStackDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
-                          errorWidget: (_, __, ___) => _buildStackDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
+                      ? _buildRecordCover(
+                          bookUrl: record.bookUrl,
+                          coverUrl: record.coverUrl,
+                          width: coverWidth,
+                          height: coverHeight,
+                          fallback: _buildStackDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
                         )
                       : _buildStackDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
                 ),
@@ -857,16 +860,12 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                 borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                 clipBehavior: Clip.hardEdge,
                 child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
-                    ? CachedNetworkImage(
-                        imageUrl: record.coverUrl,
+                    ? _buildRecordCover(
+                        bookUrl: record.bookUrl,
+                        coverUrl: record.coverUrl,
                         width: 44,
                         height: 60,
-                        fit: BoxFit.cover,
-                        cacheKey: record.coverUrl,
-                        memCacheWidth: 100,
-                        maxWidthDiskCache: 200,
-                        placeholder: (_, __) => _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
-                        errorWidget: (_, __, ___) => _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
+                        fallback: _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
                       )
                     : _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
               ),
@@ -1089,16 +1088,12 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
                 borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
                 clipBehavior: Clip.hardEdge,
                 child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
-                    ? CachedNetworkImage(
-                        imageUrl: record.coverUrl,
+                    ? _buildRecordCover(
+                        bookUrl: record.bookUrl,
+                        coverUrl: record.coverUrl,
                         width: 44,
                         height: 60,
-                        fit: BoxFit.cover,
-                        cacheKey: record.coverUrl,
-                        memCacheWidth: 100,
-                        maxWidthDiskCache: 200,
-                        placeholder: (_, __) => _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
-                        errorWidget: (_, __, ___) => _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
+                        fallback: _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
                       )
                     : _buildDefaultCover(bookName: record.bookName, bookAuthor: record.bookAuthor),
               ),
@@ -1274,16 +1269,12 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
               borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
               clipBehavior: Clip.hardEdge,
               child: record.coverUrl.isNotEmpty && !CoverConfigService.instance.useDefaultCover
-                  ? CachedNetworkImage(
-                      imageUrl: record.coverUrl,
+                  ? _buildRecordCover(
+                      bookUrl: record.bookUrl,
+                      coverUrl: record.coverUrl,
                       width: 40,
                       height: 54,
-                      fit: BoxFit.cover,
-                      cacheKey: record.coverUrl,
-                      memCacheWidth: 100,
-                      maxWidthDiskCache: 200,
-                      placeholder: (_, __) => _buildDefaultCover(size: 40, bookName: record.bookName, bookAuthor: record.bookAuthor),
-                      errorWidget: (_, __, ___) => _buildDefaultCover(size: 40, bookName: record.bookName, bookAuthor: record.bookAuthor),
+                      fallback: _buildDefaultCover(size: 40, bookName: record.bookName, bookAuthor: record.bookAuthor),
                     )
                   : _buildDefaultCover(size: 40, bookName: record.bookName, bookAuthor: record.bookAuthor),
             ),
@@ -1355,6 +1346,113 @@ class _ReadRecordPageState extends State<ReadRecordPage> {
       height: size * 60 / 44,
       color: Theme.of(context).colorScheme.outlineVariant,
       child: Icon(Icons.book, size: size * 0.45),
+    );
+  }
+
+  /// 通过 bookUrl 查找书架中的 Book，再查找对应的书源
+  /// （ReadRecord/ReadRecordSummary 没有直接保存 sourceUrl，所以需要经过 Book 中转）
+  BookSource? _findBookSourceByBookUrl(String bookUrl) {
+    final bookData = StorageService.instance.getBook(bookUrl);
+    if (bookData == null) return null;
+    String? sourceUrl;
+    try {
+      final book = Book.fromJson(bookData);
+      sourceUrl = book.sourceUrl;
+    } catch (_) {
+      // 兼容直接保存 sourceUrl 的旧格式
+      if (bookData['sourceUrl'] is String) {
+        sourceUrl = bookData['sourceUrl'] as String;
+      }
+    }
+    if (sourceUrl == null || sourceUrl.isEmpty) return null;
+    final sourceData = StorageService.instance.getBookSource(sourceUrl);
+    if (sourceData == null) return null;
+    try {
+      return BookSource.fromJson(sourceData);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 根据书源构建封面图请求头
+  Map<String, String> _buildCoverHeaders(BookSource source) {
+    final headers = <String, String>{};
+    final headerStr = source.header;
+    if (headerStr != null && headerStr.isNotEmpty) {
+      try {
+        final decoded = json.decode(headerStr);
+        if (decoded is Map) {
+          decoded.forEach((key, value) {
+            final val = value.toString();
+            if (val.isNotEmpty) {
+              headers[key.toString()] = val;
+            }
+          });
+        }
+      } catch (_) {
+        for (final line in headerStr.split('\n')) {
+          final parts = line.split(':');
+          if (parts.length >= 2) {
+            final key = parts[0].trim();
+            final val = parts.sublist(1).join(':').trim();
+            if (key.isNotEmpty && val.isNotEmpty) {
+              headers[key] = val;
+            }
+          }
+        }
+      }
+    }
+    final sourceUrl = source.bookSourceUrl;
+    if (sourceUrl.isNotEmpty) {
+      final uri = Uri.tryParse(sourceUrl);
+      if (uri != null && uri.hasScheme && uri.host.isNotEmpty) {
+        headers.putIfAbsent('Referer', () => '${uri.scheme}://${uri.host}');
+      }
+    }
+    headers.putIfAbsent(
+      'User-Agent',
+      () => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+          '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    );
+    return headers;
+  }
+
+  /// 构建阅读记录封面图（书源配置了 coverDecodeJs 时走解密链路）
+  ///
+  /// [fallback] 用于在没有书源/不需要解密/解密失败时的兜底展示
+  Widget _buildRecordCover({
+    required String bookUrl,
+    required String coverUrl,
+    required double width,
+    required double height,
+    required Widget fallback,
+  }) {
+    final source = _findBookSourceByBookUrl(bookUrl);
+    if (source != null && DecodedImageProvider.needsDecode(source, true)) {
+      return Image(
+        image: DecodedImageProvider(
+          url: coverUrl,
+          headers: _buildCoverHeaders(source),
+          source: source,
+          isCover: true,
+        ),
+        width: width,
+        height: height,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => fallback,
+      );
+    }
+    return CachedNetworkImage(
+      imageUrl: coverUrl,
+      width: width,
+      height: height,
+      fit: BoxFit.cover,
+      cacheKey: coverUrl,
+      memCacheWidth: 100,
+      maxWidthDiskCache: 200,
+      placeholder: (_, __) => fallback,
+      errorWidget: (_, __, ___) => fallback,
     );
   }
 

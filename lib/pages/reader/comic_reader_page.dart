@@ -1833,11 +1833,24 @@ Map<String, String> _imageHeaders = const {};
 
   Future<void> _downloadCurrentChapter() async {
     if (_images.isEmpty) return;
+    // 书源配置了 imageDecode 时走解密链路预缓存，否则走普通网络缓存
+    final needDecode = DecodedImageProvider.needsDecode(_bookSource, false);
     final tasks = _images
         .where((url) => !url.startsWith('data:'))
         .map(
           (url) => precacheImage(
-            CachedNetworkImageProvider(url, headers: _headersForImage(url)),
+            needDecode
+                ? DecodedImageProvider(
+                    url: url,
+                    headers: _headersForImage(url),
+                    source: _bookSource!,
+                    isCover: false,
+                    book: _book,
+                  )
+                : CachedNetworkImageProvider(
+                    url,
+                    headers: _headersForImage(url),
+                  ),
             context,
           ),
         )
