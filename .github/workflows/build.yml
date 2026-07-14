@@ -598,12 +598,51 @@ jobs:
           set -e
           echo "=== 第二阶段退出码: $BUILD2_EXIT ==="
 
-          # 输出最终日志
+          # SignHap 可能因 material 目录为空而失败（DevEco Studio 加密密码机制）
+          # 此时 PackageHap 已完成，unsigned HAP 已生成
+          # 用 hap-sign-tool.jar 手动签名，跳过 SignHap 的密码解密逻辑
           if [ $BUILD2_EXIT -ne 0 ]; then
-            echo "=== 错误上下文 ==="
-            grep -B 5 -A 10 "error|Error|FAILED|Exception|Cause:" /tmp/hap-build-2.log || true
-            echo "=== 完整构建日志 ==="
-            cat /tmp/hap-build-2.log
+            echo "=== SignHap 失败，尝试手动签名 ==="
+            echo "=== 查找 unsigned HAP ==="
+            UNSIGNED_HAP=$(find build -name "*-unsigned.hap" -type f | head -1)
+            echo "unsigned HAP: $UNSIGNED_HAP"
+            echo "=== 查找 hap-sign-tool.jar ==="
+            HAP_SIGN_TOOL=$(find /opt -name "hap-sign-tool.jar" -type f 2>/dev/null | head -1)
+            echo "hap-sign-tool.jar: $HAP_SIGN_TOOL"
+            if [ -n "$UNSIGNED_HAP" ] && [ -n "$HAP_SIGN_TOOL" ]; then
+              SIGNED_HAP="build/ohos/outputs/default/entry-default-signed.hap"
+              mkdir -p "$(dirname "$SIGNED_HAP")"
+              echo "=== 手动签名 HAP ==="
+              java -jar "$HAP_SIGN_TOOL" sign-app \
+                -keyAlias "debugkey" \
+                -signAlg "SHA256withECDSA" \
+                -mode "localSign" \
+                -appCertFile "ohos/sign/debug.cer" \
+                -profileFile "ohos/sign/debug.p7b" \
+                -inFile "$UNSIGNED_HAP" \
+                -keystoreFile "ohos/sign/debug.p12" \
+                -outFile "$SIGNED_HAP" \
+                -keyPwd "0000001B2A3C4D5E6F7A8B9C0D1E2F30" \
+                -keystorePwd "0000001B2A3C4D5E6F7A8B9C0D1E2F30"
+              SIGN_EXIT=$?
+              echo "=== 手动签名退出码: $SIGN_EXIT ==="
+              if [ $SIGN_EXIT -eq 0 ]; then
+                echo "✅ 手动签名成功"
+                BUILD2_EXIT=0
+              else
+                echo "❌ 手动签名失败"
+                echo "=== 错误上下文 ==="
+                grep -B 5 -A 10 "error|Error|FAILED|Exception|Cause:" /tmp/hap-build-2.log || true
+                echo "=== 完整构建日志 ==="
+                cat /tmp/hap-build-2.log
+              fi
+            else
+              echo "❌ 未找到 unsigned HAP 或 hap-sign-tool.jar"
+              echo "=== 错误上下文 ==="
+              grep -B 5 -A 10 "error|Error|FAILED|Exception|Cause:" /tmp/hap-build-2.log || true
+              echo "=== 完整构建日志 ==="
+              cat /tmp/hap-build-2.log
+            fi
           fi
           exit $BUILD2_EXIT
 
@@ -615,7 +654,14 @@ jobs:
           BUILD_DATE="${{ needs.prepare.outputs.build_date }}"
           HAP_NAME="mr_v${{ needs.prepare.outputs.version_compact }}_${TYPE}_${BUILD_DATE}_ohos.hap"
           # 兼容不同 SDK 版本的产物路径
-          HAP_SRC=$(find build -name "*.hap" -type f | head -1)
+          # 优先选择 signed HAP（手动签名产物），其次排除 unsigned，最后兜底
+          HAP_SRC=$(find build -name "*-signed.hap" -type f | head -1)
+          if [ -z "$HAP_SRC" ]; then
+            HAP_SRC=$(find build -name "*.hap" -type f ! -name "*-unsigned.hap" | head -1)
+          fi
+          if [ -z "$HAP_SRC" ]; then
+            HAP_SRC=$(find build -name "*.hap" -type f | head -1)
+          fi
           if [ -z "$HAP_SRC" ]; then
             echo "❌ 未找到 .hap 产物"
             find build -type f 2>/dev/null | head -20
