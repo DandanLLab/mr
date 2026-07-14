@@ -636,11 +636,20 @@ jobs:
                 echo "✅ 手动签名成功"
                 BUILD2_EXIT=0
               else
-                echo "❌ 手动签名失败"
-                echo "=== 错误上下文 ==="
-                grep -B 5 -A 10 "error|Error|FAILED|Exception|Cause:" /tmp/hap-build-2.log || true
-                echo "=== 完整构建日志 ==="
-                cat /tmp/hap-build-2.log
+                echo "❌ 手动签名失败（debug.p7b 是空占位文件，无法签名）"
+                echo "=== 回退到未签名 HAP ==="
+                # debug.p7b 是 Flutter SDK 模板的空占位文件，无法用于签名
+                # 直接上传未签名 HAP，用户可自行签名后安装
+                if [ -n "$UNSIGNED_HAP" ]; then
+                  echo "✅ 使用未签名 HAP 作为产物: $UNSIGNED_HAP"
+                  BUILD2_EXIT=0
+                else
+                  echo "❌ 未找到未签名 HAP"
+                  echo "=== 错误上下文 ==="
+                  grep -B 5 -A 10 "error|Error|FAILED|Exception|Cause:" /tmp/hap-build-2.log || true
+                  echo "=== 完整构建日志 ==="
+                  cat /tmp/hap-build-2.log
+                fi
               fi
             else
               echo "❌ 未找到 unsigned HAP 或 hap-sign-tool.jar"
@@ -660,17 +669,17 @@ jobs:
           BUILD_DATE="${{ needs.prepare.outputs.build_date }}"
           HAP_NAME="mr_v${{ needs.prepare.outputs.version_compact }}_${TYPE}_${BUILD_DATE}_ohos.hap"
           # 兼容不同 SDK 版本的产物路径
-          # 优先选择 signed HAP（手动签名产物），其次排除 unsigned，最后兜底
-          HAP_SRC=$(find build -name "*-signed.hap" -type f | head -1)
+          # 优先选择 signed HAP（手动签名产物），其次排除 unsigned，最后兜底 unsigned
+          HAP_SRC=$(find . -name "*-signed.hap" -type f 2>/dev/null | head -1)
           if [ -z "$HAP_SRC" ]; then
-            HAP_SRC=$(find build -name "*.hap" -type f ! -name "*-unsigned.hap" | head -1)
+            HAP_SRC=$(find . -name "*.hap" -type f ! -name "*-unsigned.hap" 2>/dev/null | head -1)
           fi
           if [ -z "$HAP_SRC" ]; then
-            HAP_SRC=$(find build -name "*.hap" -type f | head -1)
+            HAP_SRC=$(find . -name "*-unsigned.hap" -type f 2>/dev/null | head -1)
           fi
           if [ -z "$HAP_SRC" ]; then
             echo "❌ 未找到 .hap 产物"
-            find build -type f 2>/dev/null | head -20
+            find . -name "*.hap" -type f 2>/dev/null | head -20
             exit 1
           fi
           cp "$HAP_SRC" "${HAP_NAME}"
