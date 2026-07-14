@@ -431,9 +431,9 @@ jobs:
               "type": "HarmonyOS",
               "material": {
                   "storeFile": "./sign/debug.p12",
-                  "storePassword": "0000001B2A3C4D5E6F7A8B9C0D1E2F3",
-                  "keyAlias": "debugKey",
-                  "keyPassword": "0000001B2A3C4D5E6F7A8B9C0D1E2F3",
+                  "storePassword": "0000001B2A3C4D5E6F7A8B9C0D1E2F30",
+                  "keyAlias": "debugkey",
+                  "keyPassword": "0000001B2A3C4D5E6F7A8B9C0D1E2F30",
                   "signAlg": "SHA256withECDSA",
                   "profile": "./sign/debug.p7b",
                   "certpath": "./sign/debug.cer"
