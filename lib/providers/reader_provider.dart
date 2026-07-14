@@ -81,7 +81,7 @@ class ReaderProvider extends ChangeNotifier {
   int _titleBoldFine = 700;
   // 标题设置
   int _titleMode = 0;
-  int _titleSize = 0;
+  int _titleSize = 4;
   int _titleTopSpacing = 0;
   int _titleBottomSpacing = 0;
   // 正文边距（四向独立）
@@ -107,7 +107,7 @@ class ReaderProvider extends ChangeNotifier {
   int _footerMode = 0;
   int _tipHeaderLeft = 2;
   int _tipHeaderMiddle = 0;
-  int _tipHeaderRight = 3;
+  int _tipHeaderRight = 4;
   int _tipFooterLeft = 1;
   int _tipFooterMiddle = 0;
   int _tipFooterRight = 6;
@@ -202,32 +202,48 @@ class ReaderProvider extends ChangeNotifier {
       _textBoldFine = config['textBoldFine'] as int? ?? 400;
       _titleBoldFine = config['titleBoldFine'] as int? ?? 700;
       _titleMode = config['titleMode'] as int? ?? 0;
-      _titleSize = config['titleSize'] as int? ?? 0;
+      _titleSize = config['titleSize'] as int? ?? 4;
       _titleTopSpacing = config['titleTopSpacing'] as int? ?? 0;
       _titleBottomSpacing = config['titleBottomSpacing'] as int? ?? 0;
-      _paddingTop = (config['paddingTop'] as num?)?.toDouble() ??
-          (config['verticalPadding'] as num?)?.toDouble() ?? 6.0;
-      _paddingBottom = (config['paddingBottom'] as num?)?.toDouble() ??
-          (config['verticalPadding'] as num?)?.toDouble() ?? 6.0;
-      _paddingLeft = (config['paddingLeft'] as num?)?.toDouble() ??
-          (config['horizontalPadding'] as num?)?.toDouble() ?? 16.0;
-      _paddingRight = (config['paddingRight'] as num?)?.toDouble() ??
-          (config['horizontalPadding'] as num?)?.toDouble() ?? 16.0;
-      _headerPaddingTop = (config['headerPaddingTop'] as num?)?.toDouble() ?? 0.0;
-      _headerPaddingBottom = (config['headerPaddingBottom'] as num?)?.toDouble() ?? 0.0;
-      _headerPaddingLeft = (config['headerPaddingLeft'] as num?)?.toDouble() ?? 16.0;
-      _headerPaddingRight = (config['headerPaddingRight'] as num?)?.toDouble() ?? 16.0;
-      _footerPaddingTop = (config['footerPaddingTop'] as num?)?.toDouble() ?? 6.0;
-      _footerPaddingBottom = (config['footerPaddingBottom'] as num?)?.toDouble() ?? 6.0;
-      _footerPaddingLeft = (config['footerPaddingLeft'] as num?)?.toDouble() ?? 16.0;
-      _footerPaddingRight = (config['footerPaddingRight'] as num?)?.toDouble() ?? 16.0;
+      _paddingTop =
+          (config['paddingTop'] as num?)?.toDouble() ??
+          (config['verticalPadding'] as num?)?.toDouble() ??
+          6.0;
+      _paddingBottom =
+          (config['paddingBottom'] as num?)?.toDouble() ??
+          (config['verticalPadding'] as num?)?.toDouble() ??
+          6.0;
+      _paddingLeft =
+          (config['paddingLeft'] as num?)?.toDouble() ??
+          (config['horizontalPadding'] as num?)?.toDouble() ??
+          16.0;
+      _paddingRight =
+          (config['paddingRight'] as num?)?.toDouble() ??
+          (config['horizontalPadding'] as num?)?.toDouble() ??
+          16.0;
+      _headerPaddingTop =
+          (config['headerPaddingTop'] as num?)?.toDouble() ?? 0.0;
+      _headerPaddingBottom =
+          (config['headerPaddingBottom'] as num?)?.toDouble() ?? 0.0;
+      _headerPaddingLeft =
+          (config['headerPaddingLeft'] as num?)?.toDouble() ?? 16.0;
+      _headerPaddingRight =
+          (config['headerPaddingRight'] as num?)?.toDouble() ?? 16.0;
+      _footerPaddingTop =
+          (config['footerPaddingTop'] as num?)?.toDouble() ?? 6.0;
+      _footerPaddingBottom =
+          (config['footerPaddingBottom'] as num?)?.toDouble() ?? 6.0;
+      _footerPaddingLeft =
+          (config['footerPaddingLeft'] as num?)?.toDouble() ?? 16.0;
+      _footerPaddingRight =
+          (config['footerPaddingRight'] as num?)?.toDouble() ?? 16.0;
       _showHeaderLine = config['showHeaderLine'] as bool? ?? false;
       _showFooterLine = config['showFooterLine'] as bool? ?? true;
       _headerMode = config['headerMode'] as int? ?? 1;
       _footerMode = config['footerMode'] as int? ?? 0;
       _tipHeaderLeft = config['tipHeaderLeft'] as int? ?? 2;
       _tipHeaderMiddle = config['tipHeaderMiddle'] as int? ?? 0;
-      _tipHeaderRight = config['tipHeaderRight'] as int? ?? 3;
+      _tipHeaderRight = config['tipHeaderRight'] as int? ?? 4;
       _tipFooterLeft = config['tipFooterLeft'] as int? ?? 1;
       _tipFooterMiddle = config['tipFooterMiddle'] as int? ?? 0;
       _tipFooterRight = config['tipFooterRight'] as int? ?? 6;
@@ -687,6 +703,15 @@ class ReaderProvider extends ChangeNotifier {
   int get footerFontSize => _footerFontSize;
   int get tipColor => _tipColor;
   int get tipDividerColor => _tipDividerColor;
+  int get textFontWeight => _fontWeightFine
+      ? _textBoldFine.clamp(100, 900)
+      : switch (_fontWeightIndex) {
+          0 => 300,
+          2 => 700,
+          _ => 400,
+        };
+  int get titleFontWeight =>
+      _fontWeightFine ? _titleBoldFine.clamp(100, 900) : 700;
 
   void setShowReadingInfo(bool value) {
     _showReadingInfo = value;
@@ -696,6 +721,11 @@ class ReaderProvider extends ChangeNotifier {
 
   void setShowChapterTitle(bool value) {
     _showChapterTitle = value;
+    if (!value) {
+      _titleMode = 2;
+    } else if (_titleMode == 2) {
+      _titleMode = 0;
+    }
     _saveToStorage();
     notifyListeners();
   }
@@ -774,12 +804,16 @@ class ReaderProvider extends ChangeNotifier {
 
   void setHorizontalPadding(double value) {
     _horizontalPadding = value;
+    _paddingLeft = value;
+    _paddingRight = value;
     _saveToStorage();
     notifyListeners();
   }
 
   void setVerticalPadding(double value) {
     _verticalPadding = value;
+    _paddingTop = value;
+    _paddingBottom = value;
     _saveToStorage();
     notifyListeners();
   }
@@ -803,170 +837,208 @@ class ReaderProvider extends ChangeNotifier {
   }
 
   void setChineseConverterType(int value) {
-    _chineseConverterType = value;
+    _chineseConverterType = value.clamp(0, 2);
     _saveToStorage();
     notifyListeners();
   }
+
   void setFontWeightFine(bool value) {
     _fontWeightFine = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setTextBoldFine(int value) {
-    _textBoldFine = value;
+    _textBoldFine = value.clamp(100, 900);
     _saveToStorage();
     notifyListeners();
   }
+
   void setTitleBoldFine(int value) {
-    _titleBoldFine = value;
+    _titleBoldFine = value.clamp(100, 900);
     _saveToStorage();
     notifyListeners();
   }
+
   void setTitleMode(int value) {
-    _titleMode = value;
+    _titleMode = value.clamp(0, 3);
+    _showChapterTitle = _titleMode != 2;
     _saveToStorage();
     notifyListeners();
   }
+
   void setTitleSize(int value) {
     _titleSize = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setTitleTopSpacing(int value) {
     _titleTopSpacing = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setTitleBottomSpacing(int value) {
     _titleBottomSpacing = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setPaddingTop(double value) {
     _paddingTop = value;
+    _verticalPadding = (_paddingTop + _paddingBottom) / 2;
     _saveToStorage();
     notifyListeners();
   }
+
   void setPaddingBottom(double value) {
     _paddingBottom = value;
+    _verticalPadding = (_paddingTop + _paddingBottom) / 2;
     _saveToStorage();
     notifyListeners();
   }
+
   void setPaddingLeft(double value) {
     _paddingLeft = value;
+    _horizontalPadding = (_paddingLeft + _paddingRight) / 2;
     _saveToStorage();
     notifyListeners();
   }
+
   void setPaddingRight(double value) {
     _paddingRight = value;
+    _horizontalPadding = (_paddingLeft + _paddingRight) / 2;
     _saveToStorage();
     notifyListeners();
   }
+
   void setHeaderPaddingTop(double value) {
     _headerPaddingTop = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setHeaderPaddingBottom(double value) {
     _headerPaddingBottom = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setHeaderPaddingLeft(double value) {
     _headerPaddingLeft = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setHeaderPaddingRight(double value) {
     _headerPaddingRight = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setFooterPaddingTop(double value) {
     _footerPaddingTop = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setFooterPaddingBottom(double value) {
     _footerPaddingBottom = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setFooterPaddingLeft(double value) {
     _footerPaddingLeft = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setFooterPaddingRight(double value) {
     _footerPaddingRight = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setShowHeaderLine(bool value) {
     _showHeaderLine = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setShowFooterLine(bool value) {
     _showFooterLine = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setHeaderMode(int value) {
     _headerMode = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setFooterMode(int value) {
     _footerMode = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setTipHeaderLeft(int value) {
     _tipHeaderLeft = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setTipHeaderMiddle(int value) {
     _tipHeaderMiddle = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setTipHeaderRight(int value) {
     _tipHeaderRight = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setTipFooterLeft(int value) {
     _tipFooterLeft = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setTipFooterMiddle(int value) {
     _tipFooterMiddle = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setTipFooterRight(int value) {
     _tipFooterRight = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setHeaderFontSize(int value) {
     _headerFontSize = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setFooterFontSize(int value) {
     _footerFontSize = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setTipColor(int value) {
     _tipColor = value;
     _saveToStorage();
     notifyListeners();
   }
+
   void setTipDividerColor(int value) {
     _tipDividerColor = value;
     _saveToStorage();

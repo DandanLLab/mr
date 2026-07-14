@@ -3,6 +3,41 @@
 class ChineseConverter {
   ChineseConverter._();
 
+  static const Map<String, String> _s2tPhrases = {
+    '皇后': '皇后',
+    '里面': '裡面',
+    '后台': '後臺',
+    '台风': '颱風',
+    '头发': '頭髮',
+    '理发': '理髮',
+    '发现': '發現',
+    '发展': '發展',
+    '发布': '發布',
+    '干杯': '乾杯',
+    '干燥': '乾燥',
+    '干活': '幹活',
+    '干部': '幹部',
+    '面条': '麵條',
+    '表面': '表面',
+    '手表': '手錶',
+    '老板': '老闆',
+  };
+
+  static const Map<String, String> _t2sPhrases = {
+    '裡面': '里面',
+    '後臺': '后台',
+    '颱風': '台风',
+    '頭髮': '头发',
+    '理髮': '理发',
+    '乾杯': '干杯',
+    '乾燥': '干燥',
+    '幹活': '干活',
+    '幹部': '干部',
+    '麵條': '面条',
+    '手錶': '手表',
+    '老闆': '老板',
+  };
+
   /// 简体 -> 繁体 映射表
   static const Map<String, String> s2t = {
     '爱': '愛',
@@ -13,7 +48,6 @@ class ChineseConverter {
     '摆': '擺',
     '败': '敗',
     '颁': '頒',
-    '板': '闆',
     '办': '辦',
     '绊': '絆',
     '绑': '綁',
@@ -25,13 +59,10 @@ class ChineseConverter {
     '毙': '斃',
     '毕': '畢',
     '闭': '閉',
-    '墻': '墙',
     '边': '邊',
     '变': '變',
     '编': '編',
-    '鞭': '韁',
     '标': '標',
-    '表': '錶',
     '憋': '彆',
     '濒': '瀕',
     '宾': '賓',
@@ -41,14 +72,13 @@ class ChineseConverter {
     '并': '並',
     '钵': '缽',
     '钹': '鈸',
-    '卜': '蔔',
     '补': '補',
     '埘': '塒',
     '仓': '倉',
     '沧': '滄',
     '苍': '蒼',
     '厕': '廁',
-    '厴': '厰',
+    '测': '測',
     '厂': '廠',
     '长': '長',
     '场': '場',
@@ -89,7 +119,7 @@ class ChineseConverter {
     '葱': '蔥',
     '骞': '騫',
     '盖': '蓋',
-    '干': '幹',
+    '发': '發',
     '赶': '趕',
     '岗': '崗',
     '纲': '綱',
@@ -121,7 +151,7 @@ class ChineseConverter {
     '汉': '漢',
     '号': '號',
     '贺': '賀',
-    '合': '閤',
+    '后': '後',
     '阖': '闔',
     '鹤': '鶴',
     '轰': '轟',
@@ -165,7 +195,6 @@ class ChineseConverter {
     '块': '塊',
     '矿': '礦',
     '亏': '虧',
-    '里': '裏',
     '礼': '禮',
     '丽': '麗',
     '励': '勵',
@@ -181,7 +210,6 @@ class ChineseConverter {
     '粮': '糧',
     '疗': '療',
     '辽': '遼',
-    '了': '瞭',
     '临': '臨',
     '邻': '鄰',
     '岭': '嶺',
@@ -193,17 +221,15 @@ class ChineseConverter {
     '驴': '驢',
     '乱': '亂',
     '么': '麼',
-    '蒙': '矇',
     '梦': '夢',
     '弥': '彌',
     '觅': '覓',
-    '面': '麵',
     '庙': '廟',
     '灭': '滅',
     '闽': '閩',
     '鸣': '鳴',
     '铭': '銘',
-    '谜': '謐',
+    '谜': '謎',
     '脑': '腦',
     '恼': '惱',
     '酿': '釀',
@@ -252,7 +278,6 @@ class ChineseConverter {
     '劝': '勸',
     '确': '確',
     '群': '羣',
-    '然': '燃',
     '绕': '繞',
     '热': '熱',
     '认': '認',
@@ -269,11 +294,11 @@ class ChineseConverter {
     '绍': '紹',
     '赊': '賒',
     '摄': '攝',
-    '升': '昇',
     '胜': '勝',
     '圣': '聖',
     '师': '師',
     '诗': '詩',
+    '试': '試',
     '时': '時',
     '识': '識',
     '实': '實',
@@ -295,7 +320,6 @@ class ChineseConverter {
     '烁': '爍',
     '丝': '絲',
     '饲': '飼',
-    '松': '鬆',
     '苏': '蘇',
     '诉': '訴',
     '肃': '肅',
@@ -410,13 +434,11 @@ class ChineseConverter {
     '邮': '郵',
     '忧': '憂',
     '犹': '猶',
-    '余': '餘',
     '吁': '籲',
     '郁': '鬱',
     '誉': '譽',
     '渊': '淵',
     '园': '園',
-    '圓': '圆',
     '缘': '緣',
     '远': '遠',
     '愿': '願',
@@ -436,26 +458,19 @@ class ChineseConverter {
     '斋': '齋',
     '毡': '氈',
     '战': '戰',
-    '占': '佔',
     '账': '賬',
     '张': '張',
     '胀': '脹',
-    '着': '著',
-    '折': '摺',
     '针': '針',
-    '征': '徵',
-    '症': '癥',
     '证': '證',
     '织': '織',
     '职': '職',
     '执': '執',
-    '制': '製',
     '质': '質',
     '滞': '滯',
     '种': '種',
     '众': '眾',
-    '周': '週',
-    '注': '註',
+    '台': '臺',
     '驻': '駐',
     '专': '專',
     '庄': '莊',
@@ -480,14 +495,43 @@ class ChineseConverter {
       // 反向映射：若繁体对应多个简体，保留首次出现
       if (!m.containsKey(t)) m[t] = s;
     });
+    m.addAll(const {
+      '闆': '板',
+      '錶': '表',
+      '蔔': '卜',
+      '閤': '合',
+      '乾': '干',
+      '幹': '干',
+      '髮': '发',
+      '裡': '里',
+      '裏': '里',
+      '瞭': '了',
+      '麵': '面',
+      '矇': '蒙',
+      '昇': '升',
+      '鬆': '松',
+      '餘': '余',
+      '圓': '圆',
+      '佔': '占',
+      '著': '着',
+      '摺': '折',
+      '徵': '征',
+      '癥': '症',
+      '製': '制',
+      '週': '周',
+      '註': '注',
+      '牆': '墙',
+    });
     return m;
   }
 
   /// 简体转繁体
-  static String toTraditional(String input) => _convert(input, s2t);
+  static String toTraditional(String input) =>
+      _convertWithPhrases(input, _s2tPhrases, s2t);
 
   /// 繁体转简体
-  static String toSimplified(String input) => _convert(input, t2s);
+  static String toSimplified(String input) =>
+      _convertWithPhrases(input, _t2sPhrases, t2s);
 
   /// 0:不转换 1:简转繁 2:繁转简
   static String convert(String input, int type) {
@@ -504,9 +548,28 @@ class ChineseConverter {
   static String _convert(String input, Map<String, String> table) {
     if (table.isEmpty) return input;
     final buf = StringBuffer();
-    for (final ch in input.split('')) {
+    for (final rune in input.runes) {
+      final ch = String.fromCharCode(rune);
       buf.write(table[ch] ?? ch);
     }
     return buf.toString();
+  }
+
+  static String _convertWithPhrases(
+    String input,
+    Map<String, String> phrases,
+    Map<String, String> table,
+  ) {
+    var result = input;
+    final entries = phrases.entries.toList()
+      ..sort((a, b) => b.key.length.compareTo(a.key.length));
+    for (var i = 0; i < entries.length; i++) {
+      result = result.replaceAll(entries[i].key, '\uE000$i\uE001');
+    }
+    result = _convert(result, table);
+    for (var i = 0; i < entries.length; i++) {
+      result = result.replaceAll('\uE000$i\uE001', entries[i].value);
+    }
+    return result;
   }
 }

@@ -1,60 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../../models/replace_rule.dart';
 import '../../services/storage_service.dart';
 import '../../utils/design_tokens.dart';
-
-/// 替换规则模型
-class ReplaceRule {
-  final String id;
-  final String name;
-  final String pattern;
-  final String replacement;
-  final bool isRegex;
-  final bool isEnabled;
-
-  ReplaceRule({
-    required this.id,
-    required this.name,
-    required this.pattern,
-    this.replacement = '',
-    this.isRegex = false,
-    this.isEnabled = true,
-  });
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'pattern': pattern,
-    'replacement': replacement,
-    'isRegex': isRegex,
-    'isEnabled': isEnabled,
-  };
-
-  factory ReplaceRule.fromJson(Map<String, dynamic> json) => ReplaceRule(
-    id: json['id'] ?? '',
-    name: json['name'] ?? '',
-    pattern: json['pattern'] ?? '',
-    replacement: json['replacement'] ?? '',
-    isRegex: json['isRegex'] ?? false,
-    isEnabled: json['isEnabled'] ?? true,
-  );
-
-  ReplaceRule copyWith({
-    String? id,
-    String? name,
-    String? pattern,
-    String? replacement,
-    bool? isRegex,
-    bool? isEnabled,
-  }) => ReplaceRule(
-    id: id ?? this.id,
-    name: name ?? this.name,
-    pattern: pattern ?? this.pattern,
-    replacement: replacement ?? this.replacement,
-    isRegex: isRegex ?? this.isRegex,
-    isEnabled: isEnabled ?? this.isEnabled,
-  );
-}
 
 class ReplaceRulePage extends StatefulWidget {
   const ReplaceRulePage({super.key});
@@ -106,7 +54,9 @@ class _ReplaceRulePageState extends State<ReplaceRulePage> {
   void _showEditDialog(ReplaceRule? rule) {
     final nameController = TextEditingController(text: rule?.name ?? '');
     final patternController = TextEditingController(text: rule?.pattern ?? '');
-    final replacementController = TextEditingController(text: rule?.replacement ?? '');
+    final replacementController = TextEditingController(
+      text: rule?.replacement ?? '',
+    );
     bool isRegex = rule?.isRegex ?? false;
 
     showDialog(
@@ -119,29 +69,29 @@ class _ReplaceRulePageState extends State<ReplaceRulePage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: '规则名称',
-                  hintText: '如：去除广告',
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: '规则名称',
+                    hintText: '如：去除广告',
+                  ),
                 ),
-              ),
-              const SizedBox(height: DesignTokens.spacingLg),
-              TextField(
-                controller: patternController,
-                decoration: const InputDecoration(
-                  labelText: '匹配模式',
-                  hintText: '要替换的文本或正则表达式',
+                const SizedBox(height: DesignTokens.spacingLg),
+                TextField(
+                  controller: patternController,
+                  decoration: const InputDecoration(
+                    labelText: '匹配模式',
+                    hintText: '要替换的文本或正则表达式',
+                  ),
                 ),
-              ),
-              const SizedBox(height: DesignTokens.spacingLg),
-              TextField(
-                controller: replacementController,
-                decoration: const InputDecoration(
-                  labelText: '替换为',
-                  hintText: '留空则删除匹配内容',
+                const SizedBox(height: DesignTokens.spacingLg),
+                TextField(
+                  controller: replacementController,
+                  decoration: const InputDecoration(
+                    labelText: '替换为',
+                    hintText: '留空则删除匹配内容',
+                  ),
                 ),
-              ),
-              const SizedBox(height: DesignTokens.spacingLg),
+                const SizedBox(height: DesignTokens.spacingLg),
                 SwitchListTile(
                   title: const Text('使用正则表达式'),
                   value: isRegex,
@@ -157,12 +107,15 @@ class _ReplaceRulePageState extends State<ReplaceRulePage> {
             ),
             FilledButton(
               onPressed: () async {
-                if (nameController.text.isEmpty || patternController.text.isEmpty) {
+                if (nameController.text.isEmpty ||
+                    patternController.text.isEmpty) {
                   return;
                 }
 
                 final newRule = ReplaceRule(
-                  id: rule?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
+                  id:
+                      rule?.id ??
+                      DateTime.now().millisecondsSinceEpoch.toString(),
                   name: nameController.text,
                   pattern: patternController.text,
                   replacement: replacementController.text,
@@ -209,7 +162,10 @@ class _ReplaceRulePageState extends State<ReplaceRulePage> {
               await _saveRules();
               Navigator.pop(context);
             },
-            child: Text('确定', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            child: Text(
+              '确定',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
           ),
         ],
       ),
@@ -242,58 +198,69 @@ class _ReplaceRulePageState extends State<ReplaceRulePage> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _rules.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.find_replace,
+                    size: 64,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(height: DesignTokens.spacingLg),
+                  Text(
+                    '暂无替换规则',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: DesignTokens.spacingSm),
+                  TextButton.icon(
+                    onPressed: _addRule,
+                    icon: const Icon(Icons.add),
+                    label: const Text('添加规则'),
+                  ),
+                ],
+              ),
+            )
+          : ListView.builder(
+              itemCount: _rules.length,
+              itemBuilder: (context, index) {
+                final rule = _rules[index];
+                return ListTile(
+                  leading: Icon(
+                    rule.isEnabled
+                        ? Icons.check_circle
+                        : Icons.check_circle_outline,
+                    color: rule.isEnabled
+                        ? Theme.of(context).colorScheme.primary
+                        : Theme.of(context).colorScheme.outline,
+                  ),
+                  title: Text(rule.name),
+                  subtitle: Text(
+                    '${rule.isRegex ? '正则: ' : ''}${rule.pattern}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.find_replace, size: 64, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                      const SizedBox(height: DesignTokens.spacingLg),
-                      Text('暂无替换规则', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                      const SizedBox(height: DesignTokens.spacingSm),
-                      TextButton.icon(
-                        onPressed: _addRule,
-                        icon: const Icon(Icons.add),
-                        label: const Text('添加规则'),
+                      IconButton(
+                        icon: const Icon(Icons.edit),
+                        tooltip: '编辑',
+                        onPressed: () => _editRule(rule),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        tooltip: '删除',
+                        onPressed: () => _deleteRule(rule),
                       ),
                     ],
                   ),
-                )
-              : ListView.builder(
-                  itemCount: _rules.length,
-                  itemBuilder: (context, index) {
-                    final rule = _rules[index];
-                    return ListTile(
-                      leading: Icon(
-                        rule.isEnabled ? Icons.check_circle : Icons.check_circle_outline,
-                        color: rule.isEnabled
-                            ? Theme.of(context).colorScheme.primary
-                            : Theme.of(context).colorScheme.outline,
-                      ),
-                      title: Text(rule.name),
-                      subtitle: Text(
-                        '${rule.isRegex ? '正则: ' : ''}${rule.pattern}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.edit),
-                            tooltip: '编辑',
-                            onPressed: () => _editRule(rule),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline),
-                            tooltip: '删除',
-                            onPressed: () => _deleteRule(rule),
-                          ),
-                        ],
-                      ),
-                      onTap: () => _toggleRule(rule),
-                    );
-                  },
-                ),
+                  onTap: () => _toggleRule(rule),
+                );
+              },
+            ),
     );
   }
 }

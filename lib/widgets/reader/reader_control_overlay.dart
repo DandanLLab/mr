@@ -15,6 +15,7 @@ class ReaderControlOverlay extends StatefulWidget {
   final bool hasPrev;
   final bool hasNext;
   final bool isAutoScroll;
+  final bool useReplaceRules;
   final bool isNightMode;
   final double sliderValue;
   final VoidCallback onBack;
@@ -29,6 +30,8 @@ class ReaderControlOverlay extends StatefulWidget {
   final VoidCallback onToggleAutoScroll;
   final VoidCallback onToggleNightMode;
   final VoidCallback onOpenReplaceRules;
+  final ValueChanged<bool> onUseReplaceRulesChanged;
+  final VoidCallback onEditChapter;
   final VoidCallback onShowDirectory;
   final VoidCallback onStartTts;
   final VoidCallback onShowInterface;
@@ -54,6 +57,7 @@ class ReaderControlOverlay extends StatefulWidget {
     required this.hasPrev,
     required this.hasNext,
     required this.isAutoScroll,
+    required this.useReplaceRules,
     required this.isNightMode,
     required this.sliderValue,
     required this.onBack,
@@ -68,6 +72,8 @@ class ReaderControlOverlay extends StatefulWidget {
     required this.onToggleAutoScroll,
     required this.onToggleNightMode,
     required this.onOpenReplaceRules,
+    required this.onUseReplaceRulesChanged,
+    required this.onEditChapter,
     required this.onShowDirectory,
     required this.onStartTts,
     required this.onShowInterface,
@@ -218,26 +224,71 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
           onSelected: (v) {
-            if (v == 'bookmark') widget.onToggleBookmark();
+            switch (v) {
+              case 'bookmark':
+                widget.onToggleBookmark();
+                break;
+              case 'search':
+                widget.onStartSearch();
+                break;
+              case 'auto_scroll':
+                widget.onToggleAutoScroll();
+                break;
+              case 'replace_enabled':
+                widget.onUseReplaceRulesChanged(!widget.useReplaceRules);
+                break;
+              case 'replace_rules':
+                widget.onOpenReplaceRules();
+                break;
+              case 'edit':
+                widget.onEditChapter();
+                break;
+            }
           },
-          itemBuilder: (_) => [
-            PopupMenuItem(
+          itemBuilder: (_) => <PopupMenuEntry<String>>[
+            _popupItem(
               value: 'bookmark',
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                children: [
-                  Icon(
-                    widget.hasBookmark ? Icons.bookmark : Icons.bookmark_border,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  const Text('书签'),
-                ],
-              ),
+              icon: widget.hasBookmark ? Icons.bookmark : Icons.bookmark_border,
+              label: widget.hasBookmark ? '移除书签' : '添加书签',
             ),
+            _popupItem(value: 'search', icon: Icons.search, label: '搜索本章'),
+            _popupItem(
+              value: 'auto_scroll',
+              icon: widget.isAutoScroll ? Icons.pause : Icons.play_arrow,
+              label: widget.isAutoScroll ? '停止自动滚动' : '自动滚动',
+            ),
+            CheckedPopupMenuItem<String>(
+              value: 'replace_enabled',
+              checked: widget.useReplaceRules,
+              child: const Text('启用替换净化'),
+            ),
+            _popupItem(
+              value: 'replace_rules',
+              icon: Icons.find_replace,
+              label: '管理替换规则',
+            ),
+            const PopupMenuDivider(),
+            _popupItem(value: 'edit', icon: Icons.edit, label: '编辑正文'),
           ],
         ),
       ],
+    );
+  }
+
+  PopupMenuItem<String> _popupItem({
+    required String value,
+    required IconData icon,
+    required String label,
+  }) {
+    return PopupMenuItem<String>(
+      value: value,
+      child: Row(
+        children: [
+          Icon(icon, size: 20),
+          const SizedBox(width: 12),
+          Text(label),
+        ],
+      ),
     );
   }
 
