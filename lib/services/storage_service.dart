@@ -160,6 +160,10 @@ class StorageService {
   }
 
   dynamic getSetting(String key, {dynamic defaultValue}) {
+    if (!_initialized) {
+      debugPrint('⚠️ StorageService 未初始化，getSetting 返回默认值');
+      return defaultValue;
+    }
     if (_settingsBox == null || !_settingsBox!.isOpen) {
       debugPrint('⚠️ StorageService: settings Box不可用，尝试异步恢复');
       _ensureBox('settings', _settingsBox).then((box) => _settingsBox = box);
@@ -182,6 +186,10 @@ class StorageService {
   }
 
   List<Map<String, dynamic>> getAllBooks() {
+    if (!_initialized) {
+      debugPrint('⚠️ StorageService 未初始化，getAllBooks 返回空列表');
+      return [];
+    }
     if (_bookshelfBox == null || !_bookshelfBox!.isOpen) {
       debugPrint('⚠️ StorageService: bookshelf Box不可用，尝试异步恢复');
       _ensureBox('bookshelf', _bookshelfBox).then((box) => _bookshelfBox = box);
@@ -194,6 +202,10 @@ class StorageService {
   }
 
   Map<String, dynamic>? getBook(String bookUrl) {
+    if (!_initialized) {
+      debugPrint('⚠️ StorageService 未初始化，getBook 返回 null');
+      return null;
+    }
     if (_bookshelfBox == null || !_bookshelfBox!.isOpen) {
       debugPrint('⚠️ StorageService: bookshelf Box不可用，尝试异步恢复');
       _ensureBox('bookshelf', _bookshelfBox).then((box) => _bookshelfBox = box);
@@ -286,6 +298,10 @@ class StorageService {
   }
 
   List<Map<String, dynamic>> getAllBookSources() {
+    if (!_initialized) {
+      debugPrint('⚠️ StorageService 未初始化，getAllBookSources 返回空列表');
+      return [];
+    }
     if (_bookSourceBox == null || !_bookSourceBox!.isOpen) {
       debugPrint('⚠️ StorageService: bookSource Box不可用，尝试异步恢复');
       _ensureBox(
@@ -301,6 +317,10 @@ class StorageService {
   }
 
   Map<String, dynamic>? getBookSource(String sourceUrl) {
+    if (!_initialized) {
+      debugPrint('⚠️ StorageService 未初始化，getBookSource 返回 null');
+      return null;
+    }
     if (_bookSourceBox == null || !_bookSourceBox!.isOpen) {
       debugPrint('⚠️ StorageService: bookSource Box不可用，尝试异步恢复');
       _ensureBox(
@@ -338,6 +358,10 @@ class StorageService {
   }
 
   dynamic getCachedData(String key) {
+    if (!_initialized) {
+      debugPrint('⚠️ StorageService 未初始化，getCachedData 返回 null');
+      return null;
+    }
     if (_cacheBox == null || !_cacheBox!.isOpen) {
       _ensureBox('cache', _cacheBox).then((box) => _cacheBox = box);
       return null;
@@ -361,6 +385,10 @@ class StorageService {
   }
 
   Map<String, dynamic>? getReaderConfig() {
+    if (!_initialized) {
+      debugPrint('⚠️ StorageService 未初始化，getReaderConfig 返回 null');
+      return null;
+    }
     if (_settingsBox == null || !_settingsBox!.isOpen) {
       _ensureBox('settings', _settingsBox).then((box) => _settingsBox = box);
       return null;
@@ -384,6 +412,10 @@ class StorageService {
   }
 
   String? getLegadoUrl() {
+    if (!_initialized) {
+      debugPrint('⚠️ StorageService 未初始化，getLegadoUrl 返回 null');
+      return null;
+    }
     if (_settingsBox == null || !_settingsBox!.isOpen) {
       _ensureBox('settings', _settingsBox).then((box) => _settingsBox = box);
       return null;
@@ -407,6 +439,10 @@ class StorageService {
     String bookUrl,
     int chapterIndex,
   ) {
+    if (!_initialized) {
+      debugPrint('⚠️ StorageService 未初始化，getChapterHighlights 返回空列表');
+      return [];
+    }
     if (_cacheBox == null || !_cacheBox!.isOpen) {
       _ensureBox('cache', _cacheBox).then((box) => _cacheBox = box);
       return [];
@@ -421,6 +457,10 @@ class StorageService {
   }
 
   List<Map<String, dynamic>> getAllHighlights(String bookUrl) {
+    if (!_initialized) {
+      debugPrint('⚠️ StorageService 未初始化，getAllHighlights 返回空列表');
+      return [];
+    }
     if (_cacheBox == null || !_cacheBox!.isOpen) {
       _ensureBox('cache', _cacheBox).then((box) => _cacheBox = box);
       return [];
@@ -446,6 +486,10 @@ class StorageService {
   }
 
   List<Map<String, dynamic>> getAllHighlightRules() {
+    if (!_initialized) {
+      debugPrint('⚠️ StorageService 未初始化，getAllHighlightRules 返回空列表');
+      return [];
+    }
     if (_settingsBox == null) return [];
     return _settingsBox!.values
         .where((e) {
