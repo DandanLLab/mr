@@ -82,10 +82,11 @@ set_source_files_properties(
     PROPERTIES COMPILE_FLAGS "-flto"
 )
 
-# 链接期优化（OHOS NDK 的 lld 支持 --gc-sections / --icf=safe / --version-script / -flto）
+# 链接期优化（OHOS NDK 的 lld 支持 --gc-sections / --version-script / -flto）
+# 注意：鸿蒙 SDK 的 crtn.o 与 lld --icf=safe 不兼容（SHT_LLVM_ADDRSIG 冲突），禁用 ICF
 target_link_options(quickjs_c_bridge PRIVATE
     -Wl,--gc-sections
-    -Wl,--icf=safe
+    -Wl,--icf=none
     -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/quickjs_bridge.map
     -Wl,-s
     -flto
