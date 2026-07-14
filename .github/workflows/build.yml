@@ -514,7 +514,7 @@ jobs:
           # 第一阶段：触发 ohpm install（会在 CompileArkTS 失败）
           echo "=== 第一阶段：ohpm install + 触发编译 ==="
           set +e
-          flutter build hap --debug --verbose > /tmp/hap-build-1.log 2>&1
+          flutter build hap --release --verbose > /tmp/hap-build-1.log 2>&1
           BUILD1_EXIT=$?
           set -e
           echo "=== 第一阶段退出码: $BUILD1_EXIT ==="
@@ -548,7 +548,7 @@ jobs:
           # 第二阶段：patch 后重新构建
           echo "=== 第二阶段：patch 后重新构建 ==="
           set +e
-          flutter build hap --debug --verbose > /tmp/hap-build-2.log 2>&1
+          flutter build hap --release --verbose > /tmp/hap-build-2.log 2>&1
           BUILD2_EXIT=$?
           set -e
           echo "=== 第二阶段退出码: $BUILD2_EXIT ==="
