@@ -565,13 +565,18 @@ jobs:
             echo "找到 flutter_ohos: $FLUTTER_OHOS_DIR"
             KEH="$FLUTTER_OHOS_DIR/embedding/ohos/KeyEventHandler.ets"
             if [ -f "$KEH" ]; then
-              sed -i 's/\.isCapsLockOn/false/g' "$KEH"
-              sed -i 's/\.isNumLockOn/false/g' "$KEH"
+              # event.isCapsLockOn → false（替换整个属性访问，不能只替换 .isCapsLockOn）
+              sed -i 's/[a-zA-Z_]\+\.isCapsLockOn/false/g' "$KEH"
+              sed -i 's/[a-zA-Z_]\+\.isNumLockOn/false/g' "$KEH"
               echo "✅ Patched KeyEventHandler.ets"
             fi
             PIP="$FLUTTER_OHOS_DIR/embedding/ohos/PiPVisibilityBridge.ets"
             if [ -f "$PIP" ]; then
+              # window.getGlobalWindowMode() → 1
               sed -i 's/window\.getGlobalWindowMode()/1/g' "$PIP"
+              # window.GlobalWindowMode.XXX → 1（值上下文）
+              sed -i 's/window\.GlobalWindowMode\.[A-Z_]\+/1/g' "$PIP"
+              # window.GlobalWindowMode → number（类型上下文）
               sed -i 's/window\.GlobalWindowMode/number/g' "$PIP"
               echo "✅ Patched PiPVisibilityBridge.ets"
             fi
