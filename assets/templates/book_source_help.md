@@ -28,7 +28,6 @@
 | JS | `@js:` / `<js>`...`</js>` | ✅ | QuickJS 单引擎（ES2020） | `js_engine.dart` |
 | Regex | `:` | ✅ | 正则模式，以 `:` 开头 | `analyze_rule.dart` |
 | WebJS | `@webjs:` | 🔧 | WebView JS，需 InAppWebView 配合 | `js_advanced_service.dart` |
-| TypeScript | `@ts:` | ➕ | 自动编译为 JS 后 QuickJS 执行 | `analyze_rule.dart` → quickjs |
 
 ---
 
@@ -269,7 +268,6 @@
 
 | 功能 | 说明 | 代码位置 |
 |------|------|----------|
-| `@ts:` TypeScript 前缀 | 自动编译 TS 为 JS 后执行 | `analyze_rule.dart` |
 | ES2020 语法支持 | const/let/箭头函数/模板字符串/async-await 等 | QuickJS（ES2020） |
 | `fetch()` 标准 Web API | 内置 HTTP 请求接口 | `quickjs_runtime.dart` |
 | `console` 完整实现 | log/warn/error/info/dir/table/time/timeEnd | `js_engine.dart` |
@@ -306,13 +304,12 @@
 
 ## 十二、规则调试
 
-本应用提供 `crypto_stats_panel.dart` 调试面板，位于书源调试页，支持：
+本应用内置书源调试页（`book_source_debug_page.dart`），支持链式调试：
 
-- **加密性能统计**：C 原生加密方法调用次数、耗时、吞吐量
-- **C 层内存监控**：`memory_tracker` 全局分配/释放/峰值
-- **JS 引擎内存**：`JS_ComputeMemoryUsage` 25 字段全量展示
-- **Promise 状态监控**：输入变量名查询 Promise pending/fulfilled/rejected
-- **JS 值打印**：`JS_PrintValue` 流式输出任意 JS 表达式
-- **手动 GC**：AppBar 按钮一键触发 `JS_RunGC`
+- **日志流**：实时显示带时间戳的调试日志（搜索→详情→目录→正文全流程）
+- **源码缓存**：各阶段抓取的 HTML 源码可查看，定位规则匹配问题
+- **key 格式路由**：`++目录URL` / `--正文URL` / `分类::URL` / `书籍URL` / `关键字` 五种调试入口
+- **状态码**：`error`(-1) / `warn`(0) / `normal`(1) / `searchSrc`(10) / `exploreSrc`(15) / `bookSrc`(20) / `tocSrc`(30) / `contentSrc`(40) / `success`(1000)
+- **崩溃日志**：`crash_log_panel.dart` 独立面板，查看/复制/导出应用崩溃记录
 
 > 详见 [debug_api_guide.md](debug_api_guide.md) 与 [book_source_js_help.md](book_source_js_help.md)。

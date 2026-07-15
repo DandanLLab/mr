@@ -340,20 +340,25 @@ result;
 </js>
 ```
 
-### JS 执行追踪 + 引擎内存监控
+### JS 执行追踪
 
-QuickJS 执行时可通过调试面板（`crypto_stats_panel.dart`）可视化：
+书源执行时，`console.log` 输出会被捕获到调试日志中，可在书源调试页的「日志」标签页查看：
 
 ```javascript
 <js>
-// 调试面板可查看：
-// 1. JS 引擎内存（25 字段：malloc/memory/size/objects/strings/shapes...）
-// 2. Promise 状态（pending/fulfilled/rejected）
-// 3. 手动触发 GC
-// 4. JS_PrintValue 输出
-var p = fetch("https://api.example.com/data");  // 在 Promise 监控面板查询 p 的状态
+// 调试日志可查看：
+// 1. console.log/warn/error 输出
+// 2. 各阶段抓取的 HTML 源码（搜索/详情/目录/正文）
+// 3. 链式调试流程的每一步结果
+console.log("result长度:", result.length);
+console.log("baseUrl:", baseUrl);
+var p = fetch("https://api.example.com/data");
+console.log("fetch 返回:", p);
+result;
 </js>
 ```
+
+> 引擎层面的内存监控、Promise 状态查询、手动 GC 等是 Dart 侧编程接口（`runGc()`/`promiseState()`），供应用开发者使用，不对书源 JS 暴露。详见 [debug_api_guide.md](debug_api_guide.md)。
 
 ---
 
@@ -374,11 +379,8 @@ A: 本应用只有 QuickJS 引擎，规则中使用 `@js:` 前缀即可。旧书
 **Q: java.cache 在 QuickJS 下能持久化吗？**
 A: QuickJS 下仅内存有效。如需跨会话持久化，用 `source.variable`。
 
-**Q: 支持 TypeScript 吗？**
-A: 支持！使用 `@ts:` 前缀，自动编译为 JS 后执行。
-
-**Q: 如何监控 QuickJS 引擎的健康状况？**
-A: 打开调试页面的「引擎性能统计」面板，可查看 JS 内存占用、Promise 状态、手动触发 GC、流式打印 JS 值。
+**Q: 如何调试书源 JS？**
+A: 用 `console.log` 输出调试信息，在书源调试页的「日志」标签页查看。引擎层面的内存监控、Promise 状态查询等是应用开发者的编程接口，详见 [debug_api_guide.md](debug_api_guide.md)。
 
 ---
 

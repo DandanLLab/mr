@@ -1,522 +1,225 @@
-# AI 调试服务接口文档
+# 调试服务与面板
 
-> 调试服务入口：[lib/pages/debug/book_source_debug_page.dart](file:///d:/OpenClaw/.openclaw/workspace/mr/lib/pages/debug/book_source_debug_page.dart)
+> 本文档说明本应用内置的调试能力，所有内容均基于真实代码。
 >
-> 调试服务后端：[lib/services/source_debug_service.dart](file:///d:/OpenClaw/.openclaw/workspace/mr/lib/services/source_debug_service.dart)
->
-> 引擎性能统计面板：[lib/pages/debug/crypto_stats_panel.dart](file:///d:/OpenClaw/.openclaw/workspace/mr/lib/pages/debug/crypto_stats_panel.dart)
+> - 调试服务后端：[lib/services/source_debug_service.dart](file:///d:/OpenClaw/.openclaw/workspace/mr/lib/services/source_debug_service.dart)
+> - 调试 UI 入口：[lib/pages/debug/book_source_debug_page.dart](file:///d:/OpenClaw/.openclaw/workspace/mr/lib/pages/debug/book_source_debug_page.dart)
+> - 崩溃日志面板：[lib/pages/debug/crash_log_panel.dart](file:///d:/OpenClaw/.openclaw/workspace/mr/lib/pages/debug/crash_log_panel.dart)
+
+> ⚠️ 本应用**没有** WebSocket / HTTP 远程调试服务，所有调试均为本地进程内调用。
 
 ---
 
-## 服务信息
+## 一、SourceDebugService（本地调试服务）
 
-| 项 | 值 |
-|----|-----|
-| WebSocket 地址 | `ws://localhost:9527` |
-| HTTP API 地址 | `http://localhost:9527/api` |
-| 状态页面 | `http://localhost:9527/status` |
-| 实现语言 | Dart |
-| 运行方式 | 独立进程，由 `source_debug_service.dart` 启动 |
+单例服务，参考 Legado 的 `Debug` 对象设计，负责串行执行书源调试全流程并收集源码与日志。
 
----
+### 1.1 核心接口
 
-## 连接方式
-
-### WebSocket 连接
-
-```javascript
-const ws = new WebSocket('ws://localhost:9527');
-
-ws.onopen = () => {
-  console.log('已连接到调试服务');
-};
-
-ws.onmessage = (event) => {
-  const response = JSON.parse(event.data);
-  console.log('收到响应:', response);
-};
-
-ws.onerror = (error) => {
-  console.error('连接错误:', error);
-};
-```
-
-### HTTP API 调用
-
-```bash
-curl -X POST http://localhost:9527/api \
-  -H "Content-Type: application/json" \
-  -d '{"type": "ping", "id": "1", "data": {}}'
-```
-
----
-
-## 消息格式
-
-### 请求格式
-
-```json
-{
-  "type": "命令类型",
-  "id": "请求ID",
-  "data": {
-    "source": { },
-    "keyword": "",
-    "url": ""
-  },
-  "timestamp": "2024-01-01T00:00:00.000Z"
-}
-```
-
-### 成功响应
-
-```json
-{
-  "id": "请求ID",
-  "success": true,
-  "result": { },
-  "error": null,
-  "timestamp": "2024-01-01T00:00:00.000Z"
-}
-```
-
-### 错误响应
-
-```json
-{
-  "id": "请求ID",
-  "success": false,
-  "result": null,
-  "error": "错误描述信息",
-  "timestamp": "2024-01-01T00:00:00.000Z"
-}
-```
-
----
-
-## 可用命令
-
-### 1. ping — 心跳测试
-
-**请求：**
-```json
-{ "type": "ping", "id": "1", "data": {} }
-```
-
-**响应：**
-```json
-{ "id": "1", "success": true, "result": { "pong": true }, "error": null }
-```
-
----
-
-### 2. test_search — 测试搜索
-
-**请求：**
-```json
-{
-  "type": "test_search",
-  "id": "2",
-  "data": {
-    "source": {
-      "bookSourceUrl": "https://example.com",
-      "bookSourceName": "示例书源",
-      "searchUrl": "https://example.com/search?key={{key}}",
-      "ruleSearch": {
-        "bookList": "class.book-list@tag.li",
-        "name": "tag.h3@text",
-        "author": "tag.p@text##作者：",
-        "bookUrl": "tag.a@href"
-      }
-    },
-    "keyword": "斗破苍穹"
-  }
-}
-```
-
-**响应：**
-```json
-{
-  "id": "2",
-  "success": true,
-  "result": {
-    "keyword": "斗破苍穹",
-    "count": 10,
-    "results": [
-      { "name": "斗破苍穹", "author": "天蚕土豆", "bookUrl": "https://example.com/book/123" }
-    ]
-  }
-}
-```
-
----
-
-### 3. test_explore — 测试发现
-
-**请求：**
-```json
-{
-  "type": "test_explore",
-  "id": "3",
-  "data": {
-    "source": {
-      "bookSourceUrl": "https://example.com",
-      "exploreUrl": "全部::https://example.com/list/all",
-      "ruleExplore": {
-        "bookList": "class.book-item",
-        "name": "tag.h2@text",
-        "author": "tag.p@text",
-        "bookUrl": "tag.a@href"
-      }
-    },
-    "url": "https://example.com/list/all"
-  }
-}
-```
-
----
-
-### 4. test_book_info — 测试书籍信息
-
-**请求：**
-```json
-{
-  "type": "test_book_info",
-  "id": "4",
-  "data": {
-    "source": {
-      "bookSourceUrl": "https://example.com",
-      "ruleBookInfo": {
-        "name": "tag.h1@text",
-        "author": "class.author@text",
-        "intro": "class.intro@text",
-        "tocUrl": "class.read-btn@href"
-      }
-    },
-    "bookUrl": "https://example.com/book/123"
-  }
-}
-```
-
----
-
-### 5. test_toc — 测试目录
-
-**请求：**
-```json
-{
-  "type": "test_toc",
-  "id": "5",
-  "data": {
-    "source": {
-      "bookSourceUrl": "https://example.com",
-      "ruleToc": {
-        "chapterList": "class.chapter-list@tag.li",
-        "chapterName": "tag.a@text",
-        "chapterUrl": "tag.a@href"
-      }
-    },
-    "bookUrl": "https://example.com/book/123"
-  }
-}
-```
-
----
-
-### 6. test_content — 测试正文
-
-**请求：**
-```json
-{
-  "type": "test_content",
-  "id": "6",
-  "data": {
-    "source": {
-      "bookSourceUrl": "https://example.com",
-      "ruleContent": {
-        "content": "class.content@html"
-      }
-    },
-    "chapterUrl": "https://example.com/chapter/123"
-  }
-}
-```
-
----
-
-### 7. test_rule — 测试规则
-
-**请求：**
-```json
-{
-  "type": "test_rule",
-  "id": "7",
-  "data": {
-    "content": "<html><body><div class=\"book-list\"><li><h3>书名</h3></li></div></body></html>",
-    "rule": "class.book-list@tag.li@tag.h3@text",
-    "ruleType": "string"
-  }
-}
-```
-
-**ruleType 可选值：** `string`（默认）、`list`（列表）、`map`（对象列表）、`auto`（自动判断）
-
----
-
-### 8. execute_js — 执行 JavaScript
-
-**请求：**
-```json
-{
-  "type": "execute_js",
-  "id": "8",
-  "data": {
-    "code": "const items = result.match(/<li[^>]*>(.*?)<\\/li>/g) || []; JSON.stringify(items);",
-    "variables": {
-      "result": "<ul><li>项目1</li><li>项目2</li></ul>"
-    }
-  }
-}
-```
-
----
-
-### 9. get_book_sources — 获取书源列表
-
-**请求：**
-```json
-{ "type": "get_book_sources", "id": "9", "data": {} }
-```
-
----
-
-### 10. add_book_source — 添加书源
-
-**请求：**
-```json
-{
-  "type": "add_book_source",
-  "id": "10",
-  "data": {
-    "source": {
-      "bookSourceUrl": "https://newsource.com",
-      "bookSourceName": "新书源",
-      "enabled": true
-    }
-  }
-}
-```
-
----
-
-### 11. update_book_source — 更新书源
-
-**请求：**
-```json
-{
-  "type": "update_book_source",
-  "id": "11",
-  "data": {
-    "source": {
-      "bookSourceUrl": "https://example.com",
-      "bookSourceName": "更新后的书源名",
-      "enabled": false
-    }
-  }
-}
-```
-
----
-
-### 12. delete_book_source — 删除书源
-
-**请求：**
-```json
-{
-  "type": "delete_book_source",
-  "id": "12",
-  "data": {
-    "sourceUrl": "https://example.com"
-  }
-}
-```
-
----
-
-### 13. get_miniprograms — 获取小程序列表
-
-**请求：**
-```json
-{ "type": "get_miniprograms", "id": "13", "data": {} }
-```
-
----
-
-### 14. get_plugins — 获取插件列表
-
-**请求：**
-```json
-{ "type": "get_plugins", "id": "14", "data": {} }
-```
-
----
-
-### 15. http_request — 发送 HTTP 请求
-
-**请求：**
-```json
-{
-  "type": "http_request",
-  "id": "15",
-  "data": {
-    "url": "https://example.com/api/data",
-    "method": "GET",
-    "headers": {
-      "User-Agent": "Mozilla/5.0",
-      "Authorization": "Bearer token"
-    },
-    "body": null
-  }
-}
-```
-
----
-
-### 16. get_engine_stats — 获取引擎性能统计
-
-**请求：**
-```json
-{ "type": "get_engine_stats", "id": "16", "data": {} }
-```
-
-**响应中包含：**
-- **加密统计**：C 原生加密方法调用次数、总耗时、平均耗时、吞吐量
-- **C 层内存统计**：全局 malloc/free 计数、当前字节、峰值字节、分配失败数
-- **JS 引擎内存**：`JS_ComputeMemoryUsage` 25 字段（当前使用/限额/对象数/字符串数/shape 数/函数数/字节码大小/atom 数等）
-
----
-
-### 17. trigger_gc — 手动触发 QuickJS GC
-
-**请求：**
-```json
-{ "type": "trigger_gc", "id": "17", "data": {} }
-```
-
-**响应：**
-```json
-{ "id": "17", "success": true, "result": { "gc_completed": true }, "error": null }
-```
-
----
-
-### 18. get_promise_state — 查询 Promise 状态
-
-**请求：**
-```json
-{
-  "type": "get_promise_state",
-  "id": "18",
-  "data": {
-    "varName": "bookLoadPromise"
-  }
-}
-```
-
-**响应：**
-```json
-{
-  "id": "18",
-  "success": true,
-  "result": {
-    "varName": "bookLoadPromise",
-    "state": 2,
-    "label": "fulfilled"
-  }
-}
-```
-
-**状态值：** `0`=非 Promise 对象, `1`=pending（等待中）, `2`=fulfilled（已完成）, `3`=rejected（已拒绝）
-
----
-
-### 19. print_js_value — 流式打印 JS 值
-
-**请求：**
-```json
-{
-  "type": "print_js_value",
-  "id": "19",
-  "data": {
-    "expr": "typeof book",
-    "maxDepth": 2,
-    "maxStringLength": 256
-  }
-}
-```
-
-**响应：**
-```json
-{
-  "id": "19",
-  "success": true,
-  "result": {
-    "expr": "typeof book",
-    "value": "object"
-  }
-}
-```
-
-> 底层调用 `JS_PrintValue`（参考 quickjs-zh 实现），支持控制最大递归深度和字符串截断长度。
-
----
-
-## 本应用调试面板功能
-
-除了上述 AI 远程调试 API，本应用内置完整的调试 UI：
-
-### 书源调试页
-`book_source_debug_page.dart` — 实时日志 + 源码查看 + 执行追踪树
-
-| 标签页 | 说明 |
-|--------|------|
-| 日志 | 实时显示 `console.log` 输出和规则执行日志 |
-| 源码 | 当前调试书源的 JSON 源码 |
-| 追踪 | JS 执行流程树（每个步骤的输入/输出/耗时） |
-
-### 引擎性能统计面板
-`crypto_stats_panel.dart` — 可独立打开的调试面板
-
-| 卡片 | 功能 |
+| 成员 | 说明 |
 |------|------|
-| 加密统计 | C 原生加密调用次数、总耗时、平均耗时、吞吐量（MB/s） |
-| 吞吐量 | 每类加密方法的分时吞吐量 |
-| C 层内存 | `memory_tracker` 全局分配/释放/峰值/活跃句柄数 |
-| QuickJS 版本 | 引擎版本号 + context 异常状态 |
-| JS 引擎内存 | 25 字段 `JS_ComputeMemoryUsage` 全量展示 |
-| Promise 监控 | 输入变量名查询其 Promise 状态 |
-| JS 值打印 | 输入 JS 表达式，`JS_PrintValue` 流式输出 |
-| 自动刷新 | 500ms 定时刷新所有统计 |
-| 手动 GC | AppBar 按钮触发 `JS_RunGC` |
-| 重置计数 | 清空加密统计和内存统计 |
+| `SourceDebugService.instance` | 单例入口 |
+| `callback: DebugCallback?` | 调试回调，UI 层设置后接收日志输出 |
+| `startDebug(BookSource source, String key)` | 启动调试，根据 `key` 格式自动路由 |
+| `cancelDebug({bool destroy = false})` | 取消当前调试，`destroy=true` 时清空回调 |
+| `isDebugging` | 是否正在调试 |
+| `searchSrc` / `bookSrc` / `tocSrc` / `contentSrc` | 各阶段抓取到的原始 HTML 源码缓存 |
+
+### 1.2 DebugCallback 接口
+
+UI 层通过实现 `DebugCallback` 接收调试日志：
+
+```dart
+abstract class DebugCallback {
+  /// [state] 状态码（见下表）
+  /// [msg] 已格式化的日志消息（含时间戳前缀）
+  void printLog(int state, String msg);
+}
+```
+
+### 1.3 状态码（DebugState）
+
+与 Legado 保持一致，UI 层可据此高亮和分类显示：
+
+| 状态 | code | 含义 |
+|------|------|------|
+| `error` | -1 | 错误 |
+| `warn` | 0 | 警告 |
+| `normal` | 1 | 普通日志 |
+| `searchSrc` | 10 | 搜索页源码（携带 HTML） |
+| `exploreSrc` | 15 | 发现页源码 |
+| `bookSrc` | 20 | 详情页源码 |
+| `tocSrc` | 30 | 目录页源码 |
+| `contentSrc` | 40 | 正文页源码 |
+| `success` | 1000 | 全流程成功完成 |
+
+> 源码状态码（10/15/20/30/40）触发时，`log()` 会把 `sourceHtml` 存入对应缓存字段，供 UI 在「源码」标签页查看。
+
+### 1.4 key 格式路由
+
+`startDebug(source, key)` 根据 `key` 前缀自动选择调试入口：
+
+| key 格式 | 调试入口 | 示例 |
+|----------|----------|------|
+| `++URL` | 目录页调试 | `++https://example.com/toc` |
+| `--URL` | 正文页调试 | `--https://example.com/chapter/1` |
+| `名称::URL`（非 URL） | 发现页调试 | `玄幻::https://example.com/list/xuanhuan` |
+| `http://...` / `https://...` | 详情页调试 | `https://example.com/book/123` |
+| 其他文本 | 搜索调试 | `斗破苍穹` |
+
+### 1.5 调试流程
+
+调试采用**链式自动推进**，前一步成功后自动进入下一步：
+
+```
+搜索 → 详情 → 目录 → 正文 → success(1000)
+```
+
+每步流程：
+
+1. **搜索**（`_debugSearch`）：调用 `WebBook.searchBook` → 缓存 `searchSrc` → 输出第一条结果 → 取 `bookUrl` 进入详情
+2. **详情**（`_debugBookInfo`）：调用 `WebBook.getBookInfo` → 缓存 `bookSrc` → 输出书名/作者/分类/字数/简介/封面/目录链接 → 取 `tocUrl` 进入目录
+3. **目录**（`_debugToc`）：调用 `WebBook.getChapterList` → 缓存 `tocSrc` → 输出首章信息 → 取首章 `chapterUrl` 进入正文
+4. **正文**（`_debugContent`）：调用 `WebBook.getContent`（含 `nextChapterUrl` 熔断） → 缓存 `contentSrc` → 输出格式化正文 → `success(1000)`
+
+> 每进入下一步前会调用 `JsEngine.instance.clearJavaCache()` 清理 JS 桥接缓存，防止单次调试链内 `_javaCache` 无限增长导致 OOM。
+
+### 1.6 日志格式
+
+每条日志由 `log()` 统一格式化：
+
+```
+[MM:SS.mmm] 消息内容
+```
+
+时间戳为相对调试开始的偏移（`_formatTimestamp`）。
+
+### 1.7 取消与清理
+
+- `cancelDebug()` 设置 `_isCancelled=true`，各调试步骤在 await 点检查后提前返回
+- 同时清空四个源码缓存字段，释放大 HTML 内存
+- 调用 `JsEngine.instance.clearJavaCache()` 清理 JS 侧缓存
+- `destroy=true` 时额外置空 `callback`，断开 UI 回调
 
 ---
 
-## 调试流程建议
+## 二、书源调试页（book_source_debug_page.dart）
 
-1. **测试搜索** → `test_search` 检查 bookList/name/author 规则
-2. **测试详情** → 从搜索结果拿 `bookUrl`，`test_book_info` 验证
-3. **测试目录** → `test_toc` 检查章节列表完整性
-4. **测试正文** → 从目录拿 `chapterUrl`，`test_content` 验证
-5. **单独调规则** → `test_rule` 隔离测试某条规则
-6. **检查引擎健康** → `get_engine_stats` 查看 JS 内存和 Promise 状态
-7. **保存书源** → 测试通过后 `add_book_source` 保存
+应用内 UI，提供可视化的调试入口与结果展示。
+
+### 2.1 标签页
+
+| 标签 | 功能 |
+|------|------|
+| 调试 | 输入书源 + key，启动调试，实时显示日志流 |
+| 日志 | 查看历史调试日志详情，支持复制 |
+
+### 2.2 调试交互
+
+- 选择书源 + 输入 key（支持 `++`/`--`/`::`/URL/关键字 五种格式）
+- 启动调试后实时显示带时间戳的日志
+- 可中途取消
+- 查看各阶段抓取的源码 HTML
+- 弹窗查看日志详情、调试帮助、崩溃详情
 
 ---
 
-## 规则语法参考
+## 三、崩溃日志面板（crash_log_panel.dart）
 
-> 完整规则语法见 [book_source_help.md](book_source_help.md) | 书写指南见 [book_source_guide.md](book_source_guide.md)
+独立的 `CrashLogPanel` Widget，展示 `CrashLogService` 收集的崩溃记录。
+
+### 3.1 功能
+
+| 操作 | 说明 |
+|------|------|
+| 复制全部 | 将全部崩溃日志复制到剪贴板 |
+| 导出到文件 | 把日志写入文件并提示路径，支持复制路径 |
+| 加载 | 重新读取崩溃日志 |
+| 清空 | 二次确认后清空所有崩溃记录 |
+
+### 3.2 展示内容
+
+- 空状态：显示「暂无崩溃日志」+ 应用运行时长
+- 每条崩溃记录以 `_CrashLogCard` 卡片形式展示
+- 卡片点击可展开详情对话框，支持复制单条日志
+
+> 崩溃数据来源：`CrashLogService`（启动时由 `main.dart` 最先初始化，注册 `runZonedGuarded` 全局错误捕获）。
+
+---
+
+## 四、QuickJS Runtime 编程接口
+
+QuickJS 引擎（[lib/services/native/quickjs_runtime.dart](file:///d:/OpenClaw/.openclaw/workspace/mr/lib/services/native/quickjs_runtime.dart)）提供以下编程接口，可在 Dart 代码中直接调用（**不是远程 API**）：
+
+### 4.1 引擎生命周期
+
+| 方法 | 说明 |
+|------|------|
+| `evaluate(script)` | 执行 JS 代码，返回 `JsEvalResult`（含 `isError` 字段） |
+| `precompile(script)` | 预编译脚本为字节码 |
+| `clearBytecodeCache()` | 清空字节码缓存 |
+| `dispose()` | 释放 QuickJS runtime |
+
+### 4.2 执行控制
+
+| 方法 | 说明 |
+|------|------|
+| `setEvalTimeout(int timeoutMs)` | 设置单次执行超时（默认 5s） |
+| `wasEvalInterrupted()` | 上次执行是否被超时熔断 |
+| `hasException()` | 引擎是否处于异常状态 |
+| `setCanBlock(bool)` | 是否允许阻塞调用 |
+| `setUncatchableException(bool)` | 异常是否可被外部 catch |
+
+### 4.3 内存与 GC
+
+| 方法 | 说明 |
+|------|------|
+| `runGc()` | 手动触发 `JS_RunGC` |
+| `resetCryptoStats()` | 重置加密调用统计 |
+
+### 4.4 Promise 监控
+
+| 方法 | 说明 |
+|------|------|
+| `promiseState(String varName)` | 查询全局变量的 Promise 状态 |
+
+返回值：`0`=非 Promise，`1`=pending，`2`=fulfilled，`3`=rejected
+
+### 4.5 原生函数（全局）
+
+`quickjs_runtime.dart` 还导出以下全局原生函数，供 `js_engine.dart` 注册到 QuickJS 全局作用域：
+
+| 函数 | 说明 |
+|------|------|
+| `nativeAesEncrypt(data, key, iv)` | AES 加密（C 原生 `crypto/aes.c`） |
+| `nativeAesDecrypt(cipherB64, key, iv)` | AES 解密（Base64 输入） |
+| `nativeHtmlQueryExtract(html, selector, attr, listMode)` | lexbor C 层 HTML 查询（`@CSS:` 规则走此路径） |
+| `nativeUnescapeHtml(input)` | HTML 实体反转义 |
+| `nativeUrlEncode(input)` / `nativeUrlDecode(input)` | URL 编解码 |
+| `nativeCharsetUrlEncode(input, charset)` | 指定字符集的 URL 编码 |
+| `nativeGetCpuCount()` | CPU 核数（FFI 健康检查用） |
+| `nativeDetectModule(input)` | 检测是否为 ES Module |
+
+---
+
+## 五、调试流程建议
+
+1. **选好入口**：根据想调试的阶段选择 key 格式
+   - 想测搜索 → 直接输入关键字
+   - 想测详情 → 输入书籍 URL
+   - 想测目录 → `++目录页URL`
+   - 想测正文 → `--正文页URL`
+   - 想测发现 → `分类名::URL`
+2. **观察日志流**：「调试」标签页实时输出，关注 `error`(-1) 状态的行
+3. **查看源码**：每阶段完成后，对应源码已缓存，可切到「源码」查看 HTML 是否符合预期
+4. **链式推进**：搜索成功后会自动进入详情→目录→正文，任一环节失败会以 `error` 终止
+5. **排查 JS 桥接**：若 `java.ajax/get/post` 返回空，检查书源的 `header`/`charset` 配置；JS 侧抛 `__NEED_NETWORK__` 表示同步模式下未预缓存该 URL
+
+---
+
+## 六、规则语法参考
+
+> 完整规则语法见 [book_source_help.md](book_source_help.md) | 书写指南见 [book_source_guide.md](book_source_guide.md) | JS API 见 [book_source_js_help.md](book_source_js_help.md)
 
 ### CSS 选择器
 ```
@@ -550,79 +253,4 @@ $[?(@.type==1)]          // 过滤器
 ```
 :result.match(/name":"([^"]*)"/)?.[1] || ''
 @js:const items = result.match(/.+?/g); JSON.stringify(items);
-```
-
----
-
-## 客户端示例
-
-### Python
-
-```python
-import websocket
-import json
-
-def on_message(ws, message):
-    response = json.loads(message)
-    print(f"收到响应: {response}")
-
-def on_open(ws):
-    request = {
-        "type": "test_search",
-        "id": "1",
-        "data": {
-            "source": {
-                "bookSourceUrl": "https://example.com",
-                "bookSourceName": "示例书源",
-                "searchUrl": "https://example.com/search?key={{key}}",
-                "ruleSearch": {
-                    "bookList": "class.book-list@tag.li",
-                    "name": "tag.h3@text",
-                    "author": "tag.p@text##作者：",
-                    "bookUrl": "tag.a@href"
-                }
-            },
-            "keyword": "斗破苍穹"
-        }
-    }
-    ws.send(json.dumps(request))
-
-ws = websocket.WebSocketApp(
-    "ws://localhost:9527",
-    on_open=on_open,
-    on_message=on_message
-)
-ws.run_forever()
-```
-
-### Node.js
-
-```javascript
-const WebSocket = require('ws');
-const ws = new WebSocket('ws://localhost:9527');
-
-ws.on('open', () => {
-  ws.send(JSON.stringify({
-    type: 'test_search',
-    id: '1',
-    data: {
-      source: {
-        bookSourceUrl: 'https://example.com',
-        bookSourceName: '示例书源',
-        searchUrl: 'https://example.com/search?key={{key}}',
-        ruleSearch: {
-          bookList: 'class.book-list@tag.li',
-          name: 'tag.h3@text',
-          author: 'tag.p@text##作者：',
-          bookUrl: 'tag.a@href'
-        }
-      },
-      keyword: '斗破苍穹'
-    }
-  }));
-});
-
-ws.on('message', (data) => {
-  console.log('收到响应:', JSON.parse(data));
-});
 ```

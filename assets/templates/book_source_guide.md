@@ -6,24 +6,70 @@
 
 ## 一、书源基础信息
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `bookSourceUrl` | String | 是 | 书源地址，作为唯一标识 |
-| `bookSourceName` | String | 是 | 书源名称 |
-| `bookSourceGroup` | String | 否 | 书源分组（如"动漫"、"小说"） |
-| `bookSourceType` | Int | 否 | 类型：0=小说, 1=音频, 2=图片, 3=文件, 4=视频 |
-| `enabled` | Bool | 否 | 是否启用，默认 true |
-| `enabledExplore` | Bool | 否 | 是否启用发现，默认 true |
-| `header` | String | 否 | 请求头 JSON |
-| `searchUrl` | String | 否 | 搜索地址，支持 `{{key}}` `{{page}}` 变量 |
-| `exploreUrl` | String | 否 | 发现地址，格式：`名称::URL`，多行用 `\n` 分隔 |
-| `jsLib` | String | 否 | 公共 JS 库，可在规则中调用 |
-| `bookSourceComment` | String | 否 | 书源说明 |
-| `concurrentRate` | String | 否 | 并发频率限制 |
-| `enabledCookieJar` | Bool | 否 | CookieJar 开关 |
-| `loginUrl` | String | 否 | 登录 URL |
-| `loginCheckJs` | String | 否 | 登录检查 JS |
-| `customOrder` | Int | 否 | 自定义排序 |
+> 对应 `BookSource` 模型：[lib/models/book_source.dart](file:///d:/OpenClaw/.openclaw/workspace/mr/lib/models/book_source.dart)
+
+### 1.1 标识与类型
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `bookSourceUrl` | String | 是 | — | 书源地址，作为唯一标识 |
+| `bookSourceName` | String | 是 | — | 书源名称 |
+| `bookSourceGroup` | String? | 否 | null | 书源分组（如"动漫"、"小说"） |
+| `bookSourceType` | BookSourceType | 否 | `text` | 类型枚举：`text`=小说 / `audio`=音频 / `image`=图片 / `file`=文件 / `video`=视频（JSON 中为 0-4 整数） |
+| `bookUrlPattern` | String? | 否 | null | 书籍 URL 匹配正则 |
+| `customOrder` | int | 否 | 0 | 自定义排序值 |
+| `enabled` | bool | 否 | true | 是否启用 |
+| `enabledExplore` | bool | 否 | true | 是否启用发现 |
+| `weight` | int | 否 | 0 | 书源权重（影响多源排序） |
+| `lastUpdateTime` | int | 否 | 0 | 最后更新时间戳 |
+| `respondTime` | int | 否 | 180000 | 响应超时（毫秒） |
+| `sourceFormat` | String? | 否 | null | 书源格式标识 |
+
+### 1.2 请求与网络
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `header` | String? | null | 请求头 JSON |
+| `searchUrl` | String? | null | 搜索地址，支持 `{{key}}` `{{page}}` 变量 |
+| `exploreUrl` | String? | null | 发现地址，格式：`名称::URL`，多行用 `\n` 分隔 |
+| `exploreScreen` | String? | null | 发现页屏幕配置 |
+| `concurrentRate` | String? | null | 并发频率限制 |
+| `enabledCookieJar` | bool | true | CookieJar 开关 |
+
+### 1.3 登录与认证
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `loginUrl` | String? | null | 登录 URL |
+| `loginUi` | String? | null | 登录 UI 配置 JSON |
+| `loginCheckJs` | String? | null | 登录状态检查 JS |
+
+### 1.4 JS 与图片解密
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `jsLib` | String? | null | 公共 JS 库，可在规则中调用 |
+| `engine` | String? | null | 引擎选择标识 |
+| `coverDecodeJs` | String? | null | 封面解密 JS（`DecodedImageProvider` 调用） |
+| `variable` | String? | null | 书源持久化变量（JSON 字符串） |
+| `variableComment` | String? | null | 变量说明 |
+| `bookSourceComment` | String? | null | 书源说明 |
+
+### 1.5 规则与扩展
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `ruleSearch` | SearchRule? | null | 搜索规则 |
+| `ruleExplore` | ExploreRule? | null | 发现规则 |
+| `ruleBookInfo` | BookInfoRule? | null | 详情页规则 |
+| `ruleToc` | TocRule? | null | 目录规则 |
+| `ruleContent` | ContentRule? | null | 正文规则 |
+| `ruleReview` | ReviewRule? | null | 评论规则 |
+| `eventListener` | bool | false | 是否启用事件监听 |
+| `customButton` | bool | false | 是否启用自定义按钮 |
+| `nextPageLazyLoad` | bool | false | 下一页是否懒加载 |
+
+> 图片解密：当书源配置了 `coverDecodeJs`（封面）或 `ruleContent.imageDecode`（正文）时，图片加载走 `DecodedImageProvider`（下载 → JS 解密 → 解码），否则走 `CachedNetworkImage` 享受磁盘缓存。
 
 ---
 
@@ -56,7 +102,6 @@
 | `@xpath:` | XPath | `@xpath://div[@class='book']/a` |
 | `@json:` | JSONPath | `@json:$.data.list` |
 | `@js:` 或 `:` | JavaScript | `:result.match(/name":"([^"]*)"/)?.[1]` |
-| `@ts:` | TypeScript | `@ts:(x: number) => x * 2` |
 | 无前缀 | 自动判断 | 根据内容自动选择解析方式 |
 
 ### 3.2 CSS 选择器语法
@@ -340,16 +385,17 @@ JSON.stringify(books);
 
 ### 本应用调试工具
 
-打开书源调试页（`book_source_debug_page.dart`），进入「引擎性能统计」面板（`crypto_stats_panel.dart`）：
+打开书源调试页（`book_source_debug_page.dart`），输入书源和关键字即可启动链式调试（搜索→详情→目录→正文）：
 
 | 功能 | 说明 |
 |------|------|
-| 加密性能统计 | C 原生加密调用次数、耗时、吞吐量 |
-| C 层内存监控 | 全局 malloc/free 计数、峰值 |
-| JS 引擎内存 | 25 字段 `JS_ComputeMemoryUsage` 全量展示 |
-| Promise 状态 | 输入变量名，显示 pending/fulfilled/rejected |
-| JS 值打印 | 流式输出任意 JS 表达式 |
-| 手动 GC | AppBar 按钮一键触发 `JS_RunGC` |
+| 调试标签页 | 输入书源 + key，启动调试，实时显示带时间戳的日志流 |
+| 日志标签页 | 查看历史调试日志详情，支持复制 |
+| 源码缓存 | 各阶段抓取的 HTML 源码（搜索/详情/目录/正文）可在对应阶段查看 |
+| key 格式路由 | `++目录URL` / `--正文URL` / `分类::URL` / `书籍URL` / `关键字` 五种入口 |
+| 崩溃日志面板 | `crash_log_panel.dart`，查看/复制/导出应用崩溃记录 |
+
+> 详见 [debug_api_guide.md](debug_api_guide.md)
 
 ### 常见问题排查
 

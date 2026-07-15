@@ -11,7 +11,6 @@
 - **完整语法支持**：CSS/JSoup 选择器、JSONPath、XPath、JavaScript、正则替换、模板规则
 - **JS 引擎**：QuickJS（C 原生 FFI，ES2020）
 - **加密兼容**：`CryptoJS` API + `java.*` 桥接加密方法，底层统一走 C 原生实现（AES/MD5/SHA/HMAC）
-- **TypeScript 编译**：`@ts:` 前缀自动编译为 JS 后由 QuickJS 执行（本应用独有）
 - **书源管理**：兼容 Legado JSON 导入/导出，支持书源调试 + 执行追踪树
 
 ### 阅读器矩阵
@@ -19,15 +18,29 @@
 | 类型 | 功能 |
 |------|------|
 | 小说阅读器 | 仿真翻页 / 滚动 / 滑动 / TTS 朗读 / 自定义主题 |
-| 漫画阅读器 | 竖向滚动 / 左右翻页 / 双页模式 |
+| 漫画阅读器 | 竖向滚动 / 左右翻页 / 双页模式 / 按需缓存 |
 | 音频播放器 | 后台播放 / 定时停止 / 播放列表 |
 | 视频播放器 | 内置播放页 / 横竖屏切换 |
 
+### 图片解密
+
+- 支持书源配置的 `coverDecodeJs`（封面解密）和 `ruleContent.imageDecode`（正文图片解密）
+- `DecodedImageProvider` 自定义 ImageProvider：下载 → JS 解密 → 解码
+- 已重写 `==` / `hashCode`，Flutter `ImageCache` 可正常复用
+
 ### 跨平台
 
-- Android / iOS / Web / Windows / Linux / macOS 同一代码库
+- Android / iOS / HarmonyOS（鸿蒙）/ Web / Windows / Linux / macOS 同一代码库
 - Web 平台自动启动 CORS 代理（`ProxyService.instance.start()`）
+- 鸿蒙构建未签名 HAP，用户自行用 DevEco Studio 签名后安装
 - 书源无需针对平台修改
+
+### 崩溃防护
+
+- `CrashLogService` 启动最先初始化，注册全局错误捕获
+- `runZonedGuarded` 捕获所有未处理异步错误
+- `StorageService` 未初始化时所有同步 getter 返回空值，避免 `HiveError` 崩溃
+- 启动时检测上次崩溃日志并弹窗显示
 
 ---
 
@@ -37,7 +50,7 @@
 
 | 层 | 技术 | 路径 |
 |----|------|------|
-| UI 框架 | Flutter 3.x | `lib/` |
+| UI 框架 | Flutter 3.41+ | `lib/` |
 | 状态管理 | Provider（6 个 Provider） | `lib/providers/` |
 | 本地存储 | Hive | `lib/services/storage_service.dart` |
 | HTTP 客户端 | Dio + OkHttp（Android 原生通道） | `lib/services/source_engine/` |
@@ -46,28 +59,45 @@
 | HTML 解析 | `package:html`（CSS 选择器） | 规则引擎内部 |
 | HTML 解析（C） | lexbor（C99 HTML 解析器） | `quickjs/lexbor/` |
 | 加密 | C 原生实现 | `quickjs/crypto/` |
-| 路由 | 自定义 `AppPageRoute`（250ms 淡入 + 上滑过渡） | `lib/routes/app_routes.dart` |
+| 图片解密 | `DecodedImageProvider` | `lib/services/image_decode_provider.dart` |
+| 崩溃日志 | `CrashLogService` | `lib/services/crash_log_service.dart` |
+| 路由 | 自定义 `AppPageRoute`（零时长切换） | `lib/routes/app_routes.dart` |
+
+### 入口初始化顺序
+
+`lib/main.dart` 在 `runZonedGuarded` 中依次初始化：
+
+1. `CrashLogService.instance.init()` — 崩溃日志（最先，注册全局错误捕获）
+2. `AppLogger.instance.initFileLogging()` + `enableDebugPrintCapture()` — 应用日志
+3. `Hive.initFlutter()` → `StorageService.instance.init()` — 本地存储
+4. `JsEngine.instance.init()` — JS 引擎
+5. `CoverConfigService.instance.init()` — 封面配置
+6. `ProxyService.instance.start()` — CORS 代理（仅 Web）
+7. `runApp(DanShenqiApp())`
+
+> 每个服务初始化均包裹在 try-catch 中，单个服务失败不中断启动。
 
 ### 项目结构
 
 ```
 mr/
 ├── lib/                          # Dart 源码
-│   ├── main.dart                 # 入口：初始化 Hive/Storage/JsEngine/CoverConfig
+│   ├── main.dart                 # 入口：runZonedGuarded 初始化各服务
 │   ├── models/                   # 数据模型
 │   │   ├── book.dart / book_source.dart / chapter.dart
+│   │   ├── highlight.dart / miniprogram.dart / replace_rule.dart
 │   │   └── rules/                # 六类规则模型（search/explore/bookInfo/toc/content/review）
-│   ├── pages/                    # 13 个页面子目录（含 settings、web 等）
+│   ├── pages/                    # 13 个页面子目录
 │   │   ├── bookshelf/            # 书架
-│   │   ├── reader/               # 小说和漫画阅读器
+│   │   ├── reader/               # 小说阅读器 + 漫画阅读器
 │   │   ├── player/               # 音频和视频播放器
 │   │   ├── detail/               # 书籍详情 + 章节列表
 │   │   ├── search/               # 搜索
 │   │   ├── discovery/explore/    # 发现 / 发现详情
 │   │   ├── miniprogram/          # 小程序
 │   │   ├── web/                  # 内置浏览器
-│   │   ├── debug/                # 书源调试 + 加密性能统计 + JS 内存监控面板
-│   │   ├── profile/              # 设置中心（12 个子页）
+│   │   ├── debug/                # 书源调试 + 崩溃日志面板
+│   │   ├── profile/              # 设置中心（11 个子页）
 │   │   ├── settings/             # 主题 / AI 设置
 │   │   └── main/                 # 主框架页
 │   ├── providers/                # 6 个状态 Provider
@@ -84,14 +114,16 @@ mr/
 │   │   │   ├── proxy_service.dart      # CORS 代理
 │   │   │   └── web_proxy*.dart         # Web 请求代理（平台分支）
 │   │   ├── native/              # 原生桥接层
-│   │   │   ├── js_engine.dart          # JsEngine 主入口 + 引擎调度（QuickJS 单引擎）
+│   │   │   ├── js_engine.dart          # JsEngine 主入口 + 引擎调度
 │   │   │   ├── quickjs_runtime.dart    # QuickJS FFI 绑定（Android/iOS/桌面）
 │   │   │   ├── quickjs_runtime_stub.dart # QuickJS Web 平台 stub
 │   │   │   ├── shared_js_scope.dart    # 跨引擎共享作用域
 │   │   │   ├── js_advanced_service.dart # 高级 JS（WebView 注入）
-│   │   │   └── platform_channel.dart   # Android/iOS 原生通道
+│   │   │   ├── platform_bridge.dart    # 平台桥接
+│   │   │   ├── platform_channel.dart   # Android/iOS 原生通道
+│   │   │   └── dio_ssl_helper_*.dart   # Dio SSL 平台分支
 │   │   ├── local_book/          # 本地书解析（EPUB / TXT）
-│   │   ├── storage_service.dart
+│   │   ├── storage_service.dart       # Hive 存储（含未初始化防护）
 │   │   ├── book_data_provider.dart
 │   │   ├── book_source_import_service.dart
 │   │   ├── book_source_locator.dart
@@ -104,28 +136,27 @@ mr/
 │   │   ├── cookie_service.dart
 │   │   ├── cover_config_service.dart
 │   │   ├── share_service.dart
-│   │   └── app_logger.dart
-│   ├── themes/                  # 主题配置
-│   ├── utils/                   # 设计令牌 / 常量
+│   │   ├── image_decode_provider.dart  # 图片解密 ImageProvider
+│   │   ├── crash_log_service.dart     # 崩溃日志服务
+│   │   └── app_logger.dart            # 应用日志
+│   ├── themes/                  # 主题配置 + 圆角徽标
+│   ├── utils/                   # 设计令牌 / 简繁转换 / 分享工具
 │   └── widgets/                 # 公共组件 + reader 子组件
-├── quickjs/                     # QuickJS C 源码（Android 编译为 .so，iOS 编译为 .a）
+├── quickjs/                     # QuickJS C 源码
 │   ├── quickjs.c / quickjs.h    # QuickJS 引擎核心
 │   ├── quickjs_bridge.c/h      # C 桥接层 — 所有 FFI 导出符号
-│   ├── handle_table.c/h        # P1: 句柄表（id→指针映射，ABA 防护）
-│   ├── memory_tracker.c/h      # P1: 全局内存追踪器
-│   ├── quickjs-c-atomics.h     # P1: 跨编译器 C11 原子操作兼容层
-│   ├── crypto/                  # 加密实现
-│   │   ├── md5.c/h / sha1.c/h / sha256.c/h
-│   │   ├── aes.c/h / hmac_sha256.c/h
+│   ├── handle_table.c/h        # 句柄表（id→指针映射，ABA 防护）
+│   ├── memory_tracker.c/h      # 全局内存追踪器
+│   ├── quickjs-c-atomics.h     # 跨编译器 C11 原子操作兼容层
+│   ├── crypto/                  # 加密实现（AES/MD5/SHA/HMAC）
 │   ├── html_native.c/h         # HTML 解析 C 原生加速
-│   ├── http_client.c/h         # C HTTP 客户端（curl wrapper）
+│   ├── http_client.c/h         # C HTTP 客户端
 │   ├── charset_conv.c/h        # 字符集转换
 │   ├── lzstring.c              # LZ 字符串压缩
 │   ├── batch_decompress.c/h    # 批量解压
-│   └── lexbor/                 # lexbor HTML 解析器（C99）
+│   ├── lexbor/                 # lexbor HTML 解析器（C99）
+│   └── ohos/                   # 鸿蒙 CMakeLists.txt
 ├── android/app/src/main/cpp/   # Android CMakeLists + 符号映射
-│   ├── CMakeLists.txt          # C 源码编译配置（体积优化 + LTO + gc-sections）
-│   └── quickjs_bridge.map      # 版本脚本（仅导出 quickjs_bridge_*）
 ├── ios/                        # iOS Runner + Podfile + NativePlugin.swift
 ├── assets/templates/           # 书源模板 + 帮助文档
 └── tools/cors-proxy.js         # Web CORS 代理脚本
@@ -163,7 +194,6 @@ mr/
 | 变量系统 | ✅ | `@put` / `@get` / `java.put/getStr` |
 | CryptoJS | ✅ | AES / MD5 / SHA / HMAC 全支持 |
 | java.* 桥接 | ✅ | HTTP / 加密 / 解析 / 缓存 / 日志 |
-| TypeScript | ➕ | `@ts:` 前缀自动编译（本应用独有） |
 
 > 详见 [书源规则帮助](assets/templates/book_source_help.md) 与 [JS 开发文档](assets/templates/book_source_js_help.md)。
 
@@ -176,6 +206,7 @@ mr/
 - Flutter 3.41+（项目内置 `flutter.bat`，默认指向 `D:\flutter_windows_3.41.7-stable`，可设 `FLUTTER_ROOT` 覆盖）
 - Android NDK 28.x（编译 C 桥接层时需 CMake + NDK clang）
 - CMake 3.22+
+- 鸿蒙开发需额外安装 [鸿蒙 Flutter SDK](https://gitcode.com/openharmony-sig/flutter_flutter) + DevEco Studio
 
 ### 常用命令
 
@@ -184,6 +215,7 @@ flutter pub get                  # 安装依赖
 flutter run                      # 运行
 flutter build apk                # 构建 Android APK（含 C 编译）
 flutter build ios                # 构建 iOS（含 C 编译）
+flutter build hap                # 构建 HarmonyOS HAP（需鸿蒙 Flutter SDK）
 flutter analyze                  # 静态分析 + lint
 flutter test                     # 运行 test/ 全部测试
 ```
@@ -200,6 +232,7 @@ flutter test                     # 运行 test/ 全部测试
 | `legado_rule_test.dart` | CSS/JSoup 链式选择器规则 | `flutter test test/legado_rule_test.dart` |
 | `book_source_compat_test.dart` | 书源导入、URL 解析、元数据合并、源定位 | `flutter test test/book_source_compat_test.dart` |
 | `crypto_native_test.dart` | C 原生加密对比（需 Android 真机/模拟器加载 .so） | `flutter test test/crypto_native_test.dart` |
+| `chinese_converter_test.dart` | 简繁中文转换 | `flutter test test/chinese_converter_test.dart` |
 
 CI 不跑测试与 lint。
 
@@ -217,14 +250,30 @@ CI 不跑测试与 lint。
 - 路由使用 `Map<String, dynamic>?` 参数（见 `app_routes.dart`）
 - 路由参数可能是 `Map`（动态）或 `Map<String, dynamic>` — 代码通过 `is Map` 检查兼容两者
 - 序列化：`Book.fromJson` / `BookSource.fromJson`
+- 异步操作后使用 `BuildContext` 前必须检查 `mounted`
+- 空值断言 `!` 应替换为局部变量 + null 检查（类型提升）
+- 删除文件时同步清理 barrel export（`source_engine.dart` 等）
 
 ---
 
 ## 持续集成
 
-`.github/workflows/main.yml` — push 时自动将所有分支合并到 `master`（冲突 → 自动创建 PR）。
+### 自动合并（`.github/workflows/main.yml`）
 
-`.github/workflows/build.yml` — Android + iOS 构建验证。
+push 到任意分支（非 master）时，自动将该分支合并到 master。冲突 → 自动创建 PR。
+
+### 多平台构建发布（`.github/workflows/build.yml`）
+
+| 平台 | 触发 | 产物 | 签名 | 允许失败 |
+|------|------|------|------|----------|
+| Android | push master / 手动 | `mr_v*_dev_*.apk`（arm64） | Release 签名 | 否 |
+| iOS | push master / 手动 | `mr_v*_dev_*.ipa` | 未签名（`--no-codesign`） | 是 |
+| HarmonyOS | push master / 手动 | `mr_v*_dev_*.hap` | 未签名（用户自行签名） | 是 |
+
+- 版本号格式：`YY.MMDD.今日提交数`（如 `25.0715.3`）
+- 手动触发可选 `dev`（测试版）或 `stable`（正式版）
+- 鸿蒙 Flutter SDK 为华为 fork，CI 动态获取最新 release 分支并克隆
+- CI 不跑测试与 lint
 
 ---
 
