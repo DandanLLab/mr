@@ -94,8 +94,13 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   final Set<String> _precachedUrls = {};
   /// 缓存按钮重入保护（避免用户连点导致同一张图片被并行 precache）
   bool _isDownloading = false;
-final List<String> _imageLoadLog = [];
-Map<String, String> _imageHeaders = const {};
+  /// 图片加载日志（按时间倒序展示）
+  final List<String> _imageLoadLog = [];
+  /// 已记录日志的 URL 集合，O(1) 查找替代 lastWhere 线性查找
+  final Set<String> _loggedImageUrls = {};
+  /// base64 data: 图片解码缓存，避免每次 _buildImage 重复解析
+  final Map<String, Uint8List> _dataImageCache = {};
+  Map<String, String> _imageHeaders = const {};
   final Map<String, Map<String, String>> _imageOptionHeaders = {};
   String _sourceName = '';
   BookSource? _bookSource;
@@ -318,6 +323,9 @@ Map<String, String> _imageHeaders = const {};
     _resetZoom();
     // 章节切换时清空缓存按钮去重记录，避免 Set 无限增长
     _precachedUrls.clear();
+    // 清空日志去重 Set 和 base64 解码缓存，释放内存
+    _loggedImageUrls.clear();
+    _dataImageCache.clear();
 
     try {
       List<String> images;
@@ -626,15 +634,22 @@ Map<String, String> _imageHeaders = const {};
   }
 
   Uint8List? _decodeDataImage(String source) {
+    // 命中缓存直接返回，避免每次 _buildImage 重新解析 base64
+    final cached = _dataImageCache[source];
+    if (cached != null) return cached;
     final comma = source.indexOf(',');
     if (comma < 0) return null;
     try {
       final metadata = source.substring(0, comma).toLowerCase();
       final payload = source.substring(comma + 1);
+      final Uint8List result;
       if (metadata.contains(';base64')) {
-        return base64Decode(base64.normalize(payload));
+        result = base64Decode(base64.normalize(payload));
+      } else {
+        result = Uint8List.fromList(Uri.decodeComponent(payload).codeUnits);
       }
-      return Uint8List.fromList(Uri.decodeComponent(payload).codeUnits);
+      _dataImageCache[source] = result;
+      return result;
     } catch (_) {
       return null;
     }
@@ -730,6 +745,9 @@ Map<String, String> _imageHeaders = const {};
       _imageKeys.addAll(List.generate(_images.length, (_) => GlobalKey()));
       // 章节切换时清空缓存按钮去重记录
       _precachedUrls.clear();
+      // 清空日志去重 Set 和 base64 解码缓存，释放内存
+      _loggedImageUrls.clear();
+      _dataImageCache.clear();
     }
     if (save) _scheduleProgressSave();
   }
@@ -885,6 +903,10 @@ Map<String, String> _imageHeaders = const {};
               () => GlobalKey(),
             );
             final isLast = globalIndex == _allImages.length - 1;
+            // 防御性越界检查：章节切换时序中 _allImages 可能被清空但 SliverList 未重建
+            if (globalIndex >= _allImages.length) {
+              return const SizedBox();
+            }
             return KeyedSubtree(
               key: key,
               child: RepaintBoundary(
@@ -981,6 +1003,10 @@ Map<String, String> _imageHeaders = const {};
           return _buildHorizontalChapterEdge('已读完 ${_chapter?.title ?? ''}');
         }
         final imageIndex = itemIndex - _horizontalLeadingCount;
+        // 防御性越界检查：章节切换时序中 _images 可能被清空但 PageView 未重建
+        if (imageIndex < 0 || imageIndex >= _images.length) {
+          return const SizedBox();
+        }
         return RepaintBoundary(
           child: _buildImage(_images[imageIndex], fit: BoxFit.contain),
         );
@@ -1071,56 +1097,11 @@ Map<String, String> _imageHeaders = const {};
         fadeOutDuration: Duration.zero,
         progressIndicatorBuilder: (context, _, progress) {
           final value = progress.progress;
-          final now = DateTime.now();
-          final timeStr =
-              '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-          if (value != null && _imageLoadLog.length < 500) {
-            final existingLog = _imageLoadLog.lastWhere(
-              (l) => l.contains(url.substring(0, url.length.clamp(0, 50))),
-              orElse: () => '',
-            );
-            if (existingLog.isEmpty) {
-              _imageLoadLog.add(
-                '[$timeStr] 开始加载: ${url.substring(0, url.length.clamp(0, 80))}...',
-              );
-            }
-          }
-          return Container(
-            constraints: BoxConstraints(
-              minHeight: minHeight > 0
-                  ? minHeight
-                  : MediaQuery.sizeOf(context).height * 0.55,
-            ),
-            color: _readerBackground,
-            alignment: Alignment.center,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(
-                  value: value,
-                  color: _readerForeground,
-                  strokeWidth: 3,
-                ),
-                if (value != null) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    '${(value * 100).round()}%',
-                    style: TextStyle(color: _readerSecondary),
-                  ),
-                ],
-              ],
-            ),
-          );
+          _logImageLoadStart(url, value);
+          return _buildImageLoadingIndicator(value, minHeight);
         },
         errorWidget: (_, error, ___) {
-          final now = DateTime.now();
-          final timeStr =
-              '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-          if (_imageLoadLog.length < 500) {
-            _imageLoadLog.add(
-              '[$timeStr] 加载失败: ${url.substring(0, url.length.clamp(0, 80))} - ${error.toString().substring(0, error.toString().length.clamp(0, 50))}',
-            );
-          }
+          _logImageLoadError(url, error);
           return _buildImageError();
         },
       );
@@ -1163,14 +1144,14 @@ Map<String, String> _imageHeaders = const {};
     return child;
   }
 
-  /// 记录图片开始加载日志（借鉴原 progressIndicatorBuilder 逻辑）
+  /// 记录图片开始加载日志
+  ///
+  /// 使用 [_loggedImageUrls] Set 做 O(1) 去重，替代原 lastWhere 线性查找，
+  /// 避免快速加载多张图片时 progress 回调频繁触发线性扫描卡 UI。
   void _logImageLoadStart(String url, double? value) {
     if (value == null || _imageLoadLog.length >= 500) return;
-    final existingLog = _imageLoadLog.lastWhere(
-      (l) => l.contains(url.substring(0, url.length.clamp(0, 50))),
-      orElse: () => '',
-    );
-    if (existingLog.isNotEmpty) return;
+    if (_loggedImageUrls.contains(url)) return;
+    _loggedImageUrls.add(url);
     final now = DateTime.now();
     final timeStr =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
@@ -1818,7 +1799,11 @@ Map<String, String> _imageHeaders = const {};
   /// 被并行 precacheImage（DecodedImageProvider 不走磁盘缓存，每次调用都重新下载+解密）。
   Future<void> _downloadCurrentChapter() async {
     if (_isDownloading) return;
-    if (_images.isEmpty) return;
+    if (_images.isEmpty ||
+        _currentPageIndex < 0 ||
+        _currentPageIndex >= _images.length) {
+      return;
+    }
     final url = _images[_currentPageIndex];
     if (url.startsWith('data:')) {
       if (!mounted) return;
@@ -2659,7 +2644,10 @@ Map<String, String> _imageHeaders = const {};
                     const Spacer(),
                     TextButton(
                       onPressed: () {
-                        setState(() => _imageLoadLog.clear());
+                        setState(() {
+                          _imageLoadLog.clear();
+                          _loggedImageUrls.clear();
+                        });
                         Navigator.pop(context);
                       },
                       child: const Text('清空'),
