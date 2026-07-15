@@ -1878,8 +1878,6 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
           if (_precachedUrls.contains(url)) continue;
           if (url.startsWith('data:')) continue;
 
-          _precachedUrls.add(url);
-
           final source = _bookSource;
           final needDecode = DecodedImageProvider.needsDecode(source, false);
           final ImageProvider imageProvider = needDecode && source != null
@@ -1896,8 +1894,10 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                 );
 
           await precacheImage(imageProvider, context);
+          _precachedUrls.add(url);
         } catch (_) {
           // 单张失败（headers 构造 / provider 构造 / 下载 / 解密 / 解码）不影响其他图片
+          // 失败时不加入 _precachedUrls，允许下次重试
         }
       }
     }();
