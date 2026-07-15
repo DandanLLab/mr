@@ -808,6 +808,8 @@ class JsEngine {
           return result.stringResult;
         } finally {
           _evalBusy = false;
+          // 提取 JS console 日志（不管成功失败，只要 JS 里用了 console.log 就输出）
+          _flushConsoleLogs();
         }
       });
     } catch (e) {
@@ -826,6 +828,9 @@ class JsEngine {
       return result.stringResult;
     } catch (e) {
       return null;
+    } finally {
+      // 提取 JS console 日志（不管成功失败，只要 JS 里用了 console.log 就输出）
+      _flushConsoleLogs();
     }
   }
 
@@ -1074,6 +1079,8 @@ if (evalResult.isError) {
       _lastEvalError = errStr;
       // 引擎级错误（OOM/段错误兜底）记录到崩溃日志
       unawaited(CrashLogService.instance.logJsEngineError('QuickJS.eval', errStr));
+      // 异常路径也提取 console 日志（JS 里 console.error 记录的异常信息不丢失）
+      _flushConsoleLogs();
       return null;
     } finally {
       _evalBusy = false;
@@ -1269,6 +1276,8 @@ return __returnValue;
       return evalResult.stringResult;
       } catch (e) {
         AppLogger.instance.logJsError('QuickJS', e.toString());
+        // 异常路径也提取 console 日志
+        _flushConsoleLogs();
         return null;
       }
     });
@@ -1773,6 +1782,8 @@ return __returnValue;
       return evalResult.stringResult;
     } catch (e) {
       return null;
+    } finally {
+      _flushConsoleLogs();
     }
   }
 
@@ -1788,6 +1799,8 @@ return __returnValue;
       return evalResult.stringResult;
     } catch (e) {
       return null;
+    } finally {
+      _flushConsoleLogs();
     }
   }
 
@@ -1806,6 +1819,8 @@ return __returnValue;
       return evalResult.stringResult;
     } catch (e) {
       return null;
+    } finally {
+      _flushConsoleLogs();
     }
   }
 

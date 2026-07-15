@@ -387,6 +387,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       await _saveProgress();
       if (!mounted) return;
       setState(() => _isLoading = false);
+      _precacheNextImage();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _jumpToCurrentPage();
       });
@@ -998,6 +999,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
         _currentPageIndex = imageIndex;
         _pageNotifier.value = imageIndex;
         _scheduleProgressSave();
+        _precacheNextImage();
       },
       itemBuilder: (context, itemIndex) {
         if (!_hideChapterTitle && itemIndex == 0) {
@@ -1862,6 +1864,37 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     } finally {
       _isDownloading = false;
     }
+  }
+
+  /// 预缓存下一张图片（同章节内），提升翻页流畅度
+  /// fire-and-forget，不阻塞 UI，不预缓存下一章节
+  void _precacheNextImage() {
+    if (_images.isEmpty) return;
+    final nextIndex = _currentPageIndex + 1;
+    if (nextIndex >= _images.length) return;
+
+    final url = _images[nextIndex];
+    if (_precachedUrls.contains(url)) return;
+    if (url.startsWith('data:')) return;
+
+    _precachedUrls.add(url);
+
+    final source = _bookSource;
+    final needDecode = DecodedImageProvider.needsDecode(source, false);
+    final ImageProvider imageProvider = needDecode && source != null
+        ? DecodedImageProvider(
+            url: url,
+            headers: _headersForImage(url),
+            source: source,
+            isCover: false,
+            book: _book,
+          )
+        : CachedNetworkImageProvider(
+            url,
+            headers: _headersForImage(url),
+          );
+
+    precacheImage(imageProvider, context).catchError((_) {});
   }
 
   void _handleTap(TapUpDetails details) {
