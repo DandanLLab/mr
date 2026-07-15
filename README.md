@@ -1,6 +1,6 @@
 # MR — 多媒体阅读器
 
-> 一款基于 Flutter 的跨平台多媒体阅读器，完全兼容[阅读（Legado）](https://github.com/gedoor/legado)书源规则体系，支持小说、漫画、音频、视频与本地书。
+> 一款基于 Flutter 的跨平台多媒体阅读器，兼容[阅读（Legado）](https://github.com/gedoor/legado)书源规则体系（CSS/JSONPath/XPath/JS 规则 + `java.*` 桥接对象），不支持 Legado 的 java 包类（`io.legado.app.*` 原生类），支持小说、漫画、音频、视频与本地书。
 
 ---
 
