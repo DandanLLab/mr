@@ -387,7 +387,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       await _saveProgress();
       if (!mounted) return;
       setState(() => _isLoading = false);
-      _precacheNextImage();
+      _precacheAllImagesInChapter();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _jumpToCurrentPage();
       });
@@ -999,7 +999,6 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
         _currentPageIndex = imageIndex;
         _pageNotifier.value = imageIndex;
         _scheduleProgressSave();
-        _precacheNextImage();
       },
       itemBuilder: (context, itemIndex) {
         if (!_hideChapterTitle && itemIndex == 0) {
@@ -1866,35 +1865,42 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     }
   }
 
-  /// 预缓存下一张图片（同章节内），提升翻页流畅度
-  /// fire-and-forget，不阻塞 UI，不预缓存下一章节
-  void _precacheNextImage() {
+  /// 预缓存当前章节内所有图片，提升翻页流畅度
+  /// fire-and-forget，顺序 precache 不阻塞 UI，单张失败不影响其他
+  void _precacheAllImagesInChapter() {
     if (_images.isEmpty) return;
-    final nextIndex = _currentPageIndex + 1;
-    if (nextIndex >= _images.length) return;
 
-    final url = _images[nextIndex];
-    if (_precachedUrls.contains(url)) return;
-    if (url.startsWith('data:')) return;
+    () async {
+      for (int i = 0; i < _images.length; i++) {
+        if (!mounted) return;
+        final url = _images[i];
+        if (_precachedUrls.contains(url)) continue;
+        if (url.startsWith('data:')) continue;
 
-    _precachedUrls.add(url);
+        _precachedUrls.add(url);
 
-    final source = _bookSource;
-    final needDecode = DecodedImageProvider.needsDecode(source, false);
-    final ImageProvider imageProvider = needDecode && source != null
-        ? DecodedImageProvider(
-            url: url,
-            headers: _headersForImage(url),
-            source: source,
-            isCover: false,
-            book: _book,
-          )
-        : CachedNetworkImageProvider(
-            url,
-            headers: _headersForImage(url),
-          );
+        final source = _bookSource;
+        final needDecode = DecodedImageProvider.needsDecode(source, false);
+        final ImageProvider imageProvider = needDecode && source != null
+            ? DecodedImageProvider(
+                url: url,
+                headers: _headersForImage(url),
+                source: source,
+                isCover: false,
+                book: _book,
+              )
+            : CachedNetworkImageProvider(
+                url,
+                headers: _headersForImage(url),
+              );
 
-    precacheImage(imageProvider, context).catchError((_) {});
+        try {
+          await precacheImage(imageProvider, context);
+        } catch (_) {
+          // 单张失败不影响其他图片
+        }
+      }
+    }();
   }
 
   void _handleTap(TapUpDetails details) {
