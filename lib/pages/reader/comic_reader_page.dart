@@ -96,8 +96,10 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   bool _isDownloading = false;
   /// 图片加载日志（按时间倒序展示）
   final List<String> _imageLoadLog = [];
-  /// 已记录日志的 URL 集合，O(1) 查找替代 lastWhere 线性查找
+  /// 已记录「开始加载」日志的 URL 集合，O(1) 查找替代 lastWhere 线性查找
   final Set<String> _loggedImageUrls = {};
+  /// 已记录「加载失败」日志的 URL 集合，独立去重避免与开始加载互相干扰
+  final Set<String> _loggedErrorUrls = {};
   /// base64 data: 图片解码缓存，避免每次 _buildImage 重复解析
   final Map<String, Uint8List> _dataImageCache = {};
   Map<String, String> _imageHeaders = const {};
@@ -325,6 +327,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     _precachedUrls.clear();
     // 清空日志去重 Set 和 base64 解码缓存，释放内存
     _loggedImageUrls.clear();
+    _loggedErrorUrls.clear();
     _dataImageCache.clear();
 
     try {
@@ -747,6 +750,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       _precachedUrls.clear();
       // 清空日志去重 Set 和 base64 解码缓存，释放内存
       _loggedImageUrls.clear();
+      _loggedErrorUrls.clear();
       _dataImageCache.clear();
     }
     if (save) _scheduleProgressSave();
@@ -1161,8 +1165,14 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   }
 
   /// 记录图片加载失败日志
+  ///
+  /// 使用 [_loggedErrorUrls] 独立去重，避免同一 URL 多次失败（如重试）重复记录。
+  /// 不与 [_loggedImageUrls] 共用，否则「开始加载」记录后「加载失败」会被跳过，
+  /// 导致错误信息丢失。
   void _logImageLoadError(String url, Object error) {
     if (_imageLoadLog.length >= 500) return;
+    if (_loggedErrorUrls.contains(url)) return;
+    _loggedErrorUrls.add(url);
     final now = DateTime.now();
     final timeStr =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
@@ -2649,6 +2659,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                         setState(() {
                           _imageLoadLog.clear();
                           _loggedImageUrls.clear();
+                          _loggedErrorUrls.clear();
                         });
                         Navigator.pop(context);
                       },
