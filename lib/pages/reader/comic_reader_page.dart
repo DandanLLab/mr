@@ -1873,31 +1873,31 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     () async {
       for (int i = 0; i < _images.length; i++) {
         if (!mounted) return;
-        final url = _images[i];
-        if (_precachedUrls.contains(url)) continue;
-        if (url.startsWith('data:')) continue;
-
-        _precachedUrls.add(url);
-
-        final source = _bookSource;
-        final needDecode = DecodedImageProvider.needsDecode(source, false);
-        final ImageProvider imageProvider = needDecode && source != null
-            ? DecodedImageProvider(
-                url: url,
-                headers: _headersForImage(url),
-                source: source,
-                isCover: false,
-                book: _book,
-              )
-            : CachedNetworkImageProvider(
-                url,
-                headers: _headersForImage(url),
-              );
-
         try {
+          final url = _images[i];
+          if (_precachedUrls.contains(url)) continue;
+          if (url.startsWith('data:')) continue;
+
+          _precachedUrls.add(url);
+
+          final source = _bookSource;
+          final needDecode = DecodedImageProvider.needsDecode(source, false);
+          final ImageProvider imageProvider = needDecode && source != null
+              ? DecodedImageProvider(
+                  url: url,
+                  headers: _headersForImage(url),
+                  source: source,
+                  isCover: false,
+                  book: _book,
+                )
+              : CachedNetworkImageProvider(
+                  url,
+                  headers: _headersForImage(url),
+                );
+
           await precacheImage(imageProvider, context);
         } catch (_) {
-          // 单张失败不影响其他图片
+          // 单张失败（headers 构造 / provider 构造 / 下载 / 解密 / 解码）不影响其他图片
         }
       }
     }();
