@@ -152,7 +152,36 @@ class CrashLogService {
   }
 
   /// Flutter 框架错误回调
+  ///
+  /// 图片加载失败（如网络错误、解密失败、解码失败）会通过
+  /// `ImageStreamCompleter.reportError` → `FlutterError.reportError` 到达这里。
+  /// 这类错误已有 errorBuilder/errorWidget 处理 UI，是非致命的，
+  /// 不应记录为崩溃（否则会频繁误报崩溃弹窗）。
   void _onFlutterError(FlutterErrorDetails details) {
+    // 判定是否为图片加载相关的非致命错误
+    final contextStr = details.context?.toString().toLowerCase() ?? '';
+    final library = details.library?.toLowerCase() ?? '';
+    final exceptionStr = details.exceptionAsString().toLowerCase();
+    final isImageError = contextStr.contains('image') ||
+        contextStr.contains('resolving') ||
+        library.contains('image') ||
+        // DecodedImageProvider 主动抛出的图片加载错误
+        exceptionStr.contains('图片下载失败') ||
+        exceptionStr.contains('图片下载响应为空') ||
+        exceptionStr.contains('图片解密失败') ||
+        exceptionStr.contains('图片解密后字节为空') ||
+        exceptionStr.contains('图片解码失败') ||
+        exceptionStr.contains('服务器返回 html 而非图片数据');
+
+    if (isImageError) {
+      // 图片加载错误：仅 debug 输出，不记录为崩溃
+      if (kDebugMode) {
+        debugPrint('⚠️ 图片加载错误（非崩溃，已由 errorBuilder 处理）: '
+            '${details.exceptionAsString()} | $contextStr');
+      }
+      return;
+    }
+
     logCrash(
       error: details.exceptionAsString(),
       stackTrace: details.stack?.toString(),

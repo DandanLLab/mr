@@ -399,8 +399,9 @@ class JsEngine {
 
     try {
       _jsRuntime = getJavascriptRuntime();
-      // P2: 设置默认 JS 执行超时 5 秒，防止死循环卡死 App
-      _jsRuntime!.setEvalTimeout(5000);
+      // P2: 设置默认 JS 执行超时 50 秒，防止死循环卡死 App
+      // 注：阈值已扩大 10 倍（5s→50s），适配复杂书源规则执行
+      _jsRuntime!.setEvalTimeout(50000);
       // 加载 java-bridge.js（纯路由脚本，替代内联 polyfill）
       // 包含：Node 兼容层、URL/Buffer、btoa/atob→__nativeBase64、
       //       CryptoJS→__nativeCrypto、_JsoupLite→__nativeHtml、

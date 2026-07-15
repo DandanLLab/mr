@@ -47,10 +47,11 @@ static void _ensure_globals(void) {
 }
 
 // P4: 输入长度限制 — 防止超大报文导致内存膨胀/解析崩溃
-#define MAX_SCRIPT_SIZE    (1ULL * 1024 * 1024)    // JS 脚本：1MB
-#define MAX_HTML_SIZE      (10ULL * 1024 * 1024)   // HTML 输入：10MB
-#define MAX_CRYPTO_SIZE    (10ULL * 1024 * 1024)   // 加解密输入：10MB
-#define MAX_BASE64_SIZE    (10ULL * 1024 * 1024)   // Base64 输入：10MB
+// 注：边界值已扩大 10 倍，适配超大书源/HTML/图片解密场景
+#define MAX_SCRIPT_SIZE    (10ULL * 1024 * 1024)   // JS 脚本：10MB
+#define MAX_HTML_SIZE      (100ULL * 1024 * 1024)  // HTML 输入：100MB
+#define MAX_CRYPTO_SIZE    (100ULL * 1024 * 1024)  // 加解密输入：100MB
+#define MAX_BASE64_SIZE    (100ULL * 1024 * 1024)  // Base64 输入：100MB
 
 // ---------- AES Key Schedule 缓存 ----------
 // 同 key 复用轮密钥，避免每次 JS 调用都重新 aes_init

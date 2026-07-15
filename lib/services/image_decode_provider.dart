@@ -115,7 +115,9 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
       );
       bytes = Uint8List.fromList(response.data ?? const <int>[]);
     } catch (e) {
-      rethrow;
+      // 包装原始异常（可能是 Dio 内部的 null 断言），防止直接到达
+      // FlutterError.reportError 被误判为崩溃（图片加载有 errorBuilder 处理 UI）
+      throw StateError('图片下载失败: ${key.url} - $e');
     } finally {
       await chunkEvents.close();
     }
