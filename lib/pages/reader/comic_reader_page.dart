@@ -1823,13 +1823,15 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
         return;
       }
       // 书源配置了 imageDecode 时走解密链路预缓存，否则走普通网络缓存
-      final needDecode = DecodedImageProvider.needsDecode(_bookSource, false);
+      // 用局部变量保存 _bookSource，避免 ! 断言
+      final source = _bookSource;
+      final needDecode = DecodedImageProvider.needsDecode(source, false);
       await precacheImage(
-        needDecode
+        needDecode && source != null
             ? DecodedImageProvider(
                 url: url,
                 headers: _headersForImage(url),
-                source: _bookSource!,
+                source: source,
                 isCover: false,
                 book: _book,
               )
