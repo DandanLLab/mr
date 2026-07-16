@@ -19,7 +19,10 @@
 #include "src/webp/decode.h"
 
 #include "src/dsp/dsp.h"
-#include "src/enc/histogram_enc.h"
+// [decoder-only 精简] 前向声明 VP8LHistogram，避免依赖已删除的 src/enc/histogram_enc.h
+// lossless.h 中 VP8LHistogram 仅作为指针使用（VP8LHistogramAdd 声明，实现在已删除的 lossless_enc.c），
+// 指针类型不需要完整定义，前向声明即可
+typedef struct VP8LHistogram VP8LHistogram;
 #include "src/utils/utils.h"
 
 #ifdef __cplusplus
