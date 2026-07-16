@@ -34,9 +34,16 @@ set(QUICKJS_SOURCES
     ${NATIVE_CORE_DIR}/bridge_init.c
 )
 
+# libwebp: WebP 图片解码（仅解码器，不含编码器）
+set(LIBWEBP_SRC_DIR ${QUICKJS_SRC_DIR}/libwebp-1.5.0/src)
+file(GLOB LIBWEBP_DEC_SOURCES ${LIBWEBP_SRC_DIR}/dec/*.c)
+file(GLOB LIBWEBP_DSP_SOURCES ${LIBWEBP_SRC_DIR}/dsp/*.c)
+file(GLOB LIBWEBP_UTILS_SOURCES ${LIBWEBP_SRC_DIR}/utils/*.c)
+set(LIBWEBP_SOURCES ${LIBWEBP_DEC_SOURCES} ${LIBWEBP_DSP_SOURCES} ${LIBWEBP_UTILS_SOURCES})
+
 # 编译为共享库 libquickjs_c_bridge.so
 # Dart FFI 通过 DynamicLibrary.open('libquickjs_c_bridge.so') 加载
-add_library(quickjs_c_bridge SHARED ${QUICKJS_SOURCES})
+add_library(quickjs_c_bridge SHARED ${QUICKJS_SOURCES} ${LIBWEBP_SOURCES})
 
 # 体积优化：编译选项 —— 体积优先 + 裁剪未引用代码
 # -Oz：极致体积优先（比 -O3 体积小 20-30%，速度损失约 10-15%，移动端首选）
@@ -119,7 +126,10 @@ target_compile_definitions(quickjs_c_bridge PRIVATE
 )
 
 # 头文件搜索路径
-target_include_directories(quickjs_c_bridge PUBLIC ${QUICKJS_SRC_DIR})
+target_include_directories(quickjs_c_bridge PUBLIC
+    ${QUICKJS_SRC_DIR}
+    ${LIBWEBP_SRC_DIR}
+)
 
 # 链接库
 target_link_libraries(quickjs_c_bridge

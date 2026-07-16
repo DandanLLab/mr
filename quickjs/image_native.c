@@ -1,7 +1,9 @@
 /**
  * image_native.c — C 原生图片像素操作实现
  *
- * 使用 stb_image 解码图片 → 条带重排 → stb_image_write 编码为 PNG
+ * 使用 stb_image/libwebp 解码图片 → 条带重排 → stb_image_write 编码为 PNG
+ *
+ * 支持格式: JPEG, PNG, BMP, GIF (stb_image) + WebP (libwebp)
  *
  * 条带重排算法（对应 Python JmImageTool.decode_and_save）:
  *   将图片按高度切成 num 个条带，重新排列顺序。
@@ -17,7 +19,7 @@
 #include <string.h>
 #include <math.h>
 
-/* stb_image: 图片解码（JPEG/PNG/BMP/GIF/PSD/TGA/PGM/PPM） */
+/* stb_image: 图片解码（JPEG/PNG/BMP/GIF） */
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_JPEG
 #define STBI_ONLY_PNG
@@ -34,6 +36,9 @@
 /* stb_image_write: 图片编码（PNG/JPEG/BMP/TGA） */
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
+
+/* libwebp: WebP 图片解码 */
+#include "webp/decode.h"
 
 /* PNG 写入回调上下文 */
 typedef struct {
@@ -57,29 +62,42 @@ static void _png_write_func(void *ctx, void *data, int size) {
     wctx->len += (size_t)size;
 }
 
+/* 检测 WebP 格式: RIFF....WEBP */
+static int is_webp(const uint8_t *data, size_t len) {
+    return len >= 12 &&
+           data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' &&
+           data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P';
+}
+
 uint8_t *image_scramble_restore(const uint8_t *image_data, size_t image_len,
                                 int num, size_t *out_len) {
     if (!image_data || image_len == 0 || !out_len) return NULL;
     *out_len = 0;
 
-    /* 解码图片为 RGB 像素 */
     int w, h, channels;
-    /* 强制 3 通道（RGB），简化条带重排逻辑 */
-    unsigned char *img = stbi_load_from_memory(image_data, (int)image_len,
-                                                &w, &h, &channels, 3);
-    if (!img) {
-        /* 解码失败（可能是不支持的格式如 WebP） */
-        return NULL;
+    unsigned char *img = NULL;
+    int use_webp = 0;
+
+    if (is_webp(image_data, image_len)) {
+        /* WebP 格式: 使用 libwebp 解码为 RGB */
+        img = WebPDecodeRGB(image_data, image_len, &w, &h);
+        if (!img) return NULL;
+        channels = 3;
+        use_webp = 1;
+    } else {
+        /* 其他格式: 使用 stb_image 解码为 RGB */
+        img = stbi_load_from_memory(image_data, (int)image_len,
+                                    &w, &h, &channels, 3);
+        if (!img) return NULL;
     }
 
     /* 条带重排（对应 Python decode_and_save） */
     if (num > 0 && h >= num) {
         int over = h % num;
         int move_base = (int)floor((double)h / num);
-        /* 分配新像素缓冲区 */
         unsigned char *img_decoded = (unsigned char *)malloc((size_t)w * h * 3);
         if (!img_decoded) {
-            stbi_image_free(img);
+            free(img);
             return NULL;
         }
 
@@ -95,8 +113,6 @@ uint8_t *image_scramble_restore(const uint8_t *image_data, size_t image_len,
                 y_dst += over;
             }
 
-            /* 从源图 crop 条带到目标图 paste */
-            /* crop(0, y_src, w, y_src+move) → paste(0, y_dst, w, y_dst+move) */
             int row;
             for (row = 0; row < move; row++) {
                 int src_y = y_src + row;
@@ -108,22 +124,22 @@ uint8_t *image_scramble_restore(const uint8_t *image_data, size_t image_len,
             }
         }
 
-        stbi_image_free(img);
+        free(img);
         img = img_decoded;
     }
 
     /* 编码为 PNG（内存写入） */
     _png_write_ctx wctx = {0};
-    wctx.cap = image_len * 2 + 8192; /* 预分配：原始大小 * 2 + 余量 */
+    wctx.cap = image_len * 2 + 8192;
     wctx.buf = (uint8_t *)malloc(wctx.cap);
     if (!wctx.buf) {
-        stbi_image_free(img);
+        free(img);
         return NULL;
     }
 
     int ok = stbi_write_png_to_func(_png_write_func, &wctx,
                                      w, h, 3, img, w * 3);
-    stbi_image_free(img);
+    free(img);
 
     if (!ok || wctx.len == 0) {
         free(wctx.buf);
