@@ -122,7 +122,9 @@ class StorageService {
 
   /// 异步恢复损坏的 Box（fire-and-forget，用于同步读取方法）
   void _recoverBoxAsync(String name, void Function(Box) onRecovered) {
-    _recoverBox(name, onRecovered);
+    _recoverBox(name, onRecovered).catchError((e) {
+      debugPrint('❌ StorageService: 异步恢复Box失败: $e');
+    });
   }
 
   /// 恢复损坏的 Box：删除后重新创建
