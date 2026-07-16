@@ -13,6 +13,7 @@
 #include "charset_conv.h"
 #include "handle_table.h"
 #include "memory_tracker.h"
+#include "image_native.h"
 
 // ---------- P1: 全局线程安全 + 句柄管理 + 内存统计 ----------
 // POSIX 线程兼容层
@@ -930,6 +931,47 @@ static JSValue js_native_html_get_attr(JSContext *ctx, JSValueConst this_val,
     }
     JSValue ret = JS_NewString(ctx, result);
     free((void*)result);
+    return ret;
+}
+
+// ---------- JS 可调用图片操作函数（注册为 __nativeImage 全局对象）----------
+// 提供图片解码 + 条带乱序恢复 + 重新编码为 PNG 的能力
+// 用于 JMComic 等网站的图片 scramble 恢复
+
+// __nativeImage.scrambleRestore(bytes, num) → base64 字符串（PNG 图片）
+// bytes: ArrayBuffer/Uint8Array（原始图片字节）
+// num: 分割数（0=不需要恢复，直接重新编码为 PNG）
+// 返回: base64 字符串（解码失败返回 null）
+static JSValue js_native_image_scramble_restore(JSContext *ctx, JSValueConst this_val,
+                                                 int argc, JSValueConst *argv) {
+    (void)this_val;
+    if (argc < 2) return JS_ThrowTypeError(ctx, "scrambleRestore requires 2 arguments: bytes, num");
+
+    size_t data_len;
+    const uint8_t *data = _get_bytes(ctx, argv[0], &data_len);
+    if (!data || data_len == 0) {
+        return JS_NULL;
+    }
+
+    int num;
+    if (JS_ToInt32(ctx, &num, argv[1]) != 0) {
+        return JS_ThrowTypeError(ctx, "num must be an integer");
+    }
+
+    size_t out_len = 0;
+    uint8_t *out = image_scramble_restore(data, data_len, num, &out_len);
+    if (!out || out_len == 0) {
+        return JS_NULL;
+    }
+
+    // 转为 base64 字符串返回（与 decryptImage 返回格式一致）
+    size_t b64_len = 0;
+    char *b64 = b64_encode(out, out_len, &b64_len);
+    free(out);
+    if (!b64) return JS_NULL;
+
+    JSValue ret = JS_NewStringLen(ctx, b64, b64_len);
+    free(b64);
     return ret;
 }
 
@@ -3003,6 +3045,14 @@ QuickJSBridge *quickjs_bridge_create_with_config(uint64_t memory_limit, uint64_t
     JS_SetPropertyStr(bridge->ctx, html_obj, "getAttr",
         JS_NewCFunction(bridge->ctx, js_native_html_get_attr, "getAttr", 3));
     JS_SetPropertyStr(bridge->ctx, global_obj, "__nativeHtml", html_obj);
+
+    // 注册图片操作原生全局对象 __nativeImage
+    // 提供图片解码 + 条带乱序恢复 + 重新编码为 PNG 的能力
+    // JS 侧通过 __nativeImage.scrambleRestore(bytes, num) 调用
+    JSValue img_obj = JS_NewObject(bridge->ctx);
+    JS_SetPropertyStr(bridge->ctx, img_obj, "scrambleRestore",
+        JS_NewCFunction(bridge->ctx, js_native_image_scramble_restore, "scrambleRestore", 2));
+    JS_SetPropertyStr(bridge->ctx, global_obj, "__nativeImage", img_obj);
 
     JS_FreeValue(bridge->ctx, global_obj);
 

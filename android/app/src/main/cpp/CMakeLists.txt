@@ -30,6 +30,7 @@ set(QUICKJS_SOURCES
     ${QUICKJS_SRC_DIR}/crypto/aes.c
     ${QUICKJS_SRC_DIR}/handle_table.c
     ${QUICKJS_SRC_DIR}/memory_tracker.c
+    ${QUICKJS_SRC_DIR}/image_native.c
     ${NATIVE_CORE_DIR}/bridge_init.c
 )
 
@@ -86,6 +87,7 @@ set_source_files_properties(
     ${QUICKJS_SRC_DIR}/crypto/aes.c
     ${QUICKJS_SRC_DIR}/handle_table.c
     ${QUICKJS_SRC_DIR}/memory_tracker.c
+    ${QUICKJS_SRC_DIR}/image_native.c
     ${NATIVE_CORE_DIR}/bridge_init.c
     PROPERTIES COMPILE_FLAGS "-flto"
 )

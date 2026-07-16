@@ -21,6 +21,7 @@ set(QUICKJS_SOURCES
     ${QUICKJS_SRC_DIR}/crypto/sha256.c
     ${QUICKJS_SRC_DIR}/crypto/hmac_sha256.c
     ${QUICKJS_SRC_DIR}/crypto/aes.c
+    ${QUICKJS_SRC_DIR}/image_native.c
 )
 
 add_library(quickjs_c_bridge SHARED ${QUICKJS_SOURCES})
