@@ -97,7 +97,7 @@ uint8_t *image_scramble_restore(const uint8_t *image_data, size_t image_len,
         int move_base = (int)floor((double)h / num);
         unsigned char *img_decoded = (unsigned char *)malloc((size_t)w * h * 3);
         if (!img_decoded) {
-            free(img);
+            if (use_webp) WebPFree(img); else free(img);
             return NULL;
         }
 
@@ -124,7 +124,7 @@ uint8_t *image_scramble_restore(const uint8_t *image_data, size_t image_len,
             }
         }
 
-        free(img);
+        if (use_webp) WebPFree(img); else free(img);
         img = img_decoded;
         /* img 已指向 malloc 分配的 img_decoded，重置标记使后续走 free 分支 */
         use_webp = 0;
@@ -135,13 +135,13 @@ uint8_t *image_scramble_restore(const uint8_t *image_data, size_t image_len,
     wctx.cap = image_len * 2 + 8192;
     wctx.buf = (uint8_t *)malloc(wctx.cap);
     if (!wctx.buf) {
-        free(img);
+        if (use_webp) WebPFree(img); else free(img);
         return NULL;
     }
 
     int ok = stbi_write_png_to_func(_png_write_func, &wctx,
                                      w, h, 3, img, w * 3);
-    free(img);
+    if (use_webp) WebPFree(img); else free(img);
 
     if (!ok || wctx.len == 0) {
         free(wctx.buf);
