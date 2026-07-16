@@ -126,6 +126,8 @@ uint8_t *image_scramble_restore(const uint8_t *image_data, size_t image_len,
 
         free(img);
         img = img_decoded;
+        /* img 已指向 malloc 分配的 img_decoded，重置标记使后续走 free 分支 */
+        use_webp = 0;
     }
 
     /* 编码为 PNG（内存写入） */

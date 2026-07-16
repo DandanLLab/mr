@@ -126,9 +126,13 @@ target_compile_definitions(quickjs_c_bridge PRIVATE
 )
 
 # 头文件搜索路径
+# - QUICKJS_SRC_DIR: quickjs/ （用于 image_native.c 的 #include "webp/decode.h" 等）
+# - LIBWEBP_SRC_DIR: quickjs/libwebp-1.5.0/src （同上）
+# - LIBWEBP 根目录: quickjs/libwebp-1.5.0 （libwebp 内部源码用 #include "src/dec/xxx.h" 形式，从根目录算起）
 target_include_directories(quickjs_c_bridge PUBLIC
     ${QUICKJS_SRC_DIR}
     ${LIBWEBP_SRC_DIR}
+    ${QUICKJS_SRC_DIR}/libwebp-1.5.0
 )
 
 # 链接库

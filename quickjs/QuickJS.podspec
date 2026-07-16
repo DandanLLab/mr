@@ -25,7 +25,17 @@ Pod::Spec.new do |s|
   # 之前用 '**/*.{c,h}' 通配符，会把 lexbor/ 子目录 100+ 个含 main 函数的 .c 文件卷入编译
   # 导致 iOS 链接时 duplicate symbol _main 失败（"连接符掉了"）
   # lexbor 是历史遗留死代码，html_native.c 自实现 HTML 解析，不依赖 lexbor
-  s.source_files     = '*.{c,h}', 'crypto/*.{c,h}', '../native_core/*.{c,h}'
+  #
+  # [libwebp] 添加 WebP 解码器源文件（仅解码器，对齐 Android CMakeLists.txt 的 GLOB）
+  # - dec/: 解码器核心
+  # - dsp/: DSP 例程（含解码路径使用的反变换/滤波等）
+  # - utils/: 工具函数（位读取、颜色空间转换等）
+  # - webp/: 公共头文件（decode.h/format_constants.h/types.h 等）
+  s.source_files     = '*.{c,h}', 'crypto/*.{c,h}', '../native_core/*.{c,h}',
+                       'libwebp-1.5.0/src/dec/*.{c,h}',
+                       'libwebp-1.5.0/src/dsp/*.{c,h}',
+                       'libwebp-1.5.0/src/utils/*.{c,h}',
+                       'libwebp-1.5.0/src/webp/*.{c,h}'
   # 对齐 Android CMakeLists.txt：不编译 quickjs-libc.c
   # Android 注释：不需要标准库辅助函数，且部分 POSIX 调用不兼容
   # iOS 同为 POSIX，为避免潜在不兼容（如 fork/exec），对齐 Android 排除
@@ -37,6 +47,12 @@ Pod::Spec.new do |s|
     # 否则引号被吃掉，CONFIG_VERSION 变成 2026.06.04（浮点数）而非 "2026.06.04"（字符串）
     # 导致 quickjs.c 中 "..." CONFIG_VERSION "..." 字符串拼接编译失败
     'GCC_PREPROCESSOR_DEFINITIONS' => 'CONFIG_VERSION=\"2026.06.04\" CONFIG_NO_ATOMICS=1',
+    # [libwebp] 头文件搜索路径，对齐 Android CMakeLists.txt 的 target_include_directories
+    # pod source 为 { :path => '.' }，pod 根目录 = quickjs/，编译期映射为 $(PODS_ROOT)/QuickJS
+    # - $(PODS_ROOT)/QuickJS: quickjs/ 根，用于 image_native.c 的 #include "webp/decode.h"
+    # - $(PODS_ROOT)/QuickJS/libwebp-1.5.0: libwebp 根，用于内部源码 #include "src/dec/xxx.h"
+    # - $(PODS_ROOT)/QuickJS/libwebp-1.5.0/src: 同上（部分源码用 #include "dec/xxx.h" 形式）
+    'HEADER_SEARCH_PATHS' => '"$(PODS_ROOT)/QuickJS" "$(PODS_ROOT)/QuickJS/libwebp-1.5.0" "$(PODS_ROOT)/QuickJS/libwebp-1.5.0/src"',
     # 体积优化：编译选项 —— 体积优先
     # -Oz：极致体积优先（比 -O3 体积小 20-30%，速度损失约 10-15%，移动端首选）
     #   注：QuickJS 主要计算开销已沉降至 C 原生函数（Phase 1-3），解释器速度损失用户感知不强

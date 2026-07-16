@@ -36,9 +36,17 @@ set(QUICKJS_SOURCES
     ${NATIVE_CORE_DIR}/bridge_init.c
 )
 
+# libwebp: WebP 图片解码（仅解码器，不含编码器）
+# 与 android/app/src/main/cpp/CMakeLists.txt 保持一致
+set(LIBWEBP_SRC_DIR ${PROJECT_ROOT_DIR}/quickjs/libwebp-1.5.0/src)
+file(GLOB LIBWEBP_DEC_SOURCES ${LIBWEBP_SRC_DIR}/dec/*.c)
+file(GLOB LIBWEBP_DSP_SOURCES ${LIBWEBP_SRC_DIR}/dsp/*.c)
+file(GLOB LIBWEBP_UTILS_SOURCES ${LIBWEBP_SRC_DIR}/utils/*.c)
+set(LIBWEBP_SOURCES ${LIBWEBP_DEC_SOURCES} ${LIBWEBP_DSP_SOURCES} ${LIBWEBP_UTILS_SOURCES})
+
 # 编译为共享库 libquickjs_c_bridge.so
 # Dart FFI 通过 DynamicLibrary.open('libquickjs_c_bridge.so') 加载
-add_library(quickjs_c_bridge SHARED ${QUICKJS_SOURCES})
+add_library(quickjs_c_bridge SHARED ${QUICKJS_SOURCES} ${LIBWEBP_SOURCES})
 
 # 体积优化（与 Android 版本保持一致）
 # -Oz：极致体积优先
@@ -105,7 +113,14 @@ target_compile_definitions(quickjs_c_bridge PRIVATE
 )
 
 # 头文件搜索路径
-target_include_directories(quickjs_c_bridge PUBLIC ${PROJECT_ROOT_DIR}/quickjs)
+# - quickjs/: 用于 image_native.c 的 #include "webp/decode.h" 等
+# - libwebp-1.5.0/src: 同上
+# - libwebp-1.5.0: libwebp 内部源码用 #include "src/dec/xxx.h" 形式，从根目录算起
+target_include_directories(quickjs_c_bridge PUBLIC
+    ${PROJECT_ROOT_DIR}/quickjs
+    ${PROJECT_ROOT_DIR}/quickjs/libwebp-1.5.0/src
+    ${PROJECT_ROOT_DIR}/quickjs/libwebp-1.5.0
+)
 
 # 链接库
 # 鸿蒙 OHOS NDK：
