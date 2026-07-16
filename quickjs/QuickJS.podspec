@@ -9,6 +9,13 @@ Pod::Spec.new do |s|
   s.source           = { :path => '.' }
   s.ios.deployment_target = '16.0'
   s.osx.deployment_target = '10.14'
+
+  # [libwebp] 计算 pod 根目录的绝对路径，用于 OTHER_CFLAGS 中的 -I 参数
+  # 完全不依赖 $(PODS_ROOT) 等 Xcode 变量，避免 use_frameworks! + development pod
+  # 模式下路径解析不一致导致的头文件找不到问题
+  pod_root = File.expand_path(File.dirname(__FILE__))
+  libwebp_root = File.join(pod_root, 'libwebp-1.5.0')
+  libwebp_src = File.join(libwebp_root, 'src')
   # [动态运行时库方案] 改为动态框架（.framework 含可执行文件）
   # 之前 static_framework=true 编译为静态库，符号靠 -all_load 卷入主二进制，
   # Dart FFI 用 DynamicLibrary.process() 查找。但静态链接存在以下问题：
@@ -43,32 +50,15 @@ Pod::Spec.new do |s|
   s.public_header_files = 'quickjs.h', 'quickjs-libc.h', 'cutils.h', 'dtoa.h', 'libregexp.h', 'libunicode.h', 'list.h', 'quickjs_bridge.h'
   s.libraries        = 'm', 'pthread'
   s.pod_target_xcconfig = {
-    # Xcode 的 GCC_PREPROCESSOR_DEFINITIONS 中字符串宏必须用 \" 转义引号
-    # 否则引号被吃掉，CONFIG_VERSION 变成 2026.06.04（浮点数）而非 "2026.06.04"（字符串）
-    # 导致 quickjs.c 中 "..." CONFIG_VERSION "..." 字符串拼接编译失败
     'GCC_PREPROCESSOR_DEFINITIONS' => 'CONFIG_VERSION=\"2026.06.04\" CONFIG_NO_ATOMICS=1',
-    # [libwebp] 头文件搜索路径，对齐 Android CMakeLists.txt 的 target_include_directories
-    # pod source 为 { :path => '.' }，pod 根目录 = quickjs/，编译期映射为 $(PODS_ROOT)/QuickJS
-    # - $(PODS_ROOT)/QuickJS: quickjs/ 根，用于 image_native.c 的 #include "webp/decode.h"
-    # - $(PODS_ROOT)/QuickJS/libwebp-1.5.0: libwebp 根，用于内部源码 #include "src/dec/xxx.h"
-    # - $(PODS_ROOT)/QuickJS/libwebp-1.5.0/src: 同上（部分源码用 #include "dec/xxx.h" 形式）
-    # [iOS 修复] 改用 Ruby 数组形式：原字符串形式内嵌双引号会被 CocoaPods 二次转义，
-    # 导致 libwebp-1.5.0 与 libwebp-1.5.0/src 两条路径丢失（image_native.c 的 webp/decode.h
-    # 能找到是因为它用的是首条路径，未受影响；yuv_sse41.c 的 src/dsp/yuv.h 依赖第二条路径，
-    # 故报 'src/dsp/yuv.h' file not found）。数组形式由 CocoaPods 自动处理引号转义，更稳。
-    # 同时追加 $(inherited) 继承 CocoaPods 自动生成的搜索路径（如 module map 路径）。
-    'HEADER_SEARCH_PATHS' => ['$(inherited)', '$(PODS_ROOT)/QuickJS', '$(PODS_ROOT)/QuickJS/libwebp-1.5.0', '$(PODS_ROOT)/QuickJS/libwebp-1.5.0/src'],
-    # 体积优化：编译选项 —— 体积优先
-    # -Oz：极致体积优先（比 -O3 体积小 20-30%，速度损失约 10-15%，移动端首选）
-    #   注：QuickJS 主要计算开销已沉降至 C 原生函数（Phase 1-3），解释器速度损失用户感知不强
-    # -fomit-frame-pointer：释放 fp 寄存器
-    #
-    # [动态框架方案] 不再需要移除 -flto
-    # 之前静态框架时，-flto 会裁剪只被 Dart FFI 引用的符号（LTO 看不到 FFI 引用）
-    # 现在动态框架下，符号导出由动态库自身控制，-fvisibility=default 确保所有
-    # quickjs_bridge_* 符号在动态库导出表中可见，LTO 不会裁剪导出符号
-    # 但为保守起见，仍不启用 -flto，避免 LTO 对动态库符号导出的潜在影响
-    'OTHER_CFLAGS' => '-D_GNU_SOURCE -Wno-implicit-function-declaration -Oz -fomit-frame-pointer -fvisibility=default'
+    # [libwebp] 直接通过 OTHER_CFLAGS 传 -I 设置头文件搜索路径
+    # 用 Ruby 计算出的绝对路径，完全不依赖 $(PODS_ROOT) 等 Xcode 变量，
+    # 避免 use_frameworks! + development pod 模式下路径解析不一致。
+    # 同时保留 $(inherited) 继承 CocoaPods 默认编译选项。
+    'OTHER_CFLAGS' => '$(inherited) -D_GNU_SOURCE -Wno-implicit-function-declaration -Oz -fomit-frame-pointer -fvisibility=default' +
+                      " -I\"#{pod_root}\"" +
+                      " -I\"#{libwebp_root}\"" +
+                      " -I\"#{libwebp_src}\""
   }
   # 动态框架方案下，Dart FFI 用 DynamicLibrary.open('QuickJS.framework/QuickJS') 查找符号
   # 不再依赖 app target 的 -all_load 强制链接静态库
