@@ -938,7 +938,7 @@ static JSValue js_native_html_get_attr(JSContext *ctx, JSValueConst this_val,
 // 提供图片解码 + 条带乱序恢复 + 重新编码为 PNG 的能力
 // 用于 JMComic 等网站的图片 scramble 恢复
 
-// 前向声明：_get_bytes 定义在后面，此处提前声明供 scrambleRestore 使用
+// 前向声明：_get_bytes 定义在后面（L1128+），供 scrambleRestore 和 js_call_crypto_binary 共用
 static const uint8_t *_get_bytes(JSContext *ctx, JSValueConst val, size_t *len);
 
 // __nativeImage.scrambleRestore(bytes, num) → base64 字符串（PNG 图片）
@@ -1067,9 +1067,6 @@ static JSValue js_call_crypto(JSContext *ctx, int op, int argc, JSValueConst *ar
 // ---------- ArrayBuffer 零拷贝路径 ----------
 // 用于大数据：JS 传 Uint8Array/ArrayBuffer，C 侧直接取指针
 // 返回 Uint8Array（JS_NewArrayBufferCopy 会复制，但只复制一次）
-
-// 前向声明：_get_bytes 定义在 L1058+，此处提前声明供 js_call_crypto_binary 使用
-static const uint8_t *_get_bytes(JSContext *ctx, JSValueConst val, size_t *len);
 
 static JSValue js_call_crypto_binary(JSContext *ctx, int op, int argc, JSValueConst *argv,
                                      int min_args, const char *fn_name) {
