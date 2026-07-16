@@ -23,6 +23,9 @@
 // lossless.h 中 VP8LHistogram 仅作为指针使用（VP8LHistogramAdd 声明，实现在已删除的 lossless_enc.c），
 // 指针类型不需要完整定义，前向声明即可
 typedef struct VP8LHistogram VP8LHistogram;
+// [decoder-only 精简] 显式引入 format_constants.h，补回原 histogram_enc.h 间接提供的 ARGB_BLACK 宏
+// ARGB_BLACK 被 lossless.c / lossless_neon.c / lossless_sse2.c 等用于 Predictor0 初始化
+#include "src/webp/format_constants.h"
 #include "src/utils/utils.h"
 
 #ifdef __cplusplus

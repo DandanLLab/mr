@@ -52,7 +52,12 @@ Pod::Spec.new do |s|
     # - $(PODS_ROOT)/QuickJS: quickjs/ 根，用于 image_native.c 的 #include "webp/decode.h"
     # - $(PODS_ROOT)/QuickJS/libwebp-1.5.0: libwebp 根，用于内部源码 #include "src/dec/xxx.h"
     # - $(PODS_ROOT)/QuickJS/libwebp-1.5.0/src: 同上（部分源码用 #include "dec/xxx.h" 形式）
-    'HEADER_SEARCH_PATHS' => '"$(PODS_ROOT)/QuickJS" "$(PODS_ROOT)/QuickJS/libwebp-1.5.0" "$(PODS_ROOT)/QuickJS/libwebp-1.5.0/src"',
+    # [iOS 修复] 改用 Ruby 数组形式：原字符串形式内嵌双引号会被 CocoaPods 二次转义，
+    # 导致 libwebp-1.5.0 与 libwebp-1.5.0/src 两条路径丢失（image_native.c 的 webp/decode.h
+    # 能找到是因为它用的是首条路径，未受影响；yuv_sse41.c 的 src/dsp/yuv.h 依赖第二条路径，
+    # 故报 'src/dsp/yuv.h' file not found）。数组形式由 CocoaPods 自动处理引号转义，更稳。
+    # 同时追加 $(inherited) 继承 CocoaPods 自动生成的搜索路径（如 module map 路径）。
+    'HEADER_SEARCH_PATHS' => ['$(inherited)', '$(PODS_ROOT)/QuickJS', '$(PODS_ROOT)/QuickJS/libwebp-1.5.0', '$(PODS_ROOT)/QuickJS/libwebp-1.5.0/src'],
     # 体积优化：编译选项 —— 体积优先
     # -Oz：极致体积优先（比 -O3 体积小 20-30%，速度损失约 10-15%，移动端首选）
     #   注：QuickJS 主要计算开销已沉降至 C 原生函数（Phase 1-3），解释器速度损失用户感知不强
