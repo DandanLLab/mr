@@ -712,16 +712,63 @@ jobs:
           cat release_body.md
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ needs.prepare.outputs.version_compact }}-${{ needs.prepare.outputs.release_type }}
-          name: MR ${{ needs.prepare.outputs.version_compact }} (${{ needs.prepare.outputs.release_type == 'stable' && '正式版' || '测试版' }})
-          body_path: release_body.md
-          files: |
-            artifacts/android/*
-            artifacts/ios/*
-            artifacts/ohos/*
-          prerelease: ${{ needs.prepare.outputs.release_type != 'stable' }}
-          generate_release_notes: true
+        # 用 gh CLI 替代 softprops/action-gh-release，内置 3 次重试 + 30s 间隔
+        # 原因：GitHub API 偶发 503 Unicorn 错误（服务器临时故障），原 action 无重试机制
+        # 重试时若 release 已存在（上次创建成功但上传文件失败），自动切换为 upload 模式
+        run: |
+          TAG="v${{ needs.prepare.outputs.version_compact }}-${{ needs.prepare.outputs.release_type }}"
+          TITLE="MR ${{ needs.prepare.outputs.version_compact }} (${{ needs.prepare.outputs.release_type == 'stable' && '正式版' || '测试版' }})"
+
+          FLAGS=""
+          if [ "${{ needs.prepare.outputs.release_type }}" != "stable" ]; then
+            FLAGS="--prerelease"
+          fi
+
+          # 收集所有产物文件
+          FILES=""
+          for f in artifacts/android/* artifacts/ios/* artifacts/ohos/*; do
+            [ -f "$f" ] && FILES="$FILES $f"
+          done
+
+          if [ -z "$FILES" ]; then
+            echo "❌ No artifacts found, skipping release"
+            exit 1
+          fi
+
+          echo "=== Release target: $TAG ==="
+          echo "=== Files: $FILES ==="
+
+          for i in 1 2 3; do
+            echo "=== Attempt $i/3 ==="
+
+            # 尝试创建 release（含上传文件）
+            if gh release create "$TAG" \
+              --title "$TITLE" \
+              --notes-file release_body.md \
+              $FLAGS \
+              $FILES; then
+              echo "✅ Release created successfully"
+              exit 0
+            fi
+
+            echo "⚠️ Create failed, checking if release already exists..."
+
+            # 如果 release 已存在（上次创建成功但上传文件失败），尝试补传文件
+            if gh release view "$TAG" > /dev/null 2>&1; then
+              echo "Release exists, uploading assets..."
+              if gh release upload "$TAG" $FILES --clobber; then
+                echo "✅ Assets uploaded successfully"
+                exit 0
+              fi
+            fi
+
+            if [ $i -lt 3 ]; then
+              echo "⏳ Waiting 30s before retry..."
+              sleep 30
+            fi
+          done
+
+          echo "❌ All 3 attempts failed"
+          exit 1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
