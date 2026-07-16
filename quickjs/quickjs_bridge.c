@@ -938,6 +938,9 @@ static JSValue js_native_html_get_attr(JSContext *ctx, JSValueConst this_val,
 // 提供图片解码 + 条带乱序恢复 + 重新编码为 PNG 的能力
 // 用于 JMComic 等网站的图片 scramble 恢复
 
+// 前向声明：_get_bytes 定义在后面，此处提前声明供 scrambleRestore 使用
+static const uint8_t *_get_bytes(JSContext *ctx, JSValueConst val, size_t *len);
+
 // __nativeImage.scrambleRestore(bytes, num) → base64 字符串（PNG 图片）
 // bytes: ArrayBuffer/Uint8Array（原始图片字节）
 // num: 分割数（0=不需要恢复，直接重新编码为 PNG）
