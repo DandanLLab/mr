@@ -120,6 +120,27 @@ class StorageService {
     } catch (_) {}
   }
 
+  /// 异步恢复损坏的 Box（fire-and-forget，用于同步读取方法）
+  void _recoverBoxAsync(String name, void Function(Box) onRecovered) {
+    _recoverBox(name, onRecovered);
+  }
+
+  /// 恢复损坏的 Box：删除后重新创建
+  Future<void> _recoverBox(String name, void Function(Box) onRecovered) async {
+    debugPrint('🔧 StorageService: 恢复损坏的 Box: $name');
+    await _safeCloseBox(name);
+    try {
+      await Hive.deleteBoxFromDisk(name);
+    } catch (_) {}
+    try {
+      final box = await Hive.openBox(name);
+      onRecovered(box);
+      debugPrint('✅ StorageService: Box $name 恢复成功');
+    } catch (e) {
+      debugPrint('❌ StorageService: Box $name 恢复失败: $e');
+    }
+  }
+
   /// 确保已初始化，未初始化则尝试初始化
   Future<bool> _ensureInitialized() async {
     if (_initialized && _bookSourceBox != null) return true;
@@ -169,7 +190,13 @@ class StorageService {
       _ensureBox('settings', _settingsBox).then((box) => _settingsBox = box);
       return defaultValue;
     }
-    return _settingsBox!.get(key, defaultValue: defaultValue);
+    try {
+      return _settingsBox!.get(key, defaultValue: defaultValue);
+    } catch (e) {
+      debugPrint('❌ StorageService: getSetting 读取失败: $e');
+      _recoverBoxAsync('settings', (box) => _settingsBox = box);
+      return defaultValue;
+    }
   }
 
   Future<void> addToBookshelf(Map<String, dynamic> bookData) async {
@@ -195,10 +222,16 @@ class StorageService {
       _ensureBox('bookshelf', _bookshelfBox).then((box) => _bookshelfBox = box);
       return [];
     }
-    return _bookshelfBox!.values
-        .where((e) => e is Map)
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
+    try {
+      return _bookshelfBox!.values
+          .where((e) => e is Map)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e) {
+      debugPrint('❌ StorageService: getAllBooks 读取失败: $e');
+      _recoverBoxAsync('bookshelf', (box) => _bookshelfBox = box);
+      return [];
+    }
   }
 
   Map<String, dynamic>? getBook(String bookUrl) {
@@ -211,7 +244,14 @@ class StorageService {
       _ensureBox('bookshelf', _bookshelfBox).then((box) => _bookshelfBox = box);
       return null;
     }
-    final data = _bookshelfBox!.get(bookUrl);
+    dynamic data;
+    try {
+      data = _bookshelfBox!.get(bookUrl);
+    } catch (e) {
+      debugPrint('❌ StorageService: getBook 读取失败: $e');
+      _recoverBoxAsync('bookshelf', (box) => _bookshelfBox = box);
+      return null;
+    }
     if (data == null) return null;
     if (data is Map) return Map<String, dynamic>.from(data);
     if (data is String) {
@@ -231,7 +271,14 @@ class StorageService {
     int durChapterPos,
   ) async {
     _bookshelfBox = await _ensureBox('bookshelf', _bookshelfBox);
-    final rawBook = _bookshelfBox?.get(bookUrl);
+    dynamic rawBook;
+    try {
+      rawBook = _bookshelfBox?.get(bookUrl);
+    } catch (e) {
+      debugPrint('❌ StorageService: updateBookProgress 读取失败: $e');
+      await _recoverBox('bookshelf', (box) => _bookshelfBox = box);
+      return;
+    }
     final book = rawBook is Map ? Map<String, dynamic>.from(rawBook) : null;
     if (book != null) {
       book['durChapterIndex'] = durChapterIndex;
@@ -310,10 +357,16 @@ class StorageService {
       ).then((box) => _bookSourceBox = box);
       return [];
     }
-    return _bookSourceBox!.values
-        .where((e) => e is Map)
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
+    try {
+      return _bookSourceBox!.values
+          .where((e) => e is Map)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e) {
+      debugPrint('❌ StorageService: getAllBookSources 读取失败: $e');
+      _recoverBoxAsync('bookSource', (box) => _bookSourceBox = box);
+      return [];
+    }
   }
 
   Map<String, dynamic>? getBookSource(String sourceUrl) {
@@ -329,7 +382,14 @@ class StorageService {
       ).then((box) => _bookSourceBox = box);
       return null;
     }
-    final data = _bookSourceBox!.get(sourceUrl);
+    dynamic data;
+    try {
+      data = _bookSourceBox!.get(sourceUrl);
+    } catch (e) {
+      debugPrint('❌ StorageService: getBookSource 读取失败: $e');
+      _recoverBoxAsync('bookSource', (box) => _bookSourceBox = box);
+      return null;
+    }
     if (data == null) return null;
     if (data is Map) return Map<String, dynamic>.from(data);
     if (data is String) {
@@ -366,12 +426,24 @@ class StorageService {
       _ensureBox('cache', _cacheBox).then((box) => _cacheBox = box);
       return null;
     }
-    return _cacheBox!.get(key);
+    try {
+      return _cacheBox!.get(key);
+    } catch (e) {
+      debugPrint('❌ StorageService: getCachedData 读取失败: $e');
+      _recoverBoxAsync('cache', (box) => _cacheBox = box);
+      return null;
+    }
   }
 
   Future<dynamic> getCachedDataAsync(String key) async {
     _cacheBox = await _ensureBox('cache', _cacheBox);
-    return _cacheBox?.get(key);
+    try {
+      return _cacheBox?.get(key);
+    } catch (e) {
+      debugPrint('❌ StorageService: getCachedDataAsync 读取失败: $e');
+      await _recoverBox('cache', (box) => _cacheBox = box);
+      return null;
+    }
   }
 
   Future<void> clearCache() async {
@@ -393,7 +465,14 @@ class StorageService {
       _ensureBox('settings', _settingsBox).then((box) => _settingsBox = box);
       return null;
     }
-    final data = _settingsBox!.get('readerConfig');
+    dynamic data;
+    try {
+      data = _settingsBox!.get('readerConfig');
+    } catch (e) {
+      debugPrint('❌ StorageService: getReaderConfig 读取失败: $e');
+      _recoverBoxAsync('settings', (box) => _settingsBox = box);
+      return null;
+    }
     if (data == null) return null;
     if (data is Map) return Map<String, dynamic>.from(data);
     if (data is String) {
@@ -420,7 +499,13 @@ class StorageService {
       _ensureBox('settings', _settingsBox).then((box) => _settingsBox = box);
       return null;
     }
-    return _settingsBox!.get('legadoUrl');
+    try {
+      return _settingsBox!.get('legadoUrl');
+    } catch (e) {
+      debugPrint('❌ StorageService: getLegadoUrl 读取失败: $e');
+      _recoverBoxAsync('settings', (box) => _settingsBox = box);
+      return null;
+    }
   }
 
   // 高亮相关方法
@@ -447,13 +532,19 @@ class StorageService {
       _ensureBox('cache', _cacheBox).then((box) => _cacheBox = box);
       return [];
     }
-    return _cacheBox!.values
-        .where((e) {
-          if (e is! Map) return false;
-          return e['bookUrl'] == bookUrl && e['chapterIndex'] == chapterIndex;
-        })
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
+    try {
+      return _cacheBox!.values
+          .where((e) {
+            if (e is! Map) return false;
+            return e['bookUrl'] == bookUrl && e['chapterIndex'] == chapterIndex;
+          })
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e) {
+      debugPrint('❌ StorageService: getChapterHighlights 读取失败: $e');
+      _recoverBoxAsync('cache', (box) => _cacheBox = box);
+      return [];
+    }
   }
 
   List<Map<String, dynamic>> getAllHighlights(String bookUrl) {
@@ -465,13 +556,19 @@ class StorageService {
       _ensureBox('cache', _cacheBox).then((box) => _cacheBox = box);
       return [];
     }
-    return _cacheBox!.values
-        .where((e) {
-          if (e is! Map) return false;
-          return e['bookUrl'] == bookUrl;
-        })
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
+    try {
+      return _cacheBox!.values
+          .where((e) {
+            if (e is! Map) return false;
+            return e['bookUrl'] == bookUrl;
+          })
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e) {
+      debugPrint('❌ StorageService: getAllHighlights 读取失败: $e');
+      _recoverBoxAsync('cache', (box) => _cacheBox = box);
+      return [];
+    }
   }
 
   // 高亮规则相关方法
@@ -491,12 +588,18 @@ class StorageService {
       return [];
     }
     if (_settingsBox == null) return [];
-    return _settingsBox!.values
-        .where((e) {
-          if (e is! Map) return false;
-          return e.containsKey('pattern');
-        })
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
+    try {
+      return _settingsBox!.values
+          .where((e) {
+            if (e is! Map) return false;
+            return e.containsKey('pattern');
+          })
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e) {
+      debugPrint('❌ StorageService: getAllHighlightRules 读取失败: $e');
+      _recoverBoxAsync('settings', (box) => _settingsBox = box);
+      return [];
+    }
   }
 }
