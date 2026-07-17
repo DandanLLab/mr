@@ -1,8 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:path_provider/path_provider.dart';
 
 class StorageService {
   static final StorageService instance = StorageService._internal();
@@ -15,103 +13,37 @@ class StorageService {
 
   bool _initialized = false;
   String? _initError;
-  int _initRetries = 0;
+
+  /// 正在恢复中的 Box 名集合，防止 sync 读 catch 多次触发恢复任务
+  final Set<String> _recoveringBoxes = {};
 
   bool get isInitialized => _initialized;
   String? get initError => _initError;
 
-  Future<void> init() async {
+  /// 打开单个 Box，失败时（如 HiveError: unknown typeId 数据损坏）自动删文件重建
+  /// 只清这一个 Box，不影响其他 Box 的数据
+  Future<Box?> _openBoxWithRecovery(String name) async {
     try {
-      // 确保 Hive 已初始化
-      if (!Hive.isBoxOpen('settings')) {
-        _settingsBox = await Hive.openBox('settings');
-      } else {
-        _settingsBox = Hive.box('settings');
+      if (Hive.isBoxOpen(name)) {
+        return Hive.box(name);
       }
-      if (!Hive.isBoxOpen('bookshelf')) {
-        _bookshelfBox = await Hive.openBox('bookshelf');
-      } else {
-        _bookshelfBox = Hive.box('bookshelf');
-      }
-      if (!Hive.isBoxOpen('cache')) {
-        _cacheBox = await Hive.openBox('cache');
-      } else {
-        _cacheBox = Hive.box('cache');
-      }
-      if (!Hive.isBoxOpen('bookSource')) {
-        _bookSourceBox = await Hive.openBox('bookSource');
-      } else {
-        _bookSourceBox = Hive.box('bookSource');
-      }
-      _initialized = true;
-      _initError = null;
-      _initRetries = 0;
-      debugPrint('✅ StorageService 初始化成功');
+      return await Hive.openBox(name);
     } catch (e) {
-      _initError = e.toString();
-      debugPrint('❌ StorageService 初始化失败: $e');
-      // 尝试恢复：删除损坏的数据库文件并重新初始化
-      _initRetries++;
-      if (_initRetries <= 2) {
-        try {
-          await _recoverCorruptedBoxes();
-          // 重新尝试打开
-          _settingsBox = await Hive.openBox('settings');
-          _bookshelfBox = await Hive.openBox('bookshelf');
-          _cacheBox = await Hive.openBox('cache');
-          _bookSourceBox = await Hive.openBox('bookSource');
-          _initialized = true;
-          _initError = null;
-          debugPrint('✅ StorageService 恢复初始化成功');
-        } catch (recoveryError) {
-          _initError = recoveryError.toString();
-          debugPrint('❌ StorageService 恢复初始化也失败: $recoveryError');
-        }
-      }
-    }
-  }
-
-  /// 尝试恢复损坏的 Hive Box
-  Future<void> _recoverCorruptedBoxes() async {
-    try {
-      // 先关闭所有可能损坏的 Box
-      await _safeCloseBox('settings');
-      await _safeCloseBox('bookshelf');
-      await _safeCloseBox('cache');
-      await _safeCloseBox('bookSource');
-
-      // 删除损坏的文件
+      debugPrint('❌ 打开 $name Box失败: $e，尝试重建该 Box...');
       try {
-        final dir = await getApplicationDocumentsDirectory();
-        final hiveDir = Directory('${dir.path}/hive');
-        if (hiveDir.existsSync()) {
-          for (final file in hiveDir.listSync()) {
-            if (file is File && file.path.endsWith('.hive')) {
-              try {
-                await file.delete();
-                debugPrint('🗑️ 删除损坏的 Hive 文件: ${file.path}');
-              } catch (_) {}
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint('⚠️ 清理Hive目录失败: $e');
-        // 尝试使用 Hive 默认路径
-        try {
-          await Hive.deleteBoxFromDisk('settings');
-          await Hive.deleteBoxFromDisk('bookshelf');
-          await Hive.deleteBoxFromDisk('cache');
-          await Hive.deleteBoxFromDisk('bookSource');
-          debugPrint('🗑️ 通过 Hive API 删除损坏的 Box');
-        } catch (e2) {
-          debugPrint('⚠️ Hive API 删除也失败: $e2');
-        }
+        await _safeCloseBox(name);
+        await Hive.deleteBoxFromDisk(name);
+        final box = await Hive.openBox(name);
+        debugPrint('✅ $name Box 重建成功（该 Box 数据已清空）');
+        return box;
+      } catch (e2) {
+        debugPrint('❌ 重建 $name Box也失败: $e2');
+        return null;
       }
-    } catch (e) {
-      debugPrint('⚠️ 恢复Hive数据时出错: $e');
     }
   }
 
+  /// 安全关闭 Box
   Future<void> _safeCloseBox(String name) async {
     try {
       if (Hive.isBoxOpen(name)) {
@@ -120,14 +52,24 @@ class StorageService {
     } catch (_) {}
   }
 
-  /// 异步恢复损坏的 Box（fire-and-forget，用于同步读取方法）
+  /// 异步恢复损坏的 Box（用于同步读取方法 catch 中调用）
+  /// - 带去重保护：若同名 Box 已在恢复中，本次直接返回，避免重复触发
+  /// - 恢复完成（无论成功或失败）后清除标记，允许下次失败再触发一次
+  /// - 成功时通过 onRecovered 回调写回 _xxBox 字段
   void _recoverBoxAsync(String name, void Function(Box) onRecovered) {
-    _recoverBox(name, onRecovered).catchError((e) {
-      debugPrint('❌ StorageService: 异步恢复Box失败: $e');
+    if (_recoveringBoxes.contains(name)) {
+      debugPrint('⚠️ StorageService: Box $name 已在恢复中，跳过重复触发');
+      return;
+    }
+    _recoveringBoxes.add(name);
+    _recoverBox(name, onRecovered).whenComplete(() {
+      _recoveringBoxes.remove(name);
+    }).catchError((e) {
+      debugPrint('❌ StorageService: 异步恢复 Box $name 失败: $e');
     });
   }
 
-  /// 恢复损坏的 Box：删除后重新创建
+  /// 恢复损坏的 Box：关闭 → 删文件 → 重新打开
   Future<void> _recoverBox(String name, void Function(Box) onRecovered) async {
     debugPrint('🔧 StorageService: 恢复损坏的 Box: $name');
     await _safeCloseBox(name);
@@ -143,38 +85,59 @@ class StorageService {
     }
   }
 
+  /// 初始化：逐个打开 4 个 Box，单个失败只清那一个 Box（不影响其他 Box 数据）
+  Future<void> init() async {
+    try {
+      _settingsBox = await _openBoxWithRecovery('settings');
+      _bookshelfBox = await _openBoxWithRecovery('bookshelf');
+      _cacheBox = await _openBoxWithRecovery('cache');
+      _bookSourceBox = await _openBoxWithRecovery('bookSource');
+
+      // settings 是关键 Box，必须可用；其他 Box 失败可降级运行
+      if (_settingsBox != null) {
+        _initialized = true;
+        _initError = null;
+        debugPrint('✅ StorageService 初始化成功 '
+            '(settings=${_settingsBox != null}, bookshelf=${_bookshelfBox != null}, '
+            'cache=${_cacheBox != null}, bookSource=${_bookSourceBox != null})');
+      } else {
+        _initialized = false;
+        _initError = '关键 Box (settings) 打开失败';
+        debugPrint('❌ $_initError');
+      }
+    } catch (e) {
+      _initError = e.toString();
+      _initialized = false;
+      debugPrint('❌ StorageService 初始化失败: $e');
+    }
+  }
+
   /// 确保已初始化，未初始化则尝试初始化
   Future<bool> _ensureInitialized() async {
-    if (_initialized && _bookSourceBox != null) return true;
-    debugPrint('⚠️ StorageService: 未初始化或Box为null，尝试初始化...');
+    if (_initialized && _settingsBox != null) return true;
+    debugPrint('⚠️ StorageService: 未初始化，尝试初始化...');
     try {
       await init();
-      return _initialized && _bookSourceBox != null;
+      return _initialized && _settingsBox != null;
     } catch (e) {
       debugPrint('❌ StorageService 初始化失败: $e');
       return false;
     }
   }
 
-  /// 确保指定Box可用，不可用则重新打开
+  /// 确保指定 Box 可用，不可用则尝试打开 / 重建
   Future<Box?> _ensureBox(String name, Box? currentBox) async {
     if (currentBox != null && currentBox.isOpen) return currentBox;
-    try {
-      if (Hive.isBoxOpen(name)) {
-        return Hive.box(name);
-      }
-      return await Hive.openBox(name);
-    } catch (e) {
-      debugPrint('❌ 打开 $name Box失败: $e');
-      // 尝试删除后重建
-      try {
-        await Hive.deleteBoxFromDisk(name);
-        return await Hive.openBox(name);
-      } catch (e2) {
-        debugPrint('❌ 重建 $name Box也失败: $e2');
-        return null;
-      }
+    // _openBoxWithRecovery 内部已包含 try-catch 和重建逻辑
+    final box = await _openBoxWithRecovery(name);
+    if (box == null) {
+      // 最后兜底：完全重新初始化
+      final ok = await _ensureInitialized();
+      if (!ok) return null;
+      // 再尝试一次
+      return _openBoxWithRecovery(name);
     }
+    return box;
   }
 
   Future<void> setSetting(String key, dynamic value) async {
@@ -196,6 +159,7 @@ class StorageService {
       return _settingsBox!.get(key, defaultValue: defaultValue);
     } catch (e) {
       debugPrint('❌ StorageService: getSetting 读取失败: $e');
+      _settingsBox = null;
       _recoverBoxAsync('settings', (box) => _settingsBox = box);
       return defaultValue;
     }
@@ -231,6 +195,7 @@ class StorageService {
           .toList();
     } catch (e) {
       debugPrint('❌ StorageService: getAllBooks 读取失败: $e');
+      _bookshelfBox = null;
       _recoverBoxAsync('bookshelf', (box) => _bookshelfBox = box);
       return [];
     }
@@ -251,6 +216,7 @@ class StorageService {
       data = _bookshelfBox!.get(bookUrl);
     } catch (e) {
       debugPrint('❌ StorageService: getBook 读取失败: $e');
+      _bookshelfBox = null;
       _recoverBoxAsync('bookshelf', (box) => _bookshelfBox = box);
       return null;
     }
@@ -366,6 +332,7 @@ class StorageService {
           .toList();
     } catch (e) {
       debugPrint('❌ StorageService: getAllBookSources 读取失败: $e');
+      _bookSourceBox = null;
       _recoverBoxAsync('bookSource', (box) => _bookSourceBox = box);
       return [];
     }
@@ -389,6 +356,7 @@ class StorageService {
       data = _bookSourceBox!.get(sourceUrl);
     } catch (e) {
       debugPrint('❌ StorageService: getBookSource 读取失败: $e');
+      _bookSourceBox = null;
       _recoverBoxAsync('bookSource', (box) => _bookSourceBox = box);
       return null;
     }
@@ -432,6 +400,7 @@ class StorageService {
       return _cacheBox!.get(key);
     } catch (e) {
       debugPrint('❌ StorageService: getCachedData 读取失败: $e');
+      _cacheBox = null;
       _recoverBoxAsync('cache', (box) => _cacheBox = box);
       return null;
     }
@@ -472,6 +441,7 @@ class StorageService {
       data = _settingsBox!.get('readerConfig');
     } catch (e) {
       debugPrint('❌ StorageService: getReaderConfig 读取失败: $e');
+      _settingsBox = null;
       _recoverBoxAsync('settings', (box) => _settingsBox = box);
       return null;
     }
@@ -505,6 +475,7 @@ class StorageService {
       return _settingsBox!.get('legadoUrl');
     } catch (e) {
       debugPrint('❌ StorageService: getLegadoUrl 读取失败: $e');
+      _settingsBox = null;
       _recoverBoxAsync('settings', (box) => _settingsBox = box);
       return null;
     }
@@ -544,6 +515,7 @@ class StorageService {
           .toList();
     } catch (e) {
       debugPrint('❌ StorageService: getChapterHighlights 读取失败: $e');
+      _cacheBox = null;
       _recoverBoxAsync('cache', (box) => _cacheBox = box);
       return [];
     }
@@ -568,6 +540,7 @@ class StorageService {
           .toList();
     } catch (e) {
       debugPrint('❌ StorageService: getAllHighlights 读取失败: $e');
+      _cacheBox = null;
       _recoverBoxAsync('cache', (box) => _cacheBox = box);
       return [];
     }
@@ -600,6 +573,7 @@ class StorageService {
           .toList();
     } catch (e) {
       debugPrint('❌ StorageService: getAllHighlightRules 读取失败: $e');
+      _settingsBox = null;
       _recoverBoxAsync('settings', (box) => _settingsBox = box);
       return [];
     }
