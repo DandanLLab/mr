@@ -84,6 +84,18 @@ void main() async {
   }, (error, stack) {
     // Zone 级未捕获错误
     CrashLogService.instance.recordError(error, stack, type: 'zone');
+    // 检测 Hive 数据损坏错误（如 typeId 非法），自动触发紧急重建
+    // 避免下次启动或读取时再次崩溃
+    final errStr = error.toString();
+    if (errStr.contains('HiveError') ||
+        errStr.contains('unknown typeId') ||
+        errStr.contains('Did you forget to register an adapter')) {
+      debugPrint('🚨 检测到 Hive 错误，触发紧急重建: $errStr');
+      // fire-and-forget，避免阻塞 zone 错误回调
+      StorageService.instance.emergencyRecoverAll().catchError((e) {
+        debugPrint('❌ 紧急重建失败: $e');
+      });
+    }
   });
 }
 

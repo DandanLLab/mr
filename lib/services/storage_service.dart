@@ -140,6 +140,55 @@ class StorageService {
     return box;
   }
 
+  /// 异步确保 Box 可用（fire-and-forget 模式，带错误捕获）
+  /// - 用于同步读方法中检测到 Box 不可用时触发后台恢复
+  /// - 必须带 catchError，否则任何未预期错误会泄漏成 zone 错误（导致崩溃弹窗）
+  /// - onRecovered 回调在恢复成功时把 Box 写回对应 _xxBox 字段
+  void _ensureBoxAsync(
+    String name,
+    Box? currentBox,
+    void Function(Box?) onRecovered,
+  ) {
+    _ensureBox(name, currentBox).then(onRecovered).catchError((e) {
+      debugPrint('❌ StorageService: _ensureBoxAsync($name) 失败: $e');
+    });
+  }
+
+  /// 紧急重建所有 Box（用于 zone 错误兜底）
+  /// - 关闭并删除所有 4 个 Box 文件，然后重新打开空 Box
+  /// - 比单 Box 恢复更激进，只在检测到不可恢复的 HiveError 时使用
+  /// - 内部所有步骤都有 try-catch，不会抛错
+  /// - 用 _emergencyRecovering 标志防止并发触发
+  bool _emergencyRecovering = false;
+
+  Future<void> emergencyRecoverAll() async {
+    if (_emergencyRecovering) {
+      debugPrint('⚠️ StorageService: 紧急重建已在进行中，跳过重复触发');
+      return;
+    }
+    _emergencyRecovering = true;
+    debugPrint('🚨 StorageService: 紧急重建所有 Box');
+    const names = ['settings', 'bookshelf', 'cache', 'bookSource'];
+    for (final name in names) {
+      try {
+        await _safeCloseBox(name);
+      } catch (_) {}
+      try {
+        if (await Hive.boxExists(name)) {
+          await Hive.deleteBoxFromDisk(name);
+        }
+      } catch (_) {}
+    }
+    // 重新打开所有 Box（_openBoxWithRecovery 内部有 try-catch，不会抛错）
+    _settingsBox = await _openBoxWithRecovery('settings');
+    _bookshelfBox = await _openBoxWithRecovery('bookshelf');
+    _cacheBox = await _openBoxWithRecovery('cache');
+    _bookSourceBox = await _openBoxWithRecovery('bookSource');
+    _initialized = _settingsBox != null;
+    _emergencyRecovering = false;
+    debugPrint('🚨 StorageService: 紧急重建完成 (initialized=$_initialized)');
+  }
+
   Future<void> setSetting(String key, dynamic value) async {
     _settingsBox = await _ensureBox('settings', _settingsBox);
     await _settingsBox?.put(key, value);
@@ -152,7 +201,7 @@ class StorageService {
     }
     if (_settingsBox == null || !_settingsBox!.isOpen) {
       debugPrint('⚠️ StorageService: settings Box不可用，尝试异步恢复');
-      _ensureBox('settings', _settingsBox).then((box) => _settingsBox = box);
+      _ensureBoxAsync('settings', _settingsBox, (box) => _settingsBox = box);
       return defaultValue;
     }
     try {
@@ -185,7 +234,7 @@ class StorageService {
     }
     if (_bookshelfBox == null || !_bookshelfBox!.isOpen) {
       debugPrint('⚠️ StorageService: bookshelf Box不可用，尝试异步恢复');
-      _ensureBox('bookshelf', _bookshelfBox).then((box) => _bookshelfBox = box);
+      _ensureBoxAsync('bookshelf', _bookshelfBox, (box) => _bookshelfBox = box);
       return [];
     }
     try {
@@ -208,7 +257,7 @@ class StorageService {
     }
     if (_bookshelfBox == null || !_bookshelfBox!.isOpen) {
       debugPrint('⚠️ StorageService: bookshelf Box不可用，尝试异步恢复');
-      _ensureBox('bookshelf', _bookshelfBox).then((box) => _bookshelfBox = box);
+      _ensureBoxAsync('bookshelf', _bookshelfBox, (box) => _bookshelfBox = box);
       return null;
     }
     dynamic data;
@@ -319,10 +368,11 @@ class StorageService {
     }
     if (_bookSourceBox == null || !_bookSourceBox!.isOpen) {
       debugPrint('⚠️ StorageService: bookSource Box不可用，尝试异步恢复');
-      _ensureBox(
+      _ensureBoxAsync(
         'bookSource',
         _bookSourceBox,
-      ).then((box) => _bookSourceBox = box);
+        (box) => _bookSourceBox = box,
+      );
       return [];
     }
     try {
@@ -345,10 +395,11 @@ class StorageService {
     }
     if (_bookSourceBox == null || !_bookSourceBox!.isOpen) {
       debugPrint('⚠️ StorageService: bookSource Box不可用，尝试异步恢复');
-      _ensureBox(
+      _ensureBoxAsync(
         'bookSource',
         _bookSourceBox,
-      ).then((box) => _bookSourceBox = box);
+        (box) => _bookSourceBox = box,
+      );
       return null;
     }
     dynamic data;
@@ -393,7 +444,7 @@ class StorageService {
       return null;
     }
     if (_cacheBox == null || !_cacheBox!.isOpen) {
-      _ensureBox('cache', _cacheBox).then((box) => _cacheBox = box);
+      _ensureBoxAsync('cache', _cacheBox, (box) => _cacheBox = box);
       return null;
     }
     try {
@@ -433,7 +484,7 @@ class StorageService {
       return null;
     }
     if (_settingsBox == null || !_settingsBox!.isOpen) {
-      _ensureBox('settings', _settingsBox).then((box) => _settingsBox = box);
+      _ensureBoxAsync('settings', _settingsBox, (box) => _settingsBox = box);
       return null;
     }
     dynamic data;
@@ -468,7 +519,7 @@ class StorageService {
       return null;
     }
     if (_settingsBox == null || !_settingsBox!.isOpen) {
-      _ensureBox('settings', _settingsBox).then((box) => _settingsBox = box);
+      _ensureBoxAsync('settings', _settingsBox, (box) => _settingsBox = box);
       return null;
     }
     try {
@@ -502,7 +553,7 @@ class StorageService {
       return [];
     }
     if (_cacheBox == null || !_cacheBox!.isOpen) {
-      _ensureBox('cache', _cacheBox).then((box) => _cacheBox = box);
+      _ensureBoxAsync('cache', _cacheBox, (box) => _cacheBox = box);
       return [];
     }
     try {
@@ -527,7 +578,7 @@ class StorageService {
       return [];
     }
     if (_cacheBox == null || !_cacheBox!.isOpen) {
-      _ensureBox('cache', _cacheBox).then((box) => _cacheBox = box);
+      _ensureBoxAsync('cache', _cacheBox, (box) => _cacheBox = box);
       return [];
     }
     try {
