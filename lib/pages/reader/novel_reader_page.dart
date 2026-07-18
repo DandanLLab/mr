@@ -1361,6 +1361,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     // 缩进字符由 CSS before 渲染，测量时需要同步加上缩进前缀，
     // 否则测量高度偏小（首行少了缩进字符占用的宽度，可能少一行）。
     final indent = provider.paragraphIndent;
+    final singleLineHeight = _singleLineHeight(textStyle, metrics.width);
     var page = StringBuffer();
     var pageParagraphCount = 0;
     var usedHeight = _showChapterTitle(provider)
@@ -1377,15 +1378,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       // 剥掉源内容自带缩进，统一由 CSS before 提供缩进
       // 保存到 _pages 的是剥源缩进后的纯文本，渲染时 CSS before 会加缩进
       var paragraph = rawParagraph.replaceAll(_leadingIndentRegex, '');
-      // 测量用的文本：段落开头加缩进字符（模拟 CSS before 的效果）
-      // 续页首行（段落被切分的后半部分）不加缩进，因为 CSS before 只作用于 <p> 开头，
-      // 而续页首行在渲染时是 <p> 的第一个段落，CSS before 会加缩进...
-      // 但测量时续页首行是 paragraph 的剩余部分，不需要再加缩进字符（否则重复计算）。
-      // 所以用 _isContinuation 标记区分：首次测量加缩进，续页不加。
+      // isContinuation 标记：本段是否是被切分的续页部分
+      // - false（首段）：测量时加 indent 前缀（模拟 CSS before）
+      // - true（续页）：测量时不加 indent（续页首行在渲染时是 <p> 的开头，
+      //   CSS before 会加缩进，但段落的剩余部分不应再加缩进字符测量）
       var isContinuation = false;
 
       while (paragraph.isNotEmpty) {
-        // 测量文本：首段加缩进字符，续页不加（续页首行无缩进）
+        // 测量文本：首段加缩进字符，续页不加
         final measuredText = (!isContinuation && indent.isNotEmpty)
             ? '$indent$paragraph'
             : paragraph;
@@ -1393,7 +1393,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             _measureTextHeight(measuredText, textStyle, metrics.width) +
             paragraphSpacing;
 
-        // 当前页还能放下整段
+        // 1. 当前页能放下整段 → 直接放入
         if (usedHeight + paragraphHeight <= metrics.height) {
           page.writeln(paragraph);
           usedHeight += paragraphHeight;
@@ -1402,45 +1402,51 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           continue;
         }
 
-        // 当前页已有内容：先翻页，再重试本段
+        // 2. 整段放不下当前页 → 计算剩余可用高度（扣除段距）
+        final remainingHeight = metrics.height - usedHeight - paragraphSpacing;
+
+        // 3. 剩余空间还能放下至少一行 → 字符级切割，把能放下的部分填到当前页
+        //    关键：这是"页面填充满"的核心 —— 不允许整段翻页留下大片空白，
+        //    必须把剩余空间用尽，剩余部分断到下一页（同页内填充生效，跨页该断就断）
+        if (remainingHeight >= singleLineHeight) {
+          final splitIndex = _findFittingTextIndex(
+            measuredText,
+            textStyle,
+            metrics.width,
+            remainingHeight,
+          );
+
+          if (splitIndex > 0) {
+            // splitIndex 是针对 measuredText 的，需要扣除缩进字符长度
+            final actualSplitIndex = (!isContinuation && indent.isNotEmpty)
+                ? max(1, splitIndex - indent.length)
+                : splitIndex;
+            // 填充当前页（把切分的前半部分加到当前页），然后翻页
+            page.writeln(paragraph.substring(0, actualSplitIndex));
+            pages.add(page.toString().trimRight());
+            page = StringBuffer();
+            pageParagraphCount = 0;
+            usedHeight = 0;
+            paragraph = paragraph.substring(actualSplitIndex);
+            isContinuation = true;
+            continue;
+          }
+        }
+
+        // 4. 剩余空间不足以放下任何字符，或字符级切割失败 → 翻页重试本段
         if (pageParagraphCount > 0) {
           pages.add(page.toString().trimRight());
           page = StringBuffer();
           pageParagraphCount = 0;
           usedHeight = 0;
+          // continue 重试本段（新页）
           continue;
         }
 
-        // 走到这里：当前页为空 + 整段放不下 —— 需要字符级切割
-        final remainingHeight = max(
-          metrics.height - usedHeight - paragraphSpacing,
-          _singleLineHeight(textStyle, metrics.width),
-        );
-
-        final splitIndex = _findFittingTextIndex(
-          measuredText,
-          textStyle,
-          metrics.width,
-          remainingHeight,
-        );
-
-        // 关键守卫：splitIndex 必须 > 0，否则 substring(0,0) 返回空字符串，
-        // 下一轮 while(paragraph.isNotEmpty) 不会变空，导致死循环 + 栈溢出崩溃
-        if (splitIndex <= 0) {
-          // 兜底：强制取 1 个字符，确保 paragraph 每轮至少缩短 1 字符
-          pages.add(paragraph.substring(0, 1).trimRight());
-          paragraph = paragraph.substring(1);
-          usedHeight = 0;
-          isContinuation = true;
-          continue;
-        }
-
-        // splitIndex 是针对 measuredText 的，需要扣除缩进字符长度
-        final actualSplitIndex = (!isContinuation && indent.isNotEmpty)
-            ? max(1, splitIndex - indent.length)
-            : splitIndex;
-        pages.add(paragraph.substring(0, actualSplitIndex).trimRight());
-        paragraph = paragraph.substring(actualSplitIndex);
+        // 5. 兜底：当前页为空 + 整段也放不下整页 + 字符级切割也失败
+        //    强制取 1 个字符，避免死循环
+        pages.add(paragraph.substring(0, 1).trimRight());
+        paragraph = paragraph.substring(1);
         usedHeight = 0;
         isContinuation = true;
       }
