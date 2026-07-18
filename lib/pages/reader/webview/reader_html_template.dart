@@ -51,11 +51,13 @@ class ReaderHtmlTemplate {
 <body>
   <div id="reader-root">
     $titleHtml
-    <div id="reader-content-a" class="reader-content">
-      $paragraphsHtml
-    </div>
-    <div id="reader-content-b" class="reader-content">
-      $paragraphsHtml
+    <div id="reader-stage">
+      <div id="reader-content-a" class="reader-content">
+        $paragraphsHtml
+      </div>
+      <div id="reader-content-b" class="reader-content">
+        $paragraphsHtml
+      </div>
     </div>
   </div>
   <script>
@@ -203,10 +205,10 @@ html {
 ${generateHighlightCss(provider)}
 
 /* ============ 分页模式 ============ */
-/* 参考 lumina：body 直接做 stage（position:relative + overflow:hidden），
-   a/b 作为 body 的直接子元素，column 布局放在 a/b 上。
-   不再用 #reader-root/#reader-stage 多层嵌套，避免 CSS 变量在多层
-   计算时出现精度误差。 */
+/* #reader-root 是 flex 纵向容器：标题占自然高度，#reader-stage flex:1
+   撑满剩余空间。#reader-stage 是 a/b 的定位容器（position:relative +
+   overflow:hidden）。这样标题和正文不会重叠（之前 a/b absolute top:0
+   会覆盖标题）。 */
 body.reader-paged {
   position: relative;
   overflow: hidden;
@@ -214,20 +216,31 @@ body.reader-paged {
 
 body.reader-paged #reader-root {
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: var(--reader-safe-width);
   height: var(--reader-safe-height);
   overflow: hidden;
 }
 
-/* a/b 共用样式：absolute 重叠在 #reader-root 内，column 分栏
+body.reader-paged #reader-stage {
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* a/b 共用样式：absolute 重叠在 #reader-stage 内，column 分栏
    关键：不设 width，让 column 布局自动扩展到内容总宽度，
    这样 scrollWidth 才能返回所有列的总宽度（= pageCount * columnWidth）。
-   裁剪由父容器 #reader-root 的 overflow:hidden 负责。 */
+   height: 100% 相对 stage，确保 column 分栏高度正确。
+   裁剪由 #reader-stage 的 overflow:hidden 负责。 */
 body.reader-paged .reader-content {
   position: absolute;
   top: 0;
   left: 0;
-  height: var(--reader-safe-height);
+  height: 100%;
   column-width: var(--reader-safe-width);
   column-gap: 0;
   column-fill: auto;
@@ -242,9 +255,12 @@ body.reader-paged #reader-content-a {
   pointer-events: auto;
 }
 
-/* b 层默认隐藏，不拦截事件（点击穿透到 a） */
+/* b 层默认隐藏（visibility:hidden + opacity:0 双重保险，避免某些
+   Android WebView 上单 visibility:hidden 对 absolute 元素仍渲染
+   导致与 a 层视觉重叠） */
 body.reader-paged #reader-content-b {
   visibility: hidden;
+  opacity: 0;
   pointer-events: none;
   transform: translate3d(0, 0, 0);
 }
@@ -252,6 +268,7 @@ body.reader-paged #reader-content-b {
 /* b 层动画进行中：显示并暂时拦截事件（避免动画期间误触） */
 body.reader-paged #reader-content-b.animating {
   visibility: visible;
+  opacity: 1;
   pointer-events: auto;
 }
 
@@ -265,6 +282,12 @@ body.reader-scroll {
 body.reader-scroll #reader-root {
   position: relative;
   min-height: var(--reader-safe-height);
+  width: 100%;
+  height: auto;
+}
+
+body.reader-scroll #reader-stage {
+  position: relative;
   width: 100%;
   height: auto;
 }

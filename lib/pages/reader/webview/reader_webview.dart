@@ -173,6 +173,10 @@ class _ReaderWebViewState extends State<ReaderWebView> {
             disableHorizontalScroll: true,
             disableVerticalScroll: widget.isScrollMode ? false : true,
             supportZoom: false,
+            // 必须显式关闭 builtInZoomControls，否则 Android WebView 仍允许
+            // 双指缩放手势触发（supportZoom:false 只禁缩放功能，不禁手势识别）
+            builtInZoomControls: false,
+            displayZoomControls: false,
             javaScriptEnabled: true,
             allowFileAccessFromFileURLs: true,
             allowUniversalAccessFromFileURLs: true,
