@@ -126,6 +126,16 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   double _pendingWebviewFraction = -1.0;
   // WebView 是否正在重新加载内容（避免回调串扰）
   bool _webviewReloading = false;
+  // 问题 9 修复：_webviewReloading 超时保护
+  //
+  // 背景：JS 端 notifyPageCountReady 因异常或图片/字体加载失败未触发时，
+  // _webviewReloading 永远 true → _onWebviewPageChanged 永远早 return →
+  // 翻页流程的 _pageRenderedCompleter 永远 complete 不了 → 用户卡死。
+  //
+  // 策略：设置 _webviewReloading=true 时同步启动 5s 超时，
+  // _onWebviewPageCountReady 正常触发时取消；超时强制释放并日志告警。
+  Timer? _webviewReloadTimeoutTimer;
+  static const Duration _webviewReloadTimeout = Duration(seconds: 5);
 
   // ==================== 系统交互：屏幕常亮 / 亮度 / 音量键 ====================
   // 焦点节点：用于接收硬件按键（音量键翻页）
@@ -272,6 +282,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final provider = context.read<ReaderProvider>();
     provider.removeListener(_onProviderChanged);
     _progressSaveTimer?.cancel();
+    _webviewReloadTimeoutTimer?.cancel(); // 问题 9 修复
     _clockTimer?.cancel();
     _autoScrollTimer?.cancel();
     _scrollProgressNotifier.dispose();
@@ -899,6 +910,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         // WebView 渲染：不再调用 _repaginate（CSS column 原生分页）
         // 设置待恢复页码，等 WebView 加载完成 + onPageCountReady 后 jumpToPage
         _webviewReloading = true;
+        _startWebviewReloadTimeout(); // 问题 9 修复
         _webviewReady = false;
         _webviewCurrentPage = 0;
         _webviewPageCount = 1;
@@ -1056,6 +1068,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         : 0.0;
     _pendingWebviewInitialPage = 0;
     _webviewReloading = true;
+    _startWebviewReloadTimeout(); // 问题 9 修复
     _webviewReady = false;
     if (mounted) setState(() {});
   }
@@ -1601,18 +1614,83 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     // （_onWebviewPageCountReady 会在 JS init() 的 requestAnimationFrame 两帧后触发）
   }
 
+  /// 问题 9 修复：启动 _webviewReloading 超时保护
+  ///
+  /// 与 _webviewReloading = true 配对调用。
+  /// 若 5s 内 _onWebviewPageCountReady 未触发，强制释放 _webviewReloading
+  /// 并唤醒等待中的 _pageRenderedCompleter（避免翻页流程卡死）。
+  void _startWebviewReloadTimeout() {
+    _webviewReloadTimeoutTimer?.cancel();
+    _webviewReloadTimeoutTimer = Timer(_webviewReloadTimeout, () {
+      if (!mounted) return;
+      if (!_webviewReloading) return;
+      debugPrint('[novel_reader] WebView reload 超时 5s，强制释放 _webviewReloading');
+      _webviewReloading = false;
+      // 唤醒可能正在等待 _onWebviewPageChanged 的翻页流程
+      // （reload 期间 _onWebviewPageChanged 早 return，completer 永不 complete）
+      final c = _pageRenderedCompleter;
+      if (c != null && !c.isCompleted) {
+        c.complete();
+      }
+      _pageRenderedCompleter = null;
+      setState(() {});
+    });
+  }
+
   void _onWebviewPageCountReady(int totalPages) {
     if (!mounted) return;
+    final newPageCount = max(1, totalPages);
+
+    // M1 修复：区分「首次 pageCount ready」与「后续更新」
+    //
+    // 背景：reader_html_template.dart 的 notifyPageCountReadyWhenStable
+    // 会在图片/字体加载完成后二次通知 pageCount。二次通知时
+    // _pendingWebviewFraction/InitialPage 已被首次通知消费完，
+    // 若走原 else 分支会 _webviewCurrentPage=0 重置到第 0 页。
+    //
+    // 修复：isUpdate=true 时只更新 _webviewPageCount + clamp 当前页 +
+    // 存库（问题 6），不重新恢复进度。
+    final isUpdate = _webviewReady;
+
     setState(() {
-      _webviewPageCount = max(1, totalPages);
+      _webviewPageCount = newPageCount;
       _webviewReady = true;
       _webviewReloading = false;
     });
+    // 问题 9 修复：pageCount ready 正常触发，取消 reload 超时 timer
+    _webviewReloadTimeoutTimer?.cancel();
+    _webviewReloadTimeoutTimer = null;
+
     // 关键：标记 controller 就绪，否则 jumpToPage 第一行 if (!_isReady) return
     // 直接返回，翻页完全失效（之前 markReady() 方法定义了但从未被调用）
     _readerWebViewController.markReady();
     final provider = context.read<ReaderProvider>();
     final isScrollMode = _isScrollLikeMode(provider);
+
+    // M1 + 问题 6 修复：更新型通知不重新恢复进度
+    // 只 clamp 当前页（pageCount 变小后可能越界）+ 存库（pageCount 变化后进度比例也变）
+    if (isUpdate) {
+      if (!isScrollMode) {
+        if (_webviewCurrentPage >= newPageCount) {
+          // 当前页越界，clamp 到末页并跳转
+          final clampedPage = newPageCount - 1;
+          _webviewCurrentPage = clampedPage;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              _readerWebViewController.jumpToPage(clampedPage, animate: false);
+            }
+          });
+          _scheduleProgressSave(pos: clampedPage);
+        } else {
+          // 当前页在范围内，但 pageCount 变化后进度比例也变，存库新位置
+          _scheduleProgressSave(pos: _webviewCurrentPage);
+        }
+      }
+      // 滚动模式：pageCount 恒为 1，无需 clamp/存库
+      return;
+    }
+
+    // 以下为首次 pageCount ready 的进度恢复逻辑（原逻辑）
 
     // 滚动模式：pageCount 恒为 1，进度恢复用 scrollToOffset（像素）
     if (isScrollMode) {
