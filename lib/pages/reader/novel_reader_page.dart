@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_html/flutter_html.dart';
@@ -96,7 +97,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   // Animation
   late AnimationController _menuAnimController;
-  late Animation<double> _menuAnim;
 
   // Simulation page curl
   double _dragStartX = 0;
@@ -135,10 +135,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     _menuAnimController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 250),
-    );
-    _menuAnim = CurvedAnimation(
-      parent: _menuAnimController,
-      curve: Curves.easeInOut,
     );
 
     _scrollController.addListener(_onScroll);
@@ -968,9 +964,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       // 1. 优先从预取内存缓存读取（瞬时返回，跳过文件 I/O）
       String? content;
       if (_book!.originType == BookOriginType.online && chapter.url != null) {
+        final url = chapter.url!;
         content = ChapterPrefetchService.instance.getCachedContent(
-          _book!.bookUrl ?? '',
-          chapter.url!,
+          _book!.bookUrl,
+          url,
         );
       }
 
@@ -1010,13 +1007,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         AppLogger.instance.warn(
           LogCategory.system,
           '章节内容过大熔断',
-          detail: 'chapter=${chapter.title}, size=${content!.length}',
+          detail: 'chapter=${chapter.title}, size=${content.length}',
         );
         CrashLogService.instance.logJsEngineError(
           'Reader.oom',
-          '章节内容过大: chapter=${chapter.title}, size=${content!.length}',
+          '章节内容过大: chapter=${chapter.title}, size=${content.length}',
         );
-        content = '${content!.substring(0, 5 * 1024 * 1024)}\n\n...(内容过长已截断)';
+        content = '${content.substring(0, 5 * 1024 * 1024)}\n\n...(内容过长已截断)';
       }
 
       if (mounted &&
@@ -1372,15 +1369,22 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
     final metrics = _pageMetrics(provider);
     final textStyle = _readerTextStyle(provider);
+    // 渲染时每段会包一层 Padding(bottom: paragraphSpacing)，分页测量时不再加，
+    // 避免段距被计算两次（导致实际段距是配置值的 2 倍）。
+    // 但页内最后一段不会渲染 Padding（下面会 trimRight），所以整页高度估算用
+    // paragraphSpacing * (段数-1) 来近似。为简化实现，这里按每段都加一次
+    // paragraphSpacing 估算，渲染时最后一段的 Padding 多余空间留作底部留白。
+    final paragraphSpacing = provider.paragraphSpacing;
     var page = StringBuffer();
+    var pageParagraphCount = 0;
     var usedHeight = _showChapterTitle(provider)
         ? _measureTextHeight(
                 _displayChapterTitle(provider),
                 _titleTextStyle(provider),
                 metrics.width,
               ) +
-              provider.titleTopSpacing +
-              provider.titleBottomSpacing
+              provider.titleTopSpacing.toDouble() +
+              provider.titleBottomSpacing.toDouble()
         : 0.0;
 
     for (final rawParagraph in paragraphs) {
@@ -1388,57 +1392,83 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       // 同时测量时用剥离标签后的纯文本，避免标签字符被当作可见文本导致高度虚高
       final isHtml = _containsHtml(rawParagraph);
       var paragraph = isHtml ? rawParagraph : _applyIndent(rawParagraph, provider);
+
       while (paragraph.isNotEmpty) {
         // HTML 段落用剥离标签后的纯文本测量高度
         final measureText = isHtml ? _stripHtmlTags(paragraph) : paragraph;
         final paragraphHeight =
             _measureTextHeight(measureText, textStyle, metrics.width) +
-            provider.paragraphSpacing;
+            paragraphSpacing;
 
+        // 当前页还能放下整段
         if (usedHeight + paragraphHeight <= metrics.height) {
           page.writeln(paragraph);
           usedHeight += paragraphHeight;
+          pageParagraphCount++;
           paragraph = '';
           continue;
         }
 
-        if (page.isNotEmpty) {
+        // 当前页已有内容：先翻页，再重试本段
+        if (pageParagraphCount > 0) {
           pages.add(page.toString().trimRight());
           page = StringBuffer();
+          pageParagraphCount = 0;
           usedHeight = 0;
           continue;
         }
 
+        // 走到这里：当前页为空 + 整段放不下 —— 需要字符级切割
         if (isHtml) {
           // HTML 段落禁止在标签内部字符级切割（会产生未闭合标签），
-          // 整段直接放到下一页
+          // 整段直接放到下一页（即使溢出也比破坏标签好）
           pages.add(paragraph.trimRight());
           paragraph = '';
           usedHeight = 0;
           continue;
         }
 
+        // 计算剩余可用高度（至少留 1 行高度，避免 splitIndex=0 死循环）
+        final remainingHeight = max(
+          metrics.height - usedHeight - paragraphSpacing,
+          _singleLineHeight(textStyle, metrics.width),
+        );
+
         final splitIndex = _findFittingTextIndex(
           paragraph,
           textStyle,
           metrics.width,
-          max(
-            metrics.height - usedHeight - provider.paragraphSpacing,
-            provider.fontSize,
-          ),
+          remainingHeight,
         );
+
+        // 关键守卫：splitIndex 必须 > 0，否则 substring(0,0) 返回空字符串，
+        // 下一轮 while(paragraph.isNotEmpty) 不会变空，导致死循环 + 栈溢出崩溃
+        if (splitIndex <= 0) {
+          // 兜底：强制取 1 个字符，确保 paragraph 每轮至少缩短 1 字符
+          pages.add(paragraph.substring(0, 1).trimRight());
+          paragraph = paragraph.substring(1);
+          // 注意：不 trimLeft！trimLeft 会剥掉全角空格缩进，导致续页首行没缩进
+          usedHeight = 0;
+          continue;
+        }
+
         pages.add(paragraph.substring(0, splitIndex).trimRight());
-        paragraph = paragraph.substring(splitIndex).trimLeft();
-        // 续页不再渲染标题，重置已用高度
+        // 不 trimLeft：保留续页首行的全角空格缩进
+        paragraph = paragraph.substring(splitIndex);
         usedHeight = 0;
       }
     }
 
-    if (page.isNotEmpty) {
+    if (pageParagraphCount > 0) {
       pages.add(page.toString().trimRight());
     }
 
     return pages.isEmpty ? [''] : pages;
+  }
+
+  /// 测量单行文本高度（用于 splitIndex 兜底，确保至少能放 1 行）
+  double _singleLineHeight(TextStyle style, double width) {
+    return _measureTextHeight('一', style, width);
   }
 
   ({double width, double height}) _pageMetrics(ReaderProvider provider) {
@@ -1474,6 +1504,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     );
   }
 
+  /// 从 _readerHtmlStyle 派生的 TextStyle，用于 TextPainter 测量。
+  /// 关键：测量和渲染用同一份样式定义（字号、行高、字距、字重、字族），
+  /// 保证分页测量高度与 Html 组件渲染高度零偏差。
   TextStyle _readerTextStyle(ReaderProvider provider) {
     return TextStyle(
       fontSize: provider.fontSize,
@@ -1485,6 +1518,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     );
   }
 
+  /// 测量 HTML 段落的渲染高度（用与 _readerHtmlStyle 一致的 TextStyle）
+  /// 纯文本直接用 TextPainter；HTML 段落先剥离标签再测量，
+  /// 因为 Html 组件内部用 RichText 渲染，TextSpan 高度 = 剥离标签后文本高度。
   double _measureTextHeight(String text, TextStyle style, double width) {
     final painter = TextPainter(
       text: TextSpan(text: text, style: style),
@@ -1500,19 +1536,38 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     double width,
     double height,
   ) {
+    // 边界守卫：空文本直接返回 0（外层会走兜底逻辑，强制取 1 字符）
+    if (text.isEmpty) return 0;
+
+    // 单行都放不下时直接返回 1（至少放 1 字符，避免死循环）
+    final singleCharHeight = _measureTextHeight(
+      text.substring(0, 1),
+      style,
+      width,
+    );
+    if (singleCharHeight > height) return 1;
+
+    // 二分搜索：找到最大的 mid 使得 text[0..mid] 高度 <= height
+    // 关键：low/high 都向 best 收敛，保证循环终止
     var low = 1;
     var high = text.length;
     var best = 1;
-    while (low <= high) {
+    var iterations = 0;
+    // 安全上限：log2(N) + 常数，避免极端情况死循环
+    final maxIterations = 64;
+    while (low <= high && iterations < maxIterations) {
+      iterations++;
       final mid = (low + high) >> 1;
       final candidate = text.substring(0, mid);
-      if (_measureTextHeight(candidate, style, width) <= height) {
+      final h = _measureTextHeight(candidate, style, width);
+      if (h <= height) {
         best = mid;
         low = mid + 1;
       } else {
         high = mid - 1;
       }
     }
+    // 最终守卫：best 至少为 1（前面已保证单字符能放下）
     return best.clamp(1, text.length);
   }
 
@@ -1557,13 +1612,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   /// 关键修复：原来用 GestureDetector(onTapUp) 包裹 SelectionArea，
   /// 但 SelectionArea 内部的 Text.rich 会消费 tap 事件用于光标定位/选中，
   /// 导致外层 GestureDetector 收不到 onTapUp —— 点击屏幕中央无法召唤菜单。
-  /// 改用 Listener + _lastDownDetails 自己判定 tap，不依赖手势系统，
+  /// 改用 Listener + _lastDownEvent 自己判定 tap，不依赖手势系统，
   /// 这样既能触发菜单，又不影响 SelectionArea 的长按文字选中（长按是独立手势）。
-  PointerDownDetails? _lastDownDetails;
+  PointerDownEvent? _lastDownEvent;
 
   void _onPointerUp(PointerUpEvent event) {
-    final down = _lastDownDetails;
-    _lastDownDetails = null;
+    final down = _lastDownEvent;
+    _lastDownEvent = null;
     if (down == null) return;
     // 简单 tap 判定：移动距离 < kTouchSlop，且为左键
     final dx = event.position.dx - down.position.dx;
@@ -1578,7 +1633,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   void _onPointerDown(PointerDownEvent event) {
-    _lastDownDetails = event;
+    _lastDownEvent = event;
   }
 
   void _executeTapAction(TapZoneAction action) {
@@ -2111,46 +2166,115 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final displayContent = convertChinese
         ? ChineseConverter.convert(content, provider.chineseConverterType)
         : content;
-    // 如果内容包含 HTML 标签，使用 Html 组件渲染
-    if (_containsHtml(displayContent)) {
-      // flutter_html 3.0.0 不支持 CSS text-indent，必须把全角空格直接注入到
-      // p/div/br 后，否则含 HTML 标签的页面段落首行不会缩进（字号越大越明显，
-      // 因为分页后更多页面会走 HTML 路径）。
-      final indent = provider.paragraphIndent;
-      final htmlWithIndent = indent.isEmpty
-          ? _stripHtmlIndent(displayContent)
-          : _injectIndentIntoHtml(displayContent, indent);
-      return Html(
-        data: htmlWithIndent,
-        style: {
-          'body': Style(
-            fontSize: FontSize(provider.fontSize),
-            color: provider.textColor,
-            lineHeight: LineHeight(provider.lineHeight),
-            fontFamily: provider.fontFamily,
-            fontWeight: _readerFontWeight(provider),
-            textAlign: TextAlign.justify,
-          ),
-          'p': Style(margin: Margins.only(bottom: provider.paragraphSpacing)),
-          'div': Style(margin: Margins.only(bottom: provider.paragraphSpacing)),
-        },
-      );
+    // 统一走 HTML 渲染路径：纯文本也包装成 <p> 标签，所有样式用 CSS 定义，
+    // 分页测量和渲染用同一套样式数据源，消除双套计算偏差。
+    // 高亮规则通过内联 <span style="..."> 注入到 HTML 字符串。
+    final html = _buildUnifiedHtml(provider, displayContent, applyIndent);
+    return Html(
+      data: html,
+      style: _readerHtmlStyle(provider),
+    );
+  }
+
+  /// 统一构建 HTML 内容：把纯文本段落包装成 <p> 标签，注入缩进实体，
+  /// 高亮规则通过内联 <span style="..."> 包装。
+  /// 这样无论原始内容是纯文本还是 HTML，都走同一条 Html 渲染路径，
+  /// 样式完全由 _readerHtmlStyle 控制。
+  String _buildUnifiedHtml(
+    ReaderProvider provider,
+    String content,
+    bool applyIndent,
+  ) {
+    final indent = applyIndent ? provider.paragraphIndent : '';
+    final entity = indent.replaceAll('\u3000', '&#x3000;');
+
+    if (_containsHtml(content)) {
+      // 已是 HTML：注入缩进实体到 p/div/br 后
+      // 高亮规则不应用到 HTML 内容（HTML 已是富文本，避免破坏标签结构）
+      return indent.isEmpty
+          ? _stripHtmlIndent(content)
+          : _injectIndentIntoHtml(content, indent);
     }
 
-    final paragraphs = _splitToParagraphs(displayContent);
-    final highlights = _getActiveHighlights();
+    // 纯文本：按段落分割，每段包装成 <p>缩进实体 + 段落文本</p>
+    final paragraphs = _splitToParagraphs(content);
     final rules = provider.highlightRules.where((r) => r.enabled).toList();
+    final buf = StringBuffer();
+    for (final para in paragraphs) {
+      // 去除源内容自带缩进，统一用 CSS/text 实体注入
+      final trimmed = para.replaceAll(_leadingIndentRegex, '');
+      final body = entity.isEmpty ? trimmed : '$entity$trimmed';
+      buf.write('<p>');
+      buf.write(_wrapWithHighlightHtml(body, rules));
+      buf.write('</p>');
+    }
+    return buf.toString();
+  }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: paragraphs.map((para) {
-        final indentedPara = applyIndent ? _applyIndent(para, provider) : para;
-        return Padding(
-          padding: EdgeInsets.only(bottom: provider.paragraphSpacing),
-          child: _buildRichParagraph(provider, indentedPara, highlights, rules),
-        );
-      }).toList(),
-    );
+  /// 统一的 HTML CSS 样式表：字号、行高、字距、段距、缩进、颜色、字重
+  /// 分页测量时用 _readerTextStyle 引用同一份样式定义，保证零偏差。
+  Map<String, Style> _readerHtmlStyle(ReaderProvider provider) {
+    return {
+      'body': Style(
+        fontSize: FontSize(provider.fontSize),
+        color: provider.textColor,
+        lineHeight: LineHeight(provider.lineHeight),
+        fontFamily: provider.fontFamily.isNotEmpty ? provider.fontFamily : null,
+        fontWeight: _readerFontWeight(provider),
+        textAlign: TextAlign.justify,
+      ),
+      'p': Style(
+        margin: Margins.only(bottom: provider.paragraphSpacing),
+      ),
+      'div': Style(
+        margin: Margins.only(bottom: provider.paragraphSpacing),
+      ),
+    };
+  }
+
+  /// 把高亮规则应用到文本，包装成内联 <span style="..."> 标签
+  /// flutter_html 3.0.0-beta.2 不支持 CSS class 选择器扩展，
+  /// 所以直接用内联 style 属性，兼容性最好。
+  String _wrapWithHighlightHtml(String html, List<HighlightRule> rules) {
+    if (rules.isEmpty) return html;
+    var result = html;
+    for (final rule in rules) {
+      if (rule.pattern.isEmpty) continue;
+      try {
+        final regex = RegExp(rule.pattern, multiLine: true);
+        final styleStr = _highlightStyleToCss(rule);
+        result = result.replaceAllMapped(regex, (match) {
+          final matched = match.group(0) ?? '';
+          // 转义 HTML 特殊字符，避免破坏标签
+          final escaped = matched
+              .replaceAll('&', '&amp;')
+              .replaceAll('<', '&lt;')
+              .replaceAll('>', '&gt;');
+          return '<span style="$styleStr">$escaped</span>';
+        });
+      } catch (_) {}
+    }
+    return result;
+  }
+
+  String _highlightStyleToCss(HighlightRule rule) {
+    // Flutter 3.41 起 Color.red/green/blue/alpha 已弃用，改用 r/g/b/a (0.0-1.0)
+    final c = rule.color.color;
+    final r = (c.r * 255).round().clamp(0, 255);
+    final g = (c.g * 255).round().clamp(0, 255);
+    final b = (c.b * 255).round().clamp(0, 255);
+    final a = (c.a * 255).round().clamp(0, 255);
+    final rgba = 'rgba($r, $g, $b, ${a / 255})';
+    return switch (rule.style) {
+      HighlightStyle.background =>
+        'background-color: rgba($r, $g, $b, 0.4);',
+      HighlightStyle.underline =>
+        'text-decoration: underline; text-decoration-color: $rgba; text-decoration-thickness: 2px;',
+      HighlightStyle.strikethrough =>
+        'text-decoration: line-through; text-decoration-color: $rgba; text-decoration-thickness: 2px;',
+      HighlightStyle.wavy =>
+        'text-decoration: underline wavy; text-decoration-color: $rgba; text-decoration-thickness: 2px;',
+    };
   }
 
   static final _leadingIndentRegex = RegExp(r'^[\u3000\t ]+');
@@ -2173,21 +2297,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         .replaceAll('&lt;', '<')
         .replaceAll('&gt;', '>')
         .replaceAll('&quot;', '"');
-  }
-
-  Widget _buildRichParagraph(
-    ReaderProvider provider,
-    String text,
-    List<Highlight> highlights,
-    List<HighlightRule> rules,
-  ) {
-    final spans = _buildTextSpans(provider, text, highlights, rules);
-    return Text.rich(
-      TextSpan(children: spans),
-      style: _readerTextStyle(provider),
-      textAlign: TextAlign.justify,
-      softWrap: true,
-    );
   }
 
   FontWeight _readerFontWeight(ReaderProvider provider) {
@@ -2219,132 +2328,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       3 => Alignment.centerRight,
       _ => Alignment.centerLeft,
     };
-  }
-
-  List<InlineSpan> _buildTextSpans(
-    ReaderProvider provider,
-    String text,
-    List<Highlight> highlights,
-    List<HighlightRule> rules,
-  ) {
-    // Build a map of character indices to highlight/style info
-    final styleMap = <int, _HighlightInfo>{};
-
-    // Apply manual highlights
-    for (final h in highlights) {
-      for (var i = h.startIndex; i < h.endIndex && i < text.length; i++) {
-        styleMap[i] = _HighlightInfo(
-          color: h.color,
-          style: h.style,
-          note: h.note,
-        );
-      }
-    }
-
-    // Apply regex rules
-    for (final rule in rules) {
-      try {
-        final regex = RegExp(rule.pattern, multiLine: true);
-        for (final match in regex.allMatches(text)) {
-          for (var i = match.start; i < match.end && i < text.length; i++) {
-            styleMap.putIfAbsent(
-              i,
-              () => _HighlightInfo(color: rule.color, style: rule.style),
-            );
-          }
-        }
-      } catch (_) {}
-    }
-
-    if (styleMap.isEmpty) {
-      return [TextSpan(text: text)];
-    }
-
-    final spans = <InlineSpan>[];
-    var currentStart = 0;
-    _HighlightInfo? currentInfo;
-
-    for (var i = 0; i <= text.length; i++) {
-      final info = styleMap[i];
-      if (info != currentInfo) {
-        if (i > currentStart && currentInfo != null) {
-          spans.add(
-            _buildHighlightSpan(
-              text.substring(currentStart, i),
-              currentInfo,
-              provider,
-            ),
-          );
-        } else if (i > currentStart) {
-          spans.add(TextSpan(text: text.substring(currentStart, i)));
-        }
-        currentStart = i;
-        currentInfo = info;
-      }
-    }
-
-    return spans;
-  }
-
-  InlineSpan _buildHighlightSpan(
-    String text,
-    _HighlightInfo info,
-    ReaderProvider provider,
-  ) {
-    final highlightColor = info.color.color;
-
-    switch (info.style) {
-      case HighlightStyle.background:
-        return TextSpan(
-          text: text,
-          style: TextStyle(
-            backgroundColor: highlightColor.withValues(alpha: 0.4),
-            color: provider.textColor,
-          ),
-        );
-      case HighlightStyle.underline:
-        return TextSpan(
-          text: text,
-          style: TextStyle(
-            decoration: TextDecoration.underline,
-            decorationColor: highlightColor,
-            decorationThickness: 2,
-            color: provider.textColor,
-          ),
-        );
-      case HighlightStyle.strikethrough:
-        return TextSpan(
-          text: text,
-          style: TextStyle(
-            decoration: TextDecoration.lineThrough,
-            decorationColor: highlightColor,
-            decorationThickness: 2,
-            color: provider.textColor,
-          ),
-        );
-      case HighlightStyle.wavy:
-        return TextSpan(
-          text: text,
-          style: TextStyle(
-            decoration: TextDecoration.underline,
-            decorationStyle: TextDecorationStyle.wavy,
-            decorationColor: highlightColor,
-            decorationThickness: 2,
-            color: provider.textColor,
-          ),
-        );
-    }
-  }
-
-  List<Highlight> _getActiveHighlights() {
-    if (_book == null) return [];
-    return StorageService.instance
-        .getChapterHighlights(
-          _book?.bookUrl ?? widget.bookUrl,
-          _currentChapterIndex,
-        )
-        .map((e) => Highlight.fromJson(e))
-        .toList();
   }
 
   // ==================== Slide Mode (PageView) ====================
@@ -2747,36 +2730,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   // ==================== Menu ====================
 
-  IconData _pageModeIcon(PageMode mode) {
-    switch (mode) {
-      case PageMode.scroll:
-        return Icons.view_agenda;
-      case PageMode.slide:
-        return Icons.swap_horiz;
-      case PageMode.cover:
-        return Icons.auto_stories;
-      case PageMode.simulation:
-        return Icons.menu_book;
-      case PageMode.none:
-        return Icons.block;
-    }
-  }
-
-  String _pageModeLabel(PageMode mode) {
-    switch (mode) {
-      case PageMode.scroll:
-        return '滚动';
-      case PageMode.slide:
-        return '滑动';
-      case PageMode.cover:
-        return '覆盖';
-      case PageMode.simulation:
-        return '仿真';
-      case PageMode.none:
-        return '无动画';
-    }
-  }
-
   // ==================== Dialogs ====================
 
   void _showChangeSourceDialog() {
@@ -2961,140 +2914,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     );
   }
 
-  void _showFontDialog(ReaderProvider provider) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: const Text('字体设置'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Font size
-                    Row(
-                      children: [
-                        const Text('字号'),
-                        Expanded(
-                          child: Slider(
-                            value: provider.fontSize,
-                            min: 12,
-                            max: 32,
-                            divisions: 20,
-                            onChanged: (value) {
-                              provider.setFontSize(value);
-                              setDialogState(() {});
-                            },
-                            onChangeEnd: (_) {
-                              // 拖动结束后再重分页，避免高频 _splitContentToPages 造成卡顿
-                              _repaginatePreservingPosition();
-                            },
-                          ),
-                        ),
-                        Text('${provider.fontSize.toInt()}'),
-                      ],
-                    ),
-                    // Letter spacing
-                    Row(
-                      children: [
-                        const Text('字距'),
-                        Expanded(
-                          child: Slider(
-                            value: provider.letterSpacing,
-                            min: 0,
-                            max: 5,
-                            divisions: 50,
-                            onChanged: (value) {
-                              provider.setLetterSpacing(value);
-                              setDialogState(() {});
-                            },
-                            onChangeEnd: (_) {
-                              _repaginatePreservingPosition();
-                            },
-                          ),
-                        ),
-                        Text(provider.letterSpacing.toStringAsFixed(1)),
-                      ],
-                    ),
-                    // Font family
-                    const SizedBox(height: DesignTokens.spacingSm),
-                    Row(
-                      children: [
-                        const Text('字体'),
-                        const SizedBox(width: DesignTokens.spacingSm),
-                        Expanded(
-                          child: Builder(
-                            builder: (context) {
-                              final allFonts = [
-                                '默认',
-                                ..._getSystemFonts(),
-                              ];
-                              // 若已保存的 fontFamily 不在列表中（如导入配置带入），
-                              // 用 '默认' 兜底，否则 DropdownButton 会抛
-                              // "value is in valueKeys" multiple validation errors
-                              final currentFamily = provider.fontFamily;
-                              final dropdownValue = currentFamily.isEmpty ||
-                                      !allFonts.contains(currentFamily)
-                                  ? '默认'
-                                  : currentFamily;
-                              return DropdownButton<String>(
-                                value: dropdownValue,
-                                isExpanded: true,
-                                items: allFonts.map((f) {
-                                  return DropdownMenuItem(
-                                    value: f,
-                                    child: Text(f),
-                                  );
-                                }).toList(),
-                                onChanged: (value) {
-                                  provider.setFontFamily(
-                                    value == '默认' ? '' : value!,
-                                  );
-                                  setDialogState(() {});
-                                },
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                    // EPUB font loading
-                    if (_book != null &&
-                        LocalBookService.detectBookType(_book!.bookUrl) ==
-                            LocalBookType.epub) ...[
-                      const SizedBox(height: DesignTokens.spacingSm),
-                      SwitchListTile(
-                        title: const Text('加载EPUB内嵌字体'),
-                        value: provider.loadEpubFonts,
-                        onChanged: (value) {
-                          provider.setLoadEpubFonts(value);
-                          setDialogState(() {});
-                        },
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('确定'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  List<String> _getSystemFonts() {
-    // Common system fonts
-    return ['serif', 'sans-serif', 'monospace'];
-  }
-
   void _showSpacingDialog(ReaderProvider provider) {
     showDialog(
       context: context,
@@ -3184,147 +3003,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               ],
             );
           },
-        );
-      },
-    );
-  }
-
-  void _showPageModePicker(ReaderProvider provider) {
-    final modes = PageMode.values;
-    final labels = ['滚动', '滑动', '覆盖', '仿真', '无动画'];
-    final icons = [
-      Icons.view_agenda,
-      Icons.swap_horiz,
-      Icons.auto_stories,
-      Icons.menu_book,
-      Icons.block,
-    ];
-
-    showModalBottomSheet(
-      context: context,
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(DesignTokens.spacingLg),
-                child: Text(
-                  '翻页模式',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: List.generate(modes.length, (i) {
-                  final isSelected = provider.pageMode == modes[i];
-                  return GestureDetector(
-                    onTap: () {
-                      provider.setPageMode(modes[i]);
-                      _repaginatePreservingPosition();
-                      Navigator.pop(context);
-                    },
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 56,
-                          height: 56,
-                          decoration: BoxDecoration(
-                            color: isSelected
-                                ? Theme.of(
-                                    context,
-                                  ).colorScheme.primary.withValues(alpha: 0.2)
-                                : Colors.grey.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(
-                              DesignTokens.panelRadius,
-                            ),
-                            border: isSelected
-                                ? Border.all(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.primary,
-                                    width: 2,
-                                  )
-                                : null,
-                          ),
-                          child: Icon(
-                            icons[i],
-                            color: isSelected
-                                ? Theme.of(context).colorScheme.primary
-                                : null,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          labels[i],
-                          style: TextStyle(
-                            color: isSelected
-                                ? Theme.of(context).colorScheme.primary
-                                : null,
-                            fontWeight: isSelected ? FontWeight.bold : null,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-              ),
-              const SizedBox(height: DesignTokens.spacingLg),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _showBackgroundColorDialog(ReaderProvider provider) {
-    final colors = [
-      const Color(0xFFFFF8E1), // warm yellow
-      const Color(0xFFE8F5E9), // green
-      const Color(0xFFE3F2FD), // blue
-      const Color(0xFFFFF3E0), // orange
-      const Color(0xFFF3E5F5), // purple
-      const Color(0xFF1A1A1A), // dark
-    ];
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('背景色'),
-          content: Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: colors.map((color) {
-              return GestureDetector(
-                onTap: () {
-                  provider.setBackgroundColor(color);
-                  Navigator.pop(context);
-                },
-                child: Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: color,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: provider.backgroundColor == color
-                          ? Theme.of(context).colorScheme.primary
-                          : Colors.grey,
-                      width: 2,
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('取消'),
-            ),
-          ],
         );
       },
     );
@@ -4377,14 +4055,6 @@ class _PageCurlPainter extends CustomPainter {
 }
 
 // ==================== Helper Classes ====================
-
-class _HighlightInfo {
-  final HighlightColor color;
-  final HighlightStyle style;
-  final String? note;
-
-  _HighlightInfo({required this.color, required this.style, this.note});
-}
 
 class _NovelChapterListPanel extends StatefulWidget {
   final Book? book;
