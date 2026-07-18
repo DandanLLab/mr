@@ -2095,6 +2095,30 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     );
   }
 
+  /// 构建章节标题 Widget（统一入口）
+  ///
+  /// 关键渲染层级修复：
+  /// - 外层包 MediaQuery 强制 textScaler=1.0，与正文 Html 行为一致
+  /// - 避免 main.dart 的 MaterialApp.builder 注入的 textScaler=currentFontScale/10
+  ///   导致标题字号被缩放，而正文 Html 内部覆盖 textScaler=1.0 不被缩放，
+  ///   产生标题与正文比例失调
+  /// - _buildChapterContent（滚动模式）和 _buildPageContent（分页模式）共用此方法
+  Widget _buildChapterTitle(ReaderProvider provider, String title) {
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(
+        textScaler: const TextScaler.linear(1.0),
+      ),
+      child: Align(
+        alignment: _titleAlignment(provider),
+        child: Text(
+          ChineseConverter.convert(title, provider.chineseConverterType),
+          style: _titleTextStyle(provider),
+          textAlign: _titleTextAlign(provider),
+        ),
+      ),
+    );
+  }
+
   Widget _buildChapterContent(
     ReaderProvider provider,
     String content,
@@ -2106,14 +2130,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         // 章节标题
         if (_showChapterTitle(provider)) ...[
           SizedBox(height: provider.titleTopSpacing.toDouble()),
-          Align(
-            alignment: _titleAlignment(provider),
-            child: Text(
-              ChineseConverter.convert(title, provider.chineseConverterType),
-              style: _titleTextStyle(provider),
-              textAlign: _titleTextAlign(provider),
-            ),
-          ),
+          _buildChapterTitle(provider, title),
           SizedBox(height: provider.titleBottomSpacing.toDouble()),
         ],
         _buildRichContent(provider, content),
@@ -2146,9 +2163,22 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     // 分页测量和渲染用同一套样式数据源，消除双套计算偏差。
     // 高亮规则通过内联 <span style="..."> 注入到 HTML 字符串。
     final html = _buildUnifiedHtml(provider, displayContent, applyIndent);
-    return Html(
-      data: html,
-      style: _readerHtmlStyle(provider),
+    // 关键修复：外层包 MediaQuery 强制 textScaler = 1.0
+    // - flutter_html 内部 CssBoxWidget 对 top:false 子节点会强制 textScaler=1.0
+    //   但 top:true 的 body 根节点不覆盖，会受外层 MediaQuery 影响
+    // - main.dart 的 MaterialApp.builder 注入了 textScaler = currentFontScale/10
+    //   这会导致 Html 的 body 几何计算被缩放，但正文 Text.rich 不被缩放（内部覆盖）
+    //   产生 body 容器与文本不匹配的几何偏差
+    // - 这里显式覆盖为 1.0，让 Html 整体不受 UI 字号缩放影响
+    //   章节标题 Text 也用同样处理（见 _buildChapterContent），保持比例一致
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(
+        textScaler: const TextScaler.linear(1.0),
+      ),
+      child: Html(
+        data: html,
+        style: _readerHtmlStyle(provider),
+      ),
     );
   }
 
@@ -2165,52 +2195,103 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     String content,
     bool applyIndent,
   ) {
-    final indent = applyIndent ? provider.paragraphIndent : '';
-    final entity = indent.replaceAll('\u3000', '&#x3000;');
     final rules = provider.highlightRules.where((r) => r.enabled).toList();
     final paragraphs = _splitToParagraphs(content);
     final buf = StringBuffer();
 
-    for (final para in paragraphs) {
-      // 剥掉源内容自带缩进，先 highlight 再 prepend 实体
-      final trimmed = para.replaceAll(_leadingIndentRegex, '');
-      final highlighted = _wrapWithHighlightHtml(trimmed, rules);
-      final body = entity.isEmpty ? highlighted : '$entity$highlighted';
-      buf.write('<p>');
-      buf.write(body);
-      buf.write('</p>');
+    if (applyIndent) {
+      // 滚动模式：内容是整章原文，需要剥掉源内容自带缩进，
+      // 统一 prepend 配置的缩进实体（&#x3000;），保证每段首行缩进一致
+      final indent = provider.paragraphIndent;
+      final entity = indent.replaceAll('\u3000', '&#x3000;');
+      for (final para in paragraphs) {
+        // 先 highlight 再 prepend 实体，避免贪婪匹配的高亮规则
+        // 误匹配 &#x3000; 实体后转义成 &amp;#x3000; 导致缩进消失
+        final trimmed = para.replaceAll(_leadingIndentRegex, '');
+        final highlighted = _wrapWithHighlightHtml(trimmed, rules);
+        final body = entity.isEmpty ? highlighted : '$entity$highlighted';
+        buf.write('<p>');
+        buf.write(body);
+        buf.write('</p>');
+      }
+    } else {
+      // 分页模式：pageText 已经过 _splitContentToPages + _applyIndent 处理，
+      // 每段首行已含 \u3000 缩进，续页首行（段落被切分的后半部分）无缩进。
+      // 这里保留原样，不再二次加缩进，否则续页首行会被错误地加上缩进，
+      // 导致"段首缩进不统一"（段落开头有缩进，续页首行也有缩进）。
+      // \u3000 是合法 Unicode 字符，flutter_html 可直接渲染，无需转义成实体。
+      for (final para in paragraphs) {
+        final highlighted = _wrapWithHighlightHtml(para, rules);
+        buf.write('<p>');
+        buf.write(highlighted);
+        buf.write('</p>');
+      }
     }
     return buf.toString();
   }
 
   /// 统一的 HTML CSS 样式表：字号、行高、字距、段距、缩进、颜色、字重
-  /// 分页测量时用 _readerTextStyle 引用同一份样式定义，保证零偏差。
-  /// 关键：所有影响布局的字段（fontSize/lineHeight/letterSpacing/fontWeight/fontFamily）
-  /// 必须与 _readerTextStyle 完全一致，否则测量高度与渲染高度不一致。
+  ///
+  /// 关键修复：flutter_html 的根 StyledElement 会继承 DefaultTextStyle.of(context).style，
+  /// 所有未显式设置的字段都会继承 Scaffold/Material 注入的 DefaultTextStyle。
+  /// 因此必须显式设置所有可能影响布局/视觉的字段，避免继承导致样式不可控。
+  ///
+  /// 同时清零 flutter_html 默认样式：
+  /// - <body> 默认 margin: Margins.all(8.0) → 显式 margin: Margins.zero
+  /// - <p> 默认 margin: Margins.symmetric(vertical: 1, unit: Unit.em) → 显式 only(bottom)
+  /// - <p> 默认 display: Display.block → 保留（block 才能独占一行）
   Map<String, Style> _readerHtmlStyle(ReaderProvider provider) {
+    final fontFamily = provider.fontFamily.isNotEmpty ? provider.fontFamily : null;
     return {
       'body': Style(
         fontSize: FontSize(provider.fontSize),
         color: provider.textColor,
         lineHeight: LineHeight(provider.lineHeight),
-        fontFamily: provider.fontFamily.isNotEmpty ? provider.fontFamily : null,
+        fontFamily: fontFamily,
         fontWeight: _readerFontWeight(provider),
         letterSpacing: provider.letterSpacing,
         textAlign: TextAlign.justify,
-        // 显式清零 body 默认 padding/margin，避免 flutter_html 内部默认值
-        // 造成测量宽度与实际渲染宽度不一致
+        // 显式设置可能被 DefaultTextStyle 继承的字段，避免继承导致样式不可控
+        backgroundColor: Colors.transparent,
+        fontStyle: FontStyle.normal,
+        textDecoration: TextDecoration.none,
+        wordSpacing: 0,
+        // 显式清零 flutter_html <body> 默认 margin: Margins.all(8.0)
         padding: HtmlPaddings.zero,
         margin: Margins.zero,
+        display: Display.block,
       ),
       'p': Style(
-        margin: Margins.only(bottom: provider.paragraphSpacing),
+        // 显式清零 flutter_html <p> 默认 margin: Margins.symmetric(vertical: 1, unit: Unit.em)
+        // 只保留 bottom margin 作为段距，top/left/right 全部为 0
+        margin: Margins.only(
+          top: 0,
+          bottom: provider.paragraphSpacing,
+          left: 0,
+          right: 0,
+        ),
+        // 继承 body 的字号/颜色/行高/字距/字重/字体等（通过 copyOnlyInherited）
+        // 但显式设置以下字段避免继承 DefaultTextStyle
         letterSpacing: provider.letterSpacing,
         padding: HtmlPaddings.zero,
+        backgroundColor: Colors.transparent,
+        display: Display.block,
       ),
       'div': Style(
-        margin: Margins.only(bottom: provider.paragraphSpacing),
+        margin: Margins.only(
+          top: 0,
+          bottom: provider.paragraphSpacing,
+          left: 0,
+          right: 0,
+        ),
         letterSpacing: provider.letterSpacing,
         padding: HtmlPaddings.zero,
+        backgroundColor: Colors.transparent,
+        display: Display.block,
+      ),
+      // 高亮 span 标签：只继承 body/p 的样式，不额外设置
+      'span': Style(
+        backgroundColor: Colors.transparent,
       ),
     };
   }
@@ -2521,14 +2602,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                 children: [
                   if (showTitle) ...[
                     SizedBox(height: provider.titleTopSpacing.toDouble()),
-                    Align(
-                      alignment: _titleAlignment(provider),
-                      child: Text(
-                        _displayChapterTitle(provider),
-                        style: _titleTextStyle(provider),
-                        textAlign: _titleTextAlign(provider),
-                      ),
-                    ),
+                    _buildChapterTitle(provider, _chapterTitle),
                     SizedBox(height: provider.titleBottomSpacing.toDouble()),
                   ],
                   Expanded(
@@ -2537,6 +2611,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                       child: _buildRichContent(
                         provider,
                         pageText,
+                        // 分页结果已含缩进（_applyIndent 处理过），
+                        // 续页首行无缩进，不能再加缩进
+                        applyIndent: false,
                         convertChinese: false,
                       ),
                     ),
