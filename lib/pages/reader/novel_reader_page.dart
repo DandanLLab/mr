@@ -1062,6 +1062,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   // ==================== Tap Zone ====================
 
   void _handleTap(TapUpDetails details) {
+    // 标记本次 tap 已由 Listener 处理，防止随后到达的 JS click 二次触发
+    _tapConsumedByListener = true;
     // 菜单显示时点击任意区域（含 overlay 外部）都关闭菜单，符合「点击外部关闭」的交互预期
     if (_showMenu) {
       _hideMenu();
@@ -1091,6 +1093,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   /// 改用 Listener + _lastDownEvent 自己判定 tap，不依赖手势系统，
   /// 这样既能触发菜单，又不影响 SelectionArea 的长按文字选中（长按是独立手势）。
   PointerDownEvent? _lastDownEvent;
+  // 标志：本次 tap 已由 Listener 的 _handleTap 处理，
+  // 用于防止 WebView 的 JS click 事件二次触发相同 tap（双重处理会导致
+  // 菜单显示后立即被 _onWebviewTap 关闭）。
+  // 时序：Listener 先收到 pointerUp → _handleTap 设标志；
+  //       随后 JS click → _onWebviewTap 检查标志并跳过。
+  // 每次 pointerDown 重置，避免误判下一次 tap。
+  bool _tapConsumedByListener = false;
 
   void _onPointerUp(PointerUpEvent event) {
     final down = _lastDownEvent;
@@ -1110,6 +1119,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   void _onPointerDown(PointerDownEvent event) {
     _lastDownEvent = event;
+    // 重置去重标志：每次新的 pointer down 都是一次新的 tap
+    _tapConsumedByListener = false;
   }
 
   void _executeTapAction(TapZoneAction action) {
@@ -1540,9 +1551,18 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   /// WebView 内部点击事件（由 JS 检测后回调）
   ///
   /// x, y 是相对 WebView 视口的坐标（clientX/clientY）。
-  /// WebView 是 PlatformView，会消费 pointer 事件，外层 Listener 收不到
-  /// pointerUp，所以 tap 分区只能在这里处理。
+  /// WebView 是 PlatformView，同一 tap 会同时触发：
+  ///   1. 外层 Listener 的 onPointerUp → _handleTap（先）
+  ///   2. WebView 内部 JS click → _onWebviewTap（后）
+  /// 用 _tapConsumedByListener 标志去重，避免双重处理导致
+  /// 菜单显示后立即被关闭（_handleTap 显示 → _onWebviewTap 检测到 _showMenu 关闭）。
   void _onWebviewTap(double x, double y) {
+    // 去重：若本次 tap 已由 Listener 的 _handleTap 处理，跳过 JS click 的二次触发
+    // （WebView 是 PlatformView，同一 tap 会同时触发 Flutter Listener 和 JS click）
+    if (_tapConsumedByListener) {
+      _tapConsumedByListener = false;
+      return;
+    }
     // 菜单显示时点击任意区域关闭菜单
     if (_showMenu) {
       _hideMenu();
