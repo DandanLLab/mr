@@ -504,73 +504,128 @@ jobs:
           export PATH="$HOME/ohos-flutter/bin:$PATH"
           flutter pub get
 
+      - name: Install ohpm Dependencies
+        # 单独运行 ohpm install，确保 flutter_ohos 包在 patch 前已下载到 oh_modules
+        # 修复问题：原两阶段构建中，第一阶段可能在 ohpm install 完成前就失败，
+        # 导致 patch 步骤执行 find 时 oh_modules 目录不存在，补丁未打上
+        run: |
+          cd ohos
+          ohpm install
+          echo "=== oh_modules 目录结构（顶层）==="
+          find oh_modules -maxdepth 3 -type d 2>/dev/null | head -30
+          echo "=== 查找 flutter_ohos 包 ==="
+          find oh_modules -type d -name "flutter_ohos" 2>/dev/null | head -5
+
+      - name: Patch flutter_ohos
+        # 修复 flutter_ohos 与 HarmonyOS 5.1 SDK 的 API 不兼容：
+        # - KeyEvent.isCapsLockOn / isNumLockOn 已移除 → 替换为 false
+        # - window.getGlobalWindowMode() / GlobalWindowMode 已移除 → 替换为 1 / number
+        # 用 find -name 直接查找文件（比 find -path 更可靠，不受 .ohpm 哈希目录名影响）
+        run: |
+          echo "=== 查找需要 patch 的文件 ==="
+          KEH=$(find ohos/oh_modules -type f -name "KeyEventHandler.ets" 2>/dev/null | head -1)
+          PIP=$(find ohos/oh_modules -type f -name "PiPVisibilityBridge.ets" 2>/dev/null | head -1)
+
+          if [ -n "$KEH" ]; then
+            echo "找到 KeyEventHandler.ets: $KEH"
+            # event.isCapsLockOn → false（替换整个属性访问，不能只替换 .isCapsLockOn）
+            sed -i 's/[a-zA-Z_]\+\.isCapsLockOn/false/g' "$KEH"
+            sed -i 's/[a-zA-Z_]\+\.isNumLockOn/false/g' "$KEH"
+            echo "✅ Patched KeyEventHandler.ets"
+          else
+            echo "⚠️ 未找到 KeyEventHandler.ets"
+          fi
+
+          if [ -n "$PIP" ]; then
+            echo "找到 PiPVisibilityBridge.ets: $PIP"
+            # window.getGlobalWindowMode() → 1
+            sed -i 's/window\.getGlobalWindowMode()/1/g' "$PIP"
+            # window.GlobalWindowMode.XXX → 1（值上下文）
+            sed -i 's/window\.GlobalWindowMode\.[A-Z_]\+/1/g' "$PIP"
+            # window.GlobalWindowMode → number（类型上下文）
+            sed -i 's/window\.GlobalWindowMode/number/g' "$PIP"
+            echo "✅ Patched PiPVisibilityBridge.ets"
+          else
+            echo "⚠️ 未找到 PiPVisibilityBridge.ets"
+          fi
+
+          if [ -z "$KEH" ] && [ -z "$PIP" ]; then
+            echo "❌ 未找到任何需要 patch 的文件！oh_modules 目录内容："
+            find ohos/oh_modules -type f 2>/dev/null | head -20
+            echo "❌ 后续构建大概率会失败"
+          fi
+
       - name: Build HAP
         # 不签名构建：生成未签名 HAP，用户自行用 DevEco Studio 签名后安装
-        # 两阶段构建：第一次触发 ohpm install 并在 ArkTS 编译失败，
-        # 然后 patch flutter_ohos 不兼容 API，第二次构建通过
+        # ohpm install + patch 已在前面完成，此处单阶段构建
+        # 保留两阶段兜底：如果 ohpm install 未下载到 flutter_ohos（包仅在 hvigorw 构建时拉取），
+        # 第一次构建会失败但在 ohpm install 阶段下载包，随后重新 patch 再构建
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
 
-          # 第一阶段：触发 ohpm install（会在 CompileArkTS 失败）
-          echo "=== 第一阶段：ohpm install + 触发编译 ==="
+          echo "=== 第一阶段：构建 ==="
           set +e
           flutter build hap --release --verbose > /tmp/hap-build-1.log 2>&1
           BUILD1_EXIT=$?
           set -e
           echo "=== 第一阶段退出码: $BUILD1_EXIT ==="
 
-          # patch flutter_ohos 不兼容 API（ohpm install 后才存在 oh_modules）
-          echo "=== Patching flutter_ohos ==="
-          FLUTTER_OHOS_DIR=$(find ohos/oh_modules -type d -path "*/@ohos/flutter_ohos/src/main/ets" | head -1)
-          if [ -n "$FLUTTER_OHOS_DIR" ]; then
-            echo "找到 flutter_ohos: $FLUTTER_OHOS_DIR"
-            KEH="$FLUTTER_OHOS_DIR/embedding/ohos/KeyEventHandler.ets"
-            if [ -f "$KEH" ]; then
-              # event.isCapsLockOn → false（替换整个属性访问，不能只替换 .isCapsLockOn）
-              sed -i 's/[a-zA-Z_]\+\.isCapsLockOn/false/g' "$KEH"
-              sed -i 's/[a-zA-Z_]\+\.isNumLockOn/false/g' "$KEH"
-              echo "✅ Patched KeyEventHandler.ets"
-            fi
-            PIP="$FLUTTER_OHOS_DIR/embedding/ohos/PiPVisibilityBridge.ets"
-            if [ -f "$PIP" ]; then
-              # window.getGlobalWindowMode() → 1
-              sed -i 's/window\.getGlobalWindowMode()/1/g' "$PIP"
-              # window.GlobalWindowMode.XXX → 1（值上下文）
-              sed -i 's/window\.GlobalWindowMode\.[A-Z_]\+/1/g' "$PIP"
-              # window.GlobalWindowMode → number（类型上下文）
-              sed -i 's/window\.GlobalWindowMode/number/g' "$PIP"
-              echo "✅ Patched PiPVisibilityBridge.ets"
-            fi
-          else
-            echo "⚠️ 未找到 flutter_ohos 目录"
-          fi
+          if [ $BUILD1_EXIT -ne 0 ]; then
+            echo "=== 第一阶段失败，检查是否为 ArkTS 编译错误 ==="
+            if grep -q "ArkTS Compiler Error" /tmp/hap-build-1.log; then
+              echo "=== 检测到 ArkTS 编译错误，重新 patch 并构建 ==="
+              # 重新 patch（flutter_ohos 可能由 hvigorw 在构建时才下载）
+              KEH=$(find ohos/oh_modules -type f -name "KeyEventHandler.ets" 2>/dev/null | head -1)
+              PIP=$(find ohos/oh_modules -type f -name "PiPVisibilityBridge.ets" 2>/dev/null | head -1)
+              if [ -n "$KEH" ]; then
+                sed -i 's/[a-zA-Z_]\+\.isCapsLockOn/false/g' "$KEH"
+                sed -i 's/[a-zA-Z_]\+\.isNumLockOn/false/g' "$KEH"
+                echo "✅ Re-patched KeyEventHandler.ets"
+              fi
+              if [ -n "$PIP" ]; then
+                sed -i 's/window\.getGlobalWindowMode()/1/g' "$PIP"
+                sed -i 's/window\.GlobalWindowMode\.[A-Z_]\+/1/g' "$PIP"
+                sed -i 's/window\.GlobalWindowMode/number/g' "$PIP"
+                echo "✅ Re-patched PiPVisibilityBridge.ets"
+              fi
 
-          # 第二阶段：patch 后重新构建
-          echo "=== 第二阶段：patch 后重新构建 ==="
-          set +e
-          flutter build hap --release --verbose > /tmp/hap-build-2.log 2>&1
-          BUILD2_EXIT=$?
-          set -e
-          echo "=== 第二阶段退出码: $BUILD2_EXIT ==="
-
-          # 列出所有 .hap 产物
-          echo "=== 列出所有 .hap 文件 ==="
-          find . -name "*.hap" -type f 2>/dev/null || echo "未找到任何 .hap 文件"
-
-          if [ $BUILD2_EXIT -ne 0 ]; then
-            echo "=== 错误上下文 ==="
-            grep -B 5 -A 10 "error|Error|FAILED|Exception|Cause:" /tmp/hap-build-2.log || true
-            # 即使构建失败，如果有 unsigned HAP 产物也继续上传
-            UNSIGNED_HAP=$(find . -name "*-unsigned.hap" -type f 2>/dev/null | head -1)
-            if [ -n "$UNSIGNED_HAP" ]; then
-              echo "✅ 构建失败但有 unsigned HAP 产物: $UNSIGNED_HAP"
-              BUILD2_EXIT=0
+              echo "=== 第二阶段：patch 后重新构建 ==="
+              set +e
+              flutter build hap --release --verbose > /tmp/hap-build-2.log 2>&1
+              BUILD2_EXIT=$?
+              set -e
+              echo "=== 第二阶段退出码: $BUILD2_EXIT ==="
             else
-              echo "=== 完整构建日志 ==="
-              cat /tmp/hap-build-2.log
+              echo "=== 非 ArkTS 编译错误，输出完整日志 ==="
+              cat /tmp/hap-build-1.log
+              BUILD2_EXIT=$BUILD1_EXIT
             fi
+
+            echo "=== 列出所有 .hap 文件 ==="
+            find . -name "*.hap" -type f 2>/dev/null || echo "未找到任何 .hap 文件"
+
+            if [ "$BUILD2_EXIT" -ne 0 ]; then
+              echo "=== 错误上下文 ==="
+              if [ -f /tmp/hap-build-2.log ]; then
+                grep -B 5 -A 10 "error|Error|FAILED|Exception|Cause:" /tmp/hap-build-2.log || true
+              fi
+              # 即使构建失败，如果有 unsigned HAP 产物也继续上传
+              UNSIGNED_HAP=$(find . -name "*-unsigned.hap" -type f 2>/dev/null | head -1)
+              if [ -n "$UNSIGNED_HAP" ]; then
+                echo "✅ 构建失败但有 unsigned HAP 产物: $UNSIGNED_HAP"
+                BUILD2_EXIT=0
+              else
+                echo "=== 完整构建日志 ==="
+                if [ -f /tmp/hap-build-2.log ]; then
+                  cat /tmp/hap-build-2.log
+                else
+                  cat /tmp/hap-build-1.log
+                fi
+              fi
+            fi
+            exit $BUILD2_EXIT
           fi
-          exit $BUILD2_EXIT
+          exit 0
 
       - name: Rename HAP
         id: hap
