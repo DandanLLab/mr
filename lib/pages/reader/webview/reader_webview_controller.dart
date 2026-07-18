@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import '../../../services/app_logger.dart';
 
 /// WebView 阅读器回调
 class ReaderWebViewCallbacks {
@@ -18,16 +19,12 @@ class ReaderWebViewCallbacks {
   /// 图片点击
   final void Function(String src, Rect rect) onImageTap;
 
-  /// JS 日志回传（用于在阅读器页面显示日志面板）
-  final void Function(String message)? onLog;
-
   const ReaderWebViewCallbacks({
     required this.onInitialized,
     required this.onPageCountReady,
     required this.onPageChanged,
     required this.onTap,
     required this.onImageTap,
-    this.onLog,
   });
 }
 
@@ -208,14 +205,20 @@ window.readerApi.getPageCount();
     );
 
     // JS 日志桥：JS 端调用 callHandler('onReaderLog', msg) 回传到 Flutter
-    // 用途：封装 WebView 无法连 chrome://inspect，通过此通道让阅读器页面显示日志面板
+    // 直接写入 AppLogger（与搜索页一致），阅读器页面通过日志对话框查看
     controller.addJavaScriptHandler(
       handlerName: 'onReaderLog',
       callback: (args) {
-        if (args.isNotEmpty) {
-          final msg = args[0]?.toString() ?? '';
-          debugPrint('[reader-js] $msg');
-          _callbacks?.onLog?.call(msg);
+        if (args.isEmpty) return;
+        final msg = args[0]?.toString() ?? '';
+        if (msg.isEmpty) return;
+        // 级别判定：[error]/[warn] 走对应级别，其余走 debug
+        if (msg.startsWith('[error]') || msg.contains(' uncaught:')) {
+          AppLogger.instance.error(LogCategory.js, msg);
+        } else if (msg.startsWith('[warn]')) {
+          AppLogger.instance.warn(LogCategory.js, msg);
+        } else {
+          AppLogger.instance.debug(LogCategory.js, msg);
         }
       },
     );

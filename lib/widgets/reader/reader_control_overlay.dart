@@ -40,6 +40,8 @@ class ReaderControlOverlay extends StatefulWidget {
   final VoidCallback? onOpenChapterUrl;
   final VoidCallback? onEditSource;
   final VoidCallback? onDisableSource;
+  /// 显示 JS 日志对话框（调试用，可选）
+  final VoidCallback? onShowLog;
   final ValueChanged<double> onSliderChanged;
   final ValueChanged<int> onSliderChangeEnd;
   final VoidCallback? onSliderChangeStart;
@@ -85,6 +87,7 @@ class ReaderControlOverlay extends StatefulWidget {
     this.onOpenChapterUrl,
     this.onEditSource,
     this.onDisableSource,
+    this.onShowLog,
   });
 
   @override
@@ -464,6 +467,9 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
           cs,
           onTap: widget.onToggleNightMode,
         ),
+        // 调试用：查看 WebView JS 日志（仅在回调提供时显示）
+        if (widget.onShowLog != null)
+          _buildFab(Icons.bug_report, cs, onTap: widget.onShowLog!),
       ],
     );
   }
