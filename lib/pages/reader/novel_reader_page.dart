@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../models/book.dart';
 import '../../models/book_source.dart';
@@ -31,6 +32,7 @@ import '../../widgets/change_source_sheet.dart';
 import '../../routes/app_routes.dart';
 import '../../utils/design_tokens.dart';
 import '../../utils/chinese_converter.dart';
+import '../../utils/share_helper.dart';
 import 'webview/reader_webview.dart';
 import 'webview/reader_webview_controller.dart';
 import 'webview/reader_html_template.dart';
@@ -822,6 +824,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       return;
     }
 
+    // 章节切换时主动隐藏文字选区菜单（选区会随 WebView reload 失效，
+    // 不主动隐藏菜单会停留在旧选区位置上看起来很怪）
+    _readerWebViewController.hideSelectionMenu();
+
     final loadToken = ++_chapterLoadToken;
     final chapterIndex = _currentChapterIndex;
     // 同步捕获位置标志位并清空成员字段，防止被新 load 抢占后串到下一章
@@ -1410,12 +1416,262 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     }
   }
 
+  // ==================== 文字选择菜单回调 ====================
+  //
+  // 配套：reader_html_template.dart 中的 #reader-selection-menu（JS 自定义
+  // 浮动菜单，替代 Android 默认 ActionMode 样式不统一问题）；
+  // reader_webview.dart 中 disableContextMenu:true 禁用系统菜单。
+  //
+  // 调用流：
+  // 1. 用户长按选文字 → selectionchange → 防抖 250ms 后 showSelectionMenu
+  // 2. JS 通过 callHandler('onSelectionReady', text, l, t, w, h) 通知 Dart
+  // 3. 用户点击菜单项 → callHandler('onSelectionAction', action, text, l, t, w, h)
+  // 4. Dart 根据 action 分发：copy / highlight / lookup / share
+  // 5. 选区被清除 / 滚动 / 视口变化 → callHandler('onHideSelectionMenu')
+
+  /// 选区稳定 250ms 后触发（菜单已由 JS 自行显示）
+  ///
+  /// Dart 不需要主动响应；保留此回调供未来「按选区位置/内容自动建议操作」
+  /// 等智能菜单扩展用。
+  void _onSelectionReady(String text, Rect rect) {
+    debugPrint(
+      '[NovelReader] selection ready: textLen=${text.length} '
+      'rect=${rect.left.toStringAsFixed(1)},${rect.top.toStringAsFixed(1)}',
+    );
+  }
+
+  /// 菜单项点击分发
+  ///
+  /// action 取值：'copy' / 'highlight' / 'lookup' / 'share'
+  void _onSelectionAction(String action, String text, Rect rect) {
+    if (!mounted) return;
+    switch (action) {
+      case 'copy':
+        _onSelectionCopy(text);
+        break;
+      case 'highlight':
+        _showHighlightColorPicker(text, rect);
+        break;
+      case 'lookup':
+        _onSelectionLookup(text);
+        break;
+      case 'share':
+        _onSelectionShare(text);
+        break;
+      default:
+        debugPrint('[NovelReader] unknown selection action: $action');
+    }
+  }
+
+  /// 选区菜单隐藏（选区被清除 / 滚动 / 视口变化时触发）
+  ///
+  /// Dart 不需要主动响应；JS 已自行移除 visible class。
+  void _onHideSelectionMenu() {
+    // 预留：未来可用于联动关闭 Dart 侧弹出的子菜单（如颜色选择器）
+  }
+
+  // ---- copy ----
+  // JS 端 onSelectionMenuItemClick('copy') 已自行用 Clipboard API 复制，
+  // Dart 此处兜底（部分 WebView 可能拦截 Clipboard API）+ SnackBar 提示。
+  void _onSelectionCopy(String text) {
+    if (text.isEmpty) return;
+    Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    final preview = text.length > 16 ? '${text.substring(0, 16)}…' : text;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已复制: $preview'),
+        duration: const Duration(seconds: 1),
+      ),
+    );
+  }
+
+  // ---- lookup ----
+  // 用内置浏览器（AppRoutes.internalBrowser）打开百度百科词条页，
+  // 最适合中文小说查词场景；不用 url_launcher 是为了在 App 内浏览。
+  void _onSelectionLookup(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    final uri = Uri.parse(
+      'https://baike.baidu.com/item/${Uri.encodeComponent(trimmed)}',
+    );
+    _hideMenu();
+    Navigator.pushNamed(
+      context,
+      AppRoutes.internalBrowser,
+      arguments: <String, dynamic>{
+        'url': uri.toString(),
+        'title': '查词: $trimmed',
+        'sourceUrl': '',
+        'sourceName': '',
+      },
+    );
+  }
+
+  // ---- share ----
+  // 走 ShareHelper 封装，自动处理 iPad sharePositionOrigin
+  void _onSelectionShare(String text) {
+    if (text.isEmpty) return;
+    _hideMenu();
+    ShareHelper.shareText(context, text);
+  }
+
+  /// 高亮颜色 + 样式选择 BottomSheet
+  ///
+  /// 用户选完颜色和样式后，调 _readerWebViewController.highlightSelection
+  /// 给当前选区上色。选区在 BottomSheet 弹出期间可能失效（WebView 失焦 /
+  /// 用户已点击别处），失效时 SnackBar 提示重试。
+  void _showHighlightColorPicker(String text, Rect rect) {
+    var selectedColorIndex = 0; // 默认黄色
+    var selectedStyleIndex = 0; // 默认背景色
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            const colors = <HighlightColor>[
+              HighlightColor.yellow,
+              HighlightColor.green,
+              HighlightColor.blue,
+              HighlightColor.pink,
+              HighlightColor.orange,
+              HighlightColor.purple,
+            ];
+            const styleLabels = <String>['背景色', '下划线', '删除线', '波浪线'];
+            final preview = text.length > 24
+                ? '${text.substring(0, 24)}…'
+                : text;
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '预览: $preview',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Colors.black54,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    '颜色',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
+                    children: List.generate(colors.length, (idx) {
+                      final c = colors[idx];
+                      final selected = selectedColorIndex == idx;
+                      return GestureDetector(
+                        onTap: () {
+                          setSheetState(() {
+                            selectedColorIndex = idx;
+                          });
+                        },
+                        child: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: c.color,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: selected
+                                  ? Colors.black87
+                                  : Colors.black12,
+                              width: selected ? 2.5 : 1,
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    '样式',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: List.generate(styleLabels.length, (idx) {
+                      return ChoiceChip(
+                        label: Text(styleLabels[idx]),
+                        selected: selectedStyleIndex == idx,
+                        onSelected: (_) {
+                          setSheetState(() {
+                            selectedStyleIndex = idx;
+                          });
+                        },
+                      );
+                    }),
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(sheetContext),
+                          child: const Text('取消'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: () async {
+                            Navigator.pop(sheetContext);
+                            final success = await _readerWebViewController
+                                .highlightSelection(
+                              selectedColorIndex,
+                              selectedStyleIndex,
+                            );
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  success ? '已高亮' : '选区已失效，请重试',
+                                ),
+                                duration: const Duration(seconds: 1),
+                              ),
+                            );
+                          },
+                          child: const Text('高亮'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _toggleMenu() {
     setState(() {
       _showMenu = !_showMenu;
     });
     if (_showMenu) {
       _menuAnimController.forward();
+      // 菜单呼出时主动隐藏文字选区菜单，避免两层菜单同时显示混乱
+      _readerWebViewController.hideSelectionMenu();
     } else {
       _menuAnimController.reverse();
     }
@@ -1662,6 +1918,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   onImageTap: _onWebviewImageTap,
                   // 滚动模式无缝衔接：接近底部时加载下一章
                   onScrollNearEnd: _onScrollNearEnd,
+                  // 文字选择菜单（JS 自定义浮动菜单，替代 Android ActionMode）
+                  onSelectionReady: _onSelectionReady,
+                  onSelectionAction: _onSelectionAction,
+                  onHideSelectionMenu: _onHideSelectionMenu,
                 ),
               ),
             ),

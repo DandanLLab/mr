@@ -190,7 +190,11 @@ class _ReaderWebViewState extends State<ReaderWebView> {
             // Texture Layer 模式下 WebView 作为 texture 合成到 Flutter 树，
             // 可被 RepaintBoundary 正常截图。
             useHybridComposition: false,
-            disableContextMenu: false,
+            // 必须为 true：禁用 Android 默认 ActionMode（系统选择菜单），
+            // 改由 JS 自定义浮动菜单（reader_html_template.dart 中的
+            // #reader-selection-menu）替代，样式更美观统一。
+            // 同时长按图片的 onImageTap 通过 JS click 触发，不依赖此菜单。
+            disableContextMenu: true,
             disableHorizontalScroll: true,
             disableVerticalScroll: widget.isScrollMode ? false : true,
             supportZoom: false,

@@ -29,6 +29,31 @@ class ReaderWebViewCallbacks {
   /// 仅滚动模式（PageMode.scroll）会触发。
   final void Function()? onScrollNearEnd;
 
+  /// 文字选区完成（防抖 250ms 稳定后触发）
+  ///
+  /// 参数：
+  /// - text：选中的文字
+  /// - rect：选区在 WebView 内的 rect（WebView 坐标系，已与 Flutter 一致）
+  ///
+  /// 用途：Dart 侧可在此处记录选区位置/内容，用于高亮回填等
+  final void Function(String text, Rect rect)? onSelectionReady;
+
+  /// 文字选择菜单项点击
+  ///
+  /// 参数：
+  /// - action：'copy' / 'highlight' / 'lookup' / 'share'
+  /// - text：选中的文字
+  /// - rect：选区在 WebView 内的 rect
+  ///
+  /// action='copy' 时 JS 已自行用 Clipboard API 复制，Dart 此处兜底
+  /// action='highlight' 时 Dart 应弹颜色选择器，保存 Highlight 并刷新 HTML
+  /// action='lookup' 时 Dart 应弹查词对话框
+  /// action='share' 时 Dart 应调用 Share.share
+  final void Function(String action, String text, Rect rect)? onSelectionAction;
+
+  /// 文字选区菜单隐藏（选区被清除 / 滚动 / 视口变化时触发）
+  final void Function()? onHideSelectionMenu;
+
   const ReaderWebViewCallbacks({
     required this.onInitialized,
     required this.onPageCountReady,
@@ -36,6 +61,9 @@ class ReaderWebViewCallbacks {
     required this.onTap,
     required this.onImageTap,
     this.onScrollNearEnd,
+    this.onSelectionReady,
+    this.onSelectionAction,
+    this.onHideSelectionMenu,
   });
 }
 
@@ -182,6 +210,44 @@ class ReaderWebViewController {
     return _toInt(result);
   }
 
+  /// 主动隐藏 JS 自定义文字选择菜单
+  ///
+  /// 触发场景：
+  /// - 章节切换、翻页时（避免菜单停留在旧选区位置）
+  /// - 用户点击 ReaderControlOverlay 上的按钮（菜单呼出时同时存在选区菜单会很乱）
+  /// - 离开页面 / 退出阅读器
+  Future<void> hideSelectionMenu() async {
+    if (!_isReady) return;
+    await _webviewController?.evaluateJavascript(
+      source: 'window.readerApi.hideSelectionMenu();',
+    );
+  }
+
+  /// 给当前选区上色高亮
+  ///
+  /// 在 JS 端用 surroundContents（单元素选区）或 execCommand('hiliteColor')
+  /// （跨元素选区）给当前选区套 `<span class="sel-hl">`，上色后清除选区
+  /// 并隐藏菜单。
+  ///
+  /// 参数：
+  /// - [colorIndex]：颜色索引（0=黄/1=绿/2=蓝/3=粉/4=橙/5=紫）
+  /// - [styleIndex]：样式索引（0=背景色/1=下划线/2=删除线/3=波浪线）
+  ///
+  /// 返回 true 表示上色成功（JS 端返回 boolean）。
+  /// 失败原因可能：选区已失效（用户已点击别处清除选区）、选区跨段落且
+  /// execCommand 兜底也失败。
+  Future<bool> highlightSelection(int colorIndex, int styleIndex) async {
+    if (!_isReady) return false;
+    final result = await _webviewController?.evaluateJavascript(
+      source: 'window.readerApi.highlightSelection($colorIndex, $styleIndex);',
+    );
+    if (result == null) return false;
+    if (result is bool) return result;
+    if (result is String) return result == 'true';
+    if (result is num) return result != 0;
+    return false;
+  }
+
   /// 重新计算页数（样式更新后调用）
   Future<int> recalcPageCount() async {
     if (!_isReady) return 1;
@@ -272,6 +338,46 @@ window.readerApi.getPageCount();
       handlerName: 'onScrollNearEnd',
       callback: (args) {
         _callbacks?.onScrollNearEnd?.call();
+      },
+    );
+
+    // ============ 文字选择菜单 ============
+    // 选区稳定 250ms 后触发，Dart 侧可记录选区内容/位置
+    controller.addJavaScriptHandler(
+      handlerName: 'onSelectionReady',
+      callback: (args) {
+        if (args.length < 5) return;
+        final text = args[0]?.toString() ?? '';
+        final left = _toDouble(args[1]);
+        final top = _toDouble(args[2]);
+        final width = _toDouble(args[3]);
+        final height = _toDouble(args[4]);
+        _callbacks?.onSelectionReady?.call(text, Rect.fromLTWH(left, top, width, height));
+      },
+    );
+
+    // 菜单项点击：action ∈ {copy, highlight, lookup, share}
+    // action=copy 时 JS 已自行用 Clipboard API 复制，Dart 此处兜底
+    controller.addJavaScriptHandler(
+      handlerName: 'onSelectionAction',
+      callback: (args) {
+        if (args.length < 6) return;
+        final action = args[0]?.toString() ?? '';
+        final text = args[1]?.toString() ?? '';
+        final left = _toDouble(args[2]);
+        final top = _toDouble(args[3]);
+        final width = _toDouble(args[4]);
+        final height = _toDouble(args[5]);
+        _callbacks?.onSelectionAction?.call(
+          action, text, Rect.fromLTWH(left, top, width, height));
+      },
+    );
+
+    // 选区菜单隐藏（选区被清除 / 滚动 / 视口变化）
+    controller.addJavaScriptHandler(
+      handlerName: 'onHideSelectionMenu',
+      callback: (args) {
+        _callbacks?.onHideSelectionMenu?.call();
       },
     );
   }

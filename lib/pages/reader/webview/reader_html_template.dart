@@ -676,6 +676,11 @@ window.readerApi = (function() {
       });
     }
 
+    // 初始化文字选择菜单（替代 Android 默认 ActionMode）
+    // - 监听 selectionchange 防抖显示菜单
+    // - 监听 scroll/touchstart 隐藏菜单
+    initSelectionMenu();
+
     // 等待 DOM 渲染完成后通知 Dart 侧
     // 首次通知：rAF 双帧后立即通知，让 Dart 尽快拿到初步 pageCount 启动渲染
     // （避免首次通知延迟导致首屏白屏）
@@ -723,6 +728,238 @@ window.readerApi = (function() {
         notifyPageCountReady();
       });
     });
+  }
+
+  // ============ 文字选择菜单 ============
+  // 替代 Android 默认 ActionMode（系统菜单样式不统一）。
+  // - 监听 selectionchange 防抖 250ms 显示菜单
+  // - 监听 scroll/touchstart 隐藏菜单
+  // - 菜单项 click 时通过 callHandler 通知 Dart 处理
+  // 配套：reader_webview.dart 中 disableContextMenu=true 禁用系统菜单
+  var selMenuEl = null;
+  var selShowTimer = null;
+  var selLastText = '';
+
+  function initSelectionMenu() {
+    selMenuEl = document.getElementById('reader-selection-menu');
+    if (!selMenuEl) {
+      console.warn('[reader] selection menu element not found');
+      return;
+    }
+    buildSelectionMenuItems();
+
+    // 防抖显示菜单：选区频繁变化时只在稳定后显示
+    document.addEventListener('selectionchange', function() {
+      if (selShowTimer) clearTimeout(selShowTimer);
+      selShowTimer = setTimeout(showSelectionMenu, 250);
+    });
+
+    // 滚动时隐藏菜单（选区可能跟随滚动，菜单位置会错乱）
+    window.addEventListener('scroll', hideSelectionMenu, { passive: true });
+    body.addEventListener('scroll', hideSelectionMenu, { passive: true });
+
+    // 视口变化时隐藏菜单
+    window.addEventListener('resize', hideSelectionMenu, { passive: true });
+  }
+
+  function buildSelectionMenuItems() {
+    if (!selMenuEl) return;
+    selMenuEl.innerHTML = '';
+    var items = [
+      { icon: '\\u{1F4CB}', label: '复制', action: 'copy' },
+      { icon: '\\u{1F58D}\\u{FE0F}', label: '高亮', action: 'highlight' },
+      { icon: '\\u{1F4D6}', label: '查词', action: 'lookup' },
+      { icon: '\\u{2197}\\u{FE0F}', label: '分享', action: 'share' }
+    ];
+    items.forEach(function(item, idx) {
+      if (idx > 0) {
+        var div = document.createElement('div');
+        div.className = 'menu-divider';
+        selMenuEl.appendChild(div);
+      }
+      var btn = document.createElement('button');
+      btn.className = 'menu-item';
+      btn.type = 'button';
+      btn.innerHTML = '<span class="menu-icon">' + item.icon + '</span><span>' + item.label + '</span>';
+      // 用 pointerdown 而非 click：避免 button 点击导致 selection 被清除
+      // （Android WebView 中点击 button 会清除 window.getSelection()）
+      btn.addEventListener('pointerdown', function(e) {
+        e.stopPropagation();
+        e.preventDefault();
+        onSelectionMenuItemClick(item.action);
+      });
+      selMenuEl.appendChild(btn);
+    });
+  }
+
+  function getSelectionText() {
+    var sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return '';
+    var text = sel.toString();
+    // 去掉首尾空白后判断长度（避免全是空格的「假选区」）
+    return text;
+  }
+
+  function getSelectionRect() {
+    var sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    var range = sel.getRangeAt(0);
+    var rect = range.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return null;
+    return rect;
+  }
+
+  function positionSelectionMenu(rect) {
+    if (!selMenuEl) return;
+    var menuH = 40;
+    var menuW = selMenuEl.offsetWidth || 240;
+    var margin = 8;
+    var top;
+    if (rect.top - menuH - margin >= 0) {
+      top = rect.top - menuH - margin;
+    } else {
+      top = rect.bottom + margin;
+    }
+    if (top + menuH > window.innerHeight) {
+      top = window.innerHeight - menuH - margin;
+    }
+    if (top < 0) top = margin;
+    var left = rect.left + rect.width / 2 - menuW / 2;
+    if (left < margin) left = margin;
+    if (left + menuW > window.innerWidth - margin) {
+      left = window.innerWidth - menuW - margin;
+    }
+    selMenuEl.style.top = top + 'px';
+    selMenuEl.style.left = left + 'px';
+  }
+
+  function showSelectionMenu() {
+    if (!selMenuEl) return;
+    var text = getSelectionText();
+    if (!text || text.trim().length === 0) {
+      hideSelectionMenu();
+      return;
+    }
+    var rect = getSelectionRect();
+    if (!rect) {
+      hideSelectionMenu();
+      return;
+    }
+    selLastText = text;
+    positionSelectionMenu(rect);
+    selMenuEl.classList.add('visible');
+    if (window.flutter_inappwebview) {
+      window.flutter_inappwebview.callHandler(
+        'onSelectionReady', text,
+        rect.left, rect.top, rect.width, rect.height);
+    }
+  }
+
+  function hideSelectionMenu() {
+    if (!selMenuEl) return;
+    if (!selMenuEl.classList.contains('visible')) return;
+    selMenuEl.classList.remove('visible');
+    if (window.flutter_inappwebview) {
+      window.flutter_inappwebview.callHandler('onHideSelectionMenu');
+    }
+  }
+
+  function onSelectionMenuItemClick(action) {
+    var text = selLastText || getSelectionText();
+    if (!text) {
+      hideSelectionMenu();
+      return;
+    }
+    var rect = getSelectionRect();
+    var rl = rect ? rect.left : 0;
+    var rt = rect ? rect.top : 0;
+    var rw = rect ? rect.width : 0;
+    var rh = rect ? rect.height : 0;
+    if (window.flutter_inappwebview) {
+      window.flutter_inappwebview.callHandler(
+        'onSelectionAction', action, text, rl, rt, rw, rh);
+    }
+    // 复制：JS 直接处理（Clipboard API），同时 Dart 也会处理（兜底）
+    if (action === 'copy') {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(function(e) {
+          console.warn('[reader] clipboard write failed:', e);
+        });
+      }
+      var sel1 = window.getSelection();
+      if (sel1) sel1.removeAllRanges();
+      hideSelectionMenu();
+    } else if (action === 'lookup' || action === 'share') {
+      // 查词/分享：Dart 处理后清除选区
+      var sel2 = window.getSelection();
+      if (sel2) sel2.removeAllRanges();
+      hideSelectionMenu();
+    }
+    // highlight：不清除选区，等 Dart 处理后调 hideSelectionMenu
+  }
+
+  // 高亮当前选区（Dart 弹颜色选择器后调用）
+  //
+  // 参数：
+  // - colorIndex：颜色索引（0=黄/1=绿/2=蓝/3=粉/4=橙/5=紫）
+  // - styleIndex：样式索引（0=背景色/1=下划线/2=删除线/3=波浪线）
+  //
+  // 实现：
+  // - 单元素选区：用 range.surroundContents 包到 <span class="sel-hl"> 里
+  // - 跨元素选区：surroundContents 会抛 DOMException，fallback 到
+  //   document.execCommand('hiliteColor')（兼容跨段落选区）
+  //
+  // 注：本函数仅做即时视觉标记，不会持久化到 StorageService（持久化需
+  // startIndex/endIndex，选区高亮系统将在后续迭代完善）。
+  // 重启 WebView 后 mark 标签丢失。
+  function highlightSelection(colorIndex, styleIndex) {
+    var sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) {
+      hideSelectionMenu();
+      return false;
+    }
+    var range = sel.getRangeAt(0);
+    if (range.collapsed) {
+      hideSelectionMenu();
+      return false;
+    }
+
+    var colors = ['#FFF176', '#A5D6A7', '#90CAF9', '#F48FB1', '#FFCC80', '#CE93D8'];
+    var color = colors[colorIndex] || colors[0];
+    var textDecoration = styleIndex === 1
+      ? 'underline'
+      : (styleIndex === 2 ? 'line-through' : (styleIndex === 3 ? 'underline wavy' : ''));
+
+    var success = false;
+    try {
+      var mark = document.createElement('span');
+      mark.className = 'sel-hl';
+      mark.style.backgroundColor = styleIndex === 0 ? color : 'transparent';
+      if (textDecoration) {
+        mark.style.textDecoration = textDecoration;
+        mark.style.textDecorationColor = color;
+        mark.style.textDecorationThickness = '2px';
+        mark.style.webkitTextDecorationColor = color;
+      }
+      try {
+        range.surroundContents(mark);
+        success = true;
+      } catch (e) {
+        // 跨元素选区（如跨段落）：surroundContents 会抛
+        // DOMException: The boundary points of a Range are not valid
+        // fallback 到 execCommand('hiliteColor')，仅做背景色
+        try { document.execCommand('styleWithCSS', false, true); } catch (e2) {}
+        success = document.execCommand('hiliteColor', false, color);
+      }
+    } catch (e) {
+      console.warn('[reader] highlightSelection exception:', e);
+    }
+
+    if (success) {
+      sel.removeAllRanges();
+      hideSelectionMenu();
+    }
+    return success;
   }
 
   // 更新视口尺寸 CSS 变量
@@ -1167,7 +1404,9 @@ window.readerApi = (function() {
     scrollByViewport: scrollByViewport,
     checkTap: checkTap,
     appendChapter: appendChapter,
-    getAppendedChapterCount: getAppendedChapterCount
+    getAppendedChapterCount: getAppendedChapterCount,
+    hideSelectionMenu: hideSelectionMenu,
+    highlightSelection: highlightSelection
   };
 })();
 ''';
