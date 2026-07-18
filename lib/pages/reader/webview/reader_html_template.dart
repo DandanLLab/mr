@@ -61,6 +61,8 @@ class ReaderHtmlTemplate {
       </div>
     </div>
   </div>
+  <!-- 文字选择浮动菜单：JS 监听 selectionchange 后填充菜单项并定位显示 -->
+  <div id="reader-selection-menu" role="menu"></div>
   <script>
     $js
   </script>
@@ -208,6 +210,65 @@ html {
 
 /* 高亮规则 CSS */
 ${generateHighlightCss(provider)}
+
+/* ============ 文字选择菜单 CSS ============ */
+/* 自定义浮动菜单：选区上方/下方显示，替代 Android 默认 ActionMode（更美观、统一） */
+#reader-selection-menu {
+  position: fixed;
+  display: none;
+  flex-direction: row;
+  align-items: center;
+  padding: 0 4px;
+  background-color: var(--reader-text-color);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28), 0 1px 4px rgba(0, 0, 0, 0.18);
+  z-index: 9999;
+  /* 避免 long-press 系统菜单与本菜单同时弹出 */
+  -webkit-touch-callout: none;
+  /* transform 加速合成，避免滚动时位置漂移 */
+  transform: translateZ(0);
+  /* 防止菜单自身被选中导致选区变化 */
+  user-select: none;
+  -webkit-user-select: none;
+  max-width: 90vw;
+  overflow: hidden;
+}
+
+#reader-selection-menu.visible {
+  display: flex;
+}
+
+#reader-selection-menu .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  color: var(--reader-bg-color);
+  font-size: 14px;
+  font-family: var(--reader-font-family);
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#reader-selection-menu .menu-item:active {
+  background-color: rgba(128, 128, 128, 0.18);
+}
+
+#reader-selection-menu .menu-item .menu-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+#reader-selection-menu .menu-divider {
+  width: 1px;
+  height: 18px;
+  background-color: rgba(128, 128, 128, 0.32);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
 
 /* ============ 分页模式 ============ */
 /* #reader-root 是 flex 纵向容器：标题占自然高度，#reader-stage flex:1
