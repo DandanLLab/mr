@@ -1552,6 +1552,35 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     _executeTapAction(action);
   }
 
+  /// 用 Listener 在 hit-test 阶段拦截 pointerUp，转成 tap 事件。
+  ///
+  /// 关键修复：原来用 GestureDetector(onTapUp) 包裹 SelectionArea，
+  /// 但 SelectionArea 内部的 Text.rich 会消费 tap 事件用于光标定位/选中，
+  /// 导致外层 GestureDetector 收不到 onTapUp —— 点击屏幕中央无法召唤菜单。
+  /// 改用 Listener + _lastDownDetails 自己判定 tap，不依赖手势系统，
+  /// 这样既能触发菜单，又不影响 SelectionArea 的长按文字选中（长按是独立手势）。
+  PointerDownDetails? _lastDownDetails;
+
+  void _onPointerUp(PointerUpEvent event) {
+    final down = _lastDownDetails;
+    _lastDownDetails = null;
+    if (down == null) return;
+    // 简单 tap 判定：移动距离 < kTouchSlop，且为左键
+    final dx = event.position.dx - down.position.dx;
+    final dy = event.position.dy - down.position.dy;
+    if (dx * dx + dy * dy > 18 * 18) return; // 18px ≈ kTouchSlop
+    if (event.buttons != kPrimaryButton && event.buttons != 0) return;
+    _handleTap(TapUpDetails(
+      kind: event.kind,
+      globalPosition: event.position,
+      localPosition: event.localPosition,
+    ));
+  }
+
+  void _onPointerDown(PointerDownEvent event) {
+    _lastDownDetails = event;
+  }
+
   void _executeTapAction(TapZoneAction action) {
     switch (action) {
       case TapZoneAction.showMenu:
@@ -1758,8 +1787,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       },
       child: Scaffold(
         backgroundColor: provider.backgroundColor,
-        body: GestureDetector(
-          onTapUp: _handleTap,
+        body: Listener(
+          onPointerDown: _onPointerDown,
+          onPointerUp: _onPointerUp,
           behavior: HitTestBehavior.translucent,
           child: Stack(
             children: [
