@@ -33,6 +33,8 @@ import '../../utils/design_tokens.dart';
 import '../../utils/chinese_converter.dart';
 import 'webview/reader_webview.dart';
 import 'webview/reader_webview_controller.dart';
+import 'page_turn/reader_page_view.dart';
+import 'page_turn/page_delegate.dart';
 
 class NovelReaderPage extends StatefulWidget {
   final String bookUrl;
@@ -1033,8 +1035,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   // ==================== Tap Zone ====================
 
   void _handleTap(TapUpDetails details) {
-    // 标记本次 tap 已由 Listener 处理，防止随后到达的 JS click 二次触发
-    _tapConsumedByListener = true;
     // 菜单显示时点击任意区域（含 overlay 外部）都关闭菜单，符合「点击外部关闭」的交互预期
     if (_showMenu) {
       _hideMenu();
@@ -1064,19 +1064,20 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   /// 改用 Listener + _lastDownEvent 自己判定 tap，不依赖手势系统，
   /// 这样既能触发菜单，又不影响 SelectionArea 的长按文字选中（长按是独立手势）。
   PointerDownEvent? _lastDownEvent;
-  // 标志：本次 tap 已由 Listener 的 _handleTap 处理，
-  // 用于防止 WebView 的 JS click 事件二次触发相同 tap（双重处理会导致
-  // 菜单显示后立即被 _onWebviewTap 关闭）。
-  // 时序：Listener 先收到 pointerUp → _handleTap 设标志；
-  //       随后 JS click → _onWebviewTap 检查标志并跳过。
-  // 每次 pointerDown 重置，避免误判下一次 tap。
-  bool _tapConsumedByListener = false;
 
   void _onPointerUp(PointerUpEvent event) {
     final down = _lastDownEvent;
     _lastDownEvent = null;
     if (down == null) return;
     if (event.buttons != kPrimaryButton && event.buttons != 0) return;
+
+    // 分页模式（slide/cover/simulation/none）：翻页和 tap 完全交给 ReaderPageView 处理
+    // 外层 Listener 只保留菜单显示时的「点击外部关闭」逻辑
+    final provider = context.read<ReaderProvider>();
+    final isPagedMode = !_isScrollLikeMode(provider);
+    if (isPagedMode && !_showMenu) {
+      return;
+    }
 
     final dx = event.position.dx - down.position.dx;
     final dy = event.position.dy - down.position.dy;
@@ -1087,11 +1088,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         ? DateTime.now().difference(_swipeStartTime!).inMilliseconds
         : 0;
 
-    // 滑动翻页判定：
+    // 滑动翻页判定（仅滚动模式生效，分页模式由 ReaderPageView 处理）：
     // - 时长 < 500ms（长按选文字不算）
     // - 主轴位移 > 40px
     // - 副轴位移 < 60px（避免误识别对角线滑动）
-    if (elapsed < _swipeTimeoutMs) {
+    if (!isPagedMode && elapsed < _swipeTimeoutMs) {
       if (absDx >= _swipeThreshold && absDy < _swipeOrthogonalMax) {
         // 水平滑动：右滑=上一页，左滑=下一页
         if (dx > 0) {
@@ -1099,7 +1100,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         } else {
           _nextPage();
         }
-        _tapConsumedByListener = true; // 吞掉 tap，防止再触发分区翻页
         return;
       }
       if (absDy >= _swipeThreshold && absDx < _swipeOrthogonalMax) {
@@ -1109,7 +1109,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         } else {
           _nextPage();
         }
-        _tapConsumedByListener = true;
         return;
       }
     }
@@ -1126,8 +1125,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   void _onPointerDown(PointerDownEvent event) {
     _lastDownEvent = event;
     _swipeStartTime = DateTime.now();
-    // 重置去重标志：每次新的 pointer down 都是一次新的 tap
-    _tapConsumedByListener = false;
   }
 
   void _executeTapAction(TapZoneAction action) {
@@ -1429,6 +1426,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   Widget _buildWebViewContent(ReaderProvider provider) {
     final isScrollMode = provider.pageMode == PageMode.scroll ||
         provider.pageMode == PageMode.none;
+    final pageModeIndex = provider.pageMode.index;
 
     return SafeArea(
       child: Column(
@@ -1436,18 +1434,31 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           if (_headerVisible(provider))
             _buildScrollPageTip(provider, isHeader: true),
           Expanded(
-            child: ReaderWebView(
-              content: _processedContent(_content),
-              title: _chapterTitle,
-              provider: provider,
+            child: ReaderPageView(
               isScrollMode: isScrollMode,
-              controller: _readerWebViewController,
-              callbacks: ReaderWebViewCallbacks(
-                onInitialized: _onWebviewInitialized,
-                onPageCountReady: _onWebviewPageCountReady,
-                onPageChanged: _onWebviewPageChanged,
-                onTap: _onWebviewTap,
-                onImageTap: _onWebviewImageTap,
+              pageModeIndex: pageModeIndex,
+              onPerformPageTurn: _onPerformPageTurn,
+              onTap: (x, y) => _handleTap(TapUpDetails(
+                kind: PointerDeviceKind.touch,
+                globalPosition: Offset(x, y),
+                localPosition: Offset(x, y),
+              )),
+              onLongPress: (x, y) => _onWebviewLongPress(x, y),
+              onPageTurnCompleted: _onPageTurnCompleted,
+              onPageTurnCancelled: _onPageTurnCancelled,
+              child: ReaderWebView(
+                content: _processedContent(_content),
+                title: _chapterTitle,
+                provider: provider,
+                isScrollMode: isScrollMode,
+                controller: _readerWebViewController,
+                callbacks: ReaderWebViewCallbacks(
+                  onInitialized: _onWebviewInitialized,
+                  onPageCountReady: _onWebviewPageCountReady,
+                  onPageChanged: _onWebviewPageChanged,
+                  onTap: (x, y) {}, // tap 由 ReaderPageView 处理
+                  onImageTap: _onWebviewImageTap,
+                ),
               ),
             ),
           ),
@@ -1456,6 +1467,61 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         ],
       ),
     );
+  }
+
+  /// ReaderPageView 回调：执行翻页（让 WebView 切换到目标页）
+  ///
+  /// 返回 true：正常翻页（章节内），ReaderPageView 继续截图 + 动画
+  /// 返回 false：章节边界，外部已触发章节切换，ReaderPageView 取消动画
+  Future<bool> _onPerformPageTurn(PageDirection direction) async {
+    if (!_readerWebViewController.isReady) return false;
+
+    final provider = context.read<ReaderProvider>();
+    final isScrollMode = _isScrollLikeMode(provider);
+    if (isScrollMode) return false;
+
+    final targetPage = direction == PageDirection.next
+        ? _webviewCurrentPage + 1
+        : _webviewCurrentPage - 1;
+
+    // 章节边界：触发上一章/下一章切换，取消翻页动画
+    if (targetPage < 0) {
+      _previousChapter();
+      return false;
+    }
+    if (targetPage >= _webviewPageCount) {
+      _nextChapter();
+      return false;
+    }
+
+    // 章节内翻页：调用 WebView 切换（无动画，因为我们的 ReaderPageView 自己做动画）
+    await _readerWebViewController.jumpToPage(targetPage, animate: false);
+
+    // 等待 WebView 内部 CSS column 重排完成
+    // jumpToPage 会触发 onPageChanged 回调，但我们不能等回调（可能延迟）
+    // 给一个固定延迟让重排稳定，避免截图时内容还没切完
+    await Future.delayed(const Duration(milliseconds: 50));
+    return true;
+  }
+
+  /// 翻页完成（动画结束后）：保存进度
+  void _onPageTurnCompleted(PageDirection direction) {
+    if (!mounted) return;
+    // 进度保存由 _onWebviewPageChanged 处理（jumpToPage 会触发它）
+    // 这里只做必要的 UI 状态更新
+    setState(() {});
+  }
+
+  /// 翻页取消：恢复状态
+  void _onPageTurnCancelled() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  /// 长按（由 ReaderPageView 触发，转发给 WebView 处理）
+  void _onWebviewLongPress(double x, double y) {
+    // 长按文字选择由 WebView 自身的 CSS user-select 处理
+    // 这里不做额外处理，让 WebView 接管触摸事件
   }
 
   void _onWebviewInitialized() {
@@ -1547,47 +1613,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           _webviewPageCount > 1 ? pageIndex / (_webviewPageCount - 1) : 0;
       unawaited(_saveCurrentProgress(pos: pageIndex));
     }
-  }
-
-  /// WebView 内部点击事件（由 JS 检测后回调）
-  ///
-  /// x, y 是相对 WebView 视口的坐标（clientX/clientY）。
-  /// WebView 是 PlatformView，同一 tap 会同时触发：
-  ///   1. 外层 Listener 的 onPointerUp → _handleTap（先）
-  ///   2. WebView 内部 JS click → _onWebviewTap（后）
-  /// 用 _tapConsumedByListener 标志去重，避免双重处理导致
-  /// 菜单显示后立即被关闭（_handleTap 显示 → _onWebviewTap 检测到 _showMenu 关闭）。
-  void _onWebviewTap(double x, double y) {
-    // 去重：若本次 tap 已由 Listener 的 _handleTap 处理，跳过 JS click 的二次触发
-    // （WebView 是 PlatformView，同一 tap 会同时触发 Flutter Listener 和 JS click）
-    if (_tapConsumedByListener) {
-      _tapConsumedByListener = false;
-      return;
-    }
-    // 菜单显示时点击任意区域关闭菜单
-    if (_showMenu) {
-      _hideMenu();
-      return;
-    }
-    if (_isLoading) return;
-    final provider = context.read<ReaderProvider>();
-    final mq = MediaQuery.of(context);
-    final size = mq.size;
-    // WebView widget 位于 SafeArea 内的 Expanded 区域，顶部可能有 header
-    // clientX/clientY 原点是 WebView widget 的左上角
-    // 转换为屏幕全局坐标：+ SafeArea.left（横向）+ SafeArea.top + header高度（纵向）
-    final headerExtent = _headerVisible(provider) ? _headerExtent(provider) : 0.0;
-    final screenX = x + mq.padding.left;
-    final screenY = y + mq.padding.top + headerExtent;
-
-    final col = (screenX / (size.width / 3)).clamp(0, 2).toInt();
-    final row = (screenY / (size.height / 3)).clamp(0, 2).toInt();
-
-    final actions = provider.tapZoneActions;
-    if (row >= actions.length || col >= actions[row].length) return;
-
-    final action = actions[row][col];
-    _executeTapAction(action);
   }
 
   void _onWebviewImageTap(String src, Rect rect) {
