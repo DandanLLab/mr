@@ -294,6 +294,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     _scrollProgressNotifier.dispose();
     _menuAnimController.dispose();
     _focusNode.dispose();
+    _logScrollController.dispose();
     _readerWebViewController.detach();
     provider.disposeTts();
     // 恢复系统亮度（应用层亮度是全局的，退出阅读器必须还原）
@@ -1476,28 +1477,55 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         provider.pageMode == PageMode.none;
 
     return SafeArea(
-      child: Column(
+      child: Stack(
         children: [
-          if (_headerVisible(provider))
-            _buildScrollPageTip(provider, isHeader: true),
-          Expanded(
-            child: ReaderWebView(
-              content: _processedContent(_content),
-              title: _chapterTitle,
-              provider: provider,
-              isScrollMode: isScrollMode,
-              controller: _readerWebViewController,
-              callbacks: ReaderWebViewCallbacks(
-                onInitialized: _onWebviewInitialized,
-                onPageCountReady: _onWebviewPageCountReady,
-                onPageChanged: _onWebviewPageChanged,
-                onTap: _onWebviewTap,
-                onImageTap: _onWebviewImageTap,
+          Column(
+            children: [
+              if (_headerVisible(provider))
+                _buildScrollPageTip(provider, isHeader: true),
+              Expanded(
+                child: ReaderWebView(
+                  content: _processedContent(_content),
+                  title: _chapterTitle,
+                  provider: provider,
+                  isScrollMode: isScrollMode,
+                  controller: _readerWebViewController,
+                  callbacks: ReaderWebViewCallbacks(
+                    onInitialized: _onWebviewInitialized,
+                    onPageCountReady: _onWebviewPageCountReady,
+                    onPageChanged: _onWebviewPageChanged,
+                    onTap: _onWebviewTap,
+                    onImageTap: _onWebviewImageTap,
+                    onLog: _onWebviewLog,
+                  ),
+                ),
+              ),
+              if (_footerVisible(provider))
+                _buildScrollPageTip(provider, isHeader: false),
+            ],
+          ),
+          // 日志面板开关按钮（右上角）
+          Positioned(
+            top: 4,
+            right: 4,
+            child: GestureDetector(
+              onTap: _toggleLogPanel,
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  _logPanelVisible ? Icons.close : Icons.bug_report,
+                  size: 14,
+                  color: Colors.amberAccent.withValues(alpha: 0.8),
+                ),
               ),
             ),
           ),
-          if (_footerVisible(provider))
-            _buildScrollPageTip(provider, isHeader: false),
+          // 日志面板
+          _buildLogPanel(),
         ],
       ),
     );
@@ -1635,6 +1663,129 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   void _onWebviewImageTap(String src, Rect rect) {
     // 图片点击：打开图片预览（暂未实现，与旧 flutter_html 行为一致）
     debugPrint('[NovelReader] Image tap: $src');
+  }
+
+  // ==================== JS 日志面板（调试用） ====================
+
+  /// JS 日志缓冲区，最多保留 200 条，超出后丢弃最早的
+  static const int _maxLogLines = 200;
+  final List<String> _jsLogs = <String>[];
+  final ScrollController _logScrollController = ScrollController();
+  bool _logPanelVisible = false;
+
+  void _onWebviewLog(String message) {
+    if (!mounted) return;
+    final ts = DateTime.now().toIso8601String().substring(11, 19);
+    _jsLogs.add('$ts $message');
+    if (_jsLogs.length > _maxLogLines) {
+      _jsLogs.removeRange(0, _jsLogs.length - _maxLogLines);
+    }
+    if (_logPanelVisible) {
+      setState(() {});
+      // 滚动到最底部，显示最新日志
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_logScrollController.hasClients) {
+          _logScrollController.jumpTo(
+            _logScrollController.position.maxScrollExtent,
+          );
+        }
+      });
+    }
+  }
+
+  void _toggleLogPanel() {
+    setState(() {
+      _logPanelVisible = !_logPanelVisible;
+    });
+  }
+
+  void _clearJsLogs() {
+    setState(() {
+      _jsLogs.clear();
+    });
+  }
+
+  Widget _buildLogPanel() {
+    if (!_logPanelVisible) return const SizedBox.shrink();
+    return Positioned(
+      left: 8,
+      right: 8,
+      bottom: 8,
+      height: 220,
+      child: Material(
+        elevation: 8,
+        borderRadius: BorderRadius.circular(8),
+        color: Colors.black.withValues(alpha: 0.85),
+        child: Column(
+          children: [
+            // 标题栏
+            Container(
+              height: 32,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.9),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(8)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.bug_report,
+                      size: 14, color: Colors.amberAccent),
+                  const SizedBox(width: 6),
+                  const Text(
+                    'JS 日志（$_maxLogLines条上限）',
+                    style: TextStyle(color: Colors.amberAccent, fontSize: 12),
+                  ),
+                  const Spacer(),
+                  InkWell(
+                    onTap: _clearJsLogs,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      child: Text('清空',
+                          style: TextStyle(color: Colors.white70, fontSize: 11)),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: _toggleLogPanel,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      child: Text('关闭',
+                          style: TextStyle(color: Colors.white70, fontSize: 11)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // 日志列表
+            Expanded(
+              child: ListView.builder(
+                controller: _logScrollController,
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                itemCount: _jsLogs.length,
+                itemBuilder: (_, i) {
+                  final line = _jsLogs[i];
+                  Color c = Colors.lightGreenAccent;
+                  if (line.contains('[warn]')) {
+                    c = Colors.orangeAccent;
+                  } else if (line.contains('[error]')) {
+                    c = Colors.redAccent;
+                  }
+                  return Text(
+                    line,
+                    style: TextStyle(
+                      color: c,
+                      fontSize: 10,
+                      fontFamily: 'monospace',
+                      height: 1.25,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   bool _hasBackgroundImage(ReaderProvider provider) {

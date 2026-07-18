@@ -424,6 +424,30 @@ body.reader-scroll #reader-content-b {
   /// - none(4): 无动画，a 直接跳到目标页
   static String _readerJs() {
     return r'''
+// 日志桥：劫持 console.*，所有日志通过 callHandler 回传到 Flutter debugPrint
+// 封装 WebView 无法连 chrome://inspect，必须通过此通道看 JS 日志
+(function() {
+  var origLog = console.log.bind(console);
+  var origWarn = console.warn.bind(console);
+  var origErr = console.error.bind(console);
+  function send(level, args) {
+    try {
+      var msg = Array.prototype.slice.call(args).map(function(a) {
+        return (typeof a === 'object') ? JSON.stringify(a) : String(a);
+      }).join(' ');
+      if (window.flutter_inappwebview) {
+        window.flutter_inappwebview.callHandler('onReaderLog', '[' + level + '] ' + msg);
+      }
+    } catch (e) {}
+  }
+  console.log = function() { send('log', arguments); origLog.apply(console, arguments); };
+  console.warn = function() { send('warn', arguments); origWarn.apply(console, arguments); };
+  console.error = function() { send('error', arguments); origErr.apply(console, arguments); };
+  window.addEventListener('error', function(e) {
+    send('error', ['uncaught: ' + (e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)]);
+  });
+})();
+
 window.readerApi = (function() {
   var config = { viewWidth: 0, viewHeight: 0, isScrollMode: false, columnGap: 0, pageAnimDurationMs: 0, pageModeIndex: 4 };
   var body = document.body;

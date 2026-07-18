@@ -18,12 +18,16 @@ class ReaderWebViewCallbacks {
   /// 图片点击
   final void Function(String src, Rect rect) onImageTap;
 
+  /// JS 日志回传（用于在阅读器页面显示日志面板）
+  final void Function(String message)? onLog;
+
   const ReaderWebViewCallbacks({
     required this.onInitialized,
     required this.onPageCountReady,
     required this.onPageChanged,
     required this.onTap,
     required this.onImageTap,
+    this.onLog,
   });
 }
 
@@ -199,6 +203,19 @@ window.readerApi.getPageCount();
               (args[4] as num).toDouble(),
             ),
           );
+        }
+      },
+    );
+
+    // JS 日志桥：JS 端调用 callHandler('onReaderLog', msg) 回传到 Flutter
+    // 用途：封装 WebView 无法连 chrome://inspect，通过此通道让阅读器页面显示日志面板
+    controller.addJavaScriptHandler(
+      handlerName: 'onReaderLog',
+      callback: (args) {
+        if (args.isNotEmpty) {
+          final msg = args[0]?.toString() ?? '';
+          debugPrint('[reader-js] $msg');
+          _callbacks?.onLog?.call(msg);
         }
       },
     );
