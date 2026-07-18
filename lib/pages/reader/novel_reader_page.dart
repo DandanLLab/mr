@@ -57,6 +57,9 @@ class NovelReaderPage extends StatefulWidget {
 class _NovelReaderPageState extends State<NovelReaderPage>
     with TickerProviderStateMixin {
   bool _showMenu = false;
+  /// 翻页动画进行中标记，用于阻止动画期间 JS click 误触发菜单
+  /// 由 _onPageTurnCompleted / _onPageTurnCancelled 复位
+  bool _isPageTurning = false;
   String _content = '';
   String _chapterTitle = '';
   String? _chapterUrl;
@@ -1471,6 +1474,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   /// 返回 false：章节边界，外部已触发章节切换，ReaderPageView 取消动画
   Future<bool> _onPerformPageTurn(PageDirection direction) async {
     if (!_readerWebViewController.isReady) return false;
+    _isPageTurning = true; // 翻页流程开始，阻止 JS click 误触发菜单
 
     final provider = context.read<ReaderProvider>();
     final isScrollMode = _isScrollLikeMode(provider);
@@ -1519,6 +1523,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   /// 翻页完成（动画结束后）：保存进度
   void _onPageTurnCompleted(PageDirection direction) {
     if (!mounted) return;
+    _isPageTurning = false;
     // 进度保存由 _onWebviewPageChanged 处理（jumpToPage 会触发它）
     // 这里只做必要的 UI 状态更新
     setState(() {});
@@ -1527,6 +1532,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   /// 翻页取消：恢复状态
   void _onPageTurnCancelled() {
     if (!mounted) return;
+    _isPageTurning = false;
     setState(() {});
   }
 
@@ -1636,28 +1642,21 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   /// 注意：JS click 事件在 Android WebView 上有 ~300ms 延迟（防止双击缩放），
   /// 所以菜单召唤会比纯 Flutter 略慢一点，但这是 PlatformView 的固有代价。
   void _onWebviewJsTap(double x, double y) {
-    if (_isLoading) return;
-    // 菜单显示时点击任意区域关闭菜单
-    if (_showMenu) {
-      _hideMenu();
-      return;
-    }
+    // 翻页动画进行中：忽略 click（防止滑动时手抖触发菜单）
+    if (_isPageTurning) return;
+    // 复用 _handleTap 的 tap zone 分区逻辑，避免重复代码导致不一致
+    // x, y 是相对 WebView 视口的坐标，需补上 SafeArea padding 和 header 高度
+    // 才能得到屏幕全局坐标（_handleTap 期望的是 globalPosition）
     final provider = context.read<ReaderProvider>();
     final mq = MediaQuery.of(context);
-    final size = mq.size;
-    // x, y 是相对 WebView 视口的坐标，转换为屏幕全局坐标
-    // WebView 位于 SafeArea 内的 Expanded 区域，顶部可能有 header
     final headerExtent = _headerVisible(provider) ? _headerExtent(provider) : 0.0;
-    final screenX = x + mq.padding.left;
-    final screenY = y + mq.padding.top + headerExtent;
-
-    final col = (screenX / (size.width / 3)).clamp(0, 2).toInt();
-    final row = (screenY / (size.height / 3)).clamp(0, 2).toInt();
-
-    final actions = provider.tapZoneActions;
-    if (row >= actions.length || col >= actions[row].length) return;
-
-    _executeTapAction(actions[row][col]);
+    final globalX = x + mq.padding.left;
+    final globalY = y + mq.padding.top + headerExtent;
+    _handleTap(TapUpDetails(
+      kind: PointerDeviceKind.touch,
+      globalPosition: Offset(globalX, globalY),
+      localPosition: Offset(globalX, globalY),
+    ));
   }
 
   bool _hasBackgroundImage(ReaderProvider provider) {
