@@ -377,9 +377,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   void _startAutoScrollTimer() {
     _autoScrollTimer?.cancel();
     final provider = context.read<ReaderProvider>();
-    if (provider.pageMode == PageMode.scroll) {
+    if (_isScrollLikeMode(provider)) {
       _autoScrollTimer = Timer.periodic(const Duration(milliseconds: 80), (_) {
         if (!mounted || !_isAutoScroll || _isLoading) return;
+        // 跨章切换期间禁用滚动驱动，避免 jumpTo 与 timer 冲突
+        if (_isSwitchingChapter) return;
         if (!_scrollController.hasClients) return;
         final position = _scrollController.position;
         final step = 0.8 + provider.autoScrollSpeed * 0.055;
@@ -387,8 +389,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           _scrollController.jumpTo(
             min(position.pixels + step, position.maxScrollExtent),
           );
+        } else if (_nextContent != null &&
+            _nextContentChapterIndex != null) {
+          // 已预加载下一章，主动走无缝切换（_nextPage 在到底部时会走 _nextChapter 重新 load）
+          _switchToPreloadedChapter();
         } else if (_nextReadableChapterIndex(_currentChapterIndex) != null) {
-          _nextPage();
+          _nextChapter();
         } else {
           _stopAutoScroll();
         }
@@ -523,7 +529,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     int contentLength,
   ) {
     final provider = context.read<ReaderProvider>();
-    if (provider.pageMode == PageMode.scroll) {
+    if (_isScrollLikeMode(provider)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!_scrollController.hasClients) return;
         final fraction = contentLength == 0 ? 0.0 : offset / contentLength;
@@ -676,7 +682,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   void _onScroll() {
     if (!_scrollController.hasClients) return;
     final provider = context.read<ReaderProvider>();
-    if (provider.pageMode != PageMode.scroll) return;
+    if (!_isScrollLikeMode(provider)) return;
     // 跨章切换期间（jumpTo 调整 offset）禁用滚动监听，避免误触发二次切章或预加载
     if (_isSwitchingChapter) return;
 
@@ -1045,7 +1051,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         _repaginate(initialPage: restorePos);
 
         // 滚动模式下重置滚动位置到顶部
-        if (provider.pageMode == PageMode.scroll) {
+        if (_isScrollLikeMode(provider)) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted && _scrollController.hasClients) {
               final target = restorePos > 0 ? restorePos.toDouble() : 0.0;
@@ -1056,7 +1062,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           });
         }
 
-        unawaited(_saveCurrentProgress(chapter: chapter, pos: restorePos));
+        // 用 clamp 后的真实位置保存到数据库，避免把 1<<30 写入 durChapterPos
+        // 造成跨模式恢复时位置错误（_repaginate 已把 initialPage clamp 到 _pages.length-1）
+        final actualPos = _isScrollLikeMode(provider)
+            ? (_scrollController.hasClients
+                  ? _scrollController.offset.round()
+                  : 0)
+            : _currentPage;
+        unawaited(_saveCurrentProgress(chapter: chapter, pos: actualPos));
         unawaited(_preloadAdjacentChapters(_currentChapterIndex));
 
         // 后台预取后续 N 章（Phase 3 流水线化：用户翻页时瞬时返回）
@@ -1093,13 +1106,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           _content = '加载失败：$e';
           _chapterTitle = '加载失败';
           _isLoading = false;
-          if (provider.pageMode != PageMode.scroll) {
+          if (!_isScrollLikeMode(provider)) {
             // 重建分页，避免翻页/仿真模式显示旧章节内容
             _pages = [_content];
             _currentPage = 0;
           }
         });
-        if (provider.pageMode != PageMode.scroll) {
+        if (!_isScrollLikeMode(provider)) {
           _swapPageController(_currentPage + _pagedLeadingCount);
         }
       }
@@ -1170,7 +1183,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   int _currentChapterPos() {
     final provider = context.read<ReaderProvider>();
-    if (provider.pageMode == PageMode.scroll && _scrollController.hasClients) {
+    if (_isScrollLikeMode(provider) && _scrollController.hasClients) {
       return _scrollController.offset.round();
     }
     return _currentPage;
@@ -1179,36 +1192,50 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   Future<void> _preloadAdjacentChapters(int chapterIndex) async {
     if (_book == null || _dataProvider == null) return;
 
-    // 预加载下一章
+    // 复用 _isLoadingNext / _isLoadingPrev 锁，避免与 _preloadNextChapter / _preloadPrevChapter
+    // 并发触发导致重复 getContent 请求
     String? nextContent;
     final nextIndex = _nextReadableChapterIndex(chapterIndex);
-    if (nextIndex != null) {
-      final nextChapter = _chapters[nextIndex];
-      nextContent = await _dataProvider!.getContent(
-        _book!,
-        nextChapter,
-        allChapters: _chapters,
-      );
+    if (nextIndex != null && !_isLoadingNext && _nextContent == null) {
+      _isLoadingNext = true;
+      try {
+        final nextChapter = _chapters[nextIndex];
+        nextContent = await _dataProvider!.getContent(
+          _book!,
+          nextChapter,
+          allChapters: _chapters,
+        );
+      } finally {
+        _isLoadingNext = false;
+      }
     }
 
-    // 预加载上一章
     String? prevContent;
     final prevIndex = _previousReadableChapterIndex(chapterIndex);
-    if (prevIndex != null) {
-      final prevChapter = _chapters[prevIndex];
-      prevContent = await _dataProvider!.getContent(
-        _book!,
-        prevChapter,
-        allChapters: _chapters,
-      );
+    if (prevIndex != null && !_isLoadingPrev && _prevContent == null) {
+      _isLoadingPrev = true;
+      try {
+        final prevChapter = _chapters[prevIndex];
+        prevContent = await _dataProvider!.getContent(
+          _book!,
+          prevChapter,
+          allChapters: _chapters,
+        );
+      } finally {
+        _isLoadingPrev = false;
+      }
     }
 
     if (!mounted || _currentChapterIndex != chapterIndex) return;
     setState(() {
-      _nextContent = nextContent;
-      _nextContentChapterIndex = nextContent == null ? null : nextIndex;
-      _prevContent = prevContent;
-      _prevContentChapterIndex = prevContent == null ? null : prevIndex;
+      if (nextContent != null && _nextContent == null) {
+        _nextContent = nextContent;
+        _nextContentChapterIndex = nextIndex;
+      }
+      if (prevContent != null && _prevContent == null) {
+        _prevContent = prevContent;
+        _prevContentChapterIndex = prevIndex;
+      }
     });
   }
 
@@ -1230,6 +1257,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           allChapters: _chapters,
         );
         if (!mounted) return;
+        // 章节切换守卫：await 期间用户已切到其他章节时丢弃结果，
+        // 避免把旧章节的下一章内容赋给 _nextContent 导致后续预加载永久失效
+        if (nextIndex != _nextReadableChapterIndex(_currentChapterIndex)) {
+          return;
+        }
         _nextContent = content;
         _nextContentChapterIndex = nextIndex;
         setState(() {});
@@ -1258,6 +1290,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           allChapters: _chapters,
         );
         if (!mounted) return;
+        // 章节切换守卫：await 期间用户已切到其他章节时丢弃结果
+        if (prevIndex != _previousReadableChapterIndex(_currentChapterIndex)) {
+          return;
+        }
         _prevContent = content;
         _prevContentChapterIndex = prevIndex;
         setState(() {});
@@ -1271,7 +1307,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   void _repaginate({int initialPage = 0}) {
     final provider = context.read<ReaderProvider>();
-    if (provider.pageMode == PageMode.scroll) return;
+    if (_isScrollLikeMode(provider)) return;
 
     _pages = _splitContentToPages(_processedContent(_content), provider);
     _currentPage = initialPage.clamp(0, max(_pages.length - 1, 0));
@@ -1291,7 +1327,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           _scrollController.offset / _scrollController.position.maxScrollExtent;
     }
 
-    if (provider.pageMode == PageMode.scroll) {
+    if (_isScrollLikeMode(provider)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !_scrollController.hasClients) return;
         _scrollController.jumpTo(
@@ -1495,7 +1531,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   // ==================== Tap Zone ====================
 
   void _handleTap(TapUpDetails details) {
-    if (_showMenu || _isLoading) return;
+    // 菜单显示时点击任意区域（含 overlay 外部）都关闭菜单，符合「点击外部关闭」的交互预期
+    if (_showMenu) {
+      _hideMenu();
+      return;
+    }
+    if (_isLoading) return;
     final provider = context.read<ReaderProvider>();
     final size = MediaQuery.of(context).size;
     final x = details.globalPosition.dx;
@@ -1535,10 +1576,15 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   void _previousPage() {
     final provider = context.read<ReaderProvider>();
-    if (provider.pageMode == PageMode.scroll) {
+    if (_isScrollLikeMode(provider)) {
       if (!_scrollController.hasClients) return;
       if (_scrollController.offset <= 8) {
-        _previousChapter(toLastPage: true);
+        // 已预加载上一章时优先走无缝切换，避免丢弃缓存重新 load
+        if (_prevContent != null && _prevContentChapterIndex != null) {
+          _switchToPrevChapter();
+        } else {
+          _previousChapter(toLastPage: true);
+        }
         return;
       }
       _scrollController.animateTo(
@@ -1571,12 +1617,15 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   void _nextPage() {
     final provider = context.read<ReaderProvider>();
-    if (provider.pageMode == PageMode.scroll) {
+    if (_isScrollLikeMode(provider)) {
       if (!_scrollController.hasClients) return;
       final maxScroll = _scrollController.position.maxScrollExtent;
-      // 如果已追加下一章内容，让用户继续滚动即可，不需要调用 _nextChapter()
+      // 已预加载下一章：到底部时走无缝切换（保留缓存），否则继续向下滚动
       if (_nextContent != null) {
-        // 下一章内容已追加到滚动列表，继续滚动
+        if (_scrollController.offset >= maxScroll - 8) {
+          _switchToPreloadedChapter();
+          return;
+        }
         _scrollController.animateTo(
           min(_scrollController.offset + _scrollPageExtent(), maxScroll),
           duration: _pageAnimationDuration(provider),
@@ -1638,11 +1687,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       });
       _loadChapterContent();
     } else {
-      // 没有上一章时仅还原 PageView 越界标志位，避免翻页锁死
-      // 不要动 _isLoading —— 它可能是其他 load 流程在 await，提前清空会导致状态错乱
+      // 没有上一章时还原所有翻页锁状态（含 _isLoading），
+      // 否则 _onPageChanged 设置的 _isLoading=true 永远不会被清空，UI 卡在 loading
       if (_isChangingChapterByPageView) {
         _isChangingChapterByPageView = false;
-        setState(() {});
+        setState(() {
+          _isLoading = false;
+        });
       }
     }
   }
@@ -1655,10 +1706,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       });
       _loadChapterContent();
     } else {
-      // 没有下一章时仅还原 PageView 越界标志位，避免翻页锁死
+      // 没有下一章时还原所有翻页锁状态（含 _isLoading）
       if (_isChangingChapterByPageView) {
         _isChangingChapterByPageView = false;
-        setState(() {});
+        setState(() {
+          _isLoading = false;
+        });
       }
     }
   }
@@ -1682,6 +1735,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       _menuAnimController.reverse();
     }
   }
+
+  /// PageMode.none 在渲染上复用滚动模式（_buildContent 中 case 走 _buildScrollContent），
+  /// 因此所有「是否滚动模式」的交互判断都必须把 none 也算进去，
+  /// 否则 none 模式下翻页/进度/预加载/自动滚动/搜索跳转/页码提示全部失效。
+  bool _isScrollLikeMode(ReaderProvider provider) =>
+      provider.pageMode == PageMode.scroll ||
+      provider.pageMode == PageMode.none;
 
   // ==================== Build ====================
 
@@ -2626,7 +2686,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final time =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
     final pageCount = max(_pages.length, 1);
-    final withinChapter = provider.pageMode == PageMode.scroll
+    final withinChapter = _isScrollLikeMode(provider)
         ? _scrollProgress
         : pageIndex / max(pageCount - 1, 1);
     final totalProgress = _totalChapters <= 0
@@ -2639,12 +2699,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       1 => _displayChapterTitle(provider),
       2 => time,
       4 =>
-        provider.pageMode == PageMode.scroll
+        _isScrollLikeMode(provider)
             ? '${(_scrollProgress * 100).round()}%'
             : '${pageIndex + 1}',
       5 => '${(totalProgress * 100).toStringAsFixed(1)}%',
       6 =>
-        provider.pageMode == PageMode.scroll
+        _isScrollLikeMode(provider)
             ? '${_currentChapterIndex + 1}/${max(_totalChapters, 1)}'
             : '${pageIndex + 1}/$pageCount',
       7 => ChineseConverter.convert(
@@ -2745,12 +2805,15 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             _currentChapterIndex = 0; // 切换书源后从第一章开始
           });
 
-          _loadChapterContent();
+          // await 加载完成后再提示成功，避免「已切换」与加载中状态并存
+          await _loadChapterContent();
 
           if (mounted) {
             ScaffoldMessenger.of(
               context,
             ).showSnackBar(SnackBar(content: Text('已切换到 $sourceName')));
+            // 换源后当前章节的书签状态可能与旧源不同，需重新检查
+            _checkBookmark();
           }
         } catch (e) {
           if (mounted) {
@@ -2860,6 +2923,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           _loadChapterContent();
           Navigator.pop(context);
         },
+        // 子面板书签增删后重新检查当前章节书签状态，同步顶栏图标
+        onBookmarksChanged: () {
+          if (mounted) _checkBookmark();
+        },
       ),
     );
   }
@@ -2889,6 +2956,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                             onChanged: (value) {
                               provider.setFontSize(value);
                               setDialogState(() {});
+                            },
+                            onChangeEnd: (_) {
+                              // 拖动结束后再重分页，避免高频 _splitContentToPages 造成卡顿
                               _repaginatePreservingPosition();
                             },
                           ),
@@ -2909,6 +2979,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                             onChanged: (value) {
                               provider.setLetterSpacing(value);
                               setDialogState(() {});
+                            },
+                            onChangeEnd: (_) {
                               _repaginatePreservingPosition();
                             },
                           ),
@@ -2923,19 +2995,36 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                         const Text('字体'),
                         const SizedBox(width: DesignTokens.spacingSm),
                         Expanded(
-                          child: DropdownButton<String>(
-                            value: provider.fontFamily.isEmpty
-                                ? '默认'
-                                : provider.fontFamily,
-                            isExpanded: true,
-                            items: ['默认', ..._getSystemFonts()].map((f) {
-                              return DropdownMenuItem(value: f, child: Text(f));
-                            }).toList(),
-                            onChanged: (value) {
-                              provider.setFontFamily(
-                                value == '默认' ? '' : value!,
+                          child: Builder(
+                            builder: (context) {
+                              final allFonts = [
+                                '默认',
+                                ..._getSystemFonts(),
+                              ];
+                              // 若已保存的 fontFamily 不在列表中（如导入配置带入），
+                              // 用 '默认' 兜底，否则 DropdownButton 会抛
+                              // "value is in valueKeys" multiple validation errors
+                              final currentFamily = provider.fontFamily;
+                              final dropdownValue = currentFamily.isEmpty ||
+                                      !allFonts.contains(currentFamily)
+                                  ? '默认'
+                                  : currentFamily;
+                              return DropdownButton<String>(
+                                value: dropdownValue,
+                                isExpanded: true,
+                                items: allFonts.map((f) {
+                                  return DropdownMenuItem(
+                                    value: f,
+                                    child: Text(f),
+                                  );
+                                }).toList(),
+                                onChanged: (value) {
+                                  provider.setFontFamily(
+                                    value == '默认' ? '' : value!,
+                                  );
+                                  setDialogState(() {});
+                                },
                               );
-                              setDialogState(() {});
                             },
                           ),
                         ),
@@ -3001,6 +3090,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                             onChanged: (value) {
                               provider.setLineHeight(value);
                               setDialogState(() {});
+                            },
+                            onChangeEnd: (_) {
                               _repaginatePreservingPosition();
                             },
                           ),
@@ -3021,6 +3112,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                             onChanged: (value) {
                               provider.setParagraphSpacing(value);
                               setDialogState(() {});
+                            },
+                            onChangeEnd: (_) {
                               _repaginatePreservingPosition();
                             },
                           ),
@@ -3041,6 +3134,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                             onChanged: (value) {
                               provider.setTextIndent(value);
                               setDialogState(() {});
+                            },
+                            onChangeEnd: (_) {
                               _repaginatePreservingPosition();
                             },
                           ),
@@ -3637,7 +3732,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                       provider.setParagraphSpacing(8.0);
                       provider.setTextIndent(2.0);
                       provider.setBackgroundColor(const Color(0xFFFFF8E1));
-                      provider.setBrightness(1.0);
+                      // 屏幕亮度需用 setScreenBrightness（写入 _screenBrightness 字段），
+                      // 旧代码调用的 setBrightness 写的是另一个未生效字段 _brightness
+                      provider.setScreenBrightness(1.0);
+                      // 当前在夜间模式时需同步退出，否则背景变浅黄但 textColor 仍为白
+                      if (provider.isNightMode) {
+                        provider.toggleNightMode();
+                      }
                       Navigator.pop(context);
                       // 重置后必须重新分页，否则 PageView/仿真模式仍按旧设置计算分页
                       _repaginatePreservingPosition();
@@ -3680,14 +3781,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                         final action = provider.tapZoneActions[row][col];
                         return Expanded(
                           child: GestureDetector(
-                            onTap: () {
-                              _showTapZoneActionPicker(
+                            onTap: () async {
+                              await _showTapZoneActionPicker(
                                 provider,
                                 row,
                                 col,
                                 actionLabels,
                               );
-                              setDialogState(() {});
+                              if (mounted) setDialogState(() {});
                             },
                             child: Container(
                               margin: const EdgeInsets.all(2),
@@ -3748,13 +3849,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     );
   }
 
-  void _showTapZoneActionPicker(
+  Future<void> _showTapZoneActionPicker(
     ReaderProvider provider,
     int row,
     int col,
     Map<TapZoneAction, String> actionLabels,
   ) {
-    showDialog(
+    return showDialog(
       context: context,
       builder: (context) {
         return SimpleDialog(
@@ -3774,8 +3875,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   void _showHighlightRulesDialog(ReaderProvider provider) {
-    final rules = provider.highlightRules;
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -3788,6 +3887,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           builder: (context, scrollController) {
             return StatefulBuilder(
               builder: (context, setSheetState) {
+                // 每次重建都从 provider 重新读取，确保添加/删除后列表立即更新
+                final rules = provider.highlightRules;
                 return SafeArea(
                   child: Column(
                     children: [
@@ -3802,9 +3903,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                             const Spacer(),
                             IconButton(
                               icon: const Icon(Icons.add),
-                              onPressed: () {
-                                _showAddHighlightRuleDialog(provider);
-                                setSheetState(() {});
+                              onPressed: () async {
+                                await _showAddHighlightRuleDialog(provider);
+                                if (mounted) setSheetState(() {});
                               },
                             ),
                           ],
@@ -3817,7 +3918,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                           itemCount: rules.length,
                           itemBuilder: (context, index) {
                             final rule = rules[index];
-                            return SwitchListTile(
+                            // SwitchListTile 没有 trailing 参数，用 ListTile + Switch + IconButton 自己布局
+                            return ListTile(
                               title: Text(rule.name),
                               subtitle: Text(
                                 rule.pattern,
@@ -3828,26 +3930,56 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
-                              value: rule.enabled,
-                              onChanged: rule.isBuiltIn
-                                  ? (value) {
-                                      final updated = HighlightRule(
-                                        id: rule.id,
-                                        name: rule.name,
-                                        pattern: rule.pattern,
-                                        style: rule.style,
-                                        color: rule.color,
-                                        enabled: value,
-                                        isBuiltIn: rule.isBuiltIn,
-                                        serialNumber: rule.serialNumber,
-                                      );
-                                      StorageService.instance.saveHighlightRule(
-                                        updated.toJson(),
-                                      );
-                                      provider.toggleHighlightRule(rule.id);
-                                      setSheetState(() {});
-                                    }
-                                  : null,
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // 自定义规则提供删除入口
+                                  if (!rule.isBuiltIn)
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.delete_outline,
+                                        size: 20,
+                                      ),
+                                      onPressed: () {
+                                        showDialog<bool>(
+                                          context: context,
+                                          builder: (ctx) => AlertDialog(
+                                            title: const Text('删除规则'),
+                                            content: Text('确定删除「${rule.name}」吗？'),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () =>
+                                                    Navigator.pop(ctx, false),
+                                                child: const Text('取消'),
+                                              ),
+                                              TextButton(
+                                                onPressed: () {
+                                                  provider.removeHighlightRule(
+                                                    rule.id,
+                                                  );
+                                                  Navigator.pop(ctx, true);
+                                                  setSheetState(() {});
+                                                },
+                                                child: const Text('删除'),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  Switch(
+                                    value: rule.enabled,
+                                    // 自定义规则允许切换 enabled；内置规则保持只读
+                                    onChanged: rule.isBuiltIn
+                                        ? null
+                                        : (value) {
+                                            // 直接通过 provider 翻转（内部已 _saveToStorage），避免重复 IO 与状态反转
+                                            provider.toggleHighlightRule(rule.id);
+                                            setSheetState(() {});
+                                          },
+                                  ),
+                                ],
+                              ),
                             );
                           },
                         ),
@@ -3863,13 +3995,22 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     );
   }
 
-  void _showAddHighlightRuleDialog(ReaderProvider provider) {
+  Future<void> _showAddHighlightRuleDialog(ReaderProvider provider) {
     final nameController = TextEditingController();
     final patternController = TextEditingController();
     var selectedColor = HighlightColor.yellow;
     var selectedStyle = HighlightStyle.background;
 
-    showDialog(
+    // 在 Navigator.pop 后通过 addPostFrameCallback dispose，
+    // 避免在 dialog 重建过程中引用已 dispose 的 controller
+    void disposeControllers() {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        nameController.dispose();
+        patternController.dispose();
+      });
+    }
+
+    return showDialog(
       context: context,
       builder: (context) {
         return StatefulBuilder(
@@ -3938,14 +4079,27 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    disposeControllers();
+                  },
                   child: const Text('取消'),
                 ),
                 TextButton(
                   onPressed: () {
                     if (nameController.text.isEmpty ||
-                        patternController.text.isEmpty)
+                        patternController.text.isEmpty) {
                       return;
+                    }
+                    // 验证正则表达式有效性，无效时提示用户而不是创建永远失败的规则
+                    try {
+                      RegExp(patternController.text);
+                    } catch (e) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('正则表达式无效: $e')),
+                      );
+                      return;
+                    }
                     final rule = HighlightRule(
                       id: DateTime.now().millisecondsSinceEpoch.toString(),
                       name: nameController.text,
@@ -3959,6 +4113,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                     StorageService.instance.saveHighlightRule(rule.toJson());
                     provider.addHighlightRule(rule);
                     Navigator.pop(context);
+                    disposeControllers();
                   },
                   child: const Text('添加'),
                 ),
@@ -3971,14 +4126,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   void _showFontOverrideDialog(ReaderProvider provider) {
-    final overrides = Map<String, String>.from(provider.fontOverrides);
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
+            // 每次重建都从 provider 重新拉取最新副本，确保添加/删除后立即同步
+            final overrides = provider.fontOverrides;
             return SafeArea(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -3994,9 +4149,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                         const Spacer(),
                         IconButton(
                           icon: const Icon(Icons.add),
-                          onPressed: () {
-                            _showAddFontOverrideDialog(provider);
-                            setSheetState(() {});
+                          onPressed: () async {
+                            await _showAddFontOverrideDialog(provider);
+                            if (mounted) setSheetState(() {});
                           },
                         ),
                       ],
@@ -4017,7 +4172,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                           icon: const Icon(Icons.delete, size: 20),
                           onPressed: () {
                             provider.removeFontOverride(entry.key);
-                            overrides.remove(entry.key);
                             setSheetState(() {});
                           },
                         ),
@@ -4033,11 +4187,18 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     );
   }
 
-  void _showAddFontOverrideDialog(ReaderProvider provider) {
+  Future<void> _showAddFontOverrideDialog(ReaderProvider provider) {
     final originalController = TextEditingController();
     final overrideController = TextEditingController();
 
-    showDialog(
+    void disposeControllers() {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        originalController.dispose();
+        overrideController.dispose();
+      });
+    }
+
+    return showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
@@ -4063,7 +4224,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () {
+                Navigator.pop(context);
+                disposeControllers();
+              },
               child: const Text('取消'),
             ),
             TextButton(
@@ -4077,6 +4241,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   overrideController.text,
                 );
                 Navigator.pop(context);
+                disposeControllers();
               },
               child: const Text('添加'),
             ),
@@ -4198,6 +4363,8 @@ class _NovelChapterListPanel extends StatefulWidget {
   final int currentChapterIndex;
   final Color foregroundColor;
   final Function(int) onChapterSelected;
+  // 书签增删后通知父页面（父页面顶栏书签图标需要同步刷新）
+  final VoidCallback? onBookmarksChanged;
 
   const _NovelChapterListPanel({
     this.book,
@@ -4206,6 +4373,7 @@ class _NovelChapterListPanel extends StatefulWidget {
     required this.currentChapterIndex,
     required this.foregroundColor,
     required this.onChapterSelected,
+    this.onBookmarksChanged,
   });
 
   @override
@@ -4816,6 +4984,8 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
                 bookmarkId: bookmark.id,
               );
               _loadBookmarks();
+              // 通知父页面顶栏书签图标重新检查当前章节书签状态
+              widget.onBookmarksChanged?.call();
             },
             child: const Text('删除'),
           ),
