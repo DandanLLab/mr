@@ -60,15 +60,21 @@ abstract class HorizontalPageDelegate extends PageDelegate {
   }
 
   /// 触摸事件统一处理
+  ///
+  /// 注意：PointerUpEvent 不在此处自动调用 onAnimStart。
+  /// 因为 ReaderPageView 采用「单 WebView + 动态截图」架构，
+  /// 松手后需要先 await onPerformPageTurn 让 WebView 跳到目标页，
+  /// 再截图目标页，最后才能启动动画。这套时序由 ReaderPageView 的
+  /// _finalizeTurn 统一控制，不能让 delegate 自行启动 onAnimStart，
+  /// 否则会用旧 curBitmap 绘制造成排版错乱。
   @override
   void onTouch(PointerEvent event) {
     if (event is PointerDownEvent) {
       abortAnim();
     } else if (event is PointerMoveEvent) {
       _onScroll(event);
-    } else if (event is PointerUpEvent || event is PointerCancelEvent) {
-      onAnimStart(defaultAnimationSpeed);
     }
+    // PointerUpEvent / PointerCancelEvent 由 ReaderPageView 接管
   }
 
   /// 移动处理

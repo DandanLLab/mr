@@ -102,8 +102,10 @@ class SlidePageDelegate extends HorizontalPageDelegate {
       0,
       distanceX,
       0,
-      duration < 50 ? 50 : (duration > 500 ? 500 : duration),
-      curve: Curves.easeOut,
+      // 时长范围 200-450ms，比之前 50-500ms 更平滑
+      // 用 Curves.easeOutCubic 让结束阶段更自然减速
+      duration < 200 ? 200 : (duration > 450 ? 450 : duration),
+      curve: Curves.easeOutCubic,
     );
 
     isRunning = true;
@@ -113,6 +115,7 @@ class SlidePageDelegate extends HorizontalPageDelegate {
 
   void _startAnimationLoop() {
     _animTimer?.cancel();
+    // 16ms ≈ 60fps，配合 Curves.easeOutCubic 视觉平滑
     _animTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
       if (!computeScroll()) {
         timer.cancel();
@@ -171,18 +174,16 @@ class SlidePageDelegate extends HorizontalPageDelegate {
 ///
 /// 参考 legado CoverPageDelegate：
 /// - 当前页不动，目标页从侧边滑入覆盖
-/// - 带边缘阴影
+/// - 带边缘阴影（30px 宽度，渐变从 40% 黑到透明）
 class CoverPageDelegate extends HorizontalPageDelegate {
   final PageScroller _scroller = PageScroller();
   Timer? _animTimer;
 
-  /// 边缘阴影
-  final Paint _shadowPaint = Paint()
-    ..shader = const LinearGradient(
-      begin: Alignment.centerLeft,
-      end: Alignment.centerRight,
-      colors: [Color(0x66111111), Color(0x00000000)],
-    ).createShader(const Rect.fromLTWH(0, 0, 30, 1));
+  /// 边缘阴影宽度（视觉上像 legado 的翻页阴影）
+  static const double _shadowWidth = 30.0;
+
+  /// 阴影画笔（颜色和 shader 在 _addShadow 中动态设置）
+  final Paint _shadowPaint = Paint();
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -258,7 +259,9 @@ class CoverPageDelegate extends HorizontalPageDelegate {
     canvas.save();
     canvas.translate(dx, 0);
     final shadowRect =
-        Rect.fromLTWH(0, 0, 30, viewHeight);
+        Rect.fromLTWH(0, 0, _shadowWidth, viewHeight);
+    // 阴影渐变：从 40% 黑色（紧贴翻起页边缘）渐变到透明
+    // 比 legado 原版略深，让翻页立体感更强
     _shadowPaint.shader = const LinearGradient(
       begin: Alignment.centerLeft,
       end: Alignment.centerRight,
@@ -290,8 +293,9 @@ class CoverPageDelegate extends HorizontalPageDelegate {
       0,
       distanceX,
       0,
-      duration < 50 ? 50 : (duration > 500 ? 500 : duration),
-      curve: Curves.easeOut,
+      // 时长范围 200-450ms，与 SlidePageDelegate 保持一致
+      duration < 200 ? 200 : (duration > 450 ? 450 : duration),
+      curve: Curves.easeOutCubic,
     );
 
     isRunning = true;

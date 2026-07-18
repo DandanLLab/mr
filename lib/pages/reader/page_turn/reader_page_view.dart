@@ -50,12 +50,6 @@ class ReaderPageView extends StatefulWidget {
   /// 返回 false 表示取消翻页（章节边界等，ReaderPageView 取消动画）
   final Future<bool> Function(PageDirection direction) onPerformPageTurn;
 
-  /// 单击（非滑动、非长按）
-  final void Function(double x, double y)? onTap;
-
-  /// 长按
-  final void Function(double x, double y)? onLongPress;
-
   /// 翻页完成通知（动画结束后触发，外部可保存进度等）
   final void Function(PageDirection direction)? onPageTurnCompleted;
 
@@ -68,8 +62,6 @@ class ReaderPageView extends StatefulWidget {
     required this.isScrollMode,
     required this.pageModeIndex,
     required this.onPerformPageTurn,
-    this.onTap,
-    this.onLongPress,
     this.onPageTurnCompleted,
     this.onPageTurnCancelled,
   });
@@ -94,11 +86,6 @@ class _ReaderPageViewState extends State<ReaderPageView>
   int _turnToken = 0;
 
   Offset? _downPosition;
-  bool _isLongPressTriggered = false;
-  Timer? _longPressTimer;
-
-  /// 触摸阈值平方（16px）
-  static const double _slop = 16.0;
 
   @override
   void initState() {
@@ -160,18 +147,11 @@ class _ReaderPageViewState extends State<ReaderPageView>
     if (widget.isScrollMode) return;
 
     _downPosition = event.position;
-    _isLongPressTriggered = false;
     _delegate.onDown();
     _delegate.setStartPoint(event.position.dx, event.position.dy);
     _delegate.onTouch(event);
-
-    _longPressTimer?.cancel();
-    _longPressTimer = Timer(const Duration(milliseconds: 600), () {
-      if (!_delegate.isMoved && mounted) {
-        _isLongPressTriggered = true;
-        widget.onLongPress?.call(event.position.dx, event.position.dy);
-      }
-    });
+    // 不再启动长按计时器 —— InAppWebView 是 PlatformView 会吃掉 pointerUp，
+    // 长按选文字由 WebView 自身处理，菜单召唤靠 JS click 事件回传
   }
 
   void _onPointerMove(PointerMoveEvent event) {
@@ -179,36 +159,28 @@ class _ReaderPageViewState extends State<ReaderPageView>
     if (_downPosition == null) return;
     if (_isTurning) return; // 翻页中不响应新移动
 
-    if (!_delegate.isMoved) {
-      final dx = event.position.dx - _downPosition!.dx;
-      final dy = event.position.dy - _downPosition!.dy;
-      if (dx * dx + dy * dy > _slop) {
-        _longPressTimer?.cancel();
-        // 判定方向：dx > 0 向右滑 = 上一页，dx < 0 向左滑 = 下一页
-        _delegate.setDirection(dx > 0 ? PageDirection.prev : PageDirection.next);
-      }
-    }
+    // delegate.onTouch 内部 _onScroll 会判断 isMoved 并设置 isRunning=true
+    // 但 isRunning=true 只表示"用户开始滑动"，不代表"动画启动"
+    // paint 内部会检查 curBitmap != null 才绘制，所以提前 isRunning=true 无害
+    _delegate.onTouch(event);
 
-    // 动画未启动时，先显示覆盖层并准备 curBitmap
+    // NoAnimPageDelegate 不需要截图覆盖层 —— 松手时直接跳页
+    // 这里提前 return 避免截图开销，并保持 _showAnimationLayer=false
+    // 让 WebView 持续可交互（文字选择不受影响）
+    if (_delegate is NoAnimPageDelegate) return;
+
+    // 用户已滑动一定距离且未启动截图 → 启动截图序列
     if (_delegate.isMoved && !_showAnimationLayer) {
       _startTurnSequence();
     }
-
-    _delegate.onTouch(event);
   }
 
   void _onPointerUp(PointerUpEvent event) {
     if (widget.isScrollMode) return;
-    _longPressTimer?.cancel();
     if (_downPosition == null) return;
 
-    if (!_delegate.isMoved && !_isLongPressTriggered) {
-      // 单击
-      widget.onTap?.call(event.position.dx, event.position.dy);
-      _downPosition = null;
-      return;
-    }
-
+    // tap 召唤菜单不再由 Flutter Listener 处理 —— InAppWebView 是 PlatformView
+    // 会吃掉 pointerUp，所以 tap 改由 JS click 事件回传到 _onWebviewJsTap
     if (_delegate.isMoved) {
       // 滑动结束，开始自动动画
       _finalizeTurn();
@@ -217,7 +189,6 @@ class _ReaderPageViewState extends State<ReaderPageView>
   }
 
   void _onPointerCancel(PointerCancelEvent event) {
-    _longPressTimer?.cancel();
     if (_isTurning) {
       _delegate.abortAnim();
       _cancelTurn();
@@ -272,6 +243,15 @@ class _ReaderPageViewState extends State<ReaderPageView>
   Future<void> _finalizeTurn() async {
     final token = _turnToken;
 
+    // 用户回拖取消：不翻页，直接回弹动画
+    // isCancel=true 时仍需启动 onAnimStart 让 delegate 跑回弹动画，
+    // 但不能调用 onPerformPageTurn（WebView 不该跳页）
+    if (_delegate.isCancel) {
+      _delegate.onAnimStart(_delegate.defaultAnimationSpeed);
+      setState(() {});
+      return;
+    }
+
     // 调用外部翻页（此处才真正让 WebView 跳页）
     bool ok = true;
     try {
@@ -284,6 +264,15 @@ class _ReaderPageViewState extends State<ReaderPageView>
     if (!ok || token != _turnToken || !mounted) {
       // 章节边界或 token 失效：取消翻页
       if (token == _turnToken) _cancelTurn();
+      return;
+    }
+
+    // NoAnimPageDelegate 不需要截图目标页 —— 跳页后直接完成
+    // 否则会多余截图（约 50-100ms 开销），让用户感知延迟
+    if (_delegate is NoAnimPageDelegate) {
+      _isTurning = false;
+      widget.onPageTurnCompleted?.call(_delegate.direction);
+      _delegate.onDown(); // 重置 delegate 状态
       return;
     }
 
@@ -332,7 +321,6 @@ class _ReaderPageViewState extends State<ReaderPageView>
 
   @override
   void dispose() {
-    _longPressTimer?.cancel();
     _delegate.onDestroy();
     super.dispose();
   }

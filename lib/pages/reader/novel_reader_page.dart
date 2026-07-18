@@ -1438,12 +1438,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               isScrollMode: isScrollMode,
               pageModeIndex: pageModeIndex,
               onPerformPageTurn: _onPerformPageTurn,
-              onTap: (x, y) => _handleTap(TapUpDetails(
-                kind: PointerDeviceKind.touch,
-                globalPosition: Offset(x, y),
-                localPosition: Offset(x, y),
-              )),
-              onLongPress: (x, y) => _onWebviewLongPress(x, y),
               onPageTurnCompleted: _onPageTurnCompleted,
               onPageTurnCancelled: _onPageTurnCancelled,
               child: ReaderWebView(
@@ -1456,7 +1450,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   onInitialized: _onWebviewInitialized,
                   onPageCountReady: _onWebviewPageCountReady,
                   onPageChanged: _onWebviewPageChanged,
-                  onTap: (x, y) {}, // tap 由 ReaderPageView 处理
+                  // tap 由 JS click 事件触发（InAppWebView 是 PlatformView，
+                  // Flutter Listener 收不到 pointerUp，必须靠 JS 回调）
+                  onTap: _onWebviewJsTap,
                   onImageTap: _onWebviewImageTap,
                 ),
               ),
@@ -1497,11 +1493,27 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     // 章节内翻页：调用 WebView 切换（无动画，因为我们的 ReaderPageView 自己做动画）
     await _readerWebViewController.jumpToPage(targetPage, animate: false);
 
-    // 等待 WebView 内部 CSS column 重排完成
-    // jumpToPage 会触发 onPageChanged 回调，但我们不能等回调（可能延迟）
-    // 给一个固定延迟让重排稳定，避免截图时内容还没切完
-    await Future.delayed(const Duration(milliseconds: 50));
+    // 等待 WebView 内部 CSS column 重排 + PlatformView 合成到 Flutter Surface
+    // jumpToPage 同步设 transform，但 WebView 渲染需要 1-2 帧才能更新到 Surface
+    // 必须等帧完成，否则 RepaintBoundary.toImage 截到的是旧内容（第 2 页排版乱的根因）
+    await _waitForWebViewFrame();
     return true;
+  }
+
+  /// 等待 WebView 完成一帧渲染（CSS 重排 + PlatformView 合成）
+  Future<void> _waitForWebViewFrame() async {
+    // 第一帧：触发 CSS column transform 重排
+    await _nextFrame();
+    // 第二帧：PlatformView 合成到 Flutter Surface
+    await _nextFrame();
+    // 额外保险：给 SurfaceFlinger 一次 vsync 的时间
+    await Future.delayed(const Duration(milliseconds: 16));
+  }
+
+  Future<void> _nextFrame() {
+    final completer = Completer<void>();
+    WidgetsBinding.instance.addPostFrameCallback((_) => completer.complete());
+    return completer.future;
   }
 
   /// 翻页完成（动画结束后）：保存进度
@@ -1516,12 +1528,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   void _onPageTurnCancelled() {
     if (!mounted) return;
     setState(() {});
-  }
-
-  /// 长按（由 ReaderPageView 触发，转发给 WebView 处理）
-  void _onWebviewLongPress(double x, double y) {
-    // 长按文字选择由 WebView 自身的 CSS user-select 处理
-    // 这里不做额外处理，让 WebView 接管触摸事件
   }
 
   void _onWebviewInitialized() {
@@ -1618,6 +1624,40 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   void _onWebviewImageTap(String src, Rect rect) {
     // 图片点击：打开图片预览（暂未实现，与旧 flutter_html 行为一致）
     debugPrint('[NovelReader] Image tap: $src');
+  }
+
+  /// WebView 内部 JS click 事件回调（x, y 是 clientX/clientY，相对 WebView 视口）
+  ///
+  /// 关键修复：InAppWebView 是 PlatformView，外层 Flutter Listener 收不到
+  /// pointerUp 事件，必须靠 JS 端的 click 事件回传才能召唤菜单。
+  /// JS 端在 reader_html_template.dart 的 document.addEventListener('click')
+  /// 中调用 notifyTap(x, y)，通过 flutter_inappwebview 桥回传到此处。
+  ///
+  /// 注意：JS click 事件在 Android WebView 上有 ~300ms 延迟（防止双击缩放），
+  /// 所以菜单召唤会比纯 Flutter 略慢一点，但这是 PlatformView 的固有代价。
+  void _onWebviewJsTap(double x, double y) {
+    if (_isLoading) return;
+    // 菜单显示时点击任意区域关闭菜单
+    if (_showMenu) {
+      _hideMenu();
+      return;
+    }
+    final provider = context.read<ReaderProvider>();
+    final mq = MediaQuery.of(context);
+    final size = mq.size;
+    // x, y 是相对 WebView 视口的坐标，转换为屏幕全局坐标
+    // WebView 位于 SafeArea 内的 Expanded 区域，顶部可能有 header
+    final headerExtent = _headerVisible(provider) ? _headerExtent(provider) : 0.0;
+    final screenX = x + mq.padding.left;
+    final screenY = y + mq.padding.top + headerExtent;
+
+    final col = (screenX / (size.width / 3)).clamp(0, 2).toInt();
+    final row = (screenY / (size.height / 3)).clamp(0, 2).toInt();
+
+    final actions = provider.tapZoneActions;
+    if (row >= actions.length || col >= actions[row].length) return;
+
+    _executeTapAction(actions[row][col]);
   }
 
   bool _hasBackgroundImage(ReaderProvider provider) {

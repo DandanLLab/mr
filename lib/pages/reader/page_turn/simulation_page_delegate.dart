@@ -525,8 +525,10 @@ class SimulationPageDelegate extends HorizontalPageDelegate {
         touchY.toInt().toDouble(),
         dx,
         dy,
-        duration < 50 ? 50 : (duration > 500 ? 500 : duration),
-        curve: Curves.easeOut);
+        // 仿真翻页时长 200-500ms，比 slide/cover 略长以体现 3D 翻折感
+        // 用 easeOutCubic 让翻页末段缓慢贴合，模拟纸张落下的物理感
+        duration < 200 ? 200 : (duration > 500 ? 500 : duration),
+        curve: Curves.easeOutCubic);
 
     isRunning = true;
     isStarted = true;

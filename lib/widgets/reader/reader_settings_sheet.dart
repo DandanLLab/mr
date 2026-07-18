@@ -237,6 +237,7 @@ class ReaderSettingsSheet extends StatefulWidget {
     1: '滑动',
     3: '仿真',
     0: '滚动',
+    4: '无动画',
   };
 
   @override
