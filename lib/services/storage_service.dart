@@ -22,24 +22,120 @@ class StorageService {
 
   /// 打开单个 Box，失败时（如 HiveError: unknown typeId 数据损坏）自动删文件重建
   /// 只清这一个 Box，不影响其他 Box 的数据
+  ///
+  /// 关键修复：Hive 2.x 是懒加载的 —— openBox() 成功不代表数据完整，
+  /// 后续 box.get(key) 时才会反序列化对应 value。
+  /// 如果某个 value 的二进制数据损坏（如 typeId=101 未注册 adapter），
+  /// 会在业务代码中抛 HiveError，逃逸到 zone 触发崩溃弹窗。
+  /// 这里在打开后立即做"健康检查"逐 key 试读，把损坏的 key 提前删除，
+  /// 保留其他有效数据，避免清空整个 Box。
   Future<Box?> _openBoxWithRecovery(String name) async {
     try {
+      Box box;
       if (Hive.isBoxOpen(name)) {
-        return Hive.box(name);
+        box = Hive.box(name);
+      } else {
+        box = await Hive.openBox(name);
       }
-      return await Hive.openBox(name);
+      // 健康检查：逐 key 试读，强制反序列化，把懒加载的损坏数据提前暴露
+      await _healthCheck(box);
+      return box;
     } catch (e) {
       debugPrint('❌ 打开 $name Box失败: $e，尝试重建该 Box...');
-      try {
-        await _safeCloseBox(name);
-        await Hive.deleteBoxFromDisk(name);
-        final box = await Hive.openBox(name);
-        debugPrint('✅ $name Box 重建成功（该 Box 数据已清空）');
-        return box;
-      } catch (e2) {
-        debugPrint('❌ 重建 $name Box也失败: $e2');
-        return null;
+      return await _rebuildBox(name);
+    }
+  }
+
+  /// 重建 Box：close → 等待事件循环 → delete → 等待 → openBox
+  ///
+  /// 关键修复：Hive 2.x 在 deleteBoxFromDisk 后立即 openBox 会抛
+  /// PathNotFoundException —— Hive 内部 isBoxOpen 状态没及时清理，
+  /// openBox 复用了已关闭的 Box 引用但磁盘文件已删。
+  /// 这里通过 Future.delayed(Duration.zero) 让出事件循环，确保
+  /// Hive 内部 registry 完全清理后再 openBox。
+  /// 同时如果首次重建仍失败，再重试一次（双重保险）。
+  Future<Box?> _rebuildBox(String name, {int retry = 0}) async {
+    try {
+      await _safeCloseBox(name);
+      // 让出事件循环，确保 Hive 内部 isBoxOpen 标志位清理
+      await Future.delayed(Duration.zero);
+      // 二次确认 close：Hive 2.x 偶发 close 未完成的情况
+      if (Hive.isBoxOpen(name)) {
+        try {
+          await Hive.box(name).close();
+        } catch (_) {}
+        await Future.delayed(Duration.zero);
       }
+      try {
+        await Hive.deleteBoxFromDisk(name);
+      } catch (_) {
+        // 文件不存在也无所谓，反正要重建
+      }
+      await Future.delayed(Duration.zero);
+      final box = await Hive.openBox(name);
+      debugPrint('✅ $name Box 重建成功（该 Box 数据已清空）');
+      return box;
+    } catch (e2) {
+      debugPrint('❌ 重建 $name Box失败(第 $retry 次): $e2');
+      // 首次重建失败时再重试一次（应对 Hive 内部状态未清理的竞态）
+      if (retry < 1) {
+        await Future.delayed(const Duration(milliseconds: 50));
+        return _rebuildBox(name, retry: retry + 1);
+      }
+      return null;
+    }
+  }
+
+  /// Box 健康检查：逐 key 试读，遇到 HiveError（如 unknown typeId）时删除该损坏 key。
+  ///
+  /// 设计原则：**容错优先**，不因单个 key 损坏就让整个 Box 重建。
+  /// - keys.toList() 复制一份，避免遍历中 delete 改动原迭代器
+  /// - 每个 key 独立 try-catch，单 key 失败不影响其他 key 检查
+  /// - 删除损坏 key 失败时**不抛错**，只记录（避免 _openBoxWithRecovery 误以为
+  ///   整个 Box 损坏而走重建路径，反而把其他有效数据全清了）
+  /// - 只有 keys 本身读不出（Box 文件级损坏）才向上抛触发重建
+  Future<void> _healthCheck(Box box) async {
+    final List keys;
+    try {
+      keys = box.keys.toList();
+    } catch (e) {
+      // 连 keys 都读不出，Box 严重损坏，需要整个重建
+      debugPrint('⚠️ Box ${box.name} keys 读取失败，需要重建: $e');
+      rethrow;
+    }
+    var corruptCount = 0;
+    var deleteFailCount = 0;
+    for (final key in keys) {
+      try {
+        // 强制反序列化对应 value，触发可能的 HiveError
+        box.get(key);
+      } catch (e) {
+        final errStr = e.toString();
+        // 仅处理 Hive 反序列化错误（typeId 非法、adapter 缺失等）
+        if (errStr.contains('HiveError') ||
+            errStr.contains('unknown typeId') ||
+            errStr.contains('Did you forget to register an adapter')) {
+          corruptCount++;
+          debugPrint('⚠️ Box ${box.name} key=$key 数据损坏，删除该 key: $errStr');
+          try {
+            await box.delete(key);
+          } catch (delErr) {
+            // 删除失败不抛错：单 key 删除失败不等于整个 Box 损坏，
+            // 抛错会触发 _rebuildBox 清空整个 Box，得不偿失
+            deleteFailCount++;
+            debugPrint('⚠️ Box ${box.name} 删除损坏 key=$key 失败（跳过，不影响其他 key）: $delErr');
+          }
+        } else {
+          // 非 HiveError（磁盘 IO、权限等）记录但不抛错，避免误重建
+          debugPrint('⚠️ Box ${box.name} key=$key 读取异常（非 HiveError，跳过）: $e');
+        }
+      }
+    }
+    if (corruptCount > 0) {
+      debugPrint('🔧 Box ${box.name} 健康检查完成，'
+          '发现 $corruptCount 个损坏 key，'
+          '${corruptCount - deleteFailCount} 个已删除，'
+          '$deleteFailCount 个删除失败');
     }
   }
 
