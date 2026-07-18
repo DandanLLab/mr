@@ -211,7 +211,7 @@ body.reader-paged #reader-root {
   overflow: hidden;
 }
 
-/* stage：a/b 的定位容器，尺寸 = 安全区 */
+/* stage：a/b 的定位容器，尺寸 = 安全区，负责裁剪溢出内容 */
 body.reader-paged #reader-stage {
   position: relative;
   width: var(--reader-safe-width);
@@ -219,17 +219,20 @@ body.reader-paged #reader-stage {
   overflow: hidden;
 }
 
-/* a/b 共用样式：absolute 重叠，column 分栏 */
+/* a/b 共用样式：absolute 重叠，column 分栏
+   关键：不设 width，让 column 布局自动扩展到内容总宽度，
+   这样 scrollWidth 才能返回所有列的总宽度（= pageCount * columnWidth）。
+   裁剪由父容器 #reader-stage 的 overflow:hidden 负责。
+   如果在元素自身设 overflow:hidden + width，scrollWidth 只返回
+   元素自身宽度（一屏），getPageCount() 永远算出 1 页，翻页失效。 */
 body.reader-paged .reader-content {
   position: absolute;
   top: 0;
   left: 0;
-  width: var(--reader-safe-width);
   height: var(--reader-safe-height);
   column-width: var(--reader-safe-width);
   column-gap: 0;
   column-fill: auto;
-  overflow: hidden;
   will-change: transform;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
@@ -540,9 +543,10 @@ window.readerApi = (function() {
   }
 
   function getColumnWidth() {
-    // column-width = WebView 宽度 - paddingLeft - paddingRight
-    // 与 CSS --reader-safe-width 一致（100vw - padding）
-    var viewWidth = config.viewWidth || window.innerWidth;
+    // column-width = WebView 实际宽度 - paddingLeft - paddingRight
+    // 必须用 window.innerWidth（= WebView widget 实际尺寸，与 CSS --reader-vw 一致），
+    // 不能用 config.viewWidth（Dart 传入，可能与实际 widget 尺寸有偏差）
+    var viewWidth = window.innerWidth;
     return viewWidth - getPaddingLeft() - getPaddingRight();
   }
 
@@ -562,7 +566,11 @@ window.readerApi = (function() {
     var columnWidth = getColumnWidth();
     var gap = config.columnGap || 0;
     var scrollWidth = contentA.scrollWidth;
-    return Math.max(1, Math.round((scrollWidth + gap) / (columnWidth + gap)));
+    if (columnWidth + gap <= 0) return 1;
+    // 用 ceil：内容哪怕只溢出第 2 列一点点，也是 2 页
+    // 减 1px 容差：避免浮点误差导致多算一个空白页
+    var pageCount = Math.ceil((scrollWidth - 1) / (columnWidth + gap));
+    return Math.max(1, pageCount);
   }
 
   function getCurrentPage() {
@@ -795,6 +803,11 @@ window.readerApi = (function() {
   // ============ Dart 通信 ============
   function notifyPageCountReady() {
     var count = getPageCount();
+    var cw = getColumnWidth();
+    var sw = contentA ? contentA.scrollWidth : 0;
+    console.log('[reader] pageCountReady', 'count=' + count,
+      'scrollWidth=' + sw, 'columnWidth=' + cw,
+      'vw=' + window.innerWidth, 'vh=' + window.innerHeight);
     if (window.flutter_inappwebview) {
       window.flutter_inappwebview.callHandler('onPageCountReady', count);
     }
