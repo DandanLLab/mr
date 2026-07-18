@@ -549,9 +549,13 @@ window.readerApi = (function() {
     }, { passive: true });
 
     // 滚动模式：监听 scroll 事件
+    // 关键：滚动容器是 body（CSS body.reader-scroll { overflow-y: auto }），
+    // 不是 window。window 的 scroll 事件只在 document.scrollingElement 滚动时触发，
+    // 而 body 自身滚动不会派发 window 的 scroll 事件（scroll 事件不冒泡）。
+    // 之前监听 window 导致滚动进度永远不回调（C4 bug）
     if (config.isScrollMode) {
       var scrollTimer = null;
-      window.addEventListener('scroll', function() {
+      body.addEventListener('scroll', function() {
         if (scrollTimer) clearTimeout(scrollTimer);
         scrollTimer = setTimeout(function() {
           var progress = getScrollProgress();
@@ -635,16 +639,22 @@ window.readerApi = (function() {
 
   function getColumnWidth() {
     // column-width = 安全区宽度（已扣除 padding）
-    // 直接读 CSS 变量 --reader-safe-width（由 :root 上的 calc 计算好），
-    // 不能用 window.innerWidth - paddingLeft（padding 在 html 上而非 #reader-root）
-    var root = document.documentElement;
-    var v = getComputedStyle(root).getPropertyValue('--reader-safe-width').trim();
-    var px = parseFloat(v);
-    if (!px || px <= 0) {
-      // 兜底：用 window.innerWidth（无 padding 情况）
-      px = window.innerWidth;
+    //
+    // 必须用 contentA.clientWidth，不能用 getComputedStyle 读 CSS 自定义属性：
+    // 未注册（无 @property）的自定义属性在 JS 端 getComputedStyle 返回的是
+    // substituted value（var() 替换后的 calc/min 表达式字符串），parseFloat 解析
+    // NaN，导致 getPageCount 算出错误页数、jumpToPage translate3d 偏移错误。
+    // 即使部分 WebView 会自动计算 calc，行为也不一致。clientWidth 是布局后实际
+    // 像素值，最可靠（C1 bug 修复）
+    if (contentA) {
+      var w = contentA.clientWidth;
+      if (w > 0) return w;
     }
-    return px;
+    // 兜底：用 viewport - padding（避免 padding 漏算导致 column-width 偏大）
+    var cs = getComputedStyle(document.documentElement);
+    var pl = parseFloat(cs.paddingLeft) || 0;
+    var pr = parseFloat(cs.paddingRight) || 0;
+    return Math.max(100, window.innerWidth - pl - pr);
   }
 
   function getPaddingLeft() {
@@ -842,7 +852,11 @@ window.readerApi = (function() {
   function getScrollProgress() {
     if (config.isScrollMode) {
       var st = body.scrollTop || document.documentElement.scrollTop;
-      var sh = body.scrollHeight - window.innerHeight;
+      // 用 body.clientHeight 而非 window.innerHeight：
+      // scroll 模式下 body { height: 100% }，其 clientHeight = html content area
+      // = vh - paddingTop - paddingBottom = safe-height，小于 window.innerHeight
+      // (= vh)。用 innerHeight 会让分母偏大，到底时显示 ~96% 而非 100%（C5 bug）
+      var sh = body.scrollHeight - body.clientHeight;
       return sh > 0 ? st / sh : 0;
     }
     return getPageCount() > 0 ? currentPage / getPageCount() : 0;
@@ -855,7 +869,7 @@ window.readerApi = (function() {
       jumpToPage(page, false);
       return;
     }
-    var sh = body.scrollHeight - window.innerHeight;
+    var sh = body.scrollHeight - body.clientHeight;
     body.scrollTop = sh * ratio;
   }
 
@@ -871,7 +885,8 @@ window.readerApi = (function() {
 
   function scrollByViewport(direction) {
     if (!config.isScrollMode) return -1;
-    var viewport = window.innerHeight;
+    // 用 body.clientHeight 而非 window.innerHeight（同 getScrollProgress）
+    var viewport = body.clientHeight;
     var maxScroll = body.scrollHeight - viewport;
     if (maxScroll <= 0) return -1;
     var current = body.scrollTop || 0;
