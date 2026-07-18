@@ -44,6 +44,7 @@ class ReaderHtmlTemplate {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="format-detection" content="telephone=no, email=no, address=no">
   <style>
     $css
   </style>
@@ -585,7 +586,48 @@ window.readerApi = (function() {
     }
 
     // 等待 DOM 渲染完成后通知 Dart 侧
+    // 首次通知：rAF 双帧后立即通知，让 Dart 尽快拿到初步 pageCount 启动渲染
+    // （避免首次通知延迟导致首屏白屏）
     requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        notifyPageCountReady();
+        // 二次通知：等图片和字体加载完成后再通知一次（M1 修复）
+        // - 图片加载会改变段落高度，触发 column 布局重排，pageCount 可能变化
+        // - 字体加载完成后文本宽度变化，pageCount 可能变化
+        // - 如果不二次通知，Dart 侧拿到的是旧 pageCount，jumpToPage 用错页数
+        // - Dart 侧 _onWebviewPageCountReady 会判断 isUpdate=true 走更新分支，
+        //   只更新 _webviewPageCount + clamp 当前页，不重新恢复进度
+        notifyPageCountReadyWhenStable();
+      });
+    });
+  }
+
+  // 等图片和字体加载完成后通知 pageCount 更新（M1 修复）
+  function notifyPageCountReadyWhenStable() {
+    var imgPromises = [];
+    var imgs = document.querySelectorAll('img');
+    for (var i = 0; i < imgs.length; i++) {
+      (function(img) {
+        if (!img.complete) {
+          imgPromises.push(new Promise(function(resolve) {
+            img.addEventListener('load', resolve, { once: true });
+            img.addEventListener('error', resolve, { once: true });
+          }));
+        }
+      })(imgs[i]);
+    }
+    // document.fonts.ready：等所有字体加载完成（含 web font）
+    // 旧 WebView 不支持 document.fonts 则跳过（用 Promise.resolve 兜底）
+    var fontPromise = (document.fonts && document.fonts.ready)
+      ? document.fonts.ready
+      : Promise.resolve();
+    Promise.all(imgPromises.concat([fontPromise])).then(function() {
+      // 加载完成后等一帧让 column 布局重排完成
+      requestAnimationFrame(function() {
+        notifyPageCountReady();
+      });
+    }).catch(function() {
+      // 兜底：异常时也通知一次
       requestAnimationFrame(function() {
         notifyPageCountReady();
       });
