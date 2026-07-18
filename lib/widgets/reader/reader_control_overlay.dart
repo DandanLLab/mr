@@ -44,6 +44,14 @@ class ReaderControlOverlay extends StatefulWidget {
   final ValueChanged<int> onSliderChangeEnd;
   final VoidCallback? onSliderChangeStart;
 
+  /// 菜单显隐动画（外部传入，由父级 AnimationController 驱动）
+  ///
+  /// 用于驱动顶部栏下滑、底部栏上滑、整体淡入淡出。
+  /// - value=0：完全隐藏（SizedBox.shrink 由父级处理，本组件仍可被 build）
+  /// - value=1：完全显示
+  /// - 中间值：动画过渡中
+  final Animation<double> animation;
+
   const ReaderControlOverlay({
     super.key,
     required this.bookName,
@@ -85,6 +93,7 @@ class ReaderControlOverlay extends StatefulWidget {
     this.onOpenChapterUrl,
     this.onEditSource,
     this.onDisableSource,
+    required this.animation,
   });
 
   @override
@@ -93,6 +102,59 @@ class ReaderControlOverlay extends StatefulWidget {
 
 class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
   bool _isSliderDragging = false;
+
+  /// 顶部栏下滑曲线（持有 CurvedAnimation 以便 dispose）
+  late final CurvedAnimation _topCurve;
+
+  /// 底部栏上滑曲线
+  late final CurvedAnimation _bottomCurve;
+
+  /// 整体淡入淡出曲线
+  late final CurvedAnimation _fadeCurve;
+
+  /// 顶部栏下滑动画（SlideTransition.position 用）
+  late final Animation<Offset> _topSlide;
+
+  /// 底部栏上滑动画
+  late final Animation<Offset> _bottomSlide;
+
+  @override
+  void initState() {
+    super.initState();
+    // 三组曲线独立设置：顶部/底部用 easeOutCubic 强调「减速到位」，
+    // 中央用 easeIn 配合 fade，淡入感更柔和
+    _topCurve = CurvedAnimation(
+      parent: widget.animation,
+      curve: Curves.easeOutCubic,
+    );
+    _bottomCurve = CurvedAnimation(
+      parent: widget.animation,
+      curve: Curves.easeOutCubic,
+    );
+    _fadeCurve = CurvedAnimation(
+      parent: widget.animation,
+      curve: Curves.easeIn,
+    );
+    _topSlide = Tween<Offset>(
+      begin: const Offset(0, -1),
+      end: Offset.zero,
+    ).animate(_topCurve);
+    _bottomSlide = Tween<Offset>(
+      begin: const Offset(0, 1),
+      end: Offset.zero,
+    ).animate(_bottomCurve);
+  }
+
+  @override
+  void dispose() {
+    // 仅 dispose CurvedAnimation（它会移除对 parent 的 listener）
+    // Tween.animate 返回的 Animation<Offset> 不需要 dispose
+    // （它本身是 _AnimatedEvaluation，parent dispose 后自动解绑）
+    _topCurve.dispose();
+    _bottomCurve.dispose();
+    _fadeCurve.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -103,26 +165,47 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
 
     return Column(
       children: [
-        _buildTopBar(context, cs, isDark, topPad),
+        // 顶部栏：从屏外顶部下滑 + 整体 fade
+        SlideTransition(
+          position: _topSlide,
+          child: FadeTransition(
+            opacity: _fadeCurve,
+            child: _buildTopBar(context, cs, isDark, topPad),
+          ),
+        ),
         Expanded(
           child: Stack(
             children: [
+              // 中央点击区：仅 fade（不滑动，保持 GestureDetector 始终在原位响应关闭）
               Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _isSliderDragging ? null : widget.onClose,
+                child: FadeTransition(
+                  opacity: _fadeCurve,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _isSliderDragging ? null : widget.onClose,
+                  ),
                 ),
               ),
               Positioned(
                 left: 0,
                 right: 0,
                 bottom: 120,
-                child: _buildCenterButtons(cs),
+                child: FadeTransition(
+                  opacity: _fadeCurve,
+                  child: _buildCenterButtons(cs),
+                ),
               ),
             ],
           ),
         ),
-        _buildBottomBar(context, cs, botPad),
+        // 底部栏：从屏外底部上滑 + 整体 fade
+        SlideTransition(
+          position: _bottomSlide,
+          child: FadeTransition(
+            opacity: _fadeCurve,
+            child: _buildBottomBar(context, cs, botPad),
+          ),
+        ),
       ],
     );
   }
@@ -138,10 +221,14 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
         statusBarColor: cs.surface,
         statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
       ),
+      // elevation 提供立体阴影，分割顶部栏与阅读内容（接近主流阅读器质感）
+      // 不用 BackdropFilter：在 InAppWebView Texture Layer 上方可能渲染异常
       child: Material(
         color: cs.surface,
+        elevation: 6,
+        shadowColor: cs.shadow,
         child: Padding(
-          padding: EdgeInsets.fromLTRB(8, topPad, 4, 0),
+          padding: EdgeInsets.fromLTRB(8, topPad, 4, 8),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [_buildHeaderRow1(context, cs), _buildHeaderRow2(cs)],
@@ -471,6 +558,8 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
   Widget _buildBottomBar(BuildContext context, ColorScheme cs, double botPad) {
     return Material(
       color: cs.surface,
+      elevation: 6,
+      shadowColor: cs.shadow,
       child: Padding(
         padding: EdgeInsets.fromLTRB(12, 4, 12, botPad),
         child: Column(
@@ -570,16 +659,24 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
   }
 
   Widget _buildLabelBtn(String label, ColorScheme cs, VoidCallback? onTap) {
+    // 扩大点击区域到 36×max，水平 padding 加到 8（原 4）
+    // 配合 HitTestBehavior.opaque，确保手指粗的用户也能精准点击
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: onTap != null ? cs.onSurface : cs.onSurface.withAlpha(0x40),
-            fontSize: 12,
+      child: SizedBox(
+        height: 36,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                color:
+                    onTap != null ? cs.onSurface : cs.onSurface.withAlpha(0x40),
+                fontSize: 12,
+              ),
+            ),
           ),
         ),
       ),
@@ -592,12 +689,16 @@ class _ReaderControlOverlayState extends State<ReaderControlOverlay> {
     ColorScheme cs,
     VoidCallback onTap,
   ) {
+    // 扩大点击区域到 56×48（原 padding 8×4 ≈ 40×36）
+    // 接近 Material Design 推荐的最小可点击区域 48×48
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: SizedBox(
+        width: 56,
+        height: 48,
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon, color: cs.onSurfaceVariant, size: 24),

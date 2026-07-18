@@ -176,7 +176,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
     _menuAnimController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 250),
+      duration: const Duration(milliseconds: 300),
     );
     _focusNode = FocusNode(debugLabel: 'NovelReaderPage');
 
@@ -1498,76 +1498,102 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   speed: _ttsSpeed,
                 ),
               // 增强版控制面板
-              if (_showMenu)
-                ReaderControlOverlay(
-                  bookName: _book?.name ?? '',
-                  chapterTitle: _chapterTitle,
-                  chapterUrl: _chapterUrl,
-                  sourceName:
-                      _book?.sourceName ??
-                      (_book?.originType == BookOriginType.local ? '本地书籍' : ''),
-                  hasBookSource: _bookSource != null,
-                  currentChapter: _currentChapterIndex,
-                  totalChapters: _totalChapters,
-                  hasBookmark: _hasBookmark,
-                  hasPrev:
-                      _previousReadableChapterIndex(_currentChapterIndex) !=
-                      null,
-                  hasNext:
-                      _nextReadableChapterIndex(_currentChapterIndex) != null,
-                  isAutoScroll: _isAutoScroll,
-                  useReplaceRules: _useReplaceRules,
-                  isNightMode: provider.isNightMode,
-                  sliderValue: _sliderValue,
-                  onBack: () => Navigator.pop(context),
-                  onChangeSource: _showChangeSourceDialog,
-                  onOpenDetail: _openBookDetail,
-                  onOpenChapterUrl: _openChapterUrl,
-                  onEditSource: () => _handleSourceAction('edit'),
-                  onDisableSource: () => _handleSourceAction('disable'),
-                  onRefresh: _refreshChapterContent,
-                  onDownload: _showCacheOptions,
-                  onToggleBookmark: _toggleBookmark,
-                  onClose: _hideMenu,
-                  onPrevChapter: () {
-                    if (_previousReadableChapterIndex(_currentChapterIndex) !=
-                        null) {
-                      _previousChapter();
+              //
+              // 之前直接 if (_showMenu) ReaderControlOverlay(...) 导致菜单瞬间显示/消失
+              // 没有任何过渡动画——_menuAnimController 只 forward/reverse 但没 widget 用
+              // 它的值。改为 ListenableBuilder 监听 _menuAnimController，配合 IgnorePointer
+              // 在动画值 < 0.5 时屏蔽点击，让菜单有滑入/淡入的过渡动画。
+              //
+              // 注意 child 必须在 builder 内构造（不能用 ListenableBuilder 的 child 参数
+              // 因为 ReaderControlOverlay 依赖大量 _NovelReaderPageState 字段，父级 setState
+              // 时这些参数需要刷新）。性能上 ReaderControlOverlay 实例化很轻，可接受。
+              if (_showMenu || _menuAnimController.value > 0.0)
+                ListenableBuilder(
+                  listenable: _menuAnimController,
+                  builder: (context, _) {
+                    // 动画反向完成且 _showMenu=false 时彻底移除 widget（避免空 widget 占空间）
+                    if (!_showMenu && _menuAnimController.value == 0.0) {
+                      return const SizedBox.shrink();
                     }
-                  },
-                  onNextChapter: () {
-                    if (_nextReadableChapterIndex(_currentChapterIndex) !=
-                        null) {
-                      _nextChapter();
-                    }
-                  },
-                  onStartSearch: _showChapterSearch,
-                  onToggleAutoScroll: _toggleAutoScroll,
-                  onToggleNightMode: () {
-                    provider.toggleNightMode();
-                    _repaginatePreservingPosition();
-                  },
-                  onOpenReplaceRules: _openReplaceRules,
-                  onUseReplaceRulesChanged: _setUseReplaceRules,
-                  onEditChapter: _editChapterContent,
-                  onShowDirectory: () {
-                    _hideMenu();
-                    _showChapterList();
-                  },
-                  onStartTts: _startTts,
-                  onShowInterface: _showEnhancedSettings,
-                  onShowSettings: () {
-                    _hideMenu();
-                    _showMoreSettingsDialog(provider);
-                  },
-                  onSliderChanged: (value) {
-                    setState(() {
-                      _sliderValue = value;
-                    });
-                  },
-                  onSliderChangeEnd: (value) {
-                    _currentChapterIndex = _readableChapterIndex(value);
-                    _loadChapterContent();
+                    return IgnorePointer(
+                      // 动画值 < 0.5 时屏蔽点击：菜单半隐藏时不响应按钮
+                      // 但 GestureDetector（onClose）在 value >= 0.5 时可点击关闭
+                      ignoring: _menuAnimController.value < 0.5,
+                      child: ReaderControlOverlay(
+                        animation: _menuAnimController,
+                        bookName: _book?.name ?? '',
+                        chapterTitle: _chapterTitle,
+                        chapterUrl: _chapterUrl,
+                        sourceName: _book?.sourceName ??
+                            (_book?.originType == BookOriginType.local
+                                ? '本地书籍'
+                                : ''),
+                        hasBookSource: _bookSource != null,
+                        currentChapter: _currentChapterIndex,
+                        totalChapters: _totalChapters,
+                        hasBookmark: _hasBookmark,
+                        hasPrev: _previousReadableChapterIndex(
+                                _currentChapterIndex) !=
+                            null,
+                        hasNext: _nextReadableChapterIndex(_currentChapterIndex) !=
+                            null,
+                        isAutoScroll: _isAutoScroll,
+                        useReplaceRules: _useReplaceRules,
+                        isNightMode: provider.isNightMode,
+                        sliderValue: _sliderValue,
+                        onBack: () => Navigator.pop(context),
+                        onChangeSource: _showChangeSourceDialog,
+                        onOpenDetail: _openBookDetail,
+                        onOpenChapterUrl: _openChapterUrl,
+                        onEditSource: () => _handleSourceAction('edit'),
+                        onDisableSource: () => _handleSourceAction('disable'),
+                        onRefresh: _refreshChapterContent,
+                        onDownload: _showCacheOptions,
+                        onToggleBookmark: _toggleBookmark,
+                        onClose: _hideMenu,
+                        onPrevChapter: () {
+                          if (_previousReadableChapterIndex(
+                                  _currentChapterIndex) !=
+                              null) {
+                            _previousChapter();
+                          }
+                        },
+                        onNextChapter: () {
+                          if (_nextReadableChapterIndex(_currentChapterIndex) !=
+                              null) {
+                            _nextChapter();
+                          }
+                        },
+                        onStartSearch: _showChapterSearch,
+                        onToggleAutoScroll: _toggleAutoScroll,
+                        onToggleNightMode: () {
+                          provider.toggleNightMode();
+                          _repaginatePreservingPosition();
+                        },
+                        onOpenReplaceRules: _openReplaceRules,
+                        onUseReplaceRulesChanged: _setUseReplaceRules,
+                        onEditChapter: _editChapterContent,
+                        onShowDirectory: () {
+                          _hideMenu();
+                          _showChapterList();
+                        },
+                        onStartTts: _startTts,
+                        onShowInterface: _showEnhancedSettings,
+                        onShowSettings: () {
+                          _hideMenu();
+                          _showMoreSettingsDialog(provider);
+                        },
+                        onSliderChanged: (value) {
+                          setState(() {
+                            _sliderValue = value;
+                          });
+                        },
+                        onSliderChangeEnd: (value) {
+                          _currentChapterIndex = _readableChapterIndex(value);
+                          _loadChapterContent();
+                        },
+                      ),
+                    );
                   },
                 )
               ],
