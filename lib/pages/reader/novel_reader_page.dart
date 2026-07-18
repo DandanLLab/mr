@@ -134,6 +134,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   double? _scaleStartFontSize;
   // 双指缩放过程中最新的 scale（onScaleEnd 时取不到 scale，需在 onScaleUpdate 中累积）
   double _scaleCurrentScale = 1.0;
+  // 滑动翻页：pointerDown 时间，用于 _onPointerUp 判断是 tap 还是 swipe
+  DateTime? _swipeStartTime;
+  // 滑动翻页阈值：水平滑动 > 40px 且垂直偏移 < 60px 判为左右滑翻页
+  // 垂直滑动 > 40px 且水平偏移 < 60px 判为上下滑翻页
+  static const double _swipeThreshold = 40;
+  static const double _swipeOrthogonalMax = 60;
+  // 滑动超时：> 500ms 不算 swipe（可能是长按选文字）
+  static const int _swipeTimeoutMs = 500;
 
   @override
   void initState() {
@@ -1105,11 +1113,46 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final down = _lastDownEvent;
     _lastDownEvent = null;
     if (down == null) return;
-    // 简单 tap 判定：移动距离 < kTouchSlop，且为左键
+    if (event.buttons != kPrimaryButton && event.buttons != 0) return;
+
     final dx = event.position.dx - down.position.dx;
     final dy = event.position.dy - down.position.dy;
-    if (dx * dx + dy * dy > 18 * 18) return; // 18px ≈ kTouchSlop
-    if (event.buttons != kPrimaryButton && event.buttons != 0) return;
+    final absDx = dx.abs();
+    final absDy = dy.abs();
+    // 用 DateTime.now() 记录的按下时间，避免 PointerEvent.timeStamp 语义混淆
+    final elapsed = _swipeStartTime != null
+        ? DateTime.now().difference(_swipeStartTime!).inMilliseconds
+        : 0;
+
+    // 滑动翻页判定：
+    // - 时长 < 500ms（长按选文字不算）
+    // - 主轴位移 > 40px
+    // - 副轴位移 < 60px（避免误识别对角线滑动）
+    if (elapsed < _swipeTimeoutMs) {
+      if (absDx >= _swipeThreshold && absDy < _swipeOrthogonalMax) {
+        // 水平滑动：右滑=上一页，左滑=下一页
+        if (dx > 0) {
+          _previousPage();
+        } else {
+          _nextPage();
+        }
+        _tapConsumedByListener = true; // 吞掉 tap，防止再触发分区翻页
+        return;
+      }
+      if (absDy >= _swipeThreshold && absDx < _swipeOrthogonalMax) {
+        // 垂直滑动：下滑=上一页，上滑=下一页
+        if (dy > 0) {
+          _previousPage();
+        } else {
+          _nextPage();
+        }
+        _tapConsumedByListener = true;
+        return;
+      }
+    }
+
+    // 简单 tap 判定：移动距离 < kTouchSlop
+    if (dx * dx + dy * dy > 18 * 18) return;
     _handleTap(TapUpDetails(
       kind: event.kind,
       globalPosition: event.position,
@@ -1119,6 +1162,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   void _onPointerDown(PointerDownEvent event) {
     _lastDownEvent = event;
+    _swipeStartTime = DateTime.now();
     // 重置去重标志：每次新的 pointer down 都是一次新的 tap
     _tapConsumedByListener = false;
   }
