@@ -247,6 +247,14 @@ class _ReaderPageViewState extends State<ReaderPageView>
   void _onPointerDown(PointerDownEvent event) {
     if (widget.isScrollMode) return;
 
+    // 快速翻页支持：如果上一次翻页动画还在跑（_isTurning=true），立即结束
+    // 这样用户能立刻开始新一次翻页，实现「秒翻页」手感。
+    // 不强制结束的话，后续 _onPointerMove 会被 `if (_isTurning) return` 拦截，
+    // 用户感觉「翻页速度慢，得等动画结束」。
+    if (_isTurning) {
+      _forceFinishCurrentTurn();
+    }
+
     _downPosition = event.position;
     _finalizeStarted = false;
     _delegate.onDown();
@@ -255,6 +263,51 @@ class _ReaderPageViewState extends State<ReaderPageView>
     // 启动 pointerUp 兜底定时器（onPointerUp 可能被 WebView 吞）
     _pointerUpFallbackTimer?.cancel();
     _pointerUpFallbackTimer = Timer(_pointerUpFallbackDelay, _onPointerUpFallback);
+  }
+
+  /// 强制结束当前翻页（用户快速连续翻页时调用）
+  ///
+  /// 触发场景：上一次翻页动画还在跑（_isTurning=true），用户已经开始新一次
+  /// pointerDown。如果不强制结束，新 pointerMove 会被 `if (_isTurning) return`
+  /// 拦截 → 用户感觉「翻页速度慢，得等动画结束」。
+  ///
+  /// 策略：
+  /// 1. 中断 ticker + abortAnim（停止动画推进）
+  /// 2. 自增 _turnToken 让正在进行的 _startTurnSequence/_finalizeTurn 失效
+  /// 3. 清理覆盖层（_showAnimationLayer=false）+ 回收 bitmap
+  /// 4. 重置状态（_isTurning=false, _finalizeStarted=false）
+  /// 5. 通知外部：根据 _finalizeStarted 判断
+  ///    - true：_finalizeTurn 已执行到 onPerformPageTurn 阶段（WebView 已跳页）
+  ///      → 通知 onPageTurnCompleted（保存进度）
+  ///    - false：还在 _startTurnSequence 阶段（WebView 没跳页）
+  ///      → 通知 onPageTurnCancelled（回滚）
+  ///
+  /// 注：hadFinalized=true 时 WebView 已跳页是大概率情况，但若 _finalizeTurn
+  /// 还在 await _captureBoundary（curBitmap 截图 50-100ms）阶段就强结束，
+  /// 实际 WebView 还没跳页。此时通知 onPageTurnCompleted 会多保存一次进度，
+  /// 但 _onPageTurnCompleted 只做 _isPageTurning=false + setState，无副作用。
+  void _forceFinishCurrentTurn() {
+    _animSafetyTimer?.cancel();
+    _animSafetyTimer = null;
+    _ticker.stop();
+    _delegate.abortAnim();
+    final direction = _delegate.direction;
+    final hadFinalized = _finalizeStarted;
+    // 自增 token：让正在 await 的 _startTurnSequence/_finalizeTurn 失效
+    // （它们会检查 token != _turnToken，return 不再注入 bitmap 或调用 callback）
+    _turnToken++;
+    _isTurning = false;
+    _finalizeStarted = false;
+    setState(() {
+      _showAnimationLayer = false;
+    });
+    _delegate.recycleBitmaps();
+    // 通知外部上一次翻页的最终状态
+    if (hadFinalized) {
+      widget.onPageTurnCompleted?.call(direction);
+    } else {
+      widget.onPageTurnCancelled?.call();
+    }
   }
 
   void _onPointerMove(PointerMoveEvent event) {
