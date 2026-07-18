@@ -2308,9 +2308,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         backgroundColor: Colors.transparent,
         display: Display.block,
       ),
-      // 高亮 span 标签：只继承 body/p 的样式，不额外设置
+      // span 标签：用于首行缩进 span 和高亮 span
+      // 关键：whiteSpace: WhiteSpace.pre 让 WhitespaceProcessing 跳过该节点
+      // 否则首行缩进字符 \u3000 会被 _removeLeadingSpace trim 掉（导致缩进消失）
+      // flutter_html 3.0.0 的 css_parser 不解析内联 white-space 属性，
+      // 所以必须通过 Style map 设置，内联 style="white-space:pre" 无效
       'span': Style(
         backgroundColor: Colors.transparent,
+        whiteSpace: WhiteSpace.pre,
       ),
     };
   }

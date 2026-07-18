@@ -26,3 +26,4 @@ replay_pid*.log
 
 # 参考目录（第三方代码，不提交）
 reference/
+.reference/
