@@ -1371,22 +1371,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         : 0.0;
 
     for (final rawParagraph in paragraphs) {
-      // HTML 段落：先注入缩进实体（与渲染路径 _buildUnifiedHtml 完全一致），
-      // 再剥离标签测量高度。否则测量不含缩进 → 测量低估高度 → 渲染溢出。
-      // 纯文本段落：直接 _applyIndent 加全角空格缩进。
-      final isHtml = _containsHtml(rawParagraph);
-      final indent = provider.paragraphIndent;
-      var paragraph = isHtml
-          ? (indent.isEmpty
-              ? _stripHtmlIndent(rawParagraph)
-              : _injectIndentIntoHtml(rawParagraph, indent))
-          : _applyIndent(rawParagraph, provider);
+      // _splitToParagraphs 已把 HTML 标准化为纯文本，统一走纯文本路径
+      var paragraph = _applyIndent(rawParagraph, provider);
 
       while (paragraph.isNotEmpty) {
-        // HTML 段落用剥离标签后的纯文本测量高度
-        final measureText = isHtml ? _stripHtmlTags(paragraph) : paragraph;
         final paragraphHeight =
-            _measureTextHeight(measureText, textStyle, metrics.width) +
+            _measureTextHeight(paragraph, textStyle, metrics.width) +
             paragraphSpacing;
 
         // 当前页还能放下整段
@@ -1408,16 +1398,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         }
 
         // 走到这里：当前页为空 + 整段放不下 —— 需要字符级切割
-        if (isHtml) {
-          // HTML 段落禁止在标签内部字符级切割（会产生未闭合标签），
-          // 整段直接放到下一页（即使溢出也比破坏标签好）
-          pages.add(paragraph.trimRight());
-          paragraph = '';
-          usedHeight = 0;
-          continue;
-        }
-
-        // 计算剩余可用高度（至少留 1 行高度，避免 splitIndex=0 死循环）
+        // （纯文本路径，不再有 HTML 标签结构限制）
         final remainingHeight = max(
           metrics.height - usedHeight - paragraphSpacing,
           _singleLineHeight(textStyle, metrics.width),
@@ -1565,7 +1546,52 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   static final _asciiEdgeWhitespace = RegExp(r'^[\t \r\f]+|[\t \r\f]+$');
 
+  /// 将 HTML 内容标准化为纯文本：
+  /// - 块级标签（p/div）的闭标签转为双换行（确保段落分隔）
+  /// - 块级标签的开标签转为单换行
+  /// - `<br>` 转为换行
+  /// - 其他标签直接剥掉（保留内容）
+  /// - HTML 实体解码
+  ///
+  /// 标准化后所有内容统一走纯文本路径，避免 `_splitToParagraphs` 按 `\n`
+  /// 切分时破坏 HTML 标签结构（如 `<p>第一行\n第二行</p>` 被切成碎片，
+  /// 闭标签 `</p>` 被当作纯文本处理，flutter_html 解析出错）。
+  String _normalizeHtmlToText(String content) {
+    if (!_containsHtml(content)) return content;
+    var result = content;
+    // </p>、</div> 后补双换行（确保段落分隔）
+    result = result.replaceAll(
+      RegExp(r'</(?:p|div)\b[^>]*>', caseSensitive: false),
+      '\n\n',
+    );
+    // <p>、<div> 开标签转为换行
+    result = result.replaceAll(
+      RegExp(r'<(?:p|div)\b[^>]*>', caseSensitive: false),
+      '\n',
+    );
+    // <br> 转为换行
+    result = result.replaceAll(
+      RegExp(r'<br\s*/?>', caseSensitive: false),
+      '\n',
+    );
+    // 剥掉其他所有标签（保留内容）
+    result = result.replaceAll(_htmlTagStripRegex, '');
+    // HTML 实体解码
+    result = result.replaceAll('&nbsp;', ' ');
+    result = result.replaceAll('&#x3000;', '\u3000');
+    result = result.replaceAll('&amp;', '&');
+    result = result.replaceAll('&lt;', '<');
+    result = result.replaceAll('&gt;', '>');
+    result = result.replaceAll('&quot;', '"');
+    result = result.replaceAll('&#39;', "'");
+    return result;
+  }
+
   List<String> _splitToParagraphs(String content) {
+    // 如果内容含 HTML，先标准化为纯文本，避免按 \n 切分时破坏标签结构
+    if (_containsHtml(content)) {
+      content = _normalizeHtmlToText(content);
+    }
     // 不能用 String.trim()：它会剥离全角空格 \u3000（首行缩进）。
     // 仅剥离 ASCII 边缘空白；空行判断时把 \u3000 也视作空白。
     return content
@@ -2107,51 +2133,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     return _htmlTagRegex.hasMatch(content);
   }
 
-  /// 将缩进全角空格注入 HTML 的 p/div/br 后（替代无效的 CSS text-indent）
-  /// 注：flutter_html 3.0.0 不支持 text-indent，必须直接插入全角空格实体
-  static final _htmlBlockOpenRegex = RegExp(
-    r'(<(?:p|div)\b[^>]*>)[\u3000\t ]*',
-    caseSensitive: false,
-  );
-  static final _htmlBrRegex = RegExp(
-    r'(<br\s*/?>)[\u3000\t ]*',
-    caseSensitive: false,
-  );
-
-  static String _injectIndentIntoHtml(String html, String indent) {
-    final entity = indent.replaceAll('\u3000', '&#x3000;');
-    // 先剥离前导空白，避免判断错误导致实体被加到 <p> 之外成为孤立文本节点
-    var result = html.replaceFirst(RegExp(r'^[\u3000\t ]+'), '');
-    result = result.replaceAllMapped(
-      _htmlBlockOpenRegex,
-      (match) => '${match.group(1)}$entity',
-    );
-    result = result.replaceAllMapped(
-      _htmlBrRegex,
-      (match) => '${match.group(1)}$entity',
-    );
-    // 如果 HTML 不以块级标签开头，给开头也注入缩进（首段首行也需要缩进）
-    if (result.isNotEmpty &&
-        !result.startsWith('<p') &&
-        !result.startsWith('<div')) {
-      result = '$entity$result';
-    }
-    return result;
-  }
-
-  /// 移除 HTML 中 p/div/br 后的原有全角空格缩进
-  static String _stripHtmlIndent(String html) {
-    var result = html.replaceAllMapped(
-      _htmlBlockOpenRegex,
-      (match) => '${match.group(1)}',
-    );
-    result = result.replaceAllMapped(
-      _htmlBrRegex,
-      (match) => '${match.group(1)}',
-    );
-    return result.replaceFirst(RegExp(r'^[\u3000\t ]+'), '');
-  }
-
   Widget _buildRichContent(
     ReaderProvider provider,
     String content, {
@@ -2171,13 +2152,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     );
   }
 
-  /// 统一构建 HTML 内容：按段落切分，逐段判断 HTML/纯文本，分别包装。
+  /// 统一构建 HTML 内容：所有内容统一走纯文本路径。
   ///
-  /// 关键修复：旧实现一旦 `_containsHtml(content)` 命中就走整段 HTML 注入路径，
-  /// 导致混合内容（纯文本 + HTML 标签共存）中 `</p>` 后的纯文本段落没有注入点，
-  /// 缩进丢失。新实现按段切分后逐段判断：
-  /// - 纯文本段：包 `<p>` + 注入缩进实体 + 应用高亮规则
-  /// - HTML 段：注入缩进实体到 `<p>`/`<div>`/`<br>` 后，不应用高亮（避免破坏标签）
+  /// `_splitToParagraphs` 内部会先调用 `_normalizeHtmlToText` 把 HTML
+  /// 标准化为纯文本（块级标签转换行、剥掉其他标签、解码实体），所以这里
+  /// 不再需要区分 HTML/纯文本，所有段落统一包装成 `<p>` + 缩进实体 + 高亮。
   ///
   /// 高亮与缩进实体顺序：先 highlight 再 prepend 实体，避免贪婪匹配的高亮规则
   /// 误匹配 `&#x3000;` 实体后转义成 `&amp;#x3000;` 导致缩进消失。
@@ -2193,21 +2172,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final buf = StringBuffer();
 
     for (final para in paragraphs) {
-      if (_containsHtml(para)) {
-        // 单段 HTML：注入缩进实体到 p/div/br 后，不应用高亮规则
-        final segment = indent.isEmpty
-            ? _stripHtmlIndent(para)
-            : _injectIndentIntoHtml(para, indent);
-        buf.write(segment);
-      } else {
-        // 纯文本：剥掉源内容自带缩进，先 highlight 再 prepend 实体
-        final trimmed = para.replaceAll(_leadingIndentRegex, '');
-        final highlighted = _wrapWithHighlightHtml(trimmed, rules);
-        final body = entity.isEmpty ? highlighted : '$entity$highlighted';
-        buf.write('<p>');
-        buf.write(body);
-        buf.write('</p>');
-      }
+      // 剥掉源内容自带缩进，先 highlight 再 prepend 实体
+      final trimmed = para.replaceAll(_leadingIndentRegex, '');
+      final highlighted = _wrapWithHighlightHtml(trimmed, rules);
+      final body = entity.isEmpty ? highlighted : '$entity$highlighted';
+      buf.write('<p>');
+      buf.write(body);
+      buf.write('</p>');
     }
     return buf.toString();
   }
@@ -2298,18 +2269,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     return '${provider.paragraphIndent}$trimmed';
   }
 
-  /// 剥离 HTML 标签，仅保留可见文本（用于测量高度，避免标签字符被当作可见文本）
+  /// 剥离 HTML 标签的正则（用于 _normalizeHtmlToText）
   static final _htmlTagStripRegex = RegExp(r'<[^>]+>');
-  static String _stripHtmlTags(String html) {
-    return html
-        .replaceAll(_htmlTagStripRegex, '')
-        .replaceAll('&nbsp;', ' ')
-        .replaceAll('&#x3000;', '\u3000')
-        .replaceAll('&amp;', '&')
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&quot;', '"');
-  }
 
   FontWeight _readerFontWeight(ReaderProvider provider) {
     return _fontWeight(provider.textFontWeight);
