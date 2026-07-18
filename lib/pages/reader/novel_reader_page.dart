@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../models/book.dart';
 import '../../models/book_source.dart';
 import '../../models/chapter.dart';
@@ -19,6 +20,7 @@ import '../../services/book_data_provider.dart';
 import '../../services/chapter_cache_service.dart';
 import '../../services/chapter_prefetch_service.dart';
 import '../../services/local_book/local_book_service.dart';
+import '../../services/native/platform_channel.dart';
 import '../../services/reader_bookmark_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/read_record_service.dart';
@@ -117,6 +119,22 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   // WebView 是否正在重新加载内容（避免回调串扰）
   bool _webviewReloading = false;
 
+  // ==================== 系统交互：屏幕常亮 / 亮度 / 音量键 ====================
+  // 焦点节点：用于接收硬件按键（音量键翻页）
+  late final FocusNode _focusNode;
+  // 进入阅读器时的系统亮度（用于退出时恢复）
+  double _systemBrightnessOnEnter = -1.0;
+  // 上次应用到系统的亮度（避免重复调用 setScreenBrightness）
+  double _lastAppliedBrightness = -2.0;
+  // 上次记录的 keepScreenOn 配置（用于检测变化触发 wakelock）
+  bool? _lastKeepScreenOn;
+  // 上次记录的 screenBrightness 配置（用于检测变化触发亮度调节）
+  double? _lastScreenBrightness;
+  // 双指缩放起始字号（用于计算缩放后的目标字号）
+  double? _scaleStartFontSize;
+  // 双指缩放过程中最新的 scale（onScaleEnd 时取不到 scale，需在 onScaleUpdate 中累积）
+  double _scaleCurrentScale = 1.0;
+
   @override
   void initState() {
     super.initState();
@@ -128,6 +146,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       vsync: this,
       duration: const Duration(milliseconds: 250),
     );
+    _focusNode = FocusNode(debugLabel: 'NovelReaderPage');
 
     _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
@@ -136,17 +155,144 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     _loadReaderContentOptions();
     _initTts();
     _checkBookmark();
+    // 延迟到首帧后初始化系统交互（provider 此时已可用）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _initSystemInteractions();
+    });
+  }
+
+  /// 初始化系统交互：屏幕常亮 + 亮度调节 + 监听配置变化
+  Future<void> _initSystemInteractions() async {
+    final provider = context.read<ReaderProvider>();
+    // 读取并保存进入时的系统亮度
+    _systemBrightnessOnEnter = await NativeChannel.instance.getScreenBrightness();
+    // 应用配置中的亮度和常亮
+    _applyBrightness(provider.screenBrightness);
+    _applyKeepScreenOn(provider.keepScreenOn);
+    _lastKeepScreenOn = provider.keepScreenOn;
+    _lastScreenBrightness = provider.screenBrightness;
+    // 注册 provider 监听（配置变化时立即生效）
+    provider.addListener(_onProviderChanged);
+  }
+
+  /// Provider 变化监听：检测到 keepScreenOn / screenBrightness 变化时触发副作用
+  void _onProviderChanged() {
+    if (!mounted) return;
+    final provider = context.read<ReaderProvider>();
+    if (_lastKeepScreenOn != provider.keepScreenOn) {
+      _lastKeepScreenOn = provider.keepScreenOn;
+      _applyKeepScreenOn(provider.keepScreenOn);
+    }
+    if (_lastScreenBrightness != provider.screenBrightness) {
+      _lastScreenBrightness = provider.screenBrightness;
+      _applyBrightness(provider.screenBrightness);
+    }
+  }
+
+  /// 应用屏幕常亮配置
+  Future<void> _applyKeepScreenOn(bool enabled) async {
+    try {
+      if (enabled) {
+        await WakelockPlus.enable();
+      } else {
+        await WakelockPlus.disable();
+      }
+    } catch (error) {
+      debugPrint('[NovelReader] wakelock 切换失败: $error');
+    }
+  }
+
+  /// 应用亮度配置
+  /// [value] -1 表示跟随系统（恢复进入时的亮度）；0.0-1.0 表示应用层亮度
+  Future<void> _applyBrightness(double value) async {
+    if (value == _lastAppliedBrightness) return;
+    _lastAppliedBrightness = value;
+    try {
+      if (value < 0) {
+        // 跟随系统：恢复进入时记录的系统亮度
+        await NativeChannel.instance.setScreenBrightness(_systemBrightnessOnEnter);
+      } else {
+        await NativeChannel.instance.setScreenBrightness(value.clamp(0.0, 1.0));
+      }
+    } catch (error) {
+      debugPrint('[NovelReader] 设置屏幕亮度失败: $error');
+    }
+  }
+
+  /// 处理硬件按键：音量键翻页
+  /// 仅在 enableVolumeKeyPage 启用时生效；TTS 播放时受 volumeKeyPageOnTts 控制
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final provider = context.read<ReaderProvider>();
+    if (!provider.enableVolumeKeyPage) return KeyEventResult.ignored;
+    // TTS 播放时若未启用 volumeKeyPageOnTts 则不响应
+    if (provider.isTtsPlaying && !provider.volumeKeyPageOnTts) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.audioVolumeUp) {
+      _previousPage();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.audioVolumeDown) {
+      _nextPage();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  /// 双指缩放开始：记录起始字号
+  void _onScaleStart(ScaleStartDetails details) {
+    final provider = context.read<ReaderProvider>();
+    _scaleStartFontSize = provider.fontSize;
+    _scaleCurrentScale = 1.0;
+    // 缩放期间清空 tap 判定，避免松手时误触发菜单/翻页
+    _lastDownEvent = null;
+  }
+
+  /// 双指缩放进行中：累积最新 scale（onScaleEnd 取不到 scale）
+  void _onScaleUpdate(ScaleUpdateDetails details) {
+    _scaleCurrentScale = details.scale;
+  }
+
+  /// 双指缩放结束：根据累积的 scale 调整字号
+  void _onScaleEnd(ScaleEndDetails details) {
+    final startSize = _scaleStartFontSize;
+    _scaleStartFontSize = null;
+    final scale = _scaleCurrentScale;
+    _scaleCurrentScale = 1.0;
+    if (startSize == null) return;
+    // scale > 1 表示放大，< 1 表示缩小
+    // 仅在显著缩放（>5%）时调整，避免误触
+    if ((scale - 1.0).abs() < 0.05) return;
+    final provider = context.read<ReaderProvider>();
+    var newSize = startSize * scale;
+    // 至少变化 1px 才生效
+    if ((newSize - startSize).abs() < 1.0) {
+      newSize = startSize + (scale > 1.0 ? 1.0 : -1.0);
+    }
+    // 字号范围：12-48
+    provider.setFontSize(newSize.clamp(12.0, 48.0));
   }
 
   @override
   void dispose() {
+    final provider = context.read<ReaderProvider>();
+    provider.removeListener(_onProviderChanged);
     _progressSaveTimer?.cancel();
     _clockTimer?.cancel();
     _autoScrollTimer?.cancel();
     _scrollProgressNotifier.dispose();
     _menuAnimController.dispose();
+    _focusNode.dispose();
     _readerWebViewController.detach();
-    context.read<ReaderProvider>().disposeTts();
+    provider.disposeTts();
+    // 恢复系统亮度（应用层亮度是全局的，退出阅读器必须还原）
+    // 不等待 Future，dispose 中无法 await
+    NativeChannel.instance.setScreenBrightness(_systemBrightnessOnEnter);
+    // 禁用屏幕常亮
+    WakelockPlus.disable();
     super.dispose();
   }
 
@@ -765,6 +911,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         _webviewReady = false;
         _webviewCurrentPage = 0;
         _webviewPageCount = 1;
+        _pendingWebviewFraction = -1.0; // 章节切换时清除 fraction
         if (restorePos > 0) {
           // 用大数表示「跳到最后一页」，onPageCountReady 时会 clamp
           _pendingWebviewInitialPage =
@@ -862,7 +1009,16 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final book = _book;
     if (book == null) return;
     final chapterTitle = chapter?.title ?? _chapterTitle;
-    final chapterPos = pos ?? _currentChapterPos();
+    final provider = context.read<ReaderProvider>();
+    int chapterPos;
+    if (pos != null) {
+      chapterPos = pos;
+    } else if (_isScrollLikeMode(provider)) {
+      // 滚动模式：从 WebView 获取真实像素偏移
+      chapterPos = await _readerWebViewController.getScrollOffset();
+    } else {
+      chapterPos = _currentChapterPos();
+    }
 
     _book = book.copyWith(
       durChapterIndex: _currentChapterIndex,
@@ -871,7 +1027,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       durChapterTime: DateTime.now(),
     );
 
-    await context.read<BookshelfProvider>().updateBookProgress(
+    if (!mounted) return;
+    final bookshelfProvider = context.read<BookshelfProvider>();
+    await bookshelfProvider.updateBookProgress(
       book.bookUrl,
       durChapterIndex: _currentChapterIndex,
       durChapterTitle: chapterTitle,
@@ -979,18 +1137,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   void _previousPage() {
     final provider = context.read<ReaderProvider>();
     if (_isScrollLikeMode(provider)) {
-      // 滚动模式：WebView 内部 body 已设置 overflow-y: auto，由 JS 处理滚动
+      // 滚动模式：按视口高度向上翻
       if (!_webviewReady) return;
-      _readerWebViewController.getScrollProgress().then((progress) {
-        if (progress <= 0.01) {
-          // 已到顶部，切换上一章（从最后一页开始）
+      _readerWebViewController.scrollByViewport(-1).then((progress) {
+        if (progress < 0) {
+          // 已到顶，切换上一章（从末页开始）
           _previousChapter(toLastPage: true);
-          return;
         }
-        // 向上滚动 10%
-        _readerWebViewController.setScrollProgress(
-          (progress - 0.1).clamp(0.0, 1.0),
-        );
       });
     } else {
       // 分页模式：通过 JS jumpToPage 翻页
@@ -1006,18 +1159,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   void _nextPage() {
     final provider = context.read<ReaderProvider>();
     if (_isScrollLikeMode(provider)) {
-      // 滚动模式
+      // 滚动模式：按视口高度向下翻
       if (!_webviewReady) return;
-      _readerWebViewController.getScrollProgress().then((progress) {
-        if (progress >= 0.99) {
-          // 已到底部，切换下一章
+      _readerWebViewController.scrollByViewport(1).then((progress) {
+        if (progress < 0) {
+          // 已到底，切换下一章
           _nextChapter();
-          return;
         }
-        // 向下滚动 10%
-        _readerWebViewController.setScrollProgress(
-          (progress + 0.1).clamp(0.0, 1.0),
-        );
       });
     } else {
       // 分页模式
@@ -1110,23 +1258,34 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       },
       child: Scaffold(
         backgroundColor: provider.backgroundColor,
-        body: Listener(
-          onPointerDown: _onPointerDown,
-          onPointerUp: _onPointerUp,
-          behavior: HitTestBehavior.translucent,
-          child: Stack(
-            children: [
-              if (_hasBackgroundImage(provider))
-                Positioned.fill(
-                  child: Image.file(
-                    File(provider.backgroundImagePath!),
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                  ),
-                ),
-              // WebView 渲染层：文字选择由 WebView 内部 CSS user-select 控制
-              // 旧的 SelectionArea 仅对 flutter_html 生效，对 PlatformView 无效
-              _buildContent(provider),
+        body: Focus(
+          focusNode: _focusNode,
+          autofocus: true,
+          onKeyEvent: _onKeyEvent,
+          child: GestureDetector(
+            // 双指缩放字号（替代迁移前 onScaleEnd）
+            // behavior 必须为 translucent，否则会拦截 WebView 的点击
+            behavior: HitTestBehavior.translucent,
+            onScaleStart: _onScaleStart,
+            onScaleUpdate: _onScaleUpdate,
+            onScaleEnd: _onScaleEnd,
+            child: Listener(
+              onPointerDown: _onPointerDown,
+              onPointerUp: _onPointerUp,
+              behavior: HitTestBehavior.translucent,
+              child: Stack(
+                children: [
+                  if (_hasBackgroundImage(provider))
+                    Positioned.fill(
+                      child: Image.file(
+                        File(provider.backgroundImagePath!),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      ),
+                    ),
+                  // WebView 渲染层：文字选择由 WebView 内部 CSS user-select 控制
+                  // 旧的 SelectionArea 仅对 flutter_html 生效，对 PlatformView 无效
+                  _buildContent(provider),
               // TTS 播放控制条
               if (provider.isTtsPlaying)
                 ReaderTtsBar(
@@ -1197,6 +1356,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   onToggleAutoScroll: _toggleAutoScroll,
                   onToggleNightMode: () {
                     provider.toggleNightMode();
+                    _repaginatePreservingPosition();
                   },
                   onOpenReplaceRules: _openReplaceRules,
                   onUseReplaceRulesChanged: _setUseReplaceRules,
@@ -1222,6 +1382,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   },
                 )
             ],
+          ),
+        ),
           ),
         ),
       ),
@@ -1288,9 +1450,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   void _onWebviewInitialized() {
-    // WebView 首次加载完成，等待分页计算
-    _webviewReady = true;
-    // 若有待恢复的初始页码（章节切换/进度恢复），等 onPageCountReady 后再 jumpToPage
+    // WebView HTML 加载完成，但 CSS column 布局尚未完成
+    // 不在此处设置 _webviewReady，等 onPageCountReady 回调后再标记就绪
+    // （_onWebviewPageCountReady 会在 JS init() 的 requestAnimationFrame 两帧后触发）
   }
 
   void _onWebviewPageCountReady(int totalPages) {
@@ -1300,12 +1462,39 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       _webviewReady = true;
       _webviewReloading = false;
     });
-    // 优先用 fraction 恢复（样式变化后保留位置）
+    final provider = context.read<ReaderProvider>();
+    final isScrollMode = _isScrollLikeMode(provider);
+
+    // 滚动模式：pageCount 恒为 1，进度恢复用 scrollToOffset（像素）
+    if (isScrollMode) {
+      if (_pendingWebviewFraction >= 0) {
+        // 样式变化后保留位置（fraction 是 0-1 的滚动比例）
+        final ratio = _pendingWebviewFraction.clamp(0.0, 1.0);
+        _pendingWebviewFraction = -1.0;
+        _pendingWebviewInitialPage = 0;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _readerWebViewController.setScrollProgress(ratio);
+        });
+      } else if (_pendingWebviewInitialPage > 0) {
+        // 章节切换/进度恢复：_pendingWebviewInitialPage 是像素偏移
+        final offset = _pendingWebviewInitialPage >= (1 << 30)
+            ? 1 << 30 // 末页：scrollToOffset 会自动 clamp 到底部
+            : _pendingWebviewInitialPage;
+        _pendingWebviewInitialPage = 0;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _readerWebViewController.scrollToOffset(offset);
+        });
+      }
+      return;
+    }
+
+    // 分页模式：用 jumpToPage 恢复
     if (_pendingWebviewFraction >= 0) {
       final target = (_pendingWebviewFraction * (_webviewPageCount - 1))
           .round()
           .clamp(0, _webviewPageCount - 1);
       _pendingWebviewFraction = -1.0;
+      _pendingWebviewInitialPage = 0;
       _webviewCurrentPage = target;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _readerWebViewController.jumpToPage(target);
@@ -1324,19 +1513,28 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     } else {
       _webviewCurrentPage = 0;
     }
-    // 保存当前进度（页数变化时位置可能需要校正）
-    unawaited(_saveCurrentProgress(pos: _webviewCurrentPage));
   }
 
   void _onWebviewPageChanged(int pageIndex) {
     if (!mounted) return;
     if (_webviewReloading) return;
-    setState(() {
+    final provider = context.read<ReaderProvider>();
+    final isScrollMode = _isScrollLikeMode(provider);
+
+    if (isScrollMode) {
+      // 滚动模式：pageIndex 是 progress * 1000（虚拟页码）
       _webviewCurrentPage = pageIndex;
-    });
-    _scrollProgressNotifier.value =
-        _webviewPageCount > 1 ? pageIndex / (_webviewPageCount - 1) : 0;
-    unawaited(_saveCurrentProgress(pos: pageIndex));
+      _scrollProgressNotifier.value = pageIndex / 1000.0;
+      // 滚动模式进度保存用 getScrollOffset 获取真实像素偏移
+      unawaited(_saveCurrentProgress(pos: null));
+    } else {
+      setState(() {
+        _webviewCurrentPage = pageIndex;
+      });
+      _scrollProgressNotifier.value =
+          _webviewPageCount > 1 ? pageIndex / (_webviewPageCount - 1) : 0;
+      unawaited(_saveCurrentProgress(pos: pageIndex));
+    }
   }
 
   /// WebView 内部点击事件（由 JS 检测后回调）
@@ -1352,14 +1550,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     }
     if (_isLoading) return;
     final provider = context.read<ReaderProvider>();
-    final size = MediaQuery.of(context).size;
-    // x, y 是相对 WebView 视口的坐标，需要加上 WebView 在屏幕中的偏移
-    // WebView 位于 SafeArea 内的 Expanded 区域，顶部可能有 header
+    final mq = MediaQuery.of(context);
+    final size = mq.size;
+    // WebView widget 位于 SafeArea 内的 Expanded 区域，顶部可能有 header
+    // clientX/clientY 原点是 WebView widget 的左上角
+    // 转换为屏幕全局坐标：+ SafeArea.left（横向）+ SafeArea.top + header高度（纵向）
     final headerExtent = _headerVisible(provider) ? _headerExtent(provider) : 0.0;
-    final screenX = x;
-    final screenY = y + headerExtent +
-        MediaQuery.of(context).padding.top +
-        provider.paddingTop;
+    final screenX = x + mq.padding.left;
+    final screenY = y + mq.padding.top + headerExtent;
 
     final col = (screenX / (size.width / 3)).clamp(0, 2).toInt();
     final row = (screenY / (size.height / 3)).clamp(0, 2).toInt();
@@ -2059,7 +2257,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       },
       onFontFamilyChanged: (value) =>
           updateLayout(() => provider.setFontFamily(value)),
-      onBackgroundColorChanged: (value) => provider.setBackgroundColor(value),
+      onBackgroundColorChanged: (value) =>
+          updateLayout(() => provider.setBackgroundColor(value)),
       onBackgroundImageChanged: (value) =>
           provider.setBackgroundImagePath(value),
       onShowReadingInfoChanged: (value) =>
@@ -2087,6 +2286,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       onNightModeChanged: (value) {
         if (provider.isNightMode != value) {
           provider.toggleNightMode();
+          // 夜间模式切换会改变背景色和文字色，触发 WebView 重新加载，保留位置
+          _repaginatePreservingPosition();
         }
       },
       onChineseConverterTypeChanged: (value) {
@@ -2491,6 +2692,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                                             // 直接通过 provider 翻转（内部已 _saveToStorage），避免重复 IO 与状态反转
                                             provider.toggleHighlightRule(rule.id);
                                             setSheetState(() {});
+                                            // 高亮规则变化会触发 WebView 重新加载，保留当前阅读位置
+                                            _repaginatePreservingPosition();
                                           },
                                   ),
                                 ],

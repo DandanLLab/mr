@@ -206,14 +206,11 @@ class _ReaderWebViewState extends State<ReaderWebView> {
   void _onLoadStop(InAppWebViewController controller, WebUri? uri) {
     if (!_isLoaded) {
       _isLoaded = true;
-      widget.controller.markReady();
+      // 不在此处 markReady 或 jumpToPage：
+      // CSS column 布局需要 JS init() 里的 requestAnimationFrame 两帧后才能
+      // 正确计算 scrollWidth / columnWidth，由 JS notifyPageCountReady 回调
+      // 触发 onPageCountReady，在那里统一 markReady + jumpToPage
       widget.callbacks.onInitialized();
-      // 恢复初始页码
-      if (widget.initialPage > 0 && !widget.isScrollMode) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          widget.controller.jumpToPage(widget.initialPage);
-        });
-      }
     }
   }
 }

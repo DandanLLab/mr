@@ -350,11 +350,21 @@ window.readerApi = (function() {
       // 取 clientX/clientY（相对 WebView 视口）
       notifyTap(e.clientX, e.clientY);
     }, { passive: true });
-    // 阻止长按选中时的 click 触发菜单（选中文字后点击会先触发 selectionchange）
-    document.addEventListener('selectstart', function() {
-      // 标记最近有选中动作，click 时检查
-      window._readerLastSelect = Date.now();
-    }, { passive: true });
+    // 滚动模式：监听 scroll 事件，防抖回调进度（用于保存/恢复阅读位置）
+    if (config.isScrollMode) {
+      var scrollTimer = null;
+      var scrollTarget = config.isScrollMode ? body : null;
+      window.addEventListener('scroll', function() {
+        if (scrollTimer) clearTimeout(scrollTimer);
+        scrollTimer = setTimeout(function() {
+          var progress = getScrollProgress();
+          if (window.flutter_inappwebview) {
+            // 用 progress * 1000 作为「虚拟页码」传给 Dart 侧
+            window.flutter_inappwebview.callHandler('onPageChanged', Math.round(progress * 1000));
+          }
+        }, 200);
+      }, { passive: true });
+    }
     // 等待 DOM 渲染完成后通知 Dart 侧
     requestAnimationFrame(function() {
       requestAnimationFrame(function() {
@@ -424,6 +434,39 @@ window.readerApi = (function() {
     body.scrollTop = sh * ratio;
   }
 
+  // 获取当前滚动像素偏移（滚动模式进度保存用）
+  function getScrollOffset() {
+    if (!config.isScrollMode) return 0;
+    return body.scrollTop || document.documentElement.scrollTop || 0;
+  }
+
+  // 滚动到指定像素偏移（滚动模式进度恢复用）
+  function scrollToOffset(px) {
+    if (!config.isScrollMode) return;
+    body.scrollTop = Math.max(0, px);
+  }
+
+  // 按视口高度滚动（direction: -1 上翻 / +1 下翻）
+  // 返回滚动后的进度（0-1），若已到顶/底返回 -1 表示触发章节切换
+  function scrollByViewport(direction) {
+    if (!config.isScrollMode) return -1;
+    var viewport = window.innerHeight;
+    var maxScroll = body.scrollHeight - viewport;
+    if (maxScroll <= 0) return -1;
+    var current = body.scrollTop || 0;
+    var target = current + direction * viewport * 0.9;
+    if (target <= 0) {
+      body.scrollTop = 0;
+      return -1; // 已到顶
+    }
+    if (target >= maxScroll) {
+      body.scrollTop = maxScroll;
+      return -1; // 已到底
+    }
+    body.scrollTop = target;
+    return target / maxScroll;
+  }
+
   function checkTap(x, y) {
     // 转换为 WebView 内部坐标（考虑 padding）
     var root = document.getElementById('reader-root');
@@ -475,6 +518,9 @@ window.readerApi = (function() {
     jumpToPage: jumpToPage,
     getScrollProgress: getScrollProgress,
     setScrollProgress: setScrollProgress,
+    getScrollOffset: getScrollOffset,
+    scrollToOffset: scrollToOffset,
+    scrollByViewport: scrollByViewport,
     checkTap: checkTap
   };
 })();

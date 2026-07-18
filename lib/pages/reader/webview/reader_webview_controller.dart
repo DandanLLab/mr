@@ -104,6 +104,33 @@ class ReaderWebViewController {
     );
   }
 
+  /// 获取滚动像素偏移（滚动模式进度保存用）
+  Future<int> getScrollOffset() async {
+    if (!_isReady) return 0;
+    final result = await _webviewController?.evaluateJavascript(
+      source: 'window.readerApi.getScrollOffset();',
+    );
+    return _toInt(result);
+  }
+
+  /// 滚动到指定像素偏移（滚动模式进度恢复用）
+  Future<void> scrollToOffset(int px) async {
+    if (!_isReady) return;
+    await _webviewController?.evaluateJavascript(
+      source: 'window.readerApi.scrollToOffset($px);',
+    );
+  }
+
+  /// 按视口高度滚动（direction: -1 上翻 / +1 下翻）
+  /// 返回滚动后的进度（0-1），若已到顶/底返回 -1 表示触发章节切换
+  Future<double> scrollByViewport(int direction) async {
+    if (!_isReady) return -1;
+    final result = await _webviewController?.evaluateJavascript(
+      source: 'window.readerApi.scrollByViewport($direction);',
+    );
+    return _toDouble(result);
+  }
+
   /// 检测点击位置（让 JS 决定是普通点击还是图片点击）
   Future<void> checkTap(double x, double y) async {
     if (!_isReady) return;
