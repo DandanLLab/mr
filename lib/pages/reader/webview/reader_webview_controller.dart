@@ -62,10 +62,11 @@ class ReaderWebViewController {
   }
 
   /// 翻到指定页
-  Future<void> jumpToPage(int pageIndex) async {
+  /// [animate]: true=带翻页动画（用户主动翻页）, false=无动画（进度恢复/初始化）
+  Future<void> jumpToPage(int pageIndex, {bool animate = true}) async {
     if (!_isReady) return;
     await _webviewController?.evaluateJavascript(
-      source: 'window.readerApi.jumpToPage($pageIndex);',
+      source: 'window.readerApi.jumpToPage($pageIndex, ${animate ? 'true' : 'false'});',
     );
   }
 

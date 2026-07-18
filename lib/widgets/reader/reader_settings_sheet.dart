@@ -24,7 +24,6 @@ class ReaderSettingsSheet extends StatefulWidget {
   final bool enableLongPressMenu;
   final int autoScrollSpeed;
   final int autoPageIntervalSeconds;
-  final List<int> tapZones;
   final bool isNightMode;
   final int chineseConverterType;
   final bool fontWeightFine;
@@ -78,7 +77,6 @@ class ReaderSettingsSheet extends StatefulWidget {
   final ValueChanged<bool> onEnableLongPressMenuChanged;
   final ValueChanged<int> onAutoScrollSpeedChanged;
   final ValueChanged<int> onAutoPageIntervalChanged;
-  final ValueChanged<List<int>> onTapZonesChanged;
   final ValueChanged<bool> onNightModeChanged;
   final ValueChanged<int> onChineseConverterTypeChanged;
   final ValueChanged<bool> onFontWeightFineChanged;
@@ -135,7 +133,6 @@ class ReaderSettingsSheet extends StatefulWidget {
     required this.enableLongPressMenu,
     required this.autoScrollSpeed,
     required this.autoPageIntervalSeconds,
-    required this.tapZones,
     required this.isNightMode,
     required this.chineseConverterType,
     required this.fontWeightFine,
@@ -188,7 +185,6 @@ class ReaderSettingsSheet extends StatefulWidget {
     required this.onEnableLongPressMenuChanged,
     required this.onAutoScrollSpeedChanged,
     required this.onAutoPageIntervalChanged,
-    required this.onTapZonesChanged,
     required this.onNightModeChanged,
     required this.onChineseConverterTypeChanged,
     required this.onFontWeightFineChanged,

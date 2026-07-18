@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import '../../../models/highlight.dart';
 import '../../../providers/reader_provider.dart';
 import '../../../utils/chinese_converter.dart';
 import 'reader_html_template.dart';
@@ -38,9 +39,6 @@ class ReaderWebView extends StatefulWidget {
   /// 回调
   final ReaderWebViewCallbacks callbacks;
 
-  /// 初始页码（用于恢复阅读进度）
-  final int initialPage;
-
   const ReaderWebView({
     super.key,
     required this.content,
@@ -49,7 +47,6 @@ class ReaderWebView extends StatefulWidget {
     required this.isScrollMode,
     required this.controller,
     required this.callbacks,
-    this.initialPage = 0,
   });
 
   @override
@@ -60,27 +57,37 @@ class _ReaderWebViewState extends State<ReaderWebView> {
   InAppWebViewController? _webviewController;
   bool _isLoaded = false;
   String _currentHtml = '';
+  // 样式快照：记录上次生成 HTML 时的所有 CSS 相关字段值
+  // ChangeNotifier 是单例，didUpdateWidget 拿到的 oldWidget.provider 和
+  // widget.provider 是同一引用，无法直接比较字段（getter 返回最新值）。
+  // 用快照在生成 HTML 后保存，下次 didUpdateWidget 时与当前值比较。
+  _StyleSnapshot? _lastStyleSnapshot;
 
   @override
   void initState() {
     super.initState();
     widget.controller.setCallbacks(widget.callbacks);
     _currentHtml = _generateHtml();
+    _lastStyleSnapshot = _StyleSnapshot.fromProvider(widget.provider);
   }
 
   @override
   void didUpdateWidget(ReaderWebView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 内容变化 → 重新生成 HTML 并加载
+    // 内容/模式变化 → 重新生成 HTML 并加载
     if (oldWidget.content != widget.content ||
         oldWidget.title != widget.title ||
         oldWidget.isScrollMode != widget.isScrollMode) {
       _currentHtml = _generateHtml();
+      _lastStyleSnapshot = _StyleSnapshot.fromProvider(widget.provider);
       _reloadHtml();
       return;
     }
-    // 样式变化（字号/行高/缩进/颜色等）→ 重新生成 HTML 并加载
-    if (_styleChanged(oldWidget.provider, widget.provider)) {
+    // 样式变化（字号/行高/缩进/颜色/字重/标题模式等）→ 重新生成 HTML 并加载
+    // 用快照比较，避免同一 provider 实例导致比较永远 false 的陷阱
+    final current = _StyleSnapshot.fromProvider(widget.provider);
+    if (_lastStyleSnapshot != current) {
+      _lastStyleSnapshot = current;
       _currentHtml = _generateHtml();
       _reloadHtml();
     }
@@ -105,6 +112,7 @@ class _ReaderWebViewState extends State<ReaderWebView> {
       viewWidth: _viewWidth,
       viewHeight: _viewHeight,
       isScrollMode: widget.isScrollMode,
+      pageAnimDurationMs: widget.provider.pageAnimDurationMs,
     );
   }
 
@@ -116,41 +124,6 @@ class _ReaderWebViewState extends State<ReaderWebView> {
   double get _viewHeight {
     final size = MediaQuery.sizeOf(context);
     return size.height - widget.provider.paddingTop - widget.provider.paddingBottom;
-  }
-
-  /// 检查影响渲染的样式是否变化
-  bool _styleChanged(ReaderProvider oldP, ReaderProvider newP) {
-    return oldP.fontSize != newP.fontSize ||
-        oldP.lineHeight != newP.lineHeight ||
-        oldP.letterSpacing != newP.letterSpacing ||
-        oldP.paragraphSpacing != newP.paragraphSpacing ||
-        oldP.paragraphIndent != newP.paragraphIndent ||
-        oldP.textColor != newP.textColor ||
-        oldP.backgroundColor != newP.backgroundColor ||
-        oldP.fontFamily != newP.fontFamily ||
-        oldP.showChapterTitle != newP.showChapterTitle ||
-        oldP.titleTopSpacing != newP.titleTopSpacing ||
-        oldP.titleBottomSpacing != newP.titleBottomSpacing ||
-        oldP.paddingTop != newP.paddingTop ||
-        oldP.paddingBottom != newP.paddingBottom ||
-        oldP.paddingLeft != newP.paddingLeft ||
-        oldP.paddingRight != newP.paddingRight ||
-        oldP.chineseConverterType != newP.chineseConverterType ||
-        _highlightRulesChanged(oldP, newP);
-  }
-
-  bool _highlightRulesChanged(ReaderProvider oldP, ReaderProvider newP) {
-    final oldRules = oldP.highlightRules.where((r) => r.enabled).toList();
-    final newRules = newP.highlightRules.where((r) => r.enabled).toList();
-    if (oldRules.length != newRules.length) return true;
-    for (var i = 0; i < oldRules.length; i++) {
-      if (oldRules[i].pattern != newRules[i].pattern ||
-          oldRules[i].style != newRules[i].style ||
-          oldRules[i].color != newRules[i].color) {
-        return true;
-      }
-    }
-    return false;
   }
 
   /// 重新加载 HTML
@@ -213,4 +186,177 @@ class _ReaderWebViewState extends State<ReaderWebView> {
       widget.callbacks.onInitialized();
     }
   }
+}
+
+/// 阅读器样式快照
+///
+/// 用于 ReaderWebView.didUpdateWidget 中检测样式是否变化。
+/// ReaderProvider 是 ChangeNotifier 单例，didUpdateWidget 拿到的
+/// oldWidget.provider 和 widget.provider 是同一引用，直接比较字段
+/// 永远相等（getter 返回最新值）。所以需要在生成 HTML 后保存快照，
+/// 下次 didUpdateWidget 时用当前值构造新快照，与上次快照比较。
+///
+/// 覆盖所有影响 WebView HTML/CSS 渲染的字段：
+/// - 基础排版：字号/行距/字距/段距/缩进/字重/字体
+/// - 颜色：文字色/背景色
+/// - 边距：正文上下左右边距
+/// - 标题：显示开关/模式/字号增量/上下间距
+/// - 简繁转换类型
+/// - 高亮规则（pattern/style/color）
+class _StyleSnapshot {
+  final double fontSize;
+  final double lineHeight;
+  final double letterSpacing;
+  final double paragraphSpacing;
+  final String paragraphIndent;
+  final Color textColor;
+  final Color backgroundColor;
+  final String fontFamily;
+  final int fontWeightIndex;
+  final bool fontWeightFine;
+  final int textBoldFine;
+  final int titleBoldFine;
+  final double paddingTop;
+  final double paddingBottom;
+  final double paddingLeft;
+  final double paddingRight;
+  final bool showChapterTitle;
+  final int titleMode;
+  final int titleSize;
+  final int titleTopSpacing;
+  final int titleBottomSpacing;
+  final int chineseConverterType;
+  final int pageAnimDurationMs;
+  final List<Object?> highlightRulesSnapshot;
+
+  _StyleSnapshot({
+    required this.fontSize,
+    required this.lineHeight,
+    required this.letterSpacing,
+    required this.paragraphSpacing,
+    required this.paragraphIndent,
+    required this.textColor,
+    required this.backgroundColor,
+    required this.fontFamily,
+    required this.fontWeightIndex,
+    required this.fontWeightFine,
+    required this.textBoldFine,
+    required this.titleBoldFine,
+    required this.paddingTop,
+    required this.paddingBottom,
+    required this.paddingLeft,
+    required this.paddingRight,
+    required this.showChapterTitle,
+    required this.titleMode,
+    required this.titleSize,
+    required this.titleTopSpacing,
+    required this.titleBottomSpacing,
+    required this.chineseConverterType,
+    required this.pageAnimDurationMs,
+    required this.highlightRulesSnapshot,
+  });
+
+  factory _StyleSnapshot.fromProvider(ReaderProvider p) {
+    final rules = p.highlightRules.where((r) => r.enabled).map((r) {
+      return <Object?>[r.pattern, r.style.index, r.color.color.toARGB32()];
+    }).toList();
+    return _StyleSnapshot(
+      fontSize: p.fontSize,
+      lineHeight: p.lineHeight,
+      letterSpacing: p.letterSpacing,
+      paragraphSpacing: p.paragraphSpacing,
+      paragraphIndent: p.paragraphIndent,
+      textColor: p.textColor,
+      backgroundColor: p.backgroundColor,
+      fontFamily: p.fontFamily,
+      fontWeightIndex: p.fontWeightIndex,
+      fontWeightFine: p.fontWeightFine,
+      textBoldFine: p.textBoldFine,
+      titleBoldFine: p.titleBoldFine,
+      paddingTop: p.paddingTop,
+      paddingBottom: p.paddingBottom,
+      paddingLeft: p.paddingLeft,
+      paddingRight: p.paddingRight,
+      showChapterTitle: p.showChapterTitle,
+      titleMode: p.titleMode,
+      titleSize: p.titleSize,
+      titleTopSpacing: p.titleTopSpacing,
+      titleBottomSpacing: p.titleBottomSpacing,
+      chineseConverterType: p.chineseConverterType,
+      pageAnimDurationMs: p.pageAnimDurationMs,
+      highlightRulesSnapshot: rules,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! _StyleSnapshot) return false;
+    if (fontSize != other.fontSize ||
+        lineHeight != other.lineHeight ||
+        letterSpacing != other.letterSpacing ||
+        paragraphSpacing != other.paragraphSpacing ||
+        paragraphIndent != other.paragraphIndent ||
+        textColor.toARGB32() != other.textColor.toARGB32() ||
+        backgroundColor.toARGB32() != other.backgroundColor.toARGB32() ||
+        fontFamily != other.fontFamily ||
+        fontWeightIndex != other.fontWeightIndex ||
+        fontWeightFine != other.fontWeightFine ||
+        textBoldFine != other.textBoldFine ||
+        titleBoldFine != other.titleBoldFine ||
+        paddingTop != other.paddingTop ||
+        paddingBottom != other.paddingBottom ||
+        paddingLeft != other.paddingLeft ||
+        paddingRight != other.paddingRight ||
+        showChapterTitle != other.showChapterTitle ||
+        titleMode != other.titleMode ||
+        titleSize != other.titleSize ||
+        titleTopSpacing != other.titleTopSpacing ||
+        titleBottomSpacing != other.titleBottomSpacing ||
+        chineseConverterType != other.chineseConverterType ||
+        pageAnimDurationMs != other.pageAnimDurationMs) {
+      return false;
+    }
+    // 高亮规则比较
+    final a = highlightRulesSnapshot;
+    final b = other.highlightRulesSnapshot;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      final ra = a[i] as List<Object?>;
+      final rb = b[i] as List<Object?>;
+      if (ra.length != rb.length) return false;
+      for (var j = 0; j < ra.length; j++) {
+        if (ra[j] != rb[j]) return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hashAll([
+        fontSize,
+        lineHeight,
+        letterSpacing,
+        paragraphSpacing,
+        paragraphIndent,
+        textColor.toARGB32(),
+        backgroundColor.toARGB32(),
+        fontFamily,
+        fontWeightIndex,
+        fontWeightFine,
+        textBoldFine,
+        titleBoldFine,
+        paddingTop,
+        paddingBottom,
+        paddingLeft,
+        paddingRight,
+        showChapterTitle,
+        titleMode,
+        titleSize,
+        titleTopSpacing,
+        titleBottomSpacing,
+        chineseConverterType,
+        pageAnimDurationMs,
+        ...highlightRulesSnapshot,
+      ]);
 }

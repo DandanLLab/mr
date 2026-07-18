@@ -648,7 +648,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final targetPage = (fraction * (_webviewPageCount - 1))
         .round()
         .clamp(0, max(_webviewPageCount - 1, 0)).toInt();
-    _readerWebViewController.jumpToPage(targetPage);
+    _readerWebViewController.jumpToPage(targetPage, animate: false);
   }
 
   Future<void> _editChapterContent() async {
@@ -1443,7 +1443,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               provider: provider,
               isScrollMode: isScrollMode,
               controller: _readerWebViewController,
-              initialPage: _pendingWebviewInitialPage,
               callbacks: ReaderWebViewCallbacks(
                 onInitialized: _onWebviewInitialized,
                 onPageCountReady: _onWebviewPageCountReady,
@@ -1499,7 +1498,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       return;
     }
 
-    // 分页模式：用 jumpToPage 恢复
+    // 分页模式：用 jumpToPage 恢复（无动画，避免初始化时滑动）
     if (_pendingWebviewFraction >= 0) {
       final target = (_pendingWebviewFraction * (_webviewPageCount - 1))
           .round()
@@ -1508,7 +1507,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       _pendingWebviewInitialPage = 0;
       _webviewCurrentPage = target;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _readerWebViewController.jumpToPage(target);
+        _readerWebViewController.jumpToPage(target, animate: false);
       });
     } else if (_pendingWebviewInitialPage > 0) {
       // 章节切换/进度恢复：跳到指定页
@@ -1519,7 +1518,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       _pendingWebviewInitialPage = 0;
       _webviewCurrentPage = target;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _readerWebViewController.jumpToPage(target);
+        _readerWebViewController.jumpToPage(target, animate: false);
       });
     } else {
       _webviewCurrentPage = 0;
@@ -1606,7 +1605,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   bool _headerVisible(ReaderProvider provider) {
     if (!provider.showReadingInfo) return false;
-    return provider.headerMode == 1;
+    // headerMode: 0=自动（分页显示/滚动隐藏）, 1=显示, 2=隐藏
+    if (provider.headerMode == 1) return true;
+    if (provider.headerMode == 2) return false;
+    return !_isScrollLikeMode(provider);
   }
 
   bool _footerVisible(ReaderProvider provider) {
@@ -2217,7 +2219,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       enableLongPressMenu: provider.enableLongPressMenu,
       autoScrollSpeed: provider.autoScrollSpeed,
       autoPageIntervalSeconds: provider.autoPageIntervalSeconds,
-      tapZones: provider.tapZones,
       isNightMode: provider.isNightMode,
       chineseConverterType: provider.chineseConverterType,
       fontWeightFine: provider.fontWeightFine,
@@ -2302,7 +2303,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       onAutoScrollSpeedChanged: (value) => provider.setAutoScrollSpeed(value),
       onAutoPageIntervalChanged: (value) =>
           provider.setAutoPageIntervalSeconds(value),
-      onTapZonesChanged: (value) => provider.setTapZones(value),
       onNightModeChanged: (value) {
         if (provider.isNightMode != value) {
           provider.toggleNightMode();

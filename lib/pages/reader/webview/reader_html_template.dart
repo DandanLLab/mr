@@ -32,9 +32,10 @@ class ReaderHtmlTemplate {
     required double viewWidth,
     required double viewHeight,
     required bool isScrollMode,
+    required int pageAnimDurationMs,
   }) {
-    final css = _generateCss(provider, isScrollMode);
-    const js = _readerJs;
+    final css = _generateCss(provider, isScrollMode, pageAnimDurationMs);
+    final js = _readerJs(pageAnimDurationMs);
     final paragraphsHtml = _buildParagraphsHtml(content, provider);
     final titleHtml = _buildTitleHtml(title, provider);
 
@@ -64,7 +65,8 @@ class ReaderHtmlTemplate {
         viewWidth: ${viewWidth.floor()},
         viewHeight: ${viewHeight.floor()},
         isScrollMode: $isScrollMode,
-        columnGap: 0
+        columnGap: 0,
+        pageAnimDurationMs: $pageAnimDurationMs
       });
     });
   </script>
@@ -83,12 +85,20 @@ class ReaderHtmlTemplate {
   /// 滚动模式核心：
   /// - 取消 column-width，改为正常文档流
   /// - body overflow-y: auto
-  static String _generateCss(ReaderProvider provider, bool isScrollMode) {
+  static String _generateCss(ReaderProvider provider, bool isScrollMode, int pageAnimDurationMs) {
     final textColor = _colorToHex(provider.textColor);
     final bgColor = _colorToHex(provider.backgroundColor);
     final fontFamily = provider.fontFamily.isEmpty ? 'inherit' : provider.fontFamily;
     // 缩进字符数：'\u3000\u3000' = 2 个全角空格 = 2em
     final indentEm = provider.paragraphIndent.length.toDouble();
+    // 标题对齐模式：0=居左, 1=居中, 3=居右, 2=隐藏
+    final titleAlign = provider.titleMode == 1
+        ? 'center'
+        : provider.titleMode == 3
+            ? 'right'
+            : 'left';
+    // 标题字号 = 正文字号 * 1.4 + titleSize 增量
+    final titleFontSizeCalc = 'calc(var(--reader-font-size) * 1.4 + ${provider.titleSize}px)';
 
     return '''
 :root {
@@ -100,6 +110,11 @@ class ReaderHtmlTemplate {
   --reader-text-color: $textColor;
   --reader-bg-color: $bgColor;
   --reader-font-family: $fontFamily;
+  --reader-text-weight: ${provider.textFontWeight};
+  --reader-title-weight: ${provider.titleFontWeight};
+  --reader-title-align: $titleAlign;
+  --reader-title-font-size: $titleFontSizeCalc;
+  --reader-page-anim-duration: ${pageAnimDurationMs}ms;
   --reader-padding-top: ${provider.paddingTop}px;
   --reader-padding-bottom: ${provider.paddingBottom}px;
   --reader-padding-left: ${provider.paddingLeft}px;
@@ -142,11 +157,11 @@ html, body {
 }
 
 .reader-title {
-  font-size: calc(var(--reader-font-size) * 1.4);
-  font-weight: bold;
+  font-size: var(--reader-title-font-size);
+  font-weight: var(--reader-title-weight);
   margin: var(--reader-title-top-spacing) 0 var(--reader-title-bottom-spacing) 0;
   padding: 0;
-  text-align: left;
+  text-align: var(--reader-title-align);
   color: var(--reader-text-color);
   line-height: var(--reader-line-height);
 }
@@ -158,6 +173,7 @@ html, body {
   text-indent: var(--reader-text-indent);
   word-break: break-word;
   overflow-wrap: break-word;
+  font-weight: var(--reader-text-weight);
 }
 
 .reader-p:last-child {
@@ -183,6 +199,9 @@ body.reader-paged #reader-content {
   column-fill: auto;
   height: calc(100vh - var(--reader-padding-top) - var(--reader-padding-bottom));
   overflow: hidden;
+  /* 翻页动画：translateX 变换时的过渡时长（slide/cover/simulation 共用） */
+  transition: transform var(--reader-page-anim-duration) ease;
+  will-change: transform;
 }
 
 /* 滚动模式：正常文档流 */
@@ -273,8 +292,10 @@ body.reader-scroll #reader-content {
   }
 
   /// 构建章节标题 HTML
+  /// titleMode: 0=居左, 1=居中, 2=隐藏, 3=居右
   static String _buildTitleHtml(String title, ReaderProvider provider) {
     if (!provider.showChapterTitle || title.isEmpty) return '';
+    if (provider.titleMode == 2) return '';
     return '<h1 id="reader-title" class="reader-title">${_escapeHtml(title)}</h1>';
   }
 
@@ -326,18 +347,26 @@ body.reader-scroll #reader-content {
   /// API 暴露在 window.readerApi：
   /// - init(config): 初始化
   /// - getPageCount(): 获取总页数
-  /// - jumpToPage(pageIndex): 跳转到指定页
+  /// - jumpToPage(pageIndex, animate?): 跳转到指定页（animate 默认 true）
   /// - getCurrentPage(): 获取当前页码
   /// - getScrollProgress(): 获取滚动进度（0-1）
   /// - setScrollProgress(ratio): 设置滚动进度（仅滚动模式）
   /// - checkTap(x, y): 检测点击位置（用于交互区分）
-  static const String _readerJs = r'''
+  ///
+  /// 翻页动画：CSS transition 驱动 translateX 过渡，时长由
+  /// --reader-page-anim-duration 控制（pageAnimDurationMs 注入）。
+  /// 进度恢复时传 animate=false 临时禁用 transition 避免初始滑动。
+  static String _readerJs(int pageAnimDurationMs) {
+    // duration 为 0 时 JS 的 animEnabled 会为 false，所有跳转都无动画
+    return r'''
 window.readerApi = (function() {
-  var config = { viewWidth: 0, viewHeight: 0, isScrollMode: false, columnGap: 0 };
+  var config = { viewWidth: 0, viewHeight: 0, isScrollMode: false, columnGap: 0, pageAnimDurationMs: 0 };
   var body = document.body;
+  var animEnabled = true; // 全局动画开关（false 时所有跳转都无动画）
 
   function init(cfg) {
     config = cfg;
+    animEnabled = (config.pageAnimDurationMs || 0) > 0;
     body.classList.add(config.isScrollMode ? 'reader-scroll' : 'reader-paged');
     // 绑定 click 监听器：WebView 拦截了 pointer 事件，外层 Listener 收不到
     // tap，所以由 JS 检测 click 后回调 Dart 侧处理（菜单/翻页分区）
@@ -402,14 +431,26 @@ window.readerApi = (function() {
     return Math.round(scrollLeft / (columnWidth + gap));
   }
 
-  function jumpToPage(pageIndex) {
+  // 翻到指定页
+  // animate: true=带过渡动画（用户翻页）, false=无动画（进度恢复/初始化）
+  function jumpToPage(pageIndex, animate) {
     if (config.isScrollMode) return;
     var content = document.getElementById('reader-content');
     if (!content) return;
     var columnWidth = getColumnWidth();
     var gap = config.columnGap || 0;
     var offset = pageIndex * (columnWidth + gap);
+    // 临时禁用 transition（animate=false 或全局 animEnabled=false）
+    var useAnim = animate !== false && animEnabled;
+    if (!useAnim) {
+      content.style.transition = 'none';
+    }
     content.style.transform = 'translateX(-' + offset + 'px)';
+    if (!useAnim) {
+      // 强制重排，确保下次 transition 生效
+      void content.offsetHeight;
+      content.style.transition = '';
+    }
     // 通知 Dart 侧页码变更
     notifyPageChanged(pageIndex);
   }
@@ -525,4 +566,5 @@ window.readerApi = (function() {
   };
 })();
 ''';
+  }
 }
