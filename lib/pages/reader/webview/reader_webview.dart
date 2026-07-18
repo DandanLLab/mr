@@ -1,3 +1,4 @@
+import 'dart:async' show Timer;
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../../../models/highlight.dart';
@@ -63,6 +64,16 @@ class _ReaderWebViewState extends State<ReaderWebView> {
   // 用快照在生成 HTML 后保存，下次 didUpdateWidget 时与当前值比较。
   _StyleSnapshot? _lastStyleSnapshot;
 
+  /// 样式变化 reload 的防抖 timer
+  ///
+  /// 滑块类高频变化（fontSize/lineHeight/pageAnimDuration 等）每次 notifyListeners
+  /// 都会触发 didUpdateWidget → _reloadHtml。直接 reload 会重置 WebView 状态、丢失
+  /// 当前位置，且高频 reload 严重卡顿。
+  /// 策略：样式变化时延迟 200ms 执行 reload，期间若有新变化则取消旧 timer 重启。
+  /// 内容/模式变化（content/title/isScrollMode）不走防抖，立即 reload。
+  Timer? _styleReloadDebounce;
+  static const Duration _styleReloadDelay = Duration(milliseconds: 200);
+
   @override
   void initState() {
     super.initState();
@@ -75,22 +86,27 @@ class _ReaderWebViewState extends State<ReaderWebView> {
   @override
   void didUpdateWidget(ReaderWebView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 内容/模式变化 → 重新生成 HTML 并加载
+    // 内容/模式变化 → 重新生成 HTML 并加载（不走防抖，立即生效）
     if (oldWidget.content != widget.content ||
         oldWidget.title != widget.title ||
         oldWidget.isScrollMode != widget.isScrollMode) {
+      _styleReloadDebounce?.cancel();
       _currentHtml = _generateHtml();
       _lastStyleSnapshot = _StyleSnapshot.fromProvider(widget.provider);
       _reloadHtml();
       return;
     }
-    // 样式变化（字号/行高/缩进/颜色/字重/标题模式等）→ 重新生成 HTML 并加载
+    // 样式变化（字号/行高/缩进/颜色/字重/标题模式等）→ 防抖 reload
     // 用快照比较，避免同一 provider 实例导致比较永远 false 的陷阱
     final current = _StyleSnapshot.fromProvider(widget.provider);
     if (_lastStyleSnapshot != current) {
       _lastStyleSnapshot = current;
       _currentHtml = _generateHtml();
-      _reloadHtml();
+      // 防抖：滑块拖动期间高频触发，等 200ms 静止后才真正 reload
+      _styleReloadDebounce?.cancel();
+      _styleReloadDebounce = Timer(_styleReloadDelay, () {
+        if (mounted) _reloadHtml();
+      });
     }
   }
 
@@ -211,6 +227,13 @@ class _ReaderWebViewState extends State<ReaderWebView> {
       // 触发 onPageCountReady，在那里统一 markReady + jumpToPage
       widget.callbacks.onInitialized();
     }
+  }
+
+  @override
+  void dispose() {
+    // 取消防抖 timer，避免 widget 销毁后还触发 _reloadHtml
+    _styleReloadDebounce?.cancel();
+    super.dispose();
   }
 }
 

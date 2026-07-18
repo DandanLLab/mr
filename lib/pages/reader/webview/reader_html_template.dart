@@ -229,22 +229,27 @@ body.reader-paged #reader-root {
 
 body.reader-paged #reader-stage {
   position: relative;
-  flex: 1 1 auto;
+  /* flex:1 让 stage 占满 #reader-root 内 .reader-title 之外的剩余高度。
+     不设 height:100%，避免与 flex:1 冲突（两者都试图设高度，flex 容器内
+     height:100% 行为不一致，部分 WebView 上会导致 stage 高度计算错误） */
+  flex: 1 1 0;
   width: 100%;
-  height: 100%;
+  min-height: 0; /* flex 子项默认 min-height:auto 会阻止收缩，导致溢出 */
   overflow: hidden;
 }
 
 /* a/b 共用样式：absolute 重叠在 #reader-stage 内，column 分栏
    关键：不设 width，让 column 布局自动扩展到内容总宽度，
    这样 scrollWidth 才能返回所有列的总宽度（= pageCount * columnWidth）。
-   height: 100% 相对 stage，确保 column 分栏高度正确。
+   高度用 top:0 + bottom:0 撑满 stage，避免 height:100% 在 flex 父容器
+   内的高度计算不稳定（部分 Android WebView 上 flex 子项 absolute 子元素
+   的 height:100% 会算成 0，导致 column 布局坍缩成 1 列）。
    裁剪由 #reader-stage 的 overflow:hidden 负责。 */
 body.reader-paged .reader-content {
   position: absolute;
   top: 0;
+  bottom: 0;
   left: 0;
-  height: 100%;
   column-width: var(--reader-safe-width);
   column-gap: 0;
   column-fill: auto;
@@ -285,8 +290,12 @@ body.reader-scroll {
      content area，被 html overflow:hidden 裁剪后，body 滚动区域大于可见区域，
      滚动到 padding 区域的内容被遮挡看不到，且滚动卡顿不丝滑。 */
   height: 100%;
-  /* iOS 必需：启用硬件加速滚动；Android 现代版本默认开启，加上无害 */
-  -webkit-overflow-scrolling: touch;
+  /* 启用硬件加速合成层：让 body 自身作为合成层，
+     在 Android WebView 上滚动更流畅（替代无效的 -webkit-overflow-scrolling: touch） */
+  will-change: scroll-position;
+  transform: translateZ(0);
+  /* 关键：让滚动贴近物理手感，禁用边界回弹（避免过度滚动反而卡顿） */
+  overscroll-behavior: contain;
 }
 
 body.reader-scroll #reader-root {
@@ -588,6 +597,7 @@ window.readerApi = (function() {
     document.addEventListener('gestureend', function(e) { e.preventDefault(); }, { passive: false });
 
     // 通用: touchstart 阶段检测多指，立即 preventDefault 阻止 WebView 进入缩放模式
+    // （touchstart 不阻塞滚动，可以放心用 passive:false）
     document.addEventListener('touchstart', function(e) {
       if (e.touches.length > 1) {
         e.preventDefault();
@@ -595,21 +605,27 @@ window.readerApi = (function() {
     }, { passive: false });
 
     // touchmove 多指也拦截（双保险）
+    // 关键：必须 passive:true，否则浏览器在每次 touchmove 都要同步执行 JS，
+    // 会阻塞主线程的滚动响应，导致滚动模式严重卡顿（passive:false 是滚动卡顿元凶）
+    // supportZoom:false + viewport user-scalable=no 已禁用缩放，多指时即便不
+    // preventDefault 也不会触发缩放
     document.addEventListener('touchmove', function(e) {
       if (e.touches.length > 1) {
         e.preventDefault();
       }
-    }, { passive: false });
+    }, { passive: true });
 
-    // 双击缩放
+    // 双击检测：仅记录时间戳，不 preventDefault（双击放大已由 supportZoom:false 禁用）
+    // touchend passive:true 让浏览器滚动结束时不受 JS 阻塞
     var lastTouchEnd = 0;
-    document.addEventListener('touchend', function(e) {
+    document.addEventListener('touchend', function() {
       var now = Date.now();
       if (now - lastTouchEnd <= 300) {
-        e.preventDefault();
+        // 双击：不阻止默认行为（缩放已禁），仅日志
+        console.log('[reader] double tap detected');
       }
       lastTouchEnd = now;
-    }, { passive: false });
+    }, { passive: true });
 
     // 鼠标滚轮缩放（Ctrl+wheel）
     document.addEventListener('wheel', function(e) {

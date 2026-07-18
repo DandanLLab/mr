@@ -29,8 +29,15 @@ abstract class HorizontalPageDelegate extends PageDelegate {
   /// 外部注入截图逻辑（通过 RepaintBoundary）
   void Function(PageDirection direction)? onSetBitmap;
 
-  /// 释放图像
-  void _recycleBitmaps() {
+  /// 释放所有图像引用并 dispose
+  ///
+  /// 用于取消翻页 / 动画结束 / widget 销毁时回收 ui.Image 资源。
+  ///
+  /// 注意：不能直接调用 `setBitmaps(cur: null, prev: null, next: null)` 来清空，
+  /// 因为 setBitmaps 内部对 null 参数不做处理（保持现有引用）。
+  /// 这是为了避免动画进行中用 `setBitmaps(cur: newCur)` 更新当前页时
+  /// 把 prev/next 误 dispose 掉。清空场景必须用本方法。
+  void recycleBitmaps() {
     curBitmap?.dispose();
     prevBitmap?.dispose();
     nextBitmap?.dispose();
@@ -40,6 +47,10 @@ abstract class HorizontalPageDelegate extends PageDelegate {
   }
 
   /// 设置图像（外部调用，注入截图结果）
+  ///
+  /// null 参数会被忽略（不清空也不 dispose）。
+  /// 这是为了让动画进行中可以单独更新某一图层而不影响其他图层。
+  /// 清空所有图层用 recycleBitmaps()。
   void setBitmaps({
     ui.Image? cur,
     ui.Image? prev,
@@ -141,6 +152,6 @@ abstract class HorizontalPageDelegate extends PageDelegate {
 
   @override
   void onDestroy() {
-    _recycleBitmaps();
+    recycleBitmaps();
   }
 }

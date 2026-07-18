@@ -60,6 +60,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   /// 翻页动画进行中标记，用于阻止动画期间 JS click 误触发菜单
   /// 由 _onPageTurnCompleted / _onPageTurnCancelled 复位
   bool _isPageTurning = false;
+  /// 翻页时等 onPageChanged 回调作为「JS 已设 transform」确认信号
+  /// 由 _onWebviewPageChanged complete，由 _waitForWebViewFrame 等待
+  Completer<void>? _pageRenderedCompleter;
   String _content = '';
   String _chapterTitle = '';
   String? _chapterUrl;
@@ -1254,12 +1257,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     }
   }
 
-  /// PageMode.none 在渲染上复用滚动模式（_buildContent 中 case 走 _buildScrollContent），
-  /// 因此所有「是否滚动模式」的交互判断都必须把 none 也算进去，
-  /// 否则 none 模式下翻页/进度/预加载/自动滚动/搜索跳转/页码提示全部失效。
+  /// 是否走「按视口滚动」渲染路径。
+  ///
+  /// PageMode.scroll：原生 body.overflow-y:auto 滚动。
+  /// PageMode.none：在渲染上仍是 CSS column 分页（reader-paged），仅禁用翻页动画
+  ///   （JS 端 pageModeIndex=4 → animEnabled=false → jumpToPage 同步切页）。
+  ///   这样 none 与 lumina 的 ReaderPageAnimation.none 语义一致：分页 + 无动画。
   bool _isScrollLikeMode(ReaderProvider provider) =>
-      provider.pageMode == PageMode.scroll ||
-      provider.pageMode == PageMode.none;
+      provider.pageMode == PageMode.scroll;
 
   // ==================== Build ====================
 
@@ -1427,8 +1432,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   /// 章节内容 / 样式变化由 ReaderWebView.didUpdateWidget 自动检测并重新加载。
   /// 翻页进度通过 onPageCountReady / onPageChanged 回调同步到本 State。
   Widget _buildWebViewContent(ReaderProvider provider) {
-    final isScrollMode = provider.pageMode == PageMode.scroll ||
-        provider.pageMode == PageMode.none;
+    final isScrollMode = _isScrollLikeMode(provider);
     final pageModeIndex = provider.pageMode.index;
 
     return SafeArea(
@@ -1500,17 +1504,46 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     // 等待 WebView 内部 CSS column 重排 + PlatformView 合成到 Flutter Surface
     // jumpToPage 同步设 transform，但 WebView 渲染需要 1-2 帧才能更新到 Surface
     // 必须等帧完成，否则 RepaintBoundary.toImage 截到的是旧内容（第 2 页排版乱的根因）
-    await _waitForWebViewFrame();
+    await _waitForWebViewFrame(targetPage);
     return true;
   }
 
-  /// 等待 WebView 完成一帧渲染（CSS 重排 + PlatformView 合成）
-  Future<void> _waitForWebViewFrame() async {
-    // 第一帧：触发 CSS column transform 重排
+  /// 等待 WebView 完成渲染并合成到 Flutter Surface
+  ///
+  /// 关键时序问题：
+  /// 1. `evaluateJavascript` await 完成仅保证 JS 函数已返回，
+  ///    但 JS 端 `jumpToPage(animate:false)` 内部已同步设 `contentA.style.transform`
+  ///    并通过 `void offsetHeight` 强制 reflow。
+  /// 2. 浏览器渲染管线把 transform 提交到 Surface 需要 1 个 vsync。
+  /// 3. flutter_inappwebview 的 PlatformView 把 Surface 合成到 Flutter 的图层，
+  ///    需要 1-2 个 Flutter vsync 才能反映到 RepaintBoundary.toImage() 截图。
+  ///
+  /// 策略：
+  /// - 用 onPageChanged 回调作为「JS 端已设 transform」的确认信号（避免空等）；
+  /// - 再等 2 个 Flutter 帧 + 1 个 vsync 给 SurfaceFlinger。
+  Future<void> _waitForWebViewFrame([int? expectedPage]) async {
+    // 1. 等 onPageChanged 回调确认 JS 端 currentPage = expectedPage
+    //    （兜底超时 120ms，防止回调丢失时永远阻塞）
+    if (expectedPage != null && _pageRenderedCompleter == null) {
+      _pageRenderedCompleter = Completer<void>();
+    }
+    final completer = _pageRenderedCompleter;
+    if (completer != null) {
+      await completer.future.timeout(
+        const Duration(milliseconds: 120),
+        onTimeout: () {
+          debugPrint('[NovelReader] _waitForWebViewFrame: onPageChanged 超时');
+        },
+      );
+      if (identical(_pageRenderedCompleter, completer)) {
+        _pageRenderedCompleter = null;
+      }
+    }
+    // 2. 第一帧：浏览器提交渲染
     await _nextFrame();
-    // 第二帧：PlatformView 合成到 Flutter Surface
+    // 3. 第二帧：PlatformView 合成到 Flutter Surface
     await _nextFrame();
-    // 额外保险：给 SurfaceFlinger 一次 vsync 的时间
+    // 4. SurfaceFlinger 最后一次 vsync 保险
     await Future.delayed(const Duration(milliseconds: 16));
   }
 
@@ -1610,6 +1643,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     if (_webviewReloading) return;
     final provider = context.read<ReaderProvider>();
     final isScrollMode = _isScrollLikeMode(provider);
+
+    // 唤醒翻页时序等待：_waitForWebViewFrame(expectedPage) 在调 jumpToPage 后等此回调
+    final c = _pageRenderedCompleter;
+    if (c != null && !c.isCompleted) {
+      c.complete();
+    }
 
     if (isScrollMode) {
       // 滚动模式：pageIndex 是 progress * 1000（虚拟页码）
@@ -2356,8 +2395,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           _repaginatePreservingPosition();
         }
       },
-      onPageAnimDurationChanged: (value) =>
-          provider.setPageAnimDurationMs(value),
+      onPageAnimDurationChanged: (value) {
+        // pageAnimDurationMs 在 _StyleSnapshot 中，setter 会触发 ReaderWebView 重载 HTML，
+        // 必须保留当前进度比例，否则会跳回第 0 页
+        provider.setPageAnimDurationMs(value);
+        _repaginatePreservingPosition();
+      },
       onScreenBrightnessChanged: (value) => provider.setScreenBrightness(value),
       onKeepScreenOnChanged: (value) => provider.setKeepScreenOn(value),
       onEnableVolumeKeyPageChanged: (value) =>

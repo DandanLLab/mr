@@ -1,4 +1,4 @@
-import 'dart:async';
+import 'dart:async' show Timer;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
@@ -98,6 +98,17 @@ class _ReaderPageViewState extends State<ReaderPageView>
 
   Offset? _downPosition;
 
+  /// PointerUp 兜底定时器
+  ///
+  /// 背景：InAppWebView (PlatformView) 在 Texture Layer 模式下有时会吞掉
+  /// pointerUp 事件（特别是当 WebView 内部触发了 click 事件合成时），
+  /// 导致 _finalizeTurn 不触发，simulation 拖拽卡住。
+  /// 策略：onPointerDown 启动 timer，onPointerMove 重置（用户还在拖），
+  /// onPointerUp/onPointerCancel 取消；若 timer 触发说明 up 被吞，
+  /// 强制走 _finalizeTurn 收尾。
+  Timer? _pointerUpFallbackTimer;
+  static const Duration _pointerUpFallbackDelay = Duration(milliseconds: 600);
+
   @override
   void initState() {
     super.initState();
@@ -184,12 +195,19 @@ class _ReaderPageViewState extends State<ReaderPageView>
     _delegate.onDown();
     _delegate.setStartPoint(event.position.dx, event.position.dy);
     _delegate.onTouch(event);
+    // 启动 pointerUp 兜底定时器（onPointerUp 可能被 WebView 吞）
+    _pointerUpFallbackTimer?.cancel();
+    _pointerUpFallbackTimer = Timer(_pointerUpFallbackDelay, _onPointerUpFallback);
   }
 
   void _onPointerMove(PointerMoveEvent event) {
     if (widget.isScrollMode) return;
     if (_downPosition == null) return;
     if (_isTurning) return; // 翻页中不响应新移动
+
+    // 用户在拖动，重置 pointerUp 兜底定时器
+    _pointerUpFallbackTimer?.cancel();
+    _pointerUpFallbackTimer = Timer(_pointerUpFallbackDelay, _onPointerUpFallback);
 
     // delegate.onTouch 内部 _onScroll 会判断 isMoved 并设置 isRunning=true
     _delegate.onTouch(event);
@@ -207,6 +225,9 @@ class _ReaderPageViewState extends State<ReaderPageView>
     if (widget.isScrollMode) return;
     if (_downPosition == null) return;
 
+    _pointerUpFallbackTimer?.cancel();
+    _pointerUpFallbackTimer = null;
+
     // tap 召唤菜单不再由 Flutter Listener 处理 —— InAppWebView 是 PlatformView
     // 会吃掉 pointerUp，所以 tap 改由 JS click 事件回传到 _onWebviewJsTap
     if (_delegate.isMoved && !_finalizeStarted) {
@@ -217,11 +238,28 @@ class _ReaderPageViewState extends State<ReaderPageView>
   }
 
   void _onPointerCancel(PointerCancelEvent event) {
+    _pointerUpFallbackTimer?.cancel();
+    _pointerUpFallbackTimer = null;
     if (_isTurning) {
       _delegate.abortAnim();
       _cancelTurn();
     }
     _downPosition = null;
+  }
+
+  /// PointerUp 兜底：当 InAppWebView 吞掉 onPointerUp 时，timer 触发强制收尾
+  void _onPointerUpFallback() {
+    if (!mounted) return;
+    if (_downPosition == null) return;
+    if (!_delegate.isMoved) {
+      // 用户没真正拖动，可能是被吞的 tap。直接重置，等 JS click 通道处理菜单
+      _downPosition = null;
+      return;
+    }
+    if (_finalizeStarted) return;
+    _finalizeStarted = true;
+    debugPrint('[ReaderPageView] pointerUp 兜底触发（被 WebView 吞）');
+    _finalizeTurn();
   }
 
   /// 开始翻页流程（用户开始滑动时调用）
@@ -383,7 +421,9 @@ class _ReaderPageViewState extends State<ReaderPageView>
     setState(() {
       _showAnimationLayer = false;
     });
-    _delegate.setBitmaps(cur: null, prev: null, next: null);
+    // 真正 dispose 所有 ui.Image 资源（不能调 setBitmaps(cur:null,...)，
+    // setBitmaps 对 null 参数不做处理，会导致内存泄漏）
+    _delegate.recycleBitmaps();
     widget.onPageTurnCancelled?.call();
   }
 
@@ -394,7 +434,8 @@ class _ReaderPageViewState extends State<ReaderPageView>
     setState(() {
       _showAnimationLayer = false;
     });
-    _delegate.setBitmaps(cur: null, prev: null, next: null);
+    // 动画结束：dispose 所有截图资源（同 _cancelTurn）
+    _delegate.recycleBitmaps();
     widget.onPageTurnCompleted?.call(direction);
   }
 
@@ -404,6 +445,7 @@ class _ReaderPageViewState extends State<ReaderPageView>
 
   @override
   void dispose() {
+    _pointerUpFallbackTimer?.cancel();
     _ticker.dispose();
     _delegate.onDestroy();
     super.dispose();
