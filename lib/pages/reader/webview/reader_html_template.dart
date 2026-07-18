@@ -33,8 +33,9 @@ class ReaderHtmlTemplate {
     required double viewHeight,
     required bool isScrollMode,
     required int pageAnimDurationMs,
+    required int pageModeIndex,
   }) {
-    final css = _generateCss(provider, isScrollMode, pageAnimDurationMs);
+    final css = _generateCss(provider, isScrollMode, pageAnimDurationMs, pageModeIndex);
     final js = _readerJs(pageAnimDurationMs);
     final paragraphsHtml = _buildParagraphsHtml(content, provider);
     final titleHtml = _buildTitleHtml(title, provider);
@@ -85,7 +86,7 @@ class ReaderHtmlTemplate {
   /// 滚动模式核心：
   /// - 取消 column-width，改为正常文档流
   /// - body overflow-y: auto
-  static String _generateCss(ReaderProvider provider, bool isScrollMode, int pageAnimDurationMs) {
+  static String _generateCss(ReaderProvider provider, bool isScrollMode, int pageAnimDurationMs, int pageModeIndex) {
     final textColor = _colorToHex(provider.textColor);
     final bgColor = _colorToHex(provider.backgroundColor);
     final fontFamily = provider.fontFamily.isEmpty ? 'inherit' : provider.fontFamily;
@@ -99,6 +100,20 @@ class ReaderHtmlTemplate {
             : 'left';
     // 标题字号 = 正文字号 * 1.4 + titleSize 增量
     final titleFontSizeCalc = 'calc(var(--reader-font-size) * 1.4 + ${provider.titleSize}px)';
+    // 翻页动画 timing function：
+    // PageMode { scroll:0, slide:1, cover:2, simulation:3, none:4 }
+    // - slide: ease-out（平滑滑出）
+    // - cover: cubic-bezier(0.4, 0, 1, 1)（加速覆盖）
+    // - simulation: cubic-bezier(0.25, 0.1, 0.25, 1)（缓冲翻折感）
+    // - none/scroll: 无 transition（滚动模式不用 translateX）
+    final String transitionTiming = pageAnimDurationMs > 0
+        ? switch (pageModeIndex) {
+            1 => 'ease-out',
+            2 => 'cubic-bezier(0.4, 0, 1, 1)',
+            3 => 'cubic-bezier(0.25, 0.1, 0.25, 1)',
+            _ => 'ease',
+          }
+        : 'none';
 
     return '''
 :root {
@@ -191,16 +206,19 @@ body.reader-paged {
 body.reader-paged #reader-root {
   height: 100vh;
   width: 100vw;
+  /* 防止 padding 过大时内容溢出视口 */
+  overflow: hidden;
 }
 
 body.reader-paged #reader-content {
-  column-width: calc(100vw - var(--reader-padding-left) - var(--reader-padding-right));
+  /* max() 确保最小内容区 100px，防止 padding 之和超过视口导致 calc 结果为负 */
+  column-width: max(100px, calc(100vw - var(--reader-padding-left) - var(--reader-padding-right)));
   column-gap: 0;
   column-fill: auto;
-  height: calc(100vh - var(--reader-padding-top) - var(--reader-padding-bottom));
+  height: max(100px, calc(100vh - var(--reader-padding-top) - var(--reader-padding-bottom)));
   overflow: hidden;
-  /* 翻页动画：translateX 变换时的过渡时长（slide/cover/simulation 共用） */
-  transition: transform var(--reader-page-anim-duration) ease;
+  /* 翻页动画：translateX 过渡，timing function 根据 PageMode 区分 */
+  transition: transform var(--reader-page-anim-duration) $transitionTiming;
   will-change: transform;
 }
 

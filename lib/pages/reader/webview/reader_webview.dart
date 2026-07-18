@@ -113,6 +113,7 @@ class _ReaderWebViewState extends State<ReaderWebView> {
       viewHeight: _viewHeight,
       isScrollMode: widget.isScrollMode,
       pageAnimDurationMs: widget.provider.pageAnimDurationMs,
+      pageModeIndex: widget.provider.pageMode.index,
     );
   }
 
@@ -227,6 +228,7 @@ class _StyleSnapshot {
   final int titleBottomSpacing;
   final int chineseConverterType;
   final int pageAnimDurationMs;
+  final int pageModeIndex;
   final List<Object?> highlightRulesSnapshot;
 
   _StyleSnapshot({
@@ -253,6 +255,7 @@ class _StyleSnapshot {
     required this.titleBottomSpacing,
     required this.chineseConverterType,
     required this.pageAnimDurationMs,
+    required this.pageModeIndex,
     required this.highlightRulesSnapshot,
   });
 
@@ -284,6 +287,7 @@ class _StyleSnapshot {
       titleBottomSpacing: p.titleBottomSpacing,
       chineseConverterType: p.chineseConverterType,
       pageAnimDurationMs: p.pageAnimDurationMs,
+      pageModeIndex: p.pageMode.index,
       highlightRulesSnapshot: rules,
     );
   }
@@ -314,7 +318,8 @@ class _StyleSnapshot {
         titleTopSpacing != other.titleTopSpacing ||
         titleBottomSpacing != other.titleBottomSpacing ||
         chineseConverterType != other.chineseConverterType ||
-        pageAnimDurationMs != other.pageAnimDurationMs) {
+        pageAnimDurationMs != other.pageAnimDurationMs ||
+        pageModeIndex != other.pageModeIndex) {
       return false;
     }
     // 高亮规则比较
@@ -357,6 +362,7 @@ class _StyleSnapshot {
         titleBottomSpacing,
         chineseConverterType,
         pageAnimDurationMs,
+        pageModeIndex,
         ...highlightRulesSnapshot,
       ]);
 }
