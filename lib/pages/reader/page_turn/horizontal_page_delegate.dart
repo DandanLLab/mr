@@ -70,6 +70,32 @@ abstract class HorizontalPageDelegate extends PageDelegate {
     }
   }
 
+  /// 把 bitmap 完整绘制到 canvas 的 (0,0)-(viewWidth,viewHeight) 矩形
+  ///
+  /// 自适应截图精准修复：
+  /// - src 矩形用 bitmap 物理尺寸（image.width × image.height）
+  ///   之前用 Size(viewWidth, viewHeight) 是错的——bitmap 由
+  ///   RepaintBoundary.toImage(pixelRatio: 3.0) 生成，物理尺寸是
+  ///   viewWidth*3 × viewHeight*3，用 viewWidth/viewHeight 作 src 只截取
+  ///   了 1/9 区域再拉伸到 dst，导致内容变形、模糊、不完整
+  /// - dst 矩形用 viewWidth/viewHeight（canvas 逻辑像素尺寸）
+  /// - 这样无论 pixelRatio 是 1.0/2.0/3.0/4.0，bitmap 都能精准填充 canvas
+  ///
+  /// [dst] 可选，默认填满整个 canvas；用于 cover/slide 等需要自定义目标矩形的场景
+  /// [paint] 可选，用于 simulation 的 colorFilter 等自定义画笔
+  void drawBitmapFull(
+    Canvas canvas,
+    ui.Image? bitmap, {
+    Rect? dst,
+    Paint? paint,
+  }) {
+    if (bitmap == null) return;
+    final src =
+        Offset.zero & Size(bitmap.width.toDouble(), bitmap.height.toDouble());
+    final target = dst ?? (Offset.zero & Size(viewWidth, viewHeight));
+    canvas.drawImageRect(bitmap, src, target, paint ?? Paint());
+  }
+
   /// 触摸事件统一处理
   ///
   /// 注意：PointerUpEvent 不在此处自动调用 onAnimStart。

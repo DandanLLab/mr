@@ -31,23 +31,13 @@ class SlidePageDelegate extends HorizontalPageDelegate {
       if (curBitmap != null) {
         canvas.save();
         canvas.translate(distanceX + viewWidth, 0);
-        canvas.drawImageRect(
-          curBitmap!,
-          Offset.zero & Size(viewWidth, viewHeight),
-          Offset.zero & Size(viewWidth, viewHeight),
-          Paint(),
-        );
+        drawBitmapFull(canvas, curBitmap);
         canvas.restore();
       }
       if (prevBitmap != null) {
         canvas.save();
         canvas.translate(distanceX, 0);
-        canvas.drawImageRect(
-          prevBitmap!,
-          Offset.zero & Size(viewWidth, viewHeight),
-          Offset.zero & Size(viewWidth, viewHeight),
-          Paint(),
-        );
+        drawBitmapFull(canvas, prevBitmap);
         canvas.restore();
       }
     } else if (direction == PageDirection.next) {
@@ -55,23 +45,13 @@ class SlidePageDelegate extends HorizontalPageDelegate {
       if (nextBitmap != null) {
         canvas.save();
         canvas.translate(distanceX, 0);
-        canvas.drawImageRect(
-          nextBitmap!,
-          Offset.zero & Size(viewWidth, viewHeight),
-          Offset.zero & Size(viewWidth, viewHeight),
-          Paint(),
-        );
+        drawBitmapFull(canvas, nextBitmap);
         canvas.restore();
       }
       if (curBitmap != null) {
         canvas.save();
         canvas.translate(distanceX - viewWidth, 0);
-        canvas.drawImageRect(
-          curBitmap!,
-          Offset.zero & Size(viewWidth, viewHeight),
-          Offset.zero & Size(viewWidth, viewHeight),
-          Paint(),
-        );
+        drawBitmapFull(canvas, curBitmap);
         canvas.restore();
       }
     }
@@ -189,22 +169,12 @@ class CoverPageDelegate extends HorizontalPageDelegate {
         if (prevBitmap != null) {
           canvas.save();
           canvas.translate(distanceX, 0);
-          canvas.drawImageRect(
-            prevBitmap!,
-            Offset.zero & Size(viewWidth, viewHeight),
-            Offset.zero & Size(viewWidth, viewHeight),
-            Paint(),
-          );
+          drawBitmapFull(canvas, prevBitmap);
           canvas.restore();
         }
         _addShadow(distanceX, canvas);
       } else if (prevBitmap != null) {
-        canvas.drawImageRect(
-          prevBitmap!,
-          Offset.zero & Size(viewWidth, viewHeight),
-          Offset.zero & Size(viewWidth, viewHeight),
-          Paint(),
-        );
+        drawBitmapFull(canvas, prevBitmap);
       }
     } else if (direction == PageDirection.next) {
       // 下一页从右边滑入，裁剪只显示已滑入部分
@@ -213,24 +183,14 @@ class CoverPageDelegate extends HorizontalPageDelegate {
         final clipRect = Rect.fromLTWH(
             viewWidth + offsetX, 0, -offsetX, viewHeight);
         canvas.clipRect(clipRect);
-        canvas.drawImageRect(
-          nextBitmap!,
-          Offset.zero & Size(viewWidth, viewHeight),
-          Offset.zero & Size(viewWidth, viewHeight),
-          Paint(),
-        );
+        drawBitmapFull(canvas, nextBitmap);
         canvas.restore();
       }
       // 当前页跟随移动
       if (curBitmap != null) {
         canvas.save();
         canvas.translate(distanceX - viewWidth, 0);
-        canvas.drawImageRect(
-          curBitmap!,
-          Offset.zero & Size(viewWidth, viewHeight),
-          Offset.zero & Size(viewWidth, viewHeight),
-          Paint(),
-        );
+        drawBitmapFull(canvas, curBitmap);
         canvas.restore();
       }
       _addShadow(distanceX, canvas);

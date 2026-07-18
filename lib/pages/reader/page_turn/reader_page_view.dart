@@ -124,6 +124,19 @@ class _ReaderPageViewState extends State<ReaderPageView>
   Timer? _animSafetyTimer;
   static const Duration _animSafetyTimeout = Duration(milliseconds: 1500);
 
+  /// 截图像素比（自适应屏幕 DPR）
+  ///
+  /// 之前硬编码 3.0：
+  /// - 高 DPR 设备（4.0）：截图清晰度 < 设备渲染清晰度，翻页时图片模糊
+  /// - 低 DPR 设备（1.5/2.0）：截图清晰度 > 设备渲染清晰度，浪费内存
+  ///   （DPR=2 时一张 360×640 截图占 720×1280 物理像素 = 3.5MB，
+  ///    DPR=3 时占 1080×1920 = 7.9MB，多耗一倍内存）
+  ///
+  /// 修复：用 View.of(context).devicePixelRatio 取真实 DPR，
+  /// 截图清晰度 = 设备渲染清晰度，1:1 还原屏幕显示。
+  /// 兜底默认 3.0（与原实现一致，保证旧设备行为不变）。
+  double _devicePixelRatio = 3.0;
+
   @override
   void initState() {
     super.initState();
@@ -219,8 +232,12 @@ class _ReaderPageViewState extends State<ReaderPageView>
     final boundary = renderObj is RenderRepaintBoundary ? renderObj : null;
     if (boundary == null || boundary.size.isEmpty) return null;
     try {
-      // pixelRatio: 3.0 参考 lumina，保证清晰度
-      return await boundary.toImage(pixelRatio: 3.0);
+      // pixelRatio 自适应屏幕 DPR（之前硬编码 3.0）
+      // - DPR=2 设备：截图 = 720×1280 物理像素（原 1080×1920 省 50% 内存）
+      // - DPR=3 设备：截图 = 1080×1920（与原行为一致）
+      // - DPR=4 设备：截图 = 1440×2560（比原 1080×1920 更清晰）
+      // 配合 drawBitmapFull 的 src=bitmap 物理尺寸，绘制时精准 1:1 还原
+      return await boundary.toImage(pixelRatio: _devicePixelRatio);
     } catch (e) {
       debugPrint('[ReaderPageView] 截图失败: $e');
       return null;
@@ -532,6 +549,11 @@ class _ReaderPageViewState extends State<ReaderPageView>
 
   @override
   Widget build(BuildContext context) {
+    // 自适应屏幕 DPR：取真实设备像素比，截图清晰度 = 设备渲染清晰度
+    // View.of 比 MediaQuery.devicePixelRatio 更轻量（不依赖 MediaQuery），
+    // 在 LayoutBuilder 内部也可用，且不会因父级 MediaQuery 重建而被动刷新
+    _devicePixelRatio = View.of(context).devicePixelRatio;
+
     // 滚动模式：直接返回 child，不包裹任何翻页逻辑
     if (widget.isScrollMode) {
       return widget.child;

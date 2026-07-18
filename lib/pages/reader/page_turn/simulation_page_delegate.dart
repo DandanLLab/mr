@@ -267,10 +267,11 @@ class SimulationPageDelegate extends HorizontalPageDelegate {
       0, 0, 1, 0, 0, //
       0, 0, 0, 1, 0, //
     ]);
-    // 用变换矩阵绘制 bitmap
+    // 用变换矩阵绘制 bitmap（drawBitmapFull 自适应 src=bitmap 物理尺寸，
+    // dst=viewWidth×viewHeight，避免 drawImage 直接绘制物理像素导致超出屏幕）
     canvas.save();
     canvas.transform(matrix.storage);
-    canvas.drawImage(bitmap, Offset.zero, _paint);
+    drawBitmapFull(canvas, bitmap, paint: _paint);
     canvas.restore();
     _paint.colorFilter = null;
 
@@ -425,8 +426,8 @@ class SimulationPageDelegate extends HorizontalPageDelegate {
     canvas.clipPath(_buildPath0());
     canvas.clipPath(path1);
 
-    // 绘制下一页内容
-    canvas.drawImage(bitmap, Offset.zero, _paint);
+    // 绘制下一页内容（drawBitmapFull 自适应 src，避免超出屏幕）
+    drawBitmapFull(canvas, bitmap, paint: _paint);
 
     // 阴影
     canvas.save();
@@ -450,7 +451,9 @@ class SimulationPageDelegate extends HorizontalPageDelegate {
     canvas.save();
     // 裁剪掉 path0 外部（只绘制 path0 外的当前页内容）
     _clipOutPath0(canvas);
-    canvas.drawImage(bitmap, Offset.zero, _paint);
+    // drawBitmapFull 自适应 src=bitmap 物理尺寸，dst=viewWidth×viewHeight
+    // 之前用 drawImage 直接绘制 bitmap 物理像素，导致超出 canvas 边界
+    drawBitmapFull(canvas, bitmap, paint: _paint);
     canvas.restore();
   }
 
