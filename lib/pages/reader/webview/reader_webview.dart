@@ -67,7 +67,8 @@ class _ReaderWebViewState extends State<ReaderWebView> {
   void initState() {
     super.initState();
     widget.controller.setCallbacks(widget.callbacks);
-    _currentHtml = _generateHtml();
+    // 不在此处生成 HTML：_lastConstraints 此时为 (0,0)，生成的尺寸错误
+    // 等 build 方法第一次拿到 LayoutBuilder 的真实 constraints 后再生成
     _lastStyleSnapshot = _StyleSnapshot.fromProvider(widget.provider);
   }
 
@@ -94,6 +95,11 @@ class _ReaderWebViewState extends State<ReaderWebView> {
   }
 
   /// 生成 HTML 内容
+  ///
+  /// viewWidth/viewHeight 必须用 LayoutBuilder 的 constraints（WebView 实际可用尺寸），
+  /// 不能用 MediaQuery.sizeOf（屏幕尺寸）——因为 WebView 位于 SafeArea > Column > Expanded
+  /// 内，顶部可能有 header、底部可能有 footer，实际可用区域远小于屏幕。
+  /// 传入正确尺寸后 JS 的 column-width 才能正确分页，避免翻页错位。
   String _generateHtml() {
     // 简繁转换
     final displayContent = ChineseConverter.convert(
@@ -109,23 +115,17 @@ class _ReaderWebViewState extends State<ReaderWebView> {
       content: displayContent,
       title: displayTitle,
       provider: widget.provider,
-      viewWidth: _viewWidth,
-      viewHeight: _viewHeight,
+      viewWidth: _lastConstraints.maxWidth,
+      viewHeight: _lastConstraints.maxHeight,
       isScrollMode: widget.isScrollMode,
       pageAnimDurationMs: widget.provider.pageAnimDurationMs,
       pageModeIndex: widget.provider.pageMode.index,
     );
   }
 
-  double get _viewWidth {
-    final size = MediaQuery.sizeOf(context);
-    return size.width - widget.provider.paddingLeft - widget.provider.paddingRight;
-  }
-
-  double get _viewHeight {
-    final size = MediaQuery.sizeOf(context);
-    return size.height - widget.provider.paddingTop - widget.provider.paddingBottom;
-  }
+  /// 最近一次 LayoutBuilder 的 constraints（build 时更新）
+  /// 用于 _generateHtml 取 WebView 实际可用尺寸
+  BoxConstraints _lastConstraints = const BoxConstraints();
 
   /// 重新加载 HTML
   Future<void> _reloadHtml() async {
@@ -143,6 +143,22 @@ class _ReaderWebViewState extends State<ReaderWebView> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
+        // 检测尺寸变化（如键盘弹出、旋转、header/footer 显隐）
+        final sizeChanged = _lastConstraints.maxWidth != constraints.maxWidth ||
+            _lastConstraints.maxHeight != constraints.maxHeight;
+        final isFirstBuild = _currentHtml.isEmpty;
+
+        if (sizeChanged) {
+          _lastConstraints = constraints;
+          _currentHtml = _generateHtml();
+          if (!isFirstBuild) {
+            // 非首次：尺寸变化需异步重载 HTML（CSS column-width 依赖 viewWidth）
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _reloadHtml();
+            });
+          }
+          // 首次：_currentHtml 直接传给 initialData，无需手动重载
+        }
         return InAppWebView(
           initialData: InAppWebViewInitialData(
             data: _currentHtml,

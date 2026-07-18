@@ -155,7 +155,9 @@ html, body {
   -webkit-text-size-adjust: none;
   text-size-adjust: none;
   overflow: hidden;
-  touch-action: none;
+  /* manipulation: 允许点击和轻触，禁用双击缩放和滚动
+     none 在某些 WebView 上会阻断 click 事件合成 */
+  touch-action: manipulation;
 }
 
 #reader-root {
@@ -226,6 +228,11 @@ body.reader-paged .reader-content {
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   transform: translate3d(0, 0, 0);
+}
+
+/* a 层显式启用交互，确保点击穿透 b 后能命中 a */
+body.reader-paged #reader-content-a {
+  pointer-events: auto;
 }
 
 /* b 层默认隐藏，不拦截事件（点击穿透到 a） */
@@ -424,14 +431,19 @@ window.readerApi = (function() {
     contentA = document.getElementById('reader-content-a');
     contentB = document.getElementById('reader-content-b');
     body.classList.add(config.isScrollMode ? 'reader-scroll' : 'reader-paged');
+    console.log('[reader] init', JSON.stringify(config), 'animEnabled=' + animEnabled, 'contentA=' + !!contentA, 'contentB=' + !!contentB);
 
     // 绑定 click 监听器
     document.addEventListener('click', function(e) {
-      if (isAnimating) return; // 动画中忽略点击
+      if (isAnimating) {
+        console.log('[reader] click ignored (animating)');
+        return;
+      }
       if (e.target && e.target.tagName === 'IMG') {
         notifyImageTap(e.target.src, e.target.getBoundingClientRect());
         return;
       }
+      console.log('[reader] click at', e.clientX, e.clientY, 'target:', e.target.tagName);
       notifyTap(e.clientX, e.clientY);
     }, { passive: true });
 
@@ -468,7 +480,10 @@ window.readerApi = (function() {
   }
 
   function getColumnWidth() {
-    return config.viewWidth || (window.innerWidth - getPaddingLeft() - getPaddingRight());
+    // column-width = WebView 宽度 - paddingLeft - paddingRight
+    // 与 CSS --reader-safe-width 一致（100vw - padding）
+    var viewWidth = config.viewWidth || window.innerWidth;
+    return viewWidth - getPaddingLeft() - getPaddingRight();
   }
 
   function getPaddingLeft() {
@@ -499,13 +514,17 @@ window.readerApi = (function() {
   // animate: true=带动画（用户翻页）, false=无动画（进度恢复/初始化）
   function jumpToPage(pageIndex, animate) {
     if (config.isScrollMode) return;
-    if (!contentA || !contentB) return;
+    if (!contentA || !contentB) {
+      console.log('[reader] jumpToPage skipped: contentA/B not ready');
+      return;
+    }
 
     var pageCount = getPageCount();
     if (pageIndex < 0) pageIndex = 0;
     if (pageIndex >= pageCount) pageIndex = pageCount - 1;
 
     var useAnim = animate !== false && animEnabled && !isAnimating;
+    console.log('[reader] jumpToPage', pageIndex, 'animate=' + animate, 'useAnim=' + useAnim, 'currentPage=' + currentPage, 'pageCount=' + pageCount);
 
     if (!useAnim) {
       // 无动画：a 直接跳到目标页，b 隐藏重置
@@ -530,73 +549,72 @@ window.readerApi = (function() {
     var mode = config.pageModeIndex;
     var duration = config.pageAnimDurationMs;
 
-    // 1. 显式重置 a 起点到当前页（无动画），防止上次动画残留
-    contentA.style.transition = 'none';
-    contentA.style.transform = 'translate3d(' + (-currentPage * step) + 'px, 0, 0)';
-    void contentA.offsetHeight;
-
-    // 2. b 跳到动画起点（无动画），具体位置由 mode 决定
-    contentB.style.transition = 'none';
-    contentB.style.transformStyle = 'preserve-3d';
-    if (isForward) {
-      // 前翻：b 起点在视口右侧一列（比目标少偏移一列）
-      contentB.style.transform = 'translate3d(' + (-(pageIndex - 1) * step) + 'px, 0, 0)';
-    } else {
-      // 后翻：b 起点在视口左侧一列（比目标多偏移一列）
-      contentB.style.transform = 'translate3d(' + (-(pageIndex + 1) * step) + 'px, 0, 0)';
-    }
-    void contentB.offsetHeight;
-
-    // 3. 显示 b 并标记动画中
-    contentB.classList.add('animating');
-    isAnimating = true;
-
-    // 4. 设置 transition，并设置 a/b 的终点 transform
-    //    a 终点 = -pageIndex*step（与 b 终点一致，动画后 a 无跳跃）
-    //    b 终点 = -pageIndex*step（滑入视口中央显示目标页）
-    var aTiming = 'ease-out';
-    var bTiming = 'ease-out';
-    if (mode === 2) {
-      aTiming = 'none'; // cover: a 不动
-      bTiming = 'cubic-bezier(0.4, 0, 1, 1)';
-    } else if (mode === 3) {
-      aTiming = 'none'; // simulation: a 不动
-      bTiming = 'cubic-bezier(0.25, 0.1, 0.25, 1)';
-    }
-
-    // a 动画（cover/simulation 时 a 不动，transition 设 none）
-    if (aTiming === 'none') {
+    // 用 try-finally 保护 isAnimating，防止异常导致卡死
+    try {
+      // 1. 显式重置 a 起点到当前页（无动画），防止上次动画残留
       contentA.style.transition = 'none';
-      // a 保持当前页位置（已在步骤 1 设置）
-    } else {
-      contentA.style.transition = 'transform ' + duration + 'ms ' + aTiming;
-      // 强制重排，确保 transition 生效后再设置 transform（否则同帧批量处理会跳过动画）
+      contentA.style.transform = 'translate3d(' + (-currentPage * step) + 'px, 0, 0)';
       void contentA.offsetHeight;
-      contentA.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
-    }
 
-    // b 动画
-    contentB.style.transition = 'transform ' + duration + 'ms ' + bTiming;
-    // 强制重排，确保 transition 生效后再设置 transform
-    void contentB.offsetHeight;
-    if (mode === 3) {
-      // simulation: 带 rotateY 翻折
+      // 2. b 跳到动画起点（无动画），具体位置由 mode 决定
+      contentB.style.transition = 'none';
+      contentB.style.transformStyle = 'preserve-3d';
       if (isForward) {
-        // 前翻：b 从右侧来，绕右边翻折（右边固定，左边向用户翻过来）
-        contentB.style.transformOrigin = 'right center';
-        contentB.style.transform = 'translate3d(' + (-(pageIndex - 1) * step) + 'px, 0, 0) rotateY(90deg)';
-        void contentB.offsetHeight;
-        contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(0deg)';
+        contentB.style.transform = 'translate3d(' + (-(pageIndex - 1) * step) + 'px, 0, 0)';
       } else {
-        // 后翻：b 从左侧来，绕左边翻折（左边固定，右边向用户翻过来）
-        contentB.style.transformOrigin = 'left center';
-        contentB.style.transform = 'translate3d(' + (-(pageIndex + 1) * step) + 'px, 0, 0) rotateY(-90deg)';
-        void contentB.offsetHeight;
-        contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(0deg)';
+        contentB.style.transform = 'translate3d(' + (-(pageIndex + 1) * step) + 'px, 0, 0)';
       }
-    } else {
-      // slide/cover: 纯平移
-      contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
+      void contentB.offsetHeight;
+
+      // 3. 显示 b 并标记动画中
+      contentB.classList.add('animating');
+      isAnimating = true;
+
+      // 4. 设置 transition 和终点 transform
+      var aTiming = 'ease-out';
+      var bTiming = 'ease-out';
+      if (mode === 2) {
+        aTiming = 'none';
+        bTiming = 'cubic-bezier(0.4, 0, 1, 1)';
+      } else if (mode === 3) {
+        aTiming = 'none';
+        bTiming = 'cubic-bezier(0.25, 0.1, 0.25, 1)';
+      }
+
+      if (aTiming === 'none') {
+        contentA.style.transition = 'none';
+      } else {
+        contentA.style.transition = 'transform ' + duration + 'ms ' + aTiming;
+        void contentA.offsetHeight;
+        contentA.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
+      }
+
+      contentB.style.transition = 'transform ' + duration + 'ms ' + bTiming;
+      void contentB.offsetHeight;
+      if (mode === 3) {
+        if (isForward) {
+          contentB.style.transformOrigin = 'right center';
+          contentB.style.transform = 'translate3d(' + (-(pageIndex - 1) * step) + 'px, 0, 0) rotateY(90deg)';
+          void contentB.offsetHeight;
+          contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(0deg)';
+        } else {
+          contentB.style.transformOrigin = 'left center';
+          contentB.style.transform = 'translate3d(' + (-(pageIndex + 1) * step) + 'px, 0, 0) rotateY(-90deg)';
+          void contentB.offsetHeight;
+          contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(0deg)';
+        }
+      } else {
+        contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
+      }
+    } catch (err) {
+      // 异常时立即清理动画状态，防止 isAnimating 卡死导致后续点击全被吞
+      console.error('[reader] jumpToPage animation error:', err);
+      isAnimating = false;
+      hideB();
+      jumpA(pageIndex, false);
+      currentPage = pageIndex;
+      notifyPageChanged(pageIndex);
+      return;
     }
 
     // 5. 兜底超时（防止 transitionend 不触发）
