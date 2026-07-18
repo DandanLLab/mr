@@ -1358,6 +1358,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     // paragraphSpacing * (段数-1) 来近似。为简化实现，这里按每段都加一次
     // paragraphSpacing 估算，渲染时最后一段的 Padding 多余空间留作底部留白。
     final paragraphSpacing = provider.paragraphSpacing;
+    // 缩进字符由 CSS before 渲染，测量时需要同步加上缩进前缀，
+    // 否则测量高度偏小（首行少了缩进字符占用的宽度，可能少一行）。
+    final indent = provider.paragraphIndent;
     var page = StringBuffer();
     var pageParagraphCount = 0;
     var usedHeight = _showChapterTitle(provider)
@@ -1371,12 +1374,23 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         : 0.0;
 
     for (final rawParagraph in paragraphs) {
-      // _splitToParagraphs 已把 HTML 标准化为纯文本，统一走纯文本路径
-      var paragraph = _applyIndent(rawParagraph, provider);
+      // 剥掉源内容自带缩进，统一由 CSS before 提供缩进
+      // 保存到 _pages 的是剥源缩进后的纯文本，渲染时 CSS before 会加缩进
+      var paragraph = rawParagraph.replaceAll(_leadingIndentRegex, '');
+      // 测量用的文本：段落开头加缩进字符（模拟 CSS before 的效果）
+      // 续页首行（段落被切分的后半部分）不加缩进，因为 CSS before 只作用于 <p> 开头，
+      // 而续页首行在渲染时是 <p> 的第一个段落，CSS before 会加缩进...
+      // 但测量时续页首行是 paragraph 的剩余部分，不需要再加缩进字符（否则重复计算）。
+      // 所以用 _isContinuation 标记区分：首次测量加缩进，续页不加。
+      var isContinuation = false;
 
       while (paragraph.isNotEmpty) {
+        // 测量文本：首段加缩进字符，续页不加（续页首行无缩进）
+        final measuredText = (!isContinuation && indent.isNotEmpty)
+            ? '$indent$paragraph'
+            : paragraph;
         final paragraphHeight =
-            _measureTextHeight(paragraph, textStyle, metrics.width) +
+            _measureTextHeight(measuredText, textStyle, metrics.width) +
             paragraphSpacing;
 
         // 当前页还能放下整段
@@ -1398,14 +1412,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         }
 
         // 走到这里：当前页为空 + 整段放不下 —— 需要字符级切割
-        // （纯文本路径，不再有 HTML 标签结构限制）
         final remainingHeight = max(
           metrics.height - usedHeight - paragraphSpacing,
           _singleLineHeight(textStyle, metrics.width),
         );
 
         final splitIndex = _findFittingTextIndex(
-          paragraph,
+          measuredText,
           textStyle,
           metrics.width,
           remainingHeight,
@@ -1417,15 +1430,19 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           // 兜底：强制取 1 个字符，确保 paragraph 每轮至少缩短 1 字符
           pages.add(paragraph.substring(0, 1).trimRight());
           paragraph = paragraph.substring(1);
-          // 注意：不 trimLeft！trimLeft 会剥掉全角空格缩进，导致续页首行没缩进
           usedHeight = 0;
+          isContinuation = true;
           continue;
         }
 
-        pages.add(paragraph.substring(0, splitIndex).trimRight());
-        // 不 trimLeft：保留续页首行的全角空格缩进
-        paragraph = paragraph.substring(splitIndex);
+        // splitIndex 是针对 measuredText 的，需要扣除缩进字符长度
+        final actualSplitIndex = (!isContinuation && indent.isNotEmpty)
+            ? max(1, splitIndex - indent.length)
+            : splitIndex;
+        pages.add(paragraph.substring(0, actualSplitIndex).trimRight());
+        paragraph = paragraph.substring(actualSplitIndex);
         usedHeight = 0;
+        isContinuation = true;
       }
     }
 
@@ -2153,7 +2170,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   Widget _buildRichContent(
     ReaderProvider provider,
     String content, {
-    bool applyIndent = true,
     bool convertChinese = true,
   }) {
     final displayContent = convertChinese
@@ -2162,7 +2178,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     // 统一走 HTML 渲染路径：纯文本也包装成 <p> 标签，所有样式用 CSS 定义，
     // 分页测量和渲染用同一套样式数据源，消除双套计算偏差。
     // 高亮规则通过内联 <span style="..."> 注入到 HTML 字符串。
-    final html = _buildUnifiedHtml(provider, displayContent, applyIndent);
+    // 首行缩进由 CSS before 处理（见 _readerHtmlStyle 的 p.before）。
+    final html = _buildUnifiedHtml(provider, displayContent);
     // 关键修复：外层包 MediaQuery 强制 textScaler = 1.0
     // - flutter_html 内部 CssBoxWidget 对 top:false 子节点会强制 textScaler=1.0
     //   但 top:true 的 body 根节点不覆盖，会受外层 MediaQuery 影响
@@ -2184,48 +2201,27 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   /// 统一构建 HTML 内容：所有内容统一走纯文本路径。
   ///
-  /// `_splitToParagraphs` 内部会先调用 `_normalizeHtmlToText` 把 HTML
-  /// 标准化为纯文本（块级标签转换行、剥掉其他标签、解码实体），所以这里
-  /// 不再需要区分 HTML/纯文本，所有段落统一包装成 `<p>` + 缩进实体 + 高亮。
+  /// 缩进完全交给 CSS（`Style.before`）处理，这里只负责：
+  /// 1. 剥掉源内容自带缩进（避免双重缩进）
+  /// 2. 应用高亮规则
+  /// 3. 包装成 `<p>` 标签
   ///
-  /// 高亮与缩进实体顺序：先 highlight 再 prepend 实体，避免贪婪匹配的高亮规则
-  /// 误匹配 `&#x3000;` 实体后转义成 `&amp;#x3000;` 导致缩进消失。
+  /// 滚动模式和分页模式共用此方法，分页测量时也会同步加上缩进字符
+  /// 测量（见 `_splitContentToPages`），保证测量与渲染一致。
   String _buildUnifiedHtml(
     ReaderProvider provider,
     String content,
-    bool applyIndent,
   ) {
     final rules = provider.highlightRules.where((r) => r.enabled).toList();
     final paragraphs = _splitToParagraphs(content);
     final buf = StringBuffer();
-
-    if (applyIndent) {
-      // 滚动模式：内容是整章原文，需要剥掉源内容自带缩进，
-      // 统一 prepend 配置的缩进实体（&#x3000;），保证每段首行缩进一致
-      final indent = provider.paragraphIndent;
-      final entity = indent.replaceAll('\u3000', '&#x3000;');
-      for (final para in paragraphs) {
-        // 先 highlight 再 prepend 实体，避免贪婪匹配的高亮规则
-        // 误匹配 &#x3000; 实体后转义成 &amp;#x3000; 导致缩进消失
-        final trimmed = para.replaceAll(_leadingIndentRegex, '');
-        final highlighted = _wrapWithHighlightHtml(trimmed, rules);
-        final body = entity.isEmpty ? highlighted : '$entity$highlighted';
-        buf.write('<p>');
-        buf.write(body);
-        buf.write('</p>');
-      }
-    } else {
-      // 分页模式：pageText 已经过 _splitContentToPages + _applyIndent 处理，
-      // 每段首行已含 \u3000 缩进，续页首行（段落被切分的后半部分）无缩进。
-      // 这里保留原样，不再二次加缩进，否则续页首行会被错误地加上缩进，
-      // 导致"段首缩进不统一"（段落开头有缩进，续页首行也有缩进）。
-      // \u3000 是合法 Unicode 字符，flutter_html 可直接渲染，无需转义成实体。
-      for (final para in paragraphs) {
-        final highlighted = _wrapWithHighlightHtml(para, rules);
-        buf.write('<p>');
-        buf.write(highlighted);
-        buf.write('</p>');
-      }
+    for (final para in paragraphs) {
+      // 剥掉源内容自带缩进，统一由 CSS before 提供缩进
+      final trimmed = para.replaceAll(_leadingIndentRegex, '');
+      final highlighted = _wrapWithHighlightHtml(trimmed, rules);
+      buf.write('<p>');
+      buf.write(highlighted);
+      buf.write('</p>');
     }
     return buf.toString();
   }
@@ -2270,6 +2266,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           left: 0,
           right: 0,
         ),
+        // 首行缩进用 CSS before 实现（等价 ::before 伪元素）：
+        // flutter_html 不支持 text-indent，before 会在 <p> 内容前插入文本，
+        // 效果等同于在段首加全角空格。所有 <p> 统一加缩进，无需在 HTML 字符串中
+        // 手动 prepend 实体，避免实体被 whitespace 处理或转义导致缩进丢失。
+        before: provider.paragraphIndent.isEmpty
+            ? null
+            : provider.paragraphIndent,
         // 继承 body 的字号/颜色/行高/字距/字重/字体等（通过 copyOnlyInherited）
         // 但显式设置以下字段避免继承 DefaultTextStyle
         letterSpacing: provider.letterSpacing,
@@ -2342,13 +2345,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   static final _leadingIndentRegex = RegExp(r'^[\u3000\t ]+');
-
-  String _applyIndent(String paragraph, ReaderProvider provider) {
-    // 去除源内容自带的全角空格缩进 + ASCII 左空白，再统一加上配置缩进
-    final trimmed = paragraph.replaceAll(_leadingIndentRegex, '');
-    if (provider.paragraphIndent.isEmpty) return trimmed;
-    return '${provider.paragraphIndent}$trimmed';
-  }
 
   /// 剥离 HTML 标签的正则（用于 _normalizeHtmlToText）
   static final _htmlTagStripRegex = RegExp(r'<[^>]+>');
@@ -2611,9 +2607,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                       child: _buildRichContent(
                         provider,
                         pageText,
-                        // 分页结果已含缩进（_applyIndent 处理过），
-                        // 续页首行无缩进，不能再加缩进
-                        applyIndent: false,
+                        // 分页结果已是纯文本（_splitContentToPages 已剥源缩进），
+                        // 缩进由 CSS before 统一处理
                         convertChinese: false,
                       ),
                     ),
