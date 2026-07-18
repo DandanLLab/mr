@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../models/book.dart';
 import '../../models/book_source.dart';
@@ -1641,7 +1640,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                               selectedStyleIndex,
                             );
                             if (!mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            // 用 State.context 而非 BottomSheet 闭包 context：
+                            // BottomSheet 已 pop，闭包内 context 已 dispose
+                            ScaffoldMessenger.of(this.context).showSnackBar(
                               SnackBar(
                                 content: Text(
                                   success ? '已高亮' : '选区已失效，请重试',
