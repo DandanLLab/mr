@@ -76,6 +76,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   String? _prevContent;
   int? _prevContentChapterIndex;
   int _chapterLoadToken = 0;
+  // 预加载防重入标志位（避免滚动时多次触发 _preloadNextChapter/_preloadPrevChapter
+  // 导致重复 getContent 请求）
+  bool _isLoadingNext = false;
+  bool _isLoadingPrev = false;
 
   // Pagination for non-scroll modes
   List<String> _pages = [];
@@ -86,13 +90,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   final ScrollController _scrollController = ScrollController();
   // 标记当前章节内容的边界，用于检测滚动到下一章
   final GlobalKey _currentChapterKey = GlobalKey();
-
-  // Highlight selection state
-  String _selectedText = '';
-  int _selectionStart = -1;
-  int _selectionEnd = -1;
-  bool _showHighlightMenu = false;
-  Offset _highlightMenuPosition = Offset.zero;
+  // 标记上一章缓存块的边界，用于跨章切换时测量其高度
+  final GlobalKey _prevChapterKey = GlobalKey();
+  // 跨章切换时临时禁用 _onScroll，避免在 jumpTo 期间误触发预加载或二次切章
+  bool _isSwitchingChapter = false;
 
   // Animation
   late AnimationController _menuAnimController;
@@ -650,6 +651,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     if (!_scrollController.hasClients) return;
     final provider = context.read<ReaderProvider>();
     if (provider.pageMode != PageMode.scroll) return;
+    // 跨章切换期间（jumpTo 调整 offset）禁用滚动监听，避免误触发二次切章或预加载
+    if (_isSwitchingChapter) return;
 
     final maxScroll = _scrollController.position.maxScrollExtent;
     final currentScroll = _scrollController.position.pixels;
@@ -710,21 +713,38 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   /// 滚动模式下无缝切换到预加载的下一章
   void _switchToPreloadedChapter() {
     if (_nextContent == null || _nextContentChapterIndex == null) return;
+    if (_isSwitchingChapter) return;
+    _isSwitchingChapter = true;
 
-    // 获取旧章节内容的高度（用于调整滚动位置）
-    double oldChapterHeight = 0;
-    final oldContext = _currentChapterKey.currentContext;
-    if (oldContext != null) {
-      final renderBox = oldContext.findRenderObject() as RenderBox;
-      oldChapterHeight = renderBox.size.height;
+    final provider = context.read<ReaderProvider>();
+    final oldOffset =
+        _scrollController.hasClients ? _scrollController.offset : 0.0;
+
+    // 测量原 prevContent 块高度（含相邻 padding，用于正确计算新 offset）
+    double prevBlockHeight = 0;
+    final prevContext = _prevChapterKey.currentContext;
+    if (prevContext != null) {
+      final renderBox = prevContext.findRenderObject() as RenderBox;
+      prevBlockHeight = renderBox.size.height;
     }
+    // 测量原当前章块高度（不含 padding，因为当前章块直接是 Container）
+    double currentChapterHeight = 0;
+    final currentContext = _currentChapterKey.currentContext;
+    if (currentContext != null) {
+      final renderBox = currentContext.findRenderObject() as RenderBox;
+      currentChapterHeight = renderBox.size.height;
+    }
+
+    // 计算用户在原 nextContent 内的偏移（相对 nextContent 开头）
+    final nextContentInnerOffset = max(
+      0.0,
+      oldOffset - prevBlockHeight - currentChapterHeight,
+    );
 
     // 更新状态：将下一章设为当前章，当前章变为上一章缓存
     setState(() {
-      // 当前章变为上一章缓存（保留缓存方便回滚）
       _prevContent = _content;
       _prevContentChapterIndex = _currentChapterIndex;
-      // 下一章变为当前章
       _currentChapterIndex = _nextContentChapterIndex!;
       _chapterTitle = _chapters[_currentChapterIndex].title;
       _content = _nextContent!;
@@ -733,40 +753,60 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       _sliderValue = _currentChapterIndex.toDouble();
     });
 
-    // 在下一帧调整滚动位置（减去旧章节高度，保持视觉位置不变）
-    if (oldChapterHeight > 0 && _scrollController.hasClients) {
-      final newOffset = max(0.0, _scrollController.offset - oldChapterHeight);
+    // 新布局里新当前章（原 nextContent）开头的 offset =
+    // 新 prevContent 块高度 = 相邻 padding + 原当前章高度
+    final newPrevBlockHeight =
+        provider.paragraphSpacing * 2 + currentChapterHeight;
+    final newOffset = newPrevBlockHeight + nextContentInnerOffset;
+
+    // 立即同步 jumpTo，避免 setState 后到下一帧之间渲染一帧错误位置
+    // （jumpTo 在新内容布局完成前可能被 clamp，下一帧再纠正）
+    if (_scrollController.hasClients) {
+      try {
+        _scrollController.jumpTo(newOffset);
+      } catch (_) {}
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scrollController.hasClients) {
+        if (_scrollController.hasClients &&
+            (_scrollController.offset - newOffset).abs() > 1) {
           _scrollController.jumpTo(newOffset);
         }
+        _isSwitchingChapter = false;
       });
+    } else {
+      _isSwitchingChapter = false;
     }
 
-    // 预加载新的下一章
     _preloadNextChapter();
-    // 保存进度
-    _scheduleProgressSave(pos: 0);
+    _scheduleProgressSave(pos: newOffset.round());
   }
 
   /// 滚动模式下无缝切换到预加载的上一章
   void _switchToPrevChapter() {
     if (_prevContent == null || _prevContentChapterIndex == null) return;
+    if (_isSwitchingChapter) return;
+    _isSwitchingChapter = true;
 
-    // 获取上一章内容的高度（用于调整滚动位置）
-    double prevChapterHeight = 0;
-    final chapterContext = _currentChapterKey.currentContext;
-    if (chapterContext != null) {
-      final renderBox = chapterContext.findRenderObject() as RenderBox;
-      prevChapterHeight = renderBox.size.height;
+    final provider = context.read<ReaderProvider>();
+    final oldOffset =
+        _scrollController.hasClients ? _scrollController.offset : 0.0;
+
+    // 用户原来在原当前章内的偏移（相对原当前章开头）
+    // 原布局里原当前章开头 offset = 原 prevContent 块高度（如果有）
+    double prevBlockHeight = 0;
+    final prevContext = _prevChapterKey.currentContext;
+    if (prevContext != null) {
+      final renderBox = prevContext.findRenderObject() as RenderBox;
+      prevBlockHeight = renderBox.size.height;
     }
+    final currentChapterInnerOffset = max(
+      0.0,
+      oldOffset - prevBlockHeight,
+    );
 
     // 更新状态：将上一章设为当前章，当前章变为下一章缓存
     setState(() {
-      // 当前章变为下一章缓存
       _nextContent = _content;
       _nextContentChapterIndex = _currentChapterIndex;
-      // 上一章变为当前章
       _currentChapterIndex = _prevContentChapterIndex!;
       _chapterTitle = _chapters[_currentChapterIndex].title;
       _content = _prevContent!;
@@ -775,20 +815,35 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       _sliderValue = _currentChapterIndex.toDouble();
     });
 
-    // 在下一帧调整滚动位置（加上当前章节高度，保持视觉位置不变）
-    if (prevChapterHeight > 0 && _scrollController.hasClients) {
-      final newOffset = _scrollController.offset + prevChapterHeight;
+    // 新布局 = [新当前章=原prevContent] + [新 nextContent 块（相邻 padding + 原当前章）]
+    // 用户希望停留在原当前章内的相同视觉位置，现在变成新 nextContent 内偏移
+    // 新 nextContent 块开头 offset = 新当前章高度（原 prevContent 高度）
+    // 但我们无法在 setState 后立即测量新当前章高度，用相邻 padding + 原当前章高度近似
+    // 新 nextContent 块开头 offset = 原prevContent块高度 - 相邻padding（因为原prevContent块含padding，新当前章不含padding）
+    // 简化：新 offset = 原 prevContent 块高度（新当前章）+ 相邻 padding + 用户在原当前章内偏移
+    final adjacentPadding = provider.paragraphSpacing * 2;
+    // 新当前章高度 ≈ 原 prevContent 块高度 - 相邻 padding（因为原 prevContent 块含 padding）
+    final newCurrentChapterHeight = max(0.0, prevBlockHeight - adjacentPadding);
+    final newOffset =
+        newCurrentChapterHeight + adjacentPadding + currentChapterInnerOffset;
+
+    if (_scrollController.hasClients) {
+      try {
+        _scrollController.jumpTo(newOffset);
+      } catch (_) {}
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scrollController.hasClients) {
+        if (_scrollController.hasClients &&
+            (_scrollController.offset - newOffset).abs() > 1) {
           _scrollController.jumpTo(newOffset);
         }
+        _isSwitchingChapter = false;
       });
+    } else {
+      _isSwitchingChapter = false;
     }
 
-    // 预加载新的上一章
     _preloadPrevChapter();
-    // 保存进度
-    _scheduleProgressSave(pos: 0);
+    _scheduleProgressSave(pos: newOffset.round());
   }
 
   Future<void> _loadBookAndChapters() async {
@@ -1119,33 +1174,53 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   Future<void> _preloadNextChapter() async {
-    if (_book == null || _dataProvider == null || _nextContent != null) return;
+    if (_book == null ||
+        _dataProvider == null ||
+        _nextContent != null ||
+        _isLoadingNext) {
+      return;
+    }
     final nextIndex = _nextReadableChapterIndex(_currentChapterIndex);
     if (nextIndex != null) {
-      final nextChapter = _chapters[nextIndex];
-      _nextContent = await _dataProvider!.getContent(
-        _book!,
-        nextChapter,
-        allChapters: _chapters,
-      );
-      _nextContentChapterIndex = nextIndex;
-      if (mounted) setState(() {});
+      _isLoadingNext = true;
+      try {
+        final nextChapter = _chapters[nextIndex];
+        _nextContent = await _dataProvider!.getContent(
+          _book!,
+          nextChapter,
+          allChapters: _chapters,
+        );
+        _nextContentChapterIndex = nextIndex;
+        if (mounted) setState(() {});
+      } finally {
+        _isLoadingNext = false;
+      }
     }
   }
 
   /// 预加载上一章（用于滚动模式往上滑）
   Future<void> _preloadPrevChapter() async {
-    if (_book == null || _dataProvider == null || _prevContent != null) return;
+    if (_book == null ||
+        _dataProvider == null ||
+        _prevContent != null ||
+        _isLoadingPrev) {
+      return;
+    }
     final prevIndex = _previousReadableChapterIndex(_currentChapterIndex);
     if (prevIndex != null) {
-      final prevChapter = _chapters[prevIndex];
-      _prevContent = await _dataProvider!.getContent(
-        _book!,
-        prevChapter,
-        allChapters: _chapters,
-      );
-      _prevContentChapterIndex = prevIndex;
-      if (mounted) setState(() {});
+      _isLoadingPrev = true;
+      try {
+        final prevChapter = _chapters[prevIndex];
+        _prevContent = await _dataProvider!.getContent(
+          _book!,
+          prevChapter,
+          allChapters: _chapters,
+        );
+        _prevContentChapterIndex = prevIndex;
+        if (mounted) setState(() {});
+      } finally {
+        _isLoadingPrev = false;
+      }
     }
   }
 
@@ -1405,7 +1480,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       _scrollController.animateTo(
         max(_scrollController.offset - _scrollPageExtent(), 0),
         duration: _pageAnimationDuration(provider),
-        curve: Curves.easeOut,
+        curve: Curves.easeOutCubic,
       );
     } else {
       if (_currentPage > 0) {
@@ -1444,7 +1519,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         _scrollController.animateTo(
           min(_scrollController.offset + _scrollPageExtent(), maxScroll),
           duration: _pageAnimationDuration(provider),
-          curve: Curves.easeOut,
+          curve: Curves.easeOutCubic,
         );
         return;
       }
@@ -1456,7 +1531,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       _scrollController.animateTo(
         min(_scrollController.offset + _scrollPageExtent(), maxScroll),
         duration: _pageAnimationDuration(provider),
-        curve: Curves.easeOut,
+        curve: Curves.easeOutCubic,
       );
     } else {
       if (_currentPage < _pages.length - 1) {
@@ -1488,7 +1563,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final viewport = _scrollController.hasClients
         ? _scrollController.position.viewportDimension
         : MediaQuery.of(context).size.height;
-    return max(120.0, viewport - 48);
+    // 90% 视口高度，保留 10% 重叠让上下滚动连续感更强、视觉更丝滑
+    return max(120.0, viewport * 0.9);
   }
 
   Duration _pageAnimationDuration(ReaderProvider provider) {
@@ -1503,6 +1579,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         _currentChapterIndex = previousIndex;
       });
       _loadChapterContent();
+    } else {
+      // 没有上一章时还原 PageView 越界标志位，避免翻页锁死
+      if (_isChangingChapterByPageView || _isLoading) {
+        _isChangingChapterByPageView = false;
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -1513,6 +1595,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         _currentChapterIndex = nextIndex;
       });
       _loadChapterContent();
+    } else {
+      // 没有下一章时还原 PageView 越界标志位，避免翻页锁死
+      if (_isChangingChapterByPageView || _isLoading) {
+        _isChangingChapterByPageView = false;
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -1553,7 +1641,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         backgroundColor: provider.backgroundColor,
         body: GestureDetector(
           onTapUp: _handleTap,
-          onLongPressStart: _onLongPressStart,
+          behavior: HitTestBehavior.translucent,
           child: Stack(
             children: [
               if (_hasBackgroundImage(provider))
@@ -1564,7 +1652,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                     errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                   ),
                 ),
-              _buildContent(provider),
+              // 使用 SelectionArea 包裹正文，长按即可选择文字
+              SelectionArea(child: _buildContent(provider)),
               // TTS 播放控制条
               if (provider.isTtsPlaying)
                 ReaderTtsBar(
@@ -1662,7 +1751,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               // 原版菜单
               else if (_showMenu)
                 _buildMenu(provider),
-              if (_showHighlightMenu) _buildHighlightMenu(provider),
             ],
           ),
         ),
@@ -1705,6 +1793,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           Expanded(
             child: SingleChildScrollView(
               controller: _scrollController,
+              // 始终使用带弹性的滚动物理，让上下滚动到边界时有 iOS 风格的回弹，
+              // 视觉上更柔和、更有"丝滑"感
+              physics: const BouncingScrollPhysics(
+                parent: RangeMaintainingScrollPhysics(),
+              ),
               padding: EdgeInsets.fromLTRB(
                 provider.paddingLeft,
                 provider.paddingTop,
@@ -1720,10 +1813,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                         _prevContentChapterIndex! < _chapters.length &&
                         _prevContentChapterIndex ==
                             _previousReadableChapterIndex(_currentChapterIndex))
-                      _buildAdjacentChapterContent(
-                        provider,
-                        _prevContent!,
-                        _chapters[_prevContentChapterIndex!].title,
+                      Container(
+                        key: _prevChapterKey,
+                        child: _buildAdjacentChapterContent(
+                          provider,
+                          _prevContent!,
+                          _chapters[_prevContentChapterIndex!].title,
+                        ),
                       ),
                     Container(
                       key: _currentChapterKey,
@@ -1815,6 +1911,47 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     return _htmlTagRegex.hasMatch(content);
   }
 
+  /// 将缩进全角空格注入 HTML 的 p/div/br 后（替代无效的 CSS text-indent）
+  /// 注：flutter_html 3.0.0 不支持 text-indent，必须直接插入全角空格实体
+  static final _htmlBlockOpenRegex = RegExp(
+    r'(<(?:p|div)\b[^>]*>)[\u3000\t ]*',
+    caseSensitive: false,
+  );
+  static final _htmlBrRegex = RegExp(
+    r'(<br\s*/?>)[\u3000\t ]*',
+    caseSensitive: false,
+  );
+
+  static String _injectIndentIntoHtml(String html, String indent) {
+    final entity = indent.replaceAll('\u3000', '&#x3000;');
+    var result = html.replaceAllMapped(
+      _htmlBlockOpenRegex,
+      (match) => '${match.group(1)}$entity',
+    );
+    result = result.replaceAllMapped(
+      _htmlBrRegex,
+      (match) => '${match.group(1)}$entity',
+    );
+    // 如果 HTML 不以块级标签开头，给开头也注入缩进（首段首行也需要缩进）
+    if (result.isNotEmpty && !result.startsWith('<p') && !result.startsWith('<div')) {
+      result = '$entity$result';
+    }
+    return result;
+  }
+
+  /// 移除 HTML 中 p/div/br 后的原有全角空格缩进
+  static String _stripHtmlIndent(String html) {
+    var result = html.replaceAllMapped(
+      _htmlBlockOpenRegex,
+      (match) => '${match.group(1)}',
+    );
+    result = result.replaceAllMapped(
+      _htmlBrRegex,
+      (match) => '${match.group(1)}',
+    );
+    return result.replaceFirst(RegExp(r'^[\u3000\t ]+'), '');
+  }
+
   Widget _buildRichContent(
     ReaderProvider provider,
     String content, {
@@ -1826,14 +1963,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         : content;
     // 如果内容包含 HTML 标签，使用 Html 组件渲染
     if (_containsHtml(displayContent)) {
-      // 全角空格宽度等于字号本身，两个全角空格 = 2 * fontSize
-      final indentWidth = provider.paragraphIndent.isNotEmpty
-          ? provider.paragraphIndent.length * provider.fontSize
-          : 0.0;
-      // 使用 CSS text-indent 实现首行缩进（不是整个段落左移）
-      final htmlWithIndent = indentWidth > 0
-          ? '<style>p, div { text-indent: ${indentWidth}px; }</style>$displayContent'
-          : displayContent;
+      // flutter_html 3.0.0 不支持 CSS text-indent，必须把全角空格直接注入到
+      // p/div/br 后，否则含 HTML 标签的页面段落首行不会缩进（字号越大越明显，
+      // 因为分页后更多页面会走 HTML 路径）。
+      final indent = provider.paragraphIndent;
+      final htmlWithIndent = indent.isEmpty
+          ? _stripHtmlIndent(displayContent)
+          : _injectIndentIntoHtml(displayContent, indent);
       return Html(
         data: htmlWithIndent,
         style: {
@@ -2190,14 +2326,16 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                 if (!_isDragging) return;
                 _isDragging = false;
                 final delta = _dragCurrentX - _dragStartX;
+                _dragCurrentX = 0;
+                _dragStartX = 0;
                 if (delta < -50) {
                   _nextPage();
                 } else if (delta > 50) {
                   _previousPage();
+                } else {
+                  // 未触发翻页，仅刷新以隐藏卷曲效果
+                  setState(() {});
                 }
-                _dragCurrentX = 0;
-                _dragStartX = 0;
-                setState(() {});
               },
               child: Stack(
                 children: [
@@ -2440,296 +2578,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       ),
       _ => '',
     };
-  }
-
-  // ==================== Highlight Selection ====================
-
-  void _onLongPressStart(LongPressStartDetails details) {
-    // Show selection handles via SelectableText is handled differently
-    // For now, we'll use a simple approach with a dialog
-    _showTextSelectionDialog();
-  }
-
-  void _showTextSelectionDialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('选择文字'),
-          content: TextField(
-            autofocus: true,
-            decoration: const InputDecoration(hintText: '输入要高亮的文字'),
-            onSubmitted: (value) {
-              Navigator.pop(context, value);
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('取消'),
-            ),
-            TextButton(
-              onPressed: () {
-                // This is a simplified approach
-                Navigator.pop(context);
-              },
-              child: const Text('确定'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildHighlightMenu(ReaderProvider provider) {
-    return Positioned(
-      top: _highlightMenuPosition.dy - 60,
-      left: max(16, _highlightMenuPosition.dx - 100),
-      child: Material(
-        elevation: 8,
-        borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
-        child: Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: DesignTokens.spacingSm,
-            vertical: 4,
-          ),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _highlightActionButton('高亮', Icons.highlight, () {
-                _showHighlightColorPicker();
-              }),
-              _highlightActionButton('笔记', Icons.note_add, () {
-                _showNoteDialog();
-              }),
-              _highlightActionButton('复制', Icons.copy, () {
-                _copySelectedText();
-              }),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _highlightActionButton(
-    String label,
-    IconData icon,
-    VoidCallback onTap,
-  ) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: DesignTokens.spacingSm,
-          vertical: 4,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 20),
-            Text(
-              label,
-              style: const TextStyle(fontSize: DesignTokens.fontCaption),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showHighlightColorPicker() {
-    final colors = HighlightColor.values;
-
-    showModalBottomSheet(
-      context: context,
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(DesignTokens.spacingLg),
-                child: Text(
-                  '选择高亮样式',
-                  style: TextStyle(fontSize: DesignTokens.fontSubtitle),
-                ),
-              ),
-              // Color row
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: DesignTokens.spacingLg,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: colors.map((c) {
-                    return GestureDetector(
-                      onTap: () {
-                        Navigator.pop(context);
-                        _showHighlightStylePicker(c);
-                      },
-                      child: Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: c.color,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.grey),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-              const SizedBox(height: DesignTokens.spacingLg),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _showHighlightStylePicker(HighlightColor color) {
-    final styles = HighlightStyle.values;
-    final styleNames = ['背景色', '下划线', '删除线', '波浪线'];
-
-    showModalBottomSheet(
-      context: context,
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(DesignTokens.spacingLg),
-                child: Text(
-                  '选择高亮类型',
-                  style: TextStyle(fontSize: DesignTokens.fontSubtitle),
-                ),
-              ),
-              ...List.generate(styles.length, (i) {
-                return ListTile(
-                  leading: Container(
-                    width: 24,
-                    height: 24,
-                    decoration: BoxDecoration(
-                      color: color.color.withValues(alpha: 0.4),
-                      borderRadius: BorderRadius.circular(
-                        DesignTokens.actionRadius,
-                      ),
-                    ),
-                  ),
-                  title: Text(styleNames[i]),
-                  onTap: () {
-                    _createHighlight(color, styles[i]);
-                    Navigator.pop(context);
-                  },
-                );
-              }),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _createHighlight(HighlightColor color, HighlightStyle style) {
-    if (_book == null || _selectionStart < 0 || _selectionEnd < 0) return;
-
-    final highlight = Highlight(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      bookUrl: _book!.bookUrl,
-      chapterIndex: _currentChapterIndex,
-      startIndex: _selectionStart,
-      endIndex: _selectionEnd,
-      selectedText: _selectedText,
-      style: style,
-      color: color,
-      createdAt: DateTime.now(),
-    );
-
-    StorageService.instance.saveHighlight(highlight.toJson());
-    context.read<ReaderProvider>().addHighlight(highlight);
-
-    setState(() {
-      _showHighlightMenu = false;
-    });
-  }
-
-  void _showNoteDialog() {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('添加笔记'),
-          content: TextField(
-            controller: controller,
-            maxLines: 3,
-            decoration: const InputDecoration(hintText: '输入笔记内容'),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('取消'),
-            ),
-            TextButton(
-              onPressed: () {
-                final note = controller.text.trim();
-                if (note.isNotEmpty) {
-                  _createHighlightWithNote(note);
-                }
-                Navigator.pop(context);
-              },
-              child: const Text('确定'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  void _createHighlightWithNote(String note) {
-    if (_book == null || _selectionStart < 0 || _selectionEnd < 0) return;
-
-    final highlight = Highlight(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      bookUrl: _book!.bookUrl,
-      chapterIndex: _currentChapterIndex,
-      startIndex: _selectionStart,
-      endIndex: _selectionEnd,
-      selectedText: _selectedText,
-      style: HighlightStyle.background,
-      color: HighlightColor.yellow,
-      note: note,
-      createdAt: DateTime.now(),
-    );
-
-    StorageService.instance.saveHighlight(highlight.toJson());
-    context.read<ReaderProvider>().addHighlight(highlight);
-
-    setState(() {
-      _showHighlightMenu = false;
-    });
-  }
-
-  void _copySelectedText() {
-    if (_selectedText.isNotEmpty) {
-      Clipboard.setData(ClipboardData(text: _selectedText));
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('已复制到剪贴板'),
-          duration: Duration(seconds: 1),
-        ),
-      );
-    }
-    setState(() {
-      _showHighlightMenu = false;
-    });
   }
 
   // ==================== Menu ====================
@@ -4434,11 +4282,7 @@ class _PageCurlPainter extends CustomPainter {
     final linePaint = Paint()
       ..color = Colors.grey.withValues(alpha: 0.5)
       ..strokeWidth = 1;
-    if (isDragLeft) {
-      canvas.drawLine(Offset(touchX, 0), Offset(touchX, height), linePaint);
-    } else {
-      canvas.drawLine(Offset(touchX, 0), Offset(touchX, height), linePaint);
-    }
+    canvas.drawLine(Offset(touchX, 0), Offset(touchX, height), linePaint);
   }
 
   @override
