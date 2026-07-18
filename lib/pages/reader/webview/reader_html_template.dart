@@ -153,7 +153,11 @@ class ReaderHtmlTemplate {
 html, body {
   margin: 0;
   padding: 0;
-  width: var(--reader-vw);
+  /* 不设置 width：html 作为根元素默认 width=viewport（=--reader-vw）；
+     body 作为块级元素默认 width=auto，填满 html 的 content area
+     （= --reader-vw - paddingLeft - paddingRight = --reader-safe-width）。
+     之前写 width: var(--reader-vw) 会让 body 比 html content area 宽，
+     滚动模式下 #reader-root(width:100%) 横向溢出屏幕。 */
   height: var(--reader-vh);
   background-color: var(--reader-bg-color);
   color: var(--reader-text-color);
@@ -276,7 +280,13 @@ body.reader-paged #reader-content-b.animating {
 body.reader-scroll {
   overflow-y: auto;
   overflow-x: hidden;
-  height: var(--reader-vh);
+  /* height: 100% 相对 html content area（= --reader-vh - paddingTop - paddingBottom
+     = --reader-safe-height）。之前用 var(--reader-vh) 会让 body 竖向溢出 html
+     content area，被 html overflow:hidden 裁剪后，body 滚动区域大于可见区域，
+     滚动到 padding 区域的内容被遮挡看不到，且滚动卡顿不丝滑。 */
+  height: 100%;
+  /* iOS 必需：启用硬件加速滚动；Android 现代版本默认开启，加上无害 */
+  -webkit-overflow-scrolling: touch;
 }
 
 body.reader-scroll #reader-root {
@@ -483,9 +493,15 @@ window.readerApi = (function() {
     contentB = document.getElementById('reader-content-b');
     body.classList.add(config.isScrollMode ? 'reader-scroll' : 'reader-paged');
 
-    // 强制 html/body 不允许溢出（防止系统层因内容溢出而启用双指缩放）
-    document.documentElement.style.overflow = 'hidden';
-    body.style.overflow = 'hidden';
+    // overflow 完全由 CSS class 控制，不再用 inline style 强制设置：
+    //   - html, body { overflow: hidden }（共用样式，防横向溢出）
+    //   - body.reader-paged { overflow: hidden }（分页模式保持隐藏）
+    //   - body.reader-scroll { overflow-y: auto; overflow-x: hidden }（滚动模式）
+    // 之前用 body.style.overflow='hidden' 是 inline style，优先级高于
+    // CSS class，会覆盖 body.reader-scroll 的 overflow-y:auto，导致滚动模式
+    // 下 body 实际 overflow=hidden 不能滚动，只能靠 WebView 控件自身滚动，
+    // 既卡顿又不丝滑。
+    // 防双指缩放由 disableGestureZoom() 负责，与 overflow 无关。
 
     // 关键：注入 WebView 实际尺寸到 CSS 变量
     // window.innerWidth/innerHeight = WebView widget 实际尺寸（DIP）

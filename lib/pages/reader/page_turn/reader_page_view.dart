@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
+import 'package:flutter/scheduler.dart' show Ticker;
 import 'page_delegate.dart';
 import 'horizontal_page_delegate.dart';
 import 'simulation_page_delegate.dart';
@@ -76,11 +77,21 @@ class _ReaderPageViewState extends State<ReaderPageView>
 
   late HorizontalPageDelegate _delegate;
 
+  /// 翻页动画 Ticker（跟随 vsync，替代 Timer.periodic）
+  ///
+  /// 60Hz 屏 vsync 周期是 16.67ms，120Hz 是 8.33ms。
+  /// Timer.periodic(16ms) 与 vsync 不同步会掉帧；
+  /// Ticker 由 SchedulerBinding 驱动，与 vsync 完美同步。
+  late final Ticker _ticker;
+
   /// 动画覆盖层是否显示
   bool _showAnimationLayer = false;
 
-  /// 是否正在执行翻页流程（截图→切换→截图→动画）
+  /// 是否正在执行翻页流程（截图→跳页→截图→动画）
   bool _isTurning = false;
+
+  /// _finalizeTurn 是否已被调用（防止 _startTurnSequence 未完成时松手重复触发）
+  bool _finalizeStarted = false;
 
   /// 翻页 token：每次新翻页自增，防止并发翻页
   int _turnToken = 0;
@@ -90,29 +101,51 @@ class _ReaderPageViewState extends State<ReaderPageView>
   @override
   void initState() {
     super.initState();
+    _ticker = Ticker(_onTick);
+    // Ticker 默认 muted=false，必须显式 mute 防止未启动时被断言
+    // （muted=true 时即便 start() 也不会真正注册到 SchedulerBinding）
+    // 这里不 mute：start() 后正常注册，stop() 后正常解绑。
     _delegate = _createDelegate(widget.pageModeIndex);
-    _delegate.setCallbacks(PageDelegateCallbacks(
+    _delegate.setCallbacks(_buildCallbacks());
+  }
+
+  /// Ticker 回调：每帧推进 delegate 动画
+  void _onTick(Duration elapsed) {
+    if (!mounted) {
+      _ticker.stop();
+      return;
+    }
+    // computeScroll 返回 false 表示动画结束
+    if (!_delegate.computeScroll()) {
+      _ticker.stop();
+    }
+  }
+
+  PageDelegateCallbacks _buildCallbacks() {
+    return PageDelegateCallbacks(
       onAnimStop: _onAnimStop,
       onAnimCancel: _onAnimCancel,
       onStateChanged: () {
         if (mounted) setState(() {});
       },
-    ));
+      onRequestTickerStart: () {
+        if (mounted) _ticker.start();
+      },
+      onRequestTickerStop: () {
+        _ticker.stop();
+      },
+    );
   }
 
   @override
   void didUpdateWidget(ReaderPageView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.pageModeIndex != widget.pageModeIndex) {
+      // 切换 delegate：先停 ticker + 销毁旧 delegate
+      _ticker.stop();
       _delegate.onDestroy();
       _delegate = _createDelegate(widget.pageModeIndex);
-      _delegate.setCallbacks(PageDelegateCallbacks(
-        onAnimStop: _onAnimStop,
-        onAnimCancel: _onAnimCancel,
-        onStateChanged: () {
-          if (mounted) setState(() {});
-        },
-      ));
+      _delegate.setCallbacks(_buildCallbacks());
     }
   }
 
@@ -147,11 +180,10 @@ class _ReaderPageViewState extends State<ReaderPageView>
     if (widget.isScrollMode) return;
 
     _downPosition = event.position;
+    _finalizeStarted = false;
     _delegate.onDown();
     _delegate.setStartPoint(event.position.dx, event.position.dy);
     _delegate.onTouch(event);
-    // 不再启动长按计时器 —— InAppWebView 是 PlatformView 会吃掉 pointerUp，
-    // 长按选文字由 WebView 自身处理，菜单召唤靠 JS click 事件回传
   }
 
   void _onPointerMove(PointerMoveEvent event) {
@@ -160,16 +192,12 @@ class _ReaderPageViewState extends State<ReaderPageView>
     if (_isTurning) return; // 翻页中不响应新移动
 
     // delegate.onTouch 内部 _onScroll 会判断 isMoved 并设置 isRunning=true
-    // 但 isRunning=true 只表示"用户开始滑动"，不代表"动画启动"
-    // paint 内部会检查 curBitmap != null 才绘制，所以提前 isRunning=true 无害
     _delegate.onTouch(event);
 
     // NoAnimPageDelegate 不需要截图覆盖层 —— 松手时直接跳页
-    // 这里提前 return 避免截图开销，并保持 _showAnimationLayer=false
-    // 让 WebView 持续可交互（文字选择不受影响）
     if (_delegate is NoAnimPageDelegate) return;
 
-    // 用户已滑动一定距离且未启动截图 → 启动截图序列
+    // 用户已滑动一定距离且未启动截图 → 启动截图序列（异步）
     if (_delegate.isMoved && !_showAnimationLayer) {
       _startTurnSequence();
     }
@@ -181,8 +209,8 @@ class _ReaderPageViewState extends State<ReaderPageView>
 
     // tap 召唤菜单不再由 Flutter Listener 处理 —— InAppWebView 是 PlatformView
     // 会吃掉 pointerUp，所以 tap 改由 JS click 事件回传到 _onWebviewJsTap
-    if (_delegate.isMoved) {
-      // 滑动结束，开始自动动画
+    if (_delegate.isMoved && !_finalizeStarted) {
+      _finalizeStarted = true;
       _finalizeTurn();
     }
     _downPosition = null;
@@ -210,10 +238,13 @@ class _ReaderPageViewState extends State<ReaderPageView>
     final token = ++_turnToken;
     _isTurning = true;
 
-    // 截图当前页
+    // 截图当前页（耗时 50-100ms）
     final curBitmap = await _captureBoundary();
     if (curBitmap == null) {
-      _isTurning = false;
+      // 截图失败：如果用户已松手，让 _finalizeTurn 处理；否则重置状态
+      if (!_finalizeStarted && token == _turnToken) {
+        _isTurning = false;
+      }
       return;
     }
     if (token != _turnToken) {
@@ -221,11 +252,20 @@ class _ReaderPageViewState extends State<ReaderPageView>
       return;
     }
 
+    // 如果用户已松手，_finalizeTurn 已在 await onPerformPageTurn，
+    // 此时注入 curBitmap 已晚 —— _finalizeTurn 内部会再截图作为 targetBitmap
+    // 但 curBitmap 仍是必需的（delegate.paint 需要绘制"当前页"图层）
+    if (_finalizeStarted && token == _turnToken) {
+      // 用户已松手，_finalizeTurn 流程进行中
+      // 仍注入 curBitmap，让 delegate 有"当前页"图层可用
+      _delegate.setBitmaps(cur: curBitmap);
+      setState(() {
+        _showAnimationLayer = true;
+      });
+      return;
+    }
+
     // 显示动画覆盖层，注入 curBitmap
-    // 注意：此时 delegate.isRunning 可能仍为 false（_onScroll 尚未触发），
-    // 但 build 中 CustomPaint 显示条件只看 _showAnimationLayer，
-    // delegate.paint 内部会检查 isRunning，未启动时返回不绘制，
-    // 等用户继续滑动 _onScroll 设 isRunning=true 后自然开始绘制。
     setState(() {
       _delegate.setBitmaps(cur: curBitmap);
       _showAnimationLayer = true;
@@ -234,22 +274,66 @@ class _ReaderPageViewState extends State<ReaderPageView>
 
   /// 结束翻页流程（用户松手时调用）
   ///
+  /// 统一时序控制：不管 _startTurnSequence 是否完成，都从这里串行处理。
+  ///
   /// 步骤：
-  /// 1. 调用 onPerformPageTurn 让外部切换 WebView 到目标页（此处才真正翻页）
-  /// 2. 如果返回 false（章节边界），取消翻页
-  /// 3. 截图 → targetBitmap
-  /// 4. 注入 delegate
-  /// 5. 启动 delegate.onAnimStart 自动动画
+  /// 1. 等待 _startTurnSequence 完成（如果有）—— 通过 _isTurning 标记
+  /// 2. 判断 isCancel：回拖取消，跑回弹动画
+  /// 3. 截图当前页（如果 _startTurnSequence 没截到，这里补截）
+  /// 4. 调用 onPerformPageTurn 让 WebView 跳页
+  /// 5. 等帧 + 截图目标页
+  /// 6. 注入 delegate + 启动动画
   Future<void> _finalizeTurn() async {
     final token = _turnToken;
 
     // 用户回拖取消：不翻页，直接回弹动画
-    // isCancel=true 时仍需启动 onAnimStart 让 delegate 跑回弹动画，
-    // 但不能调用 onPerformPageTurn（WebView 不该跳页）
     if (_delegate.isCancel) {
+      // 等 _startTurnSequence 截图完成（如果有），否则 delegate 没图可画
+      // 简化：如果 _showAnimationLayer=false，说明截图还没完成或失败，
+      // 此时直接取消，不跑回弹动画
+      if (!_showAnimationLayer) {
+        _cancelTurn();
+        return;
+      }
       _delegate.onAnimStart(_delegate.defaultAnimationSpeed);
       setState(() {});
       return;
+    }
+
+    // NoAnimPageDelegate：不需要截图，直接跳页
+    if (_delegate is NoAnimPageDelegate) {
+      bool ok = true;
+      try {
+        ok = await widget.onPerformPageTurn(_delegate.direction);
+      } catch (e) {
+        debugPrint('[ReaderPageView] onPerformPageTurn 异常: $e');
+        ok = false;
+      }
+      if (!ok || token != _turnToken || !mounted) {
+        if (token == _turnToken) _cancelTurn();
+        return;
+      }
+      _isTurning = false;
+      _finalizeStarted = false;
+      widget.onPageTurnCompleted?.call(_delegate.direction);
+      _delegate.onDown(); // 重置 delegate 状态
+      return;
+    }
+
+    // 确保 curBitmap 已注入（用户快速松手时 _startTurnSequence 可能还没截完图）
+    // 这里 await 一个微任务让 _startTurnSequence 有机会完成
+    // 如果 _startTurnSequence 已完成，_showAnimationLayer=true，直接跳过
+    if (!_showAnimationLayer) {
+      // 等待 _startTurnSequence 完成（最多等 200ms）
+      for (int i = 0; i < 20 && !_showAnimationLayer && token == _turnToken; i++) {
+        await Future.delayed(const Duration(milliseconds: 10));
+      }
+      if (token != _turnToken || !mounted) return;
+      if (!_showAnimationLayer) {
+        // 截图始终失败，放弃翻页
+        _cancelTurn();
+        return;
+      }
     }
 
     // 调用外部翻页（此处才真正让 WebView 跳页）
@@ -267,19 +351,14 @@ class _ReaderPageViewState extends State<ReaderPageView>
       return;
     }
 
-    // NoAnimPageDelegate 不需要截图目标页 —— 跳页后直接完成
-    // 否则会多余截图（约 50-100ms 开销），让用户感知延迟
-    if (_delegate is NoAnimPageDelegate) {
-      _isTurning = false;
-      widget.onPageTurnCompleted?.call(_delegate.direction);
-      _delegate.onDown(); // 重置 delegate 状态
-      return;
-    }
-
-    // 截图目标页
+    // 截图目标页（此时 WebView 已跳到目标页，覆盖层仍显示挡住用户视线）
     final targetBitmap = await _captureBoundary();
     if (token != _turnToken || !mounted) {
       targetBitmap?.dispose();
+      return;
+    }
+    if (targetBitmap == null) {
+      _cancelTurn();
       return;
     }
 
@@ -298,7 +377,9 @@ class _ReaderPageViewState extends State<ReaderPageView>
   /// 取消翻页（用户回拖或外部中断）
   void _cancelTurn() {
     _turnToken++; // 使正在进行的截图/切换失效
+    _ticker.stop(); // 保险：防止 delegate 自己没停干净
     _isTurning = false;
+    _finalizeStarted = false;
     setState(() {
       _showAnimationLayer = false;
     });
@@ -307,7 +388,9 @@ class _ReaderPageViewState extends State<ReaderPageView>
   }
 
   void _onAnimStop(PageDirection direction) {
+    _ticker.stop(); // delegate.onAnimStop 已停过，这里再保险一次
     _isTurning = false;
+    _finalizeStarted = false;
     setState(() {
       _showAnimationLayer = false;
     });
@@ -321,6 +404,7 @@ class _ReaderPageViewState extends State<ReaderPageView>
 
   @override
   void dispose() {
+    _ticker.dispose();
     _delegate.onDestroy();
     super.dispose();
   }
@@ -349,10 +433,7 @@ class _ReaderPageViewState extends State<ReaderPageView>
                 key: _boundaryKey,
                 child: widget.child,
               ),
-              // 顶层：动画覆盖层（_startTurnSequence 完成后立即显示，
-              // 即使 delegate.isRunning=false 也显示，因为 paint 内部会
-              // 自行检查 isRunning，未启动时返回不绘制，等用户继续滑动
-              // 触发 _onScroll 设 isRunning=true 后自然开始绘制）
+              // 顶层：动画覆盖层
               if (_showAnimationLayer)
                 Positioned.fill(
                   child: CustomPaint(

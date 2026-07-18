@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:ui' as ui;
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -49,9 +48,6 @@ class SimulationPageDelegate extends HorizontalPageDelegate {
 
   // Scroller
   final PageScroller _scroller = PageScroller();
-
-  // 动画刷新定时器
-  Timer? _animTimer;
 
   SimulationPageDelegate() {
     _initShadowDrawables();
@@ -532,24 +528,13 @@ class SimulationPageDelegate extends HorizontalPageDelegate {
 
     isRunning = true;
     isStarted = true;
-    _startAnimationLoop();
-  }
-
-  /// 启动动画循环
-  void _startAnimationLoop() {
-    _animTimer?.cancel();
-    _animTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
-      if (!computeScroll()) {
-        timer.cancel();
-        _animTimer = null;
-      }
-    });
+    // 由外部 ReaderPageView 的 Ticker 驱动 computeScroll（跟随 vsync）
+    startTicker();
   }
 
   @override
   void onAnimStop() {
-    _animTimer?.cancel();
-    _animTimer = null;
+    stopTicker();
     notifyAnimStop();
     isRunning = false;
     isStarted = false;
@@ -558,8 +543,7 @@ class SimulationPageDelegate extends HorizontalPageDelegate {
 
   @override
   void abortAnim() {
-    _animTimer?.cancel();
-    _animTimer = null;
+    stopTicker();
     if (!_scroller.isFinished) {
       _scroller.abortAnimation();
       if (!isCancel) {
@@ -574,8 +558,7 @@ class SimulationPageDelegate extends HorizontalPageDelegate {
 
   @override
   void onDestroy() {
-    _animTimer?.cancel();
-    _animTimer = null;
+    stopTicker();
     super.onDestroy();
   }
 }

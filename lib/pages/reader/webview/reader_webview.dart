@@ -168,7 +168,12 @@ class _ReaderWebViewState extends State<ReaderWebView> {
           ),
           initialSettings: InAppWebViewSettings(
             transparentBackground: true,
-            useHybridComposition: true,
+            // 必须为 false：Hybrid Composition 模式下 WebView 由 Android
+            // 原生绘制到独立 Surface，Flutter 的 RepaintBoundary.toImage()
+            // 无法截到该 Surface 内容 → 翻页截图会是空白 → 排版乱。
+            // Texture Layer 模式下 WebView 作为 texture 合成到 Flutter 树，
+            // 可被 RepaintBoundary 正常截图。
+            useHybridComposition: false,
             disableContextMenu: false,
             disableHorizontalScroll: true,
             disableVerticalScroll: widget.isScrollMode ? false : true,

@@ -15,10 +15,23 @@ class PageDelegateCallbacks {
   /// 状态变化（用于触发重绘）
   final void Function()? onStateChanged;
 
+  /// 请求外部 Ticker 开始驱动动画（每帧调用 computeScroll）
+  ///
+  /// delegate 自己不持有 Ticker，因为 Ticker 必须由
+  /// TickerProvider（如 SingleTickerProviderStateMixin）创建。
+  /// delegate 在 onAnimStart 中调用此回调，让外部启动 Ticker；
+  /// 在 onAnimStop/abortAnim 中调用 [onRequestTickerStop] 停止。
+  final void Function()? onRequestTickerStart;
+
+  /// 请求外部 Ticker 停止
+  final void Function()? onRequestTickerStop;
+
   const PageDelegateCallbacks({
     this.onAnimStop,
     this.onAnimCancel,
     this.onStateChanged,
+    this.onRequestTickerStart,
+    this.onRequestTickerStop,
   });
 }
 
@@ -91,6 +104,16 @@ abstract class PageDelegate {
     } else {
       _callbacks?.onAnimCancel?.call();
     }
+  }
+
+  /// 请求外部 Ticker 启动（子类在 onAnimStart 中调用）
+  void startTicker() {
+    _callbacks?.onRequestTickerStart?.call();
+  }
+
+  /// 请求外部 Ticker 停止（子类在 onAnimStop/abortAnim/onDestroy 中调用）
+  void stopTicker() {
+    _callbacks?.onRequestTickerStop?.call();
   }
 
   /// 设置视口尺寸

@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'page_delegate.dart';
 import 'horizontal_page_delegate.dart';
@@ -11,7 +10,6 @@ import 'horizontal_page_delegate.dart';
 /// - 无阴影、无 3D 效果，最简单的翻页方式
 class SlidePageDelegate extends HorizontalPageDelegate {
   final PageScroller _scroller = PageScroller();
-  Timer? _animTimer;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -110,18 +108,8 @@ class SlidePageDelegate extends HorizontalPageDelegate {
 
     isRunning = true;
     isStarted = true;
-    _startAnimationLoop();
-  }
-
-  void _startAnimationLoop() {
-    _animTimer?.cancel();
-    // 16ms ≈ 60fps，配合 Curves.easeOutCubic 视觉平滑
-    _animTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
-      if (!computeScroll()) {
-        timer.cancel();
-        _animTimer = null;
-      }
-    });
+    // 由外部 ReaderPageView 的 Ticker 驱动 computeScroll（跟随 vsync）
+    startTicker();
   }
 
   @override
@@ -139,8 +127,7 @@ class SlidePageDelegate extends HorizontalPageDelegate {
 
   @override
   void onAnimStop() {
-    _animTimer?.cancel();
-    _animTimer = null;
+    stopTicker();
     notifyAnimStop();
     isRunning = false;
     isStarted = false;
@@ -149,8 +136,7 @@ class SlidePageDelegate extends HorizontalPageDelegate {
 
   @override
   void abortAnim() {
-    _animTimer?.cancel();
-    _animTimer = null;
+    stopTicker();
     if (!_scroller.isFinished) {
       _scroller.abortAnimation();
       if (!isCancel) {
@@ -164,8 +150,7 @@ class SlidePageDelegate extends HorizontalPageDelegate {
 
   @override
   void onDestroy() {
-    _animTimer?.cancel();
-    _animTimer = null;
+    stopTicker();
     super.onDestroy();
   }
 }
@@ -177,7 +162,6 @@ class SlidePageDelegate extends HorizontalPageDelegate {
 /// - 带边缘阴影（30px 宽度，渐变从 40% 黑到透明）
 class CoverPageDelegate extends HorizontalPageDelegate {
   final PageScroller _scroller = PageScroller();
-  Timer? _animTimer;
 
   /// 边缘阴影宽度（视觉上像 legado 的翻页阴影）
   static const double _shadowWidth = 30.0;
@@ -300,17 +284,8 @@ class CoverPageDelegate extends HorizontalPageDelegate {
 
     isRunning = true;
     isStarted = true;
-    _startAnimationLoop();
-  }
-
-  void _startAnimationLoop() {
-    _animTimer?.cancel();
-    _animTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
-      if (!computeScroll()) {
-        timer.cancel();
-        _animTimer = null;
-      }
-    });
+    // 由外部 ReaderPageView 的 Ticker 驱动 computeScroll（跟随 vsync）
+    startTicker();
   }
 
   @override
@@ -328,8 +303,7 @@ class CoverPageDelegate extends HorizontalPageDelegate {
 
   @override
   void onAnimStop() {
-    _animTimer?.cancel();
-    _animTimer = null;
+    stopTicker();
     notifyAnimStop();
     isRunning = false;
     isStarted = false;
@@ -338,8 +312,7 @@ class CoverPageDelegate extends HorizontalPageDelegate {
 
   @override
   void abortAnim() {
-    _animTimer?.cancel();
-    _animTimer = null;
+    stopTicker();
     if (!_scroller.isFinished) {
       _scroller.abortAnimation();
       if (!isCancel) {
@@ -353,8 +326,7 @@ class CoverPageDelegate extends HorizontalPageDelegate {
 
   @override
   void onDestroy() {
-    _animTimer?.cancel();
-    _animTimer = null;
+    stopTicker();
     super.onDestroy();
   }
 }
