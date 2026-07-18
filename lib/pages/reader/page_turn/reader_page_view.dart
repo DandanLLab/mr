@@ -152,11 +152,33 @@ class _ReaderPageViewState extends State<ReaderPageView>
   void didUpdateWidget(ReaderPageView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.pageModeIndex != widget.pageModeIndex) {
-      // 切换 delegate：先停 ticker + 销毁旧 delegate
+      // 切 delegate：先记录是否有翻页在进行，再停 ticker + 销毁旧 delegate
+      // + 重置所有翻页状态（中 5 修复：避免新 delegate 接到脏状态白屏）
+      final wasTurning = _isTurning || _showAnimationLayer;
+
+      // 取消 pointerUp 兜底 timer（避免切换后误触发 _onPointerUpFallback）
+      _pointerUpFallbackTimer?.cancel();
+      _pointerUpFallbackTimer = null;
+      // 自增 token 让正在进行的异步操作（_startTurnSequence/_finalizeTurn 的
+      // await 链）失效，避免它们在新 delegate 创建后还注入旧 bitmap
+      _turnToken++;
       _ticker.stop();
       _delegate.onDestroy();
       _delegate = _createDelegate(widget.pageModeIndex);
       _delegate.setCallbacks(_buildCallbacks());
+
+      // 重置翻页状态：新 delegate 是干净的，不能继承旧 delegate 的状态
+      _showAnimationLayer = false;
+      _isTurning = false;
+      _finalizeStarted = false;
+      _downPosition = null;
+
+      // 通知外部取消（如果有翻页在进行，外部可能需要回滚进度等）
+      if (wasTurning) {
+        widget.onPageTurnCancelled?.call();
+      }
+
+      setState(() {});
     }
   }
 
@@ -290,16 +312,15 @@ class _ReaderPageViewState extends State<ReaderPageView>
       return;
     }
 
-    // 如果用户已松手，_finalizeTurn 已在 await onPerformPageTurn，
-    // 此时注入 curBitmap 已晚 —— _finalizeTurn 内部会再截图作为 targetBitmap
-    // 但 curBitmap 仍是必需的（delegate.paint 需要绘制"当前页"图层）
-    if (_finalizeStarted && token == _turnToken) {
-      // 用户已松手，_finalizeTurn 流程进行中
-      // 仍注入 curBitmap，让 delegate 有"当前页"图层可用
-      _delegate.setBitmaps(cur: curBitmap);
-      setState(() {
-        _showAnimationLayer = true;
-      });
+    // 用户已松手：_finalizeTurn 会自己接管截图（_finalizeTurn 不再轮询等待
+    // _startTurnSequence 完成），这里 dispose 当前截图避免泄漏，不注入
+    // （_finalizeTurn 后续会自己 _captureBoundary 作为 curBitmap）
+    //
+    // 这样做的好处：
+    // - 去掉 _finalizeTurn 的 200ms 轮询等待，改为自己截图（50-100ms 更快）
+    // - 避免双份截图（_startTurnSequence 注入后 _finalizeTurn 又截图造成闪烁）
+    if (_finalizeStarted) {
+      curBitmap.dispose();
       return;
     }
 
@@ -358,20 +379,28 @@ class _ReaderPageViewState extends State<ReaderPageView>
       return;
     }
 
-    // 确保 curBitmap 已注入（用户快速松手时 _startTurnSequence 可能还没截完图）
-    // 这里 await 一个微任务让 _startTurnSequence 有机会完成
-    // 如果 _startTurnSequence 已完成，_showAnimationLayer=true，直接跳过
+    // 确保 curBitmap 已注入（_finalizeTurn 时序简化）
+    //
+    // - 慢拖：_startTurnSequence 已完成，_showAnimationLayer=true，跳过自己截图
+    // - 快松：_startTurnSequence 还没截完，_finalizeStarted=true 让它后续
+    //   dispose return（不再注入），这里自己 _captureBoundary 作为 curBitmap
+    //
+    // 优化：原代码用 200ms 轮询（10ms × 20 次）等 _startTurnSequence 完成，
+    // 现在直接自己截图（耗时 50-100ms，比 200ms 轮询快）。
     if (!_showAnimationLayer) {
-      // 等待 _startTurnSequence 完成（最多等 200ms）
-      for (int i = 0; i < 20 && !_showAnimationLayer && token == _turnToken; i++) {
-        await Future.delayed(const Duration(milliseconds: 10));
+      final curBitmap = await _captureBoundary();
+      if (token != _turnToken || !mounted) {
+        curBitmap?.dispose();
+        return;
       }
-      if (token != _turnToken || !mounted) return;
-      if (!_showAnimationLayer) {
-        // 截图始终失败，放弃翻页
+      if (curBitmap == null) {
         _cancelTurn();
         return;
       }
+      _delegate.setBitmaps(cur: curBitmap);
+      setState(() {
+        _showAnimationLayer = true;
+      });
     }
 
     // 调用外部翻页（此处才真正让 WebView 跳页）

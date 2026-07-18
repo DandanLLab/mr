@@ -236,6 +236,12 @@ body.reader-paged #reader-stage {
   width: 100%;
   min-height: 0; /* flex 子项默认 min-height:auto 会阻止收缩，导致溢出 */
   overflow: hidden;
+  /* perspective：让子元素 .reader-content 的 rotateY 有立体感（C3 修复）
+     - 仅 simulation 模式生效，slide/cover 的 transform 是 2D 平移不受影响
+     - 1500px 是经验值：过小畸变严重，过大立体感弱
+     - 必须设在父元素（stage）上，子元素自身 perspective 无效 */
+  perspective: 1500px;
+  perspective-origin: center center;
 }
 
 /* a/b 共用样式：absolute 重叠在 #reader-stage 内，column 分栏
@@ -257,6 +263,9 @@ body.reader-paged .reader-content {
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   transform: translate3d(0, 0, 0);
+  /* preserve-3d：让自身 rotateY 不被压平成 2D（C3 修复，配合父元素 perspective）
+     仅 simulation 模式用到 rotateY，其他模式 transform 是 2D 不受影响 */
+  transform-style: preserve-3d;
 }
 
 /* a 层显式启用交互，确保点击穿透 b 后能命中 a */
@@ -763,26 +772,51 @@ window.readerApi = (function() {
         contentA.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
       }
 
-      contentB.style.transition = 'transform ' + duration + 'ms ' + bTiming;
-      void contentB.offsetHeight;
       if (mode === 3) {
-        // simulation 模式：rotateY 必须分两帧设置，否则浏览器会批量处理
-        // 跳过 transition（同帧内对同一属性设两个值只保留最后一个）
+        // simulation 模式：b 像书页一样从侧边翻入盖到当前页
+        //
+        // 关键修复（C2 + C3）：
+        // 1. transformOrigin 必须用具体像素值（目标页的边缘），不能用
+        //    'right center'/'left center'——那是 b 容器整体最右/左边缘
+        //    （scrollWidth 可达几千 px，远在视口外），旋转中心错位
+        // 2. b 全程 translate3d 不变（在目标页位置），只 rotateY 变化，
+        //    实现"翻入"效果（原代码起点终点 translate3d 不同，变成滑动+翻转混合）
+        // 3. 起点 transform 包含 rotateY，必须先关 transition + reflow + 再开
+        //    transition，否则从上面设置的 slide/cover 起点 transform 跑到
+        //    simulation 起点 transform 会触发一次多余 transition
+        // 4. 父元素 #reader-stage 需要 perspective（CSS 中已加），否则
+        //    rotateY 是正交投影无立体感
+        contentB.style.transition = 'none';
         if (isForward) {
-          contentB.style.transformOrigin = 'right center';
-          contentB.style.transform = 'translate3d(' + (-(pageIndex - 1) * step) + 'px, 0, 0) rotateY(90deg)';
-          // 下一帧再设终点，触发 transition
-          requestAnimationFrame(function() {
-            contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(0deg)';
-          });
+          // 翻向下一页：b 从右边翻入
+          // transformOrigin = 目标页右边缘 = (pageIndex+1) * step
+          // （b 容器原始坐标系，第 pageIndex 列的右边缘；
+          //  应用 translate3d(-pageIndex*step) 后正好位于视口右边缘）
+          contentB.style.transformOrigin = ((pageIndex + 1) * step) + 'px 50%';
+          // 起点：b 在目标页位置，立着朝右
+          // rotateY(90deg) 绕右边旋转：右边不动、左边远离观察者
+          // → b 正面朝向视口右侧，从视口看不见正面
+          contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(90deg)';
         } else {
-          contentB.style.transformOrigin = 'left center';
-          contentB.style.transform = 'translate3d(' + (-(pageIndex + 1) * step) + 'px, 0, 0) rotateY(-90deg)';
-          requestAnimationFrame(function() {
-            contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(0deg)';
-          });
+          // 翻向上一页：b 从左边翻入
+          // transformOrigin = 目标页左边缘 = pageIndex * step
+          contentB.style.transformOrigin = (pageIndex * step) + 'px 50%';
+          // 起点：b 在目标页位置，立着朝左
+          // rotateY(-90deg) 绕左边旋转：左边不动、右边远离观察者
+          // → b 正面朝向视口左侧，从视口看不见正面
+          contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(-90deg)';
         }
+        void contentB.offsetHeight; // 强制 reflow 让起点 transform 生效
+        // 再开启 transition
+        contentB.style.transition = 'transform ' + duration + 'ms ' + bTiming;
+        // 下一帧设终点（平躺、正面朝向观察者），触发 transition
+        requestAnimationFrame(function() {
+          contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(0deg)';
+        });
       } else {
+        // slide/cover 模式：b 平移到目标页位置
+        contentB.style.transition = 'transform ' + duration + 'ms ' + bTiming;
+        void contentB.offsetHeight;
         contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
       }
     } catch (err) {
