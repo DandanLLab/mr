@@ -1,3 +1,4 @@
+import 'dart:convert' show jsonEncode;
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../../../services/app_logger.dart';
@@ -19,12 +20,22 @@ class ReaderWebViewCallbacks {
   /// 图片点击
   final void Function(String src, Rect rect) onImageTap;
 
+  /// 滚动模式接近底部时触发（用于无缝衔接下一章）
+  ///
+  /// 触发条件：滚动到距底部 < 1.5 视口高度时通知一次，
+  /// Dart 侧加载下一章并调 appendChapter 追加到 DOM，
+  /// 追加后 JS 端会重置标志允许下次触发。
+  /// 用户主动滚回顶部区域也会重置，允许下次触发。
+  /// 仅滚动模式（PageMode.scroll）会触发。
+  final void Function()? onScrollNearEnd;
+
   const ReaderWebViewCallbacks({
     required this.onInitialized,
     required this.onPageCountReady,
     required this.onPageChanged,
     required this.onTap,
     required this.onImageTap,
+    this.onScrollNearEnd,
   });
 }
 
@@ -140,6 +151,37 @@ class ReaderWebViewController {
     );
   }
 
+  /// 追加章节内容到 DOM（滚动模式无缝衔接）
+  ///
+  /// 在不触发整页 reload 的前提下，把下一章标题 + 段落 HTML 追加到
+  /// #reader-content-a 末尾，保留用户当前滚动位置。
+  ///
+  /// - [title]：章节标题（纯文本，已做简繁转换）。JS 端用 textContent
+  ///   创建 h1，避免 XSS。
+  /// - [paragraphsHtml]：段落 HTML（由 ReaderHtmlTemplate.buildParagraphsHtml
+  ///   生成，包含 `<p class="reader-p">...</p>`），可信内容。
+  ///
+  /// 追加后 JS 端会重置 nearEndNotified，允许下次接近底部时再次触发。
+  /// 仅滚动模式有效；分页模式调用此方法无意义（column 布局不会重排）。
+  Future<void> appendChapter(String title, String paragraphsHtml) async {
+    if (!_isReady) return;
+    // 用 jsonEncode 把字符串转为合法 JS 字符串字面量（自动转义 "、\、\n 等）
+    final titleJs = jsonEncode(title);
+    final htmlJs = jsonEncode(paragraphsHtml);
+    await _webviewController?.evaluateJavascript(
+      source: 'window.readerApi.appendChapter($titleJs, $htmlJs);',
+    );
+  }
+
+  /// 获取已追加的章节数（用于 Dart 侧查询当前已加载到第几章）
+  Future<int> getAppendedChapterCount() async {
+    if (!_isReady) return 0;
+    final result = await _webviewController?.evaluateJavascript(
+      source: 'window.readerApi.getAppendedChapterCount();',
+    );
+    return _toInt(result);
+  }
+
   /// 重新计算页数（样式更新后调用）
   Future<int> recalcPageCount() async {
     if (!_isReady) return 1;
@@ -220,6 +262,16 @@ window.readerApi.getPageCount();
         } else {
           AppLogger.instance.debug(LogCategory.js, msg);
         }
+      },
+    );
+
+    // 滚动模式无缝衔接：滚动接近底部时通知 Dart 侧加载下一章
+    // - 仅滚动模式（isScrollMode=true）会触发，分页模式不会
+    // - JS 端已做去重（nearEndNotified），appendChapter 后会重置
+    controller.addJavaScriptHandler(
+      handlerName: 'onScrollNearEnd',
+      callback: (args) {
+        _callbacks?.onScrollNearEnd?.call();
       },
     );
   }

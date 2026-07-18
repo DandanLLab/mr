@@ -35,8 +35,8 @@ class ReaderHtmlTemplate {
   }) {
     final css = _generateCss(provider, isScrollMode);
     final js = _readerJs();
-    final paragraphsHtml = _buildParagraphsHtml(content, provider);
-    final titleHtml = _buildTitleHtml(title, provider);
+    final paragraphsHtml = buildParagraphsHtml(content, provider);
+    final titleHtml = buildTitleHtml(title, provider);
 
     return '''
 <!DOCTYPE html>
@@ -384,7 +384,12 @@ body.reader-scroll #reader-content-b {
   }
 
   /// 构建段落 HTML
-  static String _buildParagraphsHtml(
+  ///
+  /// 改为 public（原 _buildParagraphsHtml）以支持滚动模式无缝衔接：
+  /// novel_reader_page 加载下一章后，调用此方法生成段落 HTML，
+  /// 再通过 controller.appendChapter 追加到 WebView DOM，
+  /// 避免整页 reload 丢失当前滚动位置。
+  static String buildParagraphsHtml(
     String content,
     ReaderProvider provider,
   ) {
@@ -407,7 +412,10 @@ body.reader-scroll #reader-content-b {
 
   /// 构建章节标题 HTML
   /// titleMode: 0=居左, 1=居中, 2=隐藏, 3=居右
-  static String _buildTitleHtml(String title, ReaderProvider provider) {
+  ///
+  /// 改为 public（原 _buildTitleHtml）以支持滚动模式无缝衔接：
+  /// 与 buildParagraphsHtml 配合使用，生成下章标题 HTML 供 appendChapter 追加。
+  static String buildTitleHtml(String title, ReaderProvider provider) {
     if (!provider.showChapterTitle || title.isEmpty) return '';
     if (provider.titleMode == 2) return '';
     return '<h1 id="reader-title" class="reader-title">${_escapeHtml(title)}</h1>';
@@ -504,6 +512,12 @@ window.readerApi = (function() {
   var isAnimating = false;    // 当前是否在动画中
   var currentPage = 0;        // 当前页码（a 显示的页）
   var animEndTimer = null;    // 动画超时兜底（防止 transitionend 不触发）
+  // 滚动模式无缝衔接：是否已通知「接近底部」
+  // - 触发后置 true 避免重复通知，Flutter 加载下章调 appendChapter 后会重置为 false
+  // - 用户主动滚回顶部区域（remaining > threshold*1.5）也会重置，允许下次触发
+  var nearEndNotified = false;
+  // 滚动模式无缝衔接：追加的章节数（用于 Dart 侧查询当前已加载到第几章）
+  var appendedChapterCount = 0;
 
   function init(cfg) {
     config = cfg;
@@ -571,6 +585,22 @@ window.readerApi = (function() {
           var progress = getScrollProgress();
           if (window.flutter_inappwebview) {
             window.flutter_inappwebview.callHandler('onPageChanged', Math.round(progress * 1000));
+          }
+          // 无缝衔接：检测是否接近底部，触发 onScrollNearEnd 让 Dart 加载下一章
+          // - threshold = 1.5 * clientHeight（约 1.5 屏）：提前加载避免用户看到空白
+          // - 触发后 nearEndNotified=true 防止重复通知；appendChapter 后会重置
+          // - 用户滚回上方（remaining > threshold*2）也会重置，允许下次触发
+          var viewport = body.clientHeight;
+          var remaining = body.scrollHeight - body.scrollTop - viewport;
+          var threshold = viewport * 1.5;
+          if (remaining < threshold && !nearEndNotified) {
+            nearEndNotified = true;
+            console.log('[reader] scroll near end, remaining=' + Math.round(remaining) + 'px');
+            if (window.flutter_inappwebview) {
+              window.flutter_inappwebview.callHandler('onScrollNearEnd');
+            }
+          } else if (remaining > threshold * 2 && nearEndNotified) {
+            nearEndNotified = false;
           }
         }, 200);
       }, { passive: true });
@@ -1023,6 +1053,47 @@ window.readerApi = (function() {
     }
   }
 
+  // ============ 滚动模式无缝衔接 ============
+  // 在 #reader-content-a 末尾追加章节标题 + 段落 HTML，不触发整页 reload
+  // - 滚动模式下 .reader-content 是普通 div（column-width:auto），appendChild 即可
+  // - 标题用 createElement + textContent 创建，避免 XSS
+  // - 段落 HTML 由 Dart 侧 ReaderHtmlTemplate.buildParagraphsHtml 生成，可信
+  // - 追加后重置 nearEndNotified，允许下次接近底部时再次触发
+  function appendChapter(title, paragraphsHtml) {
+    if (!contentA) {
+      console.warn('[reader] appendChapter: contentA is null');
+      return;
+    }
+    // 章节分隔符：视觉提示用户进入新章节（32px 间距）
+    var sep = document.createElement('div');
+    sep.className = 'chapter-separator';
+    sep.style.cssText = 'height: 32px; width: 100%;';
+    contentA.appendChild(sep);
+    // 章节标题（textContent 避免 XSS）
+    if (title && title.length > 0) {
+      var h1 = document.createElement('h1');
+      h1.className = 'reader-title';
+      h1.textContent = title;
+      contentA.appendChild(h1);
+    }
+    // 段落（用临时 div 解析 HTML 字符串，再 append 移到 contentA）
+    if (paragraphsHtml && paragraphsHtml.length > 0) {
+      var tmp = document.createElement('div');
+      tmp.innerHTML = paragraphsHtml;
+      while (tmp.firstChild) {
+        contentA.appendChild(tmp.firstChild);
+      }
+    }
+    appendedChapterCount++;
+    nearEndNotified = false; // 重置以允许下次触发
+    console.log('[reader] appendChapter: title=' + title + ' appendedCount=' + appendedChapterCount);
+  }
+
+  // 获取已追加的章节数（用于 Dart 侧查询当前已加载到第几章）
+  function getAppendedChapterCount() {
+    return appendedChapterCount;
+  }
+
   return {
     init: init,
     getPageCount: getPageCount,
@@ -1033,7 +1104,9 @@ window.readerApi = (function() {
     getScrollOffset: getScrollOffset,
     scrollToOffset: scrollToOffset,
     scrollByViewport: scrollByViewport,
-    checkTap: checkTap
+    checkTap: checkTap,
+    appendChapter: appendChapter,
+    getAppendedChapterCount: getAppendedChapterCount
   };
 })();
 ''';

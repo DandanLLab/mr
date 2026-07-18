@@ -33,6 +33,7 @@ import '../../utils/design_tokens.dart';
 import '../../utils/chinese_converter.dart';
 import 'webview/reader_webview.dart';
 import 'webview/reader_webview_controller.dart';
+import 'webview/reader_html_template.dart';
 import 'page_turn/reader_page_view.dart';
 import 'page_turn/page_delegate.dart';
 
@@ -118,6 +119,15 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   int _webviewCurrentPage = 0;
   // WebView 是否已就绪（HTML 加载完成，可调用 JS API）
   bool _webviewReady = false;
+  // 滚动模式无缝衔接：当前已加载到第几章（最大 index）
+  //
+  // - 章节切换（_loadChapterContent）时重置为 _currentChapterIndex
+  // - 滚动到接近底部触发 _onScrollNearEnd 时，加载下一章并 _scrollChapterMax=nextIndex
+  // - 用户主动翻到下一章 / 跳转章节时，_content 变化触发 WebView reload，
+  //   _scrollChapterMax 同步重置为新章节 index，旧追加内容随 reload 清空
+  int _scrollChapterMax = -1;
+  // _appendNextChapter 防重入标志：避免 onScrollNearEnd 高频触发时重复加载
+  bool _isAppendingChapter = false;
   // 待恢复的初始页码（章节加载时设置，WebView 就绪后调用 jumpToPage）
   // 约定：>= (1 << 30) 表示「跳到最后一页」
   int _pendingWebviewInitialPage = 0;
@@ -819,6 +829,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final restoreInitial = _restoreInitialPosition;
     _pendingInitialPageToEnd = false;
     _restoreInitialPosition = false;
+    // 滚动模式无缝衔接：章节切换时重置已加载到第几章
+    // WebView 会因 _content 变化 reload，旧追加内容随 reload 清空
+    _scrollChapterMax = chapterIndex;
+    _isAppendingChapter = false;
     setState(() {
       _isLoading = true;
       _sliderValue = _currentChapterIndex.toDouble();
@@ -1272,6 +1286,130 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     }
   }
 
+  // ==================== 滚动模式无缝衔接 ====================
+  // 滚动模式（PageMode.scroll）下，滚动到接近底部时自动加载下一章并追加到
+  // WebView DOM，保留用户当前滚动位置，无需点击翻页按钮即可连续阅读。
+  //
+  // 数据流：
+  // 1. JS 端 scroll listener 检测距底 < 1.5 视口高度 → callHandler('onScrollNearEnd')
+  // 2. ReaderWebViewController 转发到 callbacks.onScrollNearEnd
+  // 3. _onScrollNearEnd 检查是否有下一章 → _appendNextChapter 异步加载
+  // 4. _appendNextChapter 拉取章节内容 → 简繁转换 + 替换规则 + 生成段落 HTML
+  //    → controller.appendChapter 追加到 DOM（不触发整页 reload）
+  // 5. _scrollChapterMax 更新为 nextIndex，下次接近底部时继续加载下一章
+  //
+  // 章节切换（_loadChapterContent）会重置 _scrollChapterMax = _currentChapterIndex，
+  // 同时 _content 变化触发 WebView reload，旧追加内容随 reload 清空。
+
+  /// 滚动接近底部时触发：加载下一章并追加到 WebView DOM
+  void _onScrollNearEnd() {
+    if (!mounted) return;
+    if (_isAppendingChapter) return; // 防重入：避免高频触发重复加载
+    if (_book == null || _dataProvider == null || _chapters.isEmpty) return;
+
+    final nextIndex = _nextReadableChapterIndex(_scrollChapterMax);
+    if (nextIndex == null) return; // 没有下一章，JS 端 nearEndNotified 会保持 true 避免重复
+
+    _isAppendingChapter = true;
+    _appendNextChapter(nextIndex);
+  }
+
+  /// 异步加载下一章内容并追加到 WebView DOM
+  ///
+  /// 不走 _loadChapterContent（会 setState(_isLoading=true) + 触发 _content 变化
+  /// 导致 WebView reload 丢失滚动位置）。而是直接拉取内容、生成段落 HTML、
+  /// 调用 controller.appendChapter 追加到现有 DOM 末尾。
+  Future<void> _appendNextChapter(int chapterIndex) async {
+    final chapter =
+        chapterIndex < _chapters.length ? _chapters[chapterIndex] : null;
+    if (chapter == null || chapter.isVolume) {
+      _isAppendingChapter = false;
+      return;
+    }
+
+    // 在 await 之前先取 provider，避免异步间隙后访问 BuildContext（info 警告）
+    final provider = context.read<ReaderProvider>();
+    final book = _book!;
+    final dataProvider = _dataProvider!;
+
+    try {
+      // 1. 优先从预取内存缓存读取（瞬时返回，跳过文件 I/O）
+      String? content;
+      if (book.originType == BookOriginType.online && chapter.url != null) {
+        content = ChapterPrefetchService.instance.getCachedContent(
+          book.bookUrl,
+          chapter.url!,
+        );
+      }
+      // 2. 内存未命中则从文件缓存读取
+      if ((content == null || content.isEmpty) &&
+          book.originType == BookOriginType.online) {
+        content = await ChapterCacheService.instance.readChapterContent(
+          book,
+          chapter,
+        );
+      }
+      // 3. 缓存没有则从网络获取
+      if (content == null || content.isEmpty) {
+        content = await dataProvider.getContent(
+          book,
+          chapter,
+          allChapters: _chapters,
+        );
+        // 保存到缓存
+        if (content != null &&
+            content.isNotEmpty &&
+            book.originType == BookOriginType.online) {
+          unawaited(
+            ChapterCacheService.instance.saveChapterContent(
+              book,
+              chapter,
+              content,
+            ),
+          );
+        }
+      }
+      if (content == null || content.isEmpty) {
+        debugPrint(
+          '[NovelReader] _appendNextChapter 内容为空: index=$chapterIndex',
+        );
+        return;
+      }
+
+      // 4. 简繁转换 + 替换规则
+      final displayContent = ChineseConverter.convert(
+        content,
+        provider.chineseConverterType,
+      );
+      final displayTitle = ChineseConverter.convert(
+        chapter.title,
+        provider.chineseConverterType,
+      );
+      final processedContent = _processedContent(displayContent);
+
+      // 5. 生成段落 HTML（用 ReaderHtmlTemplate 的 public 方法）
+      final paragraphsHtml = ReaderHtmlTemplate.buildParagraphsHtml(
+        processedContent,
+        provider,
+      );
+
+      // 6. 调用 JS 追加到 DOM（不触发 reload）
+      if (!mounted) return;
+      await _readerWebViewController.appendChapter(displayTitle, paragraphsHtml);
+
+      // 7. 更新已加载章节索引
+      _scrollChapterMax = chapterIndex;
+
+      debugPrint(
+        '[NovelReader] appendChapter 完成: index=$chapterIndex title=$displayTitle',
+      );
+    } catch (e) {
+      debugPrint('[NovelReader] _appendNextChapter 失败: $e');
+    } finally {
+      _isAppendingChapter = false;
+    }
+  }
+
   void _toggleMenu() {
     setState(() {
       _showMenu = !_showMenu;
@@ -1496,6 +1634,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   // Flutter Listener 收不到 pointerUp，必须靠 JS 回调）
                   onTap: _onWebviewJsTap,
                   onImageTap: _onWebviewImageTap,
+                  // 滚动模式无缝衔接：接近底部时加载下一章
+                  onScrollNearEnd: _onScrollNearEnd,
                 ),
               ),
             ),
