@@ -1341,6 +1341,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     }
   }
 
+  /// 续页首行标记：\u0001 (SOH)
+  /// 用于标记"本段是上一页段落的剩余部分，渲染时不加首行缩进"
+  /// 详见 _buildUnifiedHtml 的处理逻辑
+  static const String _continuationMarker = '\u0001';
+
   List<String> _splitContentToPages(String content, ReaderProvider provider) {
     final displayContent = ChineseConverter.convert(
       content,
@@ -1352,14 +1357,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
     final metrics = _pageMetrics(provider);
     final textStyle = _readerTextStyle(provider);
-    // 渲染时每段会包一层 Padding(bottom: paragraphSpacing)，分页测量时不再加，
-    // 避免段距被计算两次（导致实际段距是配置值的 2 倍）。
-    // 但页内最后一段不会渲染 Padding（下面会 trimRight），所以整页高度估算用
-    // paragraphSpacing * (段数-1) 来近似。为简化实现，这里按每段都加一次
-    // paragraphSpacing 估算，渲染时最后一段的 Padding 多余空间留作底部留白。
     final paragraphSpacing = provider.paragraphSpacing;
-    // 缩进字符由 CSS before 渲染，测量时需要同步加上缩进前缀，
-    // 否则测量高度偏小（首行少了缩进字符占用的宽度，可能少一行）。
     final indent = provider.paragraphIndent;
     final singleLineHeight = _singleLineHeight(textStyle, metrics.width);
     var page = StringBuffer();
@@ -1375,13 +1373,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         : 0.0;
 
     for (final rawParagraph in paragraphs) {
-      // 剥掉源内容自带缩进，统一由 CSS before 提供缩进
-      // 保存到 _pages 的是剥源缩进后的纯文本，渲染时 CSS before 会加缩进
+      // 剥掉源内容自带缩进，统一由 <span style="white-space:pre"> 提供缩进
       var paragraph = rawParagraph.replaceAll(_leadingIndentRegex, '');
       // isContinuation 标记：本段是否是被切分的续页部分
-      // - false（首段）：测量时加 indent 前缀（模拟 CSS before）
-      // - true（续页）：测量时不加 indent（续页首行在渲染时是 <p> 的开头，
-      //   CSS before 会加缩进，但段落的剩余部分不应再加缩进字符测量）
+      // - false（首段）：测量时加 indent 前缀，渲染时加 indent
+      // - true（续页）：测量时不加 indent，渲染时也不加 indent（用 _continuationMarker 标记）
       var isContinuation = false;
 
       while (paragraph.isNotEmpty) {
@@ -1395,7 +1391,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
         // 1. 当前页能放下整段 → 直接放入
         if (usedHeight + paragraphHeight <= metrics.height) {
-          page.writeln(paragraph);
+          // 续页首行用 _continuationMarker 标记，渲染时不加 indent
+          page.writeln(isContinuation ? '$_continuationMarker$paragraph' : paragraph);
           usedHeight += paragraphHeight;
           pageParagraphCount++;
           paragraph = '';
@@ -2207,25 +2204,43 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   /// 统一构建 HTML 内容：所有内容统一走纯文本路径。
   ///
-  /// 缩进完全交给 CSS（`Style.before`）处理，这里只负责：
-  /// 1. 剥掉源内容自带缩进（避免双重缩进）
-  /// 2. 应用高亮规则
-  /// 3. 包装成 `<p>` 标签
+  /// 缩进实现方案（关键）：
+  /// flutter_html 3.0.0 的 WhitespaceProcessing 会 trimLeft 所有段首空白
+  /// （包括全角空格 \u3000 和 HTML 实体 &#x3000; 解码后的字符），
+  /// `Style.before` 注入的文本也会被 trim。
   ///
-  /// 滚动模式和分页模式共用此方法，分页测量时也会同步加上缩进字符
-  /// 测量（见 `_splitContentToPages`），保证测量与渲染一致。
+  /// 唯一可行方案：用 `<span style="white-space: pre">` 包裹缩进字符。
+  /// WhiteSpace.pre 会让 WhitespaceProcessing 跳过该节点的所有空白处理，
+  /// 缩进字符得以保留。这是真正的 CSS 实现，不依赖任何 hack。
+  ///
+  /// 高亮规则：用 `<span style="...">` 内联样式注入，flutter_html 支持
+  /// 内联 CSS 解析（见 html_parser.dart 的 inlineCssToStyle 调用）。
   String _buildUnifiedHtml(
     ReaderProvider provider,
     String content,
   ) {
     final rules = provider.highlightRules.where((r) => r.enabled).toList();
     final paragraphs = _splitToParagraphs(content);
+    final indent = provider.paragraphIndent;
     final buf = StringBuffer();
-    for (final para in paragraphs) {
-      // 剥掉源内容自带缩进，统一由 CSS before 提供缩进
-      final trimmed = para.replaceAll(_leadingIndentRegex, '');
-      final highlighted = _wrapWithHighlightHtml(trimmed, rules);
+    for (final rawPara in paragraphs) {
+      // 续页首行用 _continuationMarker 标记，不加首行缩进
+      // 否则剥掉源内容自带缩进，统一由 <span style="white-space:pre"> 提供缩进
+      var para = rawPara;
+      final isContinuation = para.startsWith(_continuationMarker);
+      if (isContinuation) {
+        para = para.substring(_continuationMarker.length);
+      } else {
+        para = para.replaceAll(_leadingIndentRegex, '');
+      }
+      final highlighted = _wrapWithHighlightHtml(para, rules);
+      // 缩进字符用 white-space:pre 的 span 包裹，避免被 whitespace 处理 trim
+      // 续页首行不加缩进（段落剩余部分，不是段落开头）
+      final indentHtml = (!isContinuation && indent.isNotEmpty)
+          ? '<span style="white-space: pre">$indent</span>'
+          : '';
       buf.write('<p>');
+      buf.write(indentHtml);
       buf.write(highlighted);
       buf.write('</p>');
     }
@@ -2272,13 +2287,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           left: 0,
           right: 0,
         ),
-        // 首行缩进用 CSS before 实现（等价 ::before 伪元素）：
-        // flutter_html 不支持 text-indent，before 会在 <p> 内容前插入文本，
-        // 效果等同于在段首加全角空格。所有 <p> 统一加缩进，无需在 HTML 字符串中
-        // 手动 prepend 实体，避免实体被 whitespace 处理或转义导致缩进丢失。
-        before: provider.paragraphIndent.isEmpty
-            ? null
-            : provider.paragraphIndent,
+        // 首行缩进由 HTML 字符串中的 <span style="white-space:pre"> 提供
+        // （见 _buildUnifiedHtml），不使用 Style.before（会被 whitespace trim 掉）
         // 继承 body 的字号/颜色/行高/字距/字重/字体等（通过 copyOnlyInherited）
         // 但显式设置以下字段避免继承 DefaultTextStyle
         letterSpacing: provider.letterSpacing,
@@ -2314,10 +2324,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     for (final rule in rules) {
       if (rule.pattern.isEmpty) continue;
       try {
+        // 多行模式：^ $ 匹配每行开头结尾（分隔线规则需要）
         final regex = RegExp(rule.pattern, multiLine: true);
         final styleStr = _highlightStyleToCss(rule);
         result = result.replaceAllMapped(regex, (match) {
           final matched = match.group(0) ?? '';
+          if (matched.isEmpty) return '';
           // 转义 HTML 特殊字符，避免破坏标签
           final escaped = matched
               .replaceAll('&', '&amp;')
@@ -2325,7 +2337,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               .replaceAll('>', '&gt;');
           return '<span style="$styleStr">$escaped</span>';
         });
-      } catch (_) {}
+      } catch (error) {
+        debugPrint('[NovelReader] 高亮规则 "${rule.name}" 正则错误: $error');
+      }
     }
     return result;
   }
@@ -2338,15 +2352,17 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final b = (c.b * 255).round().clamp(0, 255);
     final a = (c.a * 255).round().clamp(0, 255);
     final rgba = 'rgba($r, $g, $b, ${a / 255})';
+    // 注意：flutter_html 3.0.0 不支持 text-decoration-thickness，
+    // 但支持 text-decoration / text-decoration-color / text-decoration-style
     return switch (rule.style) {
       HighlightStyle.background =>
         'background-color: rgba($r, $g, $b, 0.4);',
       HighlightStyle.underline =>
-        'text-decoration: underline; text-decoration-color: $rgba; text-decoration-thickness: 2px;',
+        'text-decoration: underline; text-decoration-color: $rgba;',
       HighlightStyle.strikethrough =>
-        'text-decoration: line-through; text-decoration-color: $rgba; text-decoration-thickness: 2px;',
+        'text-decoration: line-through; text-decoration-color: $rgba;',
       HighlightStyle.wavy =>
-        'text-decoration: underline wavy; text-decoration-color: $rgba; text-decoration-thickness: 2px;',
+        'text-decoration: underline; text-decoration-style: wavy; text-decoration-color: $rgba;',
     };
   }
 
