@@ -43,7 +43,7 @@ class ReaderHtmlTemplate {
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <style>
     $css
   </style>
@@ -121,14 +121,20 @@ class ReaderHtmlTemplate {
   --reader-padding-bottom-raw: ${provider.paddingBottom}px;
   --reader-padding-left-raw: ${provider.paddingLeft}px;
   --reader-padding-right-raw: ${provider.paddingRight}px;
+  /* --reader-vw/vh 由 JS 在 init 时注入（= window.innerWidth/innerHeight，
+     即 WebView widget 实际尺寸）。不能用 100vw/100vh，因为在 Android
+     InAppWebView 中 100vw = 设备屏幕宽度，不等于 widget 宽度，会导致
+     内容区比 widget 宽 → 溢出 → 允许双指缩放 → 分页错乱。 */
+  --reader-vw: 100vw;
+  --reader-vh: 100vh;
   /* 限制 padding 不超 viewport，保证内容区最小 100px 防溢出 */
-  --reader-padding-top: min(var(--reader-padding-top-raw), calc((100vh - 100px) / 2));
-  --reader-padding-bottom: min(var(--reader-padding-bottom-raw), calc(100vh - 100px - var(--reader-padding-top)));
-  --reader-padding-left: min(var(--reader-padding-left-raw), calc((100vw - 100px) / 2));
-  --reader-padding-right: min(var(--reader-padding-right-raw), calc(100vw - 100px - var(--reader-padding-left)));
+  --reader-padding-top: min(var(--reader-padding-top-raw), calc((var(--reader-vh) - 100px) / 2));
+  --reader-padding-bottom: min(var(--reader-padding-bottom-raw), calc(var(--reader-vh) - 100px - var(--reader-padding-top)));
+  --reader-padding-left: min(var(--reader-padding-left-raw), calc((var(--reader-vw) - 100px) / 2));
+  --reader-padding-right: min(var(--reader-padding-right-raw), calc(var(--reader-vw) - 100px - var(--reader-padding-left)));
   /* 安全区尺寸（内容区） */
-  --reader-safe-width: calc(100vw - var(--reader-padding-left) - var(--reader-padding-right));
-  --reader-safe-height: calc(100vh - var(--reader-padding-top) - var(--reader-padding-bottom));
+  --reader-safe-width: calc(var(--reader-vw) - var(--reader-padding-left) - var(--reader-padding-right));
+  --reader-safe-height: calc(var(--reader-vh) - var(--reader-padding-top) - var(--reader-padding-bottom));
   --reader-title-top-spacing: ${provider.titleTopSpacing}px;
   --reader-title-bottom-spacing: ${provider.titleBottomSpacing}px;
 }
@@ -200,8 +206,8 @@ body.reader-paged {
 }
 
 body.reader-paged #reader-root {
-  height: 100vh;
-  width: 100vw;
+  height: var(--reader-vh);
+  width: var(--reader-vw);
   overflow: hidden;
 }
 
@@ -252,11 +258,11 @@ body.reader-paged #reader-content-b.animating {
 body.reader-scroll {
   overflow-y: auto;
   overflow-x: hidden;
-  height: 100vh;
+  height: var(--reader-vh);
 }
 
 body.reader-scroll #reader-root {
-  min-height: 100vh;
+  min-height: var(--reader-vh);
 }
 
 body.reader-scroll #reader-stage {
@@ -431,7 +437,28 @@ window.readerApi = (function() {
     contentA = document.getElementById('reader-content-a');
     contentB = document.getElementById('reader-content-b');
     body.classList.add(config.isScrollMode ? 'reader-scroll' : 'reader-paged');
-    console.log('[reader] init', JSON.stringify(config), 'animEnabled=' + animEnabled, 'contentA=' + !!contentA, 'contentB=' + !!contentB);
+
+    // 关键：注入 WebView 实际尺寸到 CSS 变量
+    // window.innerWidth/innerHeight = WebView widget 实际尺寸（DIP）
+    // 不能用 100vw/100vh，Android InAppWebView 中 100vw = 屏幕宽度 ≠ widget 宽度
+    updateViewportSize();
+    // 监听 resize（键盘弹出/旋转等）
+    window.addEventListener('resize', function() {
+      updateViewportSize();
+      // 尺寸变化后重新通知页数
+      requestAnimationFrame(function() {
+        requestAnimationFrame(function() {
+          notifyPageCountReady();
+        });
+      });
+    });
+
+    // 禁用所有手势缩放（防止双指放大内容导致溢出可见 + 分页错乱）
+    disableGestureZoom();
+
+    console.log('[reader] init', JSON.stringify(config), 'animEnabled=' + animEnabled,
+      'vw=' + window.innerWidth, 'vh=' + window.innerHeight,
+      'contentA=' + !!contentA, 'contentB=' + !!contentB);
 
     // 绑定 click 监听器
     document.addEventListener('click', function(e) {
@@ -464,7 +491,6 @@ window.readerApi = (function() {
     // b 层 transitionend 监听（动画结束清理）
     if (contentB) {
       contentB.addEventListener('transitionend', function(e) {
-        // 只响应 b 自身的 transform transition，忽略子元素冒泡
         if (e.target !== contentB) return;
         if (e.propertyName !== 'transform') return;
         onAnimEnd();
@@ -477,6 +503,40 @@ window.readerApi = (function() {
         notifyPageCountReady();
       });
     });
+  }
+
+  // 更新视口尺寸 CSS 变量
+  function updateViewportSize() {
+    var root = document.documentElement;
+    root.style.setProperty('--reader-vw', window.innerWidth + 'px');
+    root.style.setProperty('--reader-vh', window.innerHeight + 'px');
+  }
+
+  // 禁用所有手势缩放
+  function disableGestureZoom() {
+    // iOS: gesturestart/change/end
+    document.addEventListener('gesturestart', function(e) { e.preventDefault(); }, { passive: false });
+    document.addEventListener('gesturechange', function(e) { e.preventDefault(); }, { passive: false });
+    document.addEventListener('gestureend', function(e) { e.preventDefault(); }, { passive: false });
+    // 通用: 双指 touchmove 阻止（防止 WebView 内部双指缩放）
+    document.addEventListener('touchmove', function(e) {
+      if (e.touches.length > 1) {
+        e.preventDefault();
+      }
+    }, { passive: false });
+    // 双击缩放
+    var lastTouchEnd = 0;
+    document.addEventListener('touchend', function(e) {
+      var now = Date.now();
+      if (now - lastTouchEnd <= 300) {
+        e.preventDefault();
+      }
+      lastTouchEnd = now;
+    }, { passive: false });
+    // 鼠标滚轮缩放（Ctrl+wheel）
+    document.addEventListener('wheel', function(e) {
+      if (e.ctrlKey) e.preventDefault();
+    }, { passive: false });
   }
 
   function getColumnWidth() {
