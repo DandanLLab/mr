@@ -179,6 +179,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final provider = context.read<ReaderProvider>();
     // 读取并保存进入时的系统亮度
     _systemBrightnessOnEnter = await NativeChannel.instance.getScreenBrightness();
+    // await 后必须检查 mounted：dispose() 可能在 await 期间被调用，
+    // 此时若继续 addListener 会导致 provider（单例 ChangeNotifier）持有
+    // 已销毁 State 的 _onProviderChanged 引用，造成内存泄漏 + 反复进出累积
+    if (!mounted) return;
     // 应用配置中的亮度和常亮
     _applyBrightness(provider.screenBrightness);
     _applyKeepScreenOn(provider.keepScreenOn);
@@ -257,6 +261,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   @override
   void dispose() {
+    // 翻页中退出：唤醒等待的 completer，避免 _waitForWebViewFrame 等超时
+    // （问题 10：dispose 中未处理 _pageRenderedCompleter 会有 ~150ms 悬挂）
+    final c = _pageRenderedCompleter;
+    if (c != null && !c.isCompleted) {
+      c.complete();
+    }
+    _pageRenderedCompleter = null;
+
     final provider = context.read<ReaderProvider>();
     provider.removeListener(_onProviderChanged);
     _progressSaveTimer?.cancel();
@@ -1028,6 +1040,16 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   // 通过 setState 通知 ReaderWebView.didUpdateWidget 检测样式变化并重新加载 HTML。
 
   void _repaginatePreservingPosition() {
+    // 唤醒正在等待 onPageChanged 的翻页流程：
+    // 样式变化会触发 WebView reload，reload 期间 _webviewReloading=true 让
+    // _onWebviewPageChanged 早 return，永远不会 complete 旧 completer。
+    // 不唤醒会导致 _waitForWebViewFrame 等 120ms 超时（白白阻塞翻页时序）。
+    final c = _pageRenderedCompleter;
+    if (c != null && !c.isCompleted) {
+      c.complete();
+    }
+    _pageRenderedCompleter = null;
+
     // WebView 模式下：记录当前页码比例，等 WebView 重新加载后按比例恢复
     _pendingWebviewFraction = _webviewPageCount > 1
         ? _webviewCurrentPage / (_webviewPageCount - 1)
@@ -1524,10 +1546,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   Future<void> _waitForWebViewFrame([int? expectedPage]) async {
     // 1. 等 onPageChanged 回调确认 JS 端 currentPage = expectedPage
     //    （兜底超时 120ms，防止回调丢失时永远阻塞）
-    if (expectedPage != null && _pageRenderedCompleter == null) {
-      _pageRenderedCompleter = Completer<void>();
+    //
+    // 每次强制新建 completer 覆盖旧值：
+    // 快速连续翻页时若复用旧 completer（已 complete），第二次 await 立即返回，
+    // 但等的是上一次的回调，时序错乱（问题 5）
+    final completer = expectedPage != null ? Completer<void>() : null;
+    if (completer != null) {
+      _pageRenderedCompleter = completer;
     }
-    final completer = _pageRenderedCompleter;
     if (completer != null) {
       await completer.future.timeout(
         const Duration(milliseconds: 120),
@@ -1654,16 +1680,31 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       // 滚动模式：pageIndex 是 progress * 1000（虚拟页码）
       _webviewCurrentPage = pageIndex;
       _scrollProgressNotifier.value = pageIndex / 1000.0;
-      // 滚动模式进度保存用 getScrollOffset 获取真实像素偏移
-      unawaited(_saveCurrentProgress(pos: null));
+      // 滚动模式高频触发（每滚几像素一次），用防抖避免高频 Hive 写入 IO 压力
+      // （问题 2：滚动模式无防抖，每滚几像素写一次数据库）
+      _scheduleProgressSave(pos: null);
     } else {
       setState(() {
         _webviewCurrentPage = pageIndex;
       });
       _scrollProgressNotifier.value =
           _webviewPageCount > 1 ? pageIndex / (_webviewPageCount - 1) : 0;
-      unawaited(_saveCurrentProgress(pos: pageIndex));
+      // 分页模式每次翻页才触发，频率低，但仍走防抖以合并连续翻页
+      _scheduleProgressSave(pos: pageIndex);
     }
+  }
+
+  /// 防抖保存进度
+  ///
+  /// 滚动模式 _onWebviewPageChanged 高频触发（每滚几像素一次），直接
+  /// _saveCurrentProgress 会造成 Hive 频繁 put，IO 压力大，且并发保存存在
+  /// 回退竞态（问题 3）。延迟 300ms，期间新触发则取消旧 timer 重启。
+  /// 分页模式也走防抖，合并连续翻页的多次保存。
+  void _scheduleProgressSave({int? pos}) {
+    _progressSaveTimer?.cancel();
+    _progressSaveTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) unawaited(_saveCurrentProgress(pos: pos));
+    });
   }
 
   void _onWebviewImageTap(String src, Rect rect) {
