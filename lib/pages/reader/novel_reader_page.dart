@@ -1371,10 +1371,16 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         : 0.0;
 
     for (final rawParagraph in paragraphs) {
-      // HTML 段落不调用 _applyIndent（避免与 _injectIndentIntoHtml 双缩进），
-      // 同时测量时用剥离标签后的纯文本，避免标签字符被当作可见文本导致高度虚高
+      // HTML 段落：先注入缩进实体（与渲染路径 _buildUnifiedHtml 完全一致），
+      // 再剥离标签测量高度。否则测量不含缩进 → 测量低估高度 → 渲染溢出。
+      // 纯文本段落：直接 _applyIndent 加全角空格缩进。
       final isHtml = _containsHtml(rawParagraph);
-      var paragraph = isHtml ? rawParagraph : _applyIndent(rawParagraph, provider);
+      final indent = provider.paragraphIndent;
+      var paragraph = isHtml
+          ? (indent.isEmpty
+              ? _stripHtmlIndent(rawParagraph)
+              : _injectIndentIntoHtml(rawParagraph, indent))
+          : _applyIndent(rawParagraph, provider);
 
       while (paragraph.isNotEmpty) {
         // HTML 段落用剥离标签后的纯文本测量高度
@@ -1504,11 +1510,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   /// 测量 HTML 段落的渲染高度（用与 _readerHtmlStyle 一致的 TextStyle）
   /// 纯文本直接用 TextPainter；HTML 段落先剥离标签再测量，
   /// 因为 Html 组件内部用 RichText 渲染，TextSpan 高度 = 剥离标签后文本高度。
+  /// textAlign 与 _readerHtmlStyle 的 body.textAlign 保持一致（justify），
+  /// 避免测量与渲染在断行行为上产生细微差异。
   double _measureTextHeight(String text, TextStyle style, double width) {
     final painter = TextPainter(
       text: TextSpan(text: text, style: style),
       textDirection: TextDirection.ltr,
       maxLines: null,
+      textAlign: TextAlign.justify,
     )..layout(maxWidth: width);
     return painter.height;
   }
@@ -2051,8 +2060,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     String content,
     String title,
   ) {
+    // 上一章最后 <p> 的 margin-bottom 已经提供一次段距，
+    // 这里再补一次段距作为章节间额外间隔（总间隔 = paragraphSpacing × 2，
+    // 与章节内段距 paragraphSpacing × 1 形成合理的视觉层次）
     return Padding(
-      padding: EdgeInsets.only(top: provider.paragraphSpacing * 2),
+      padding: EdgeInsets.only(top: provider.paragraphSpacing),
       child: _buildChapterContent(provider, _processedContent(content), title),
     );
   }
@@ -2159,10 +2171,16 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     );
   }
 
-  /// 统一构建 HTML 内容：把纯文本段落包装成 <p> 标签，注入缩进实体，
-  /// 高亮规则通过内联 <span style="..."> 包装。
-  /// 这样无论原始内容是纯文本还是 HTML，都走同一条 Html 渲染路径，
-  /// 样式完全由 _readerHtmlStyle 控制。
+  /// 统一构建 HTML 内容：按段落切分，逐段判断 HTML/纯文本，分别包装。
+  ///
+  /// 关键修复：旧实现一旦 `_containsHtml(content)` 命中就走整段 HTML 注入路径，
+  /// 导致混合内容（纯文本 + HTML 标签共存）中 `</p>` 后的纯文本段落没有注入点，
+  /// 缩进丢失。新实现按段切分后逐段判断：
+  /// - 纯文本段：包 `<p>` + 注入缩进实体 + 应用高亮规则
+  /// - HTML 段：注入缩进实体到 `<p>`/`<div>`/`<br>` 后，不应用高亮（避免破坏标签）
+  ///
+  /// 高亮与缩进实体顺序：先 highlight 再 prepend 实体，避免贪婪匹配的高亮规则
+  /// 误匹配 `&#x3000;` 实体后转义成 `&amp;#x3000;` 导致缩进消失。
   String _buildUnifiedHtml(
     ReaderProvider provider,
     String content,
@@ -2170,32 +2188,34 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   ) {
     final indent = applyIndent ? provider.paragraphIndent : '';
     final entity = indent.replaceAll('\u3000', '&#x3000;');
-
-    if (_containsHtml(content)) {
-      // 已是 HTML：注入缩进实体到 p/div/br 后
-      // 高亮规则不应用到 HTML 内容（HTML 已是富文本，避免破坏标签结构）
-      return indent.isEmpty
-          ? _stripHtmlIndent(content)
-          : _injectIndentIntoHtml(content, indent);
-    }
-
-    // 纯文本：按段落分割，每段包装成 <p>缩进实体 + 段落文本</p>
-    final paragraphs = _splitToParagraphs(content);
     final rules = provider.highlightRules.where((r) => r.enabled).toList();
+    final paragraphs = _splitToParagraphs(content);
     final buf = StringBuffer();
+
     for (final para in paragraphs) {
-      // 去除源内容自带缩进，统一用 CSS/text 实体注入
-      final trimmed = para.replaceAll(_leadingIndentRegex, '');
-      final body = entity.isEmpty ? trimmed : '$entity$trimmed';
-      buf.write('<p>');
-      buf.write(_wrapWithHighlightHtml(body, rules));
-      buf.write('</p>');
+      if (_containsHtml(para)) {
+        // 单段 HTML：注入缩进实体到 p/div/br 后，不应用高亮规则
+        final segment = indent.isEmpty
+            ? _stripHtmlIndent(para)
+            : _injectIndentIntoHtml(para, indent);
+        buf.write(segment);
+      } else {
+        // 纯文本：剥掉源内容自带缩进，先 highlight 再 prepend 实体
+        final trimmed = para.replaceAll(_leadingIndentRegex, '');
+        final highlighted = _wrapWithHighlightHtml(trimmed, rules);
+        final body = entity.isEmpty ? highlighted : '$entity$highlighted';
+        buf.write('<p>');
+        buf.write(body);
+        buf.write('</p>');
+      }
     }
     return buf.toString();
   }
 
   /// 统一的 HTML CSS 样式表：字号、行高、字距、段距、缩进、颜色、字重
   /// 分页测量时用 _readerTextStyle 引用同一份样式定义，保证零偏差。
+  /// 关键：所有影响布局的字段（fontSize/lineHeight/letterSpacing/fontWeight/fontFamily）
+  /// 必须与 _readerTextStyle 完全一致，否则测量高度与渲染高度不一致。
   Map<String, Style> _readerHtmlStyle(ReaderProvider provider) {
     return {
       'body': Style(
@@ -2204,13 +2224,22 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         lineHeight: LineHeight(provider.lineHeight),
         fontFamily: provider.fontFamily.isNotEmpty ? provider.fontFamily : null,
         fontWeight: _readerFontWeight(provider),
+        letterSpacing: provider.letterSpacing,
         textAlign: TextAlign.justify,
+        // 显式清零 body 默认 padding/margin，避免 flutter_html 内部默认值
+        // 造成测量宽度与实际渲染宽度不一致
+        padding: HtmlPaddings.zero,
+        margin: Margins.zero,
       ),
       'p': Style(
         margin: Margins.only(bottom: provider.paragraphSpacing),
+        letterSpacing: provider.letterSpacing,
+        padding: HtmlPaddings.zero,
       ),
       'div': Style(
         margin: Margins.only(bottom: provider.paragraphSpacing),
+        letterSpacing: provider.letterSpacing,
+        padding: HtmlPaddings.zero,
       ),
     };
   }
