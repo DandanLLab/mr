@@ -9,22 +9,20 @@ import '../../../providers/reader_provider.dart';
 /// - 使用 CSS 变量驱动样式，无需重新加载即可更新
 /// - 使用 JavaScript 计算页数、处理翻页、检测交互
 ///
-/// 与 flutter_html 方案相比的优势：
-/// - 原生支持 text-indent（首行缩进）
-/// - 原生支持 white-space: pre（保留空格）
-/// - 原生支持所有 CSS 属性（text-decoration-thickness 等）
-/// - 性能更好（浏览器原生渲染，无需 Dart 侧 TextPainter 测量）
-/// - 分页准确（CSS column 原生分栏，无字符级切割误差）
+/// 翻页动画：双层容器方案
+/// - #reader-content-a：主层，静态时显示当前页，可交互（选文字、点链接）
+/// - #reader-content-b：动画层，默认 visibility:hidden，翻页时显示并做动画
+/// - 动画结束后 a 跳到目标页（无动画），b 隐藏
+/// - 全程文字选择可用（动画期间 b 拦截点击，但动画很快用户感知不到）
+///
+/// 三种翻页模式：
+/// - slide：a/b 同时平移（a 滑出，b 滑入）
+/// - cover：a 不动，b 从侧边滑入覆盖
+/// - simulation：b 带 3D rotateY 翻折从侧边滑入
 class ReaderHtmlTemplate {
   ReaderHtmlTemplate._();
 
   /// 生成完整的 HTML 文档
-  ///
-  /// [content] 已经过简繁转换和替换规则处理的纯文本章节内容
-  /// [title] 章节标题
-  /// [provider] 阅读器配置
-  /// [viewWidth] / [viewHeight] 可视区域尺寸（用于 column-width 计算）
-  /// [isScrollMode] 是否滚动模式（true: 取消分栏，改用纵向滚动）
   static String generate({
     required String content,
     required String title,
@@ -35,8 +33,8 @@ class ReaderHtmlTemplate {
     required int pageAnimDurationMs,
     required int pageModeIndex,
   }) {
-    final css = _generateCss(provider, isScrollMode, pageAnimDurationMs, pageModeIndex);
-    final js = _readerJs(pageAnimDurationMs);
+    final css = _generateCss(provider, isScrollMode);
+    final js = _readerJs();
     final paragraphsHtml = _buildParagraphsHtml(content, provider);
     final titleHtml = _buildTitleHtml(title, provider);
 
@@ -53,8 +51,13 @@ class ReaderHtmlTemplate {
 <body>
   <div id="reader-root">
     $titleHtml
-    <div id="reader-content">
-      $paragraphsHtml
+    <div id="reader-stage">
+      <div id="reader-content-a" class="reader-content">
+        $paragraphsHtml
+      </div>
+      <div id="reader-content-b" class="reader-content">
+        $paragraphsHtml
+      </div>
     </div>
   </div>
   <script>
@@ -67,7 +70,8 @@ class ReaderHtmlTemplate {
         viewHeight: ${viewHeight.floor()},
         isScrollMode: $isScrollMode,
         columnGap: 0,
-        pageAnimDurationMs: $pageAnimDurationMs
+        pageAnimDurationMs: $pageAnimDurationMs,
+        pageModeIndex: $pageModeIndex
       });
     });
   </script>
@@ -78,42 +82,25 @@ class ReaderHtmlTemplate {
 
   /// 生成完整 CSS
   ///
-  /// 分页模式核心：
-  /// - body 设置 column-width = viewWidth，column-gap = 0
-  /// - body 高度固定 = viewHeight，overflow: hidden
-  /// - 内容会自动流式分栏，每栏一页
+  /// 填充溢出修复（借鉴 lumina）：
+  /// - 用 min() 限制 padding 不超过 viewport - 100px
+  /// - 保证内容区最小 100px，padding 之和永不超 viewport
   ///
-  /// 滚动模式核心：
-  /// - 取消 column-width，改为正常文档流
-  /// - body overflow-y: auto
-  static String _generateCss(ReaderProvider provider, bool isScrollMode, int pageAnimDurationMs, int pageModeIndex) {
+  /// 双层容器：
+  /// - #reader-stage: relative + overflow:hidden，作为 a/b 的定位容器
+  /// - .reader-content: absolute + column 布局，a/b 重叠在同一位置
+  /// - #reader-content-b: 默认 visibility:hidden + pointer-events:none
+  static String _generateCss(ReaderProvider provider, bool isScrollMode) {
     final textColor = _colorToHex(provider.textColor);
     final bgColor = _colorToHex(provider.backgroundColor);
     final fontFamily = provider.fontFamily.isEmpty ? 'inherit' : provider.fontFamily;
-    // 缩进字符数：'\u3000\u3000' = 2 个全角空格 = 2em
     final indentEm = provider.paragraphIndent.length.toDouble();
-    // 标题对齐模式：0=居左, 1=居中, 3=居右, 2=隐藏
     final titleAlign = provider.titleMode == 1
         ? 'center'
         : provider.titleMode == 3
             ? 'right'
             : 'left';
-    // 标题字号 = 正文字号 * 1.4 + titleSize 增量
     final titleFontSizeCalc = 'calc(var(--reader-font-size) * 1.4 + ${provider.titleSize}px)';
-    // 翻页动画 timing function：
-    // PageMode { scroll:0, slide:1, cover:2, simulation:3, none:4 }
-    // - slide: ease-out（平滑滑出）
-    // - cover: cubic-bezier(0.4, 0, 1, 1)（加速覆盖）
-    // - simulation: cubic-bezier(0.25, 0.1, 0.25, 1)（缓冲翻折感）
-    // - none/scroll: 无 transition（滚动模式不用 translateX）
-    final String transitionTiming = pageAnimDurationMs > 0
-        ? switch (pageModeIndex) {
-            1 => 'ease-out',
-            2 => 'cubic-bezier(0.4, 0, 1, 1)',
-            3 => 'cubic-bezier(0.25, 0.1, 0.25, 1)',
-            _ => 'ease',
-          }
-        : 'none';
 
     return '''
 :root {
@@ -129,11 +116,19 @@ class ReaderHtmlTemplate {
   --reader-title-weight: ${provider.titleFontWeight};
   --reader-title-align: $titleAlign;
   --reader-title-font-size: $titleFontSizeCalc;
-  --reader-page-anim-duration: ${pageAnimDurationMs}ms;
-  --reader-padding-top: ${provider.paddingTop}px;
-  --reader-padding-bottom: ${provider.paddingBottom}px;
-  --reader-padding-left: ${provider.paddingLeft}px;
-  --reader-padding-right: ${provider.paddingRight}px;
+  /* 原始 padding 值（用户配置） */
+  --reader-padding-top-raw: ${provider.paddingTop}px;
+  --reader-padding-bottom-raw: ${provider.paddingBottom}px;
+  --reader-padding-left-raw: ${provider.paddingLeft}px;
+  --reader-padding-right-raw: ${provider.paddingRight}px;
+  /* 限制 padding 不超 viewport，保证内容区最小 100px 防溢出 */
+  --reader-padding-top: min(var(--reader-padding-top-raw), calc((100vh - 100px) / 2));
+  --reader-padding-bottom: min(var(--reader-padding-bottom-raw), calc(100vh - 100px - var(--reader-padding-top)));
+  --reader-padding-left: min(var(--reader-padding-left-raw), calc((100vw - 100px) / 2));
+  --reader-padding-right: min(var(--reader-padding-right-raw), calc(100vw - 100px - var(--reader-padding-left)));
+  /* 安全区尺寸（内容区） */
+  --reader-safe-width: calc(100vw - var(--reader-padding-left) - var(--reader-padding-right));
+  --reader-safe-height: calc(100vh - var(--reader-padding-top) - var(--reader-padding-bottom));
   --reader-title-top-spacing: ${provider.titleTopSpacing}px;
   --reader-title-bottom-spacing: ${provider.titleBottomSpacing}px;
 }
@@ -141,7 +136,6 @@ class ReaderHtmlTemplate {
 * {
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
-  /* 允许长按选择文字（替代 Flutter SelectionArea） */
   -webkit-touch-callout: default;
   -webkit-user-select: text;
   user-select: text;
@@ -198,7 +192,7 @@ html, body {
 /* 高亮规则 CSS */
 ${generateHighlightCss(provider)}
 
-/* 分页模式：CSS Multi-column 布局 */
+/* ============ 分页模式 ============ */
 body.reader-paged {
   overflow: hidden;
 }
@@ -206,23 +200,48 @@ body.reader-paged {
 body.reader-paged #reader-root {
   height: 100vh;
   width: 100vw;
-  /* 防止 padding 过大时内容溢出视口 */
   overflow: hidden;
 }
 
-body.reader-paged #reader-content {
-  /* max() 确保最小内容区 100px，防止 padding 之和超过视口导致 calc 结果为负 */
-  column-width: max(100px, calc(100vw - var(--reader-padding-left) - var(--reader-padding-right)));
+/* stage：a/b 的定位容器，尺寸 = 安全区 */
+body.reader-paged #reader-stage {
+  position: relative;
+  width: var(--reader-safe-width);
+  height: var(--reader-safe-height);
+  overflow: hidden;
+}
+
+/* a/b 共用样式：absolute 重叠，column 分栏 */
+body.reader-paged .reader-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--reader-safe-width);
+  height: var(--reader-safe-height);
+  column-width: var(--reader-safe-width);
   column-gap: 0;
   column-fill: auto;
-  height: max(100px, calc(100vh - var(--reader-padding-top) - var(--reader-padding-bottom)));
   overflow: hidden;
-  /* 翻页动画：translateX 过渡，timing function 根据 PageMode 区分 */
-  transition: transform var(--reader-page-anim-duration) $transitionTiming;
   will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform: translate3d(0, 0, 0);
 }
 
-/* 滚动模式：正常文档流 */
+/* b 层默认隐藏，不拦截事件（点击穿透到 a） */
+body.reader-paged #reader-content-b {
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate3d(0, 0, 0);
+}
+
+/* b 层动画进行中：显示并暂时拦截事件（避免动画期间误触） */
+body.reader-paged #reader-content-b.animating {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+/* ============ 滚动模式 ============ */
 body.reader-scroll {
   overflow-y: auto;
   overflow-x: hidden;
@@ -233,13 +252,27 @@ body.reader-scroll #reader-root {
   min-height: 100vh;
 }
 
-body.reader-scroll #reader-content {
-  column-width: auto;
-  column-gap: 0;
+body.reader-scroll #reader-stage {
+  position: relative;
+  width: 100%;
   height: auto;
 }
 
-/* 图片样式（如果有） */
+body.reader-scroll .reader-content {
+  position: relative;
+  column-width: auto;
+  column-gap: 0;
+  height: auto;
+  width: 100%;
+  transform: none !important;
+}
+
+/* 滚动模式隐藏 b 层（不需要翻页动画） */
+body.reader-scroll #reader-content-b {
+  display: none;
+}
+
+/* 图片样式 */
 .reader-p img {
   max-width: 100%;
   height: auto;
@@ -360,58 +393,67 @@ body.reader-scroll #reader-content {
     return '#${argb.toRadixString(16).padLeft(8, '0').substring(2)}';
   }
 
-  /// JavaScript 脚本：分页计算 + 翻页 + 交互检测
+  /// JavaScript 脚本：分页计算 + 双层翻页动画 + 交互检测
   ///
-  /// API 暴露在 window.readerApi：
-  /// - init(config): 初始化
-  /// - getPageCount(): 获取总页数
-  /// - jumpToPage(pageIndex, animate?): 跳转到指定页（animate 默认 true）
-  /// - getCurrentPage(): 获取当前页码
-  /// - getScrollProgress(): 获取滚动进度（0-1）
-  /// - setScrollProgress(ratio): 设置滚动进度（仅滚动模式）
-  /// - checkTap(x, y): 检测点击位置（用于交互区分）
+  /// 双层翻页流程（从第 N 页 → 第 M 页）：
+  /// 1. b 跳到目标页 M（无动画），显示 b
+  /// 2. 根据 mode 和方向设置 a/b 的 transform 起止值
+  /// 3. 启动 transition 动画
+  /// 4. transitionend 回调：a 跳到 M（无动画），b 隐藏
   ///
-  /// 翻页动画：CSS transition 驱动 translateX 过渡，时长由
-  /// --reader-page-anim-duration 控制（pageAnimDurationMs 注入）。
-  /// 进度恢复时传 animate=false 临时禁用 transition 避免初始滑动。
-  static String _readerJs(int pageAnimDurationMs) {
-    // duration 为 0 时 JS 的 animEnabled 会为 false，所有跳转都无动画
+  /// mode 行为：
+  /// - slide(1): a/b 同时平移（a 滑出，b 滑入）
+  /// - cover(2): a 不动，b 从侧边滑入覆盖
+  /// - simulation(3): b 带 3D rotateY 翻折滑入
+  /// - none(4): 无动画，a 直接跳到目标页
+  static String _readerJs() {
     return r'''
 window.readerApi = (function() {
-  var config = { viewWidth: 0, viewHeight: 0, isScrollMode: false, columnGap: 0, pageAnimDurationMs: 0 };
+  var config = { viewWidth: 0, viewHeight: 0, isScrollMode: false, columnGap: 0, pageAnimDurationMs: 0, pageModeIndex: 4 };
   var body = document.body;
-  var animEnabled = true; // 全局动画开关（false 时所有跳转都无动画）
+  var contentA = null;  // 主层（静态可交互）
+  var contentB = null;  // 动画层（默认隐藏）
+  var animEnabled = true;     // 全局动画开关
+  var isAnimating = false;    // 当前是否在动画中
+  var currentPage = 0;        // 当前页码（a 显示的页）
+  var animEndTimer = null;    // 动画超时兜底（防止 transitionend 不触发）
 
   function init(cfg) {
     config = cfg;
-    animEnabled = (config.pageAnimDurationMs || 0) > 0;
+    animEnabled = (config.pageAnimDurationMs || 0) > 0 && (config.pageModeIndex !== 4);
+    contentA = document.getElementById('reader-content-a');
+    contentB = document.getElementById('reader-content-b');
     body.classList.add(config.isScrollMode ? 'reader-scroll' : 'reader-paged');
-    // 绑定 click 监听器：WebView 拦截了 pointer 事件，外层 Listener 收不到
-    // tap，所以由 JS 检测 click 后回调 Dart 侧处理（菜单/翻页分区）
+
+    // 绑定 click 监听器
     document.addEventListener('click', function(e) {
-      // 点击图片交给 onImageTap
+      if (isAnimating) return; // 动画中忽略点击
       if (e.target && e.target.tagName === 'IMG') {
         notifyImageTap(e.target.src, e.target.getBoundingClientRect());
         return;
       }
-      // 取 clientX/clientY（相对 WebView 视口）
       notifyTap(e.clientX, e.clientY);
     }, { passive: true });
-    // 滚动模式：监听 scroll 事件，防抖回调进度（用于保存/恢复阅读位置）
+
+    // 滚动模式：监听 scroll 事件
     if (config.isScrollMode) {
       var scrollTimer = null;
-      var scrollTarget = config.isScrollMode ? body : null;
       window.addEventListener('scroll', function() {
         if (scrollTimer) clearTimeout(scrollTimer);
         scrollTimer = setTimeout(function() {
           var progress = getScrollProgress();
           if (window.flutter_inappwebview) {
-            // 用 progress * 1000 作为「虚拟页码」传给 Dart 侧
             window.flutter_inappwebview.callHandler('onPageChanged', Math.round(progress * 1000));
           }
         }, 200);
       }, { passive: true });
     }
+
+    // b 层 transitionend 监听（动画结束清理）
+    if (contentB) {
+      contentB.addEventListener('transitionend', onAnimEnd);
+    }
+
     // 等待 DOM 渲染完成后通知 Dart 侧
     requestAnimationFrame(function() {
       requestAnimationFrame(function() {
@@ -421,56 +463,180 @@ window.readerApi = (function() {
   }
 
   function getColumnWidth() {
-    // column-width = 100vw - paddingLeft - paddingRight
+    return config.viewWidth || (window.innerWidth - getPaddingLeft() - getPaddingRight());
+  }
+
+  function getPaddingLeft() {
     var root = document.getElementById('reader-root');
-    var style = getComputedStyle(root);
-    var pl = parseFloat(style.paddingLeft) || 0;
-    var pr = parseFloat(style.paddingRight) || 0;
-    return window.innerWidth - pl - pr;
+    return parseFloat(getComputedStyle(root).paddingLeft) || 0;
+  }
+
+  function getPaddingRight() {
+    var root = document.getElementById('reader-root');
+    return parseFloat(getComputedStyle(root).paddingRight) || 0;
   }
 
   function getPageCount() {
     if (config.isScrollMode) return 1;
-    var content = document.getElementById('reader-content');
-    if (!content) return 1;
+    if (!contentA) return 1;
     var columnWidth = getColumnWidth();
     var gap = config.columnGap || 0;
-    var scrollWidth = content.scrollWidth;
+    var scrollWidth = contentA.scrollWidth;
     return Math.max(1, Math.round((scrollWidth + gap) / (columnWidth + gap)));
   }
 
   function getCurrentPage() {
     if (config.isScrollMode) return 0;
-    var content = document.getElementById('reader-content');
-    if (!content) return 0;
-    var columnWidth = getColumnWidth();
-    var gap = config.columnGap || 0;
-    var scrollLeft = content.scrollLeft || window.scrollX || 0;
-    return Math.round(scrollLeft / (columnWidth + gap));
+    return currentPage;
   }
 
-  // 翻到指定页
-  // animate: true=带过渡动画（用户翻页）, false=无动画（进度恢复/初始化）
+  // ============ 翻页核心 ============
+  // animate: true=带动画（用户翻页）, false=无动画（进度恢复/初始化）
   function jumpToPage(pageIndex, animate) {
     if (config.isScrollMode) return;
-    var content = document.getElementById('reader-content');
-    if (!content) return;
+    if (!contentA || !contentB) return;
+
+    var pageCount = getPageCount();
+    if (pageIndex < 0) pageIndex = 0;
+    if (pageIndex >= pageCount) pageIndex = pageCount - 1;
+
+    var useAnim = animate !== false && animEnabled && !isAnimating;
+
+    if (!useAnim) {
+      // 无动画：a 直接跳到目标页，b 隐藏重置
+      jumpA(pageIndex, false);
+      hideB();
+      currentPage = pageIndex;
+      notifyPageChanged(pageIndex);
+      return;
+    }
+
+    // 有动画：用 b 做过渡
+    var isForward = pageIndex > currentPage;
     var columnWidth = getColumnWidth();
     var gap = config.columnGap || 0;
-    var offset = pageIndex * (columnWidth + gap);
-    // 临时禁用 transition（animate=false 或全局 animEnabled=false）
-    var useAnim = animate !== false && animEnabled;
-    if (!useAnim) {
-      content.style.transition = 'none';
+    var step = columnWidth + gap;
+
+    // 1. b 跳到目标页（无动画）
+    contentB.style.transition = 'none';
+    contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
+    contentB.style.transformStyle = 'preserve-3d';
+    // 强制重排
+    void contentB.offsetHeight;
+
+    // 2. 显示 b 并标记动画中
+    contentB.classList.add('animating');
+    isAnimating = true;
+
+    // 3. 设置 a/b 的起始 transform（动画起点）
+    var mode = config.pageModeIndex;
+    var duration = config.pageAnimDurationMs;
+
+    if (isForward) {
+      // 前翻（下一页）：b 从右侧（+1 列）滑入到目标页
+      if (mode === 1) {
+        // slide: a 同时向左滑出（多偏移 1 列），b 从右滑入
+        contentA.style.transition = 'transform ' + duration + 'ms ease-out';
+        contentA.style.transform = 'translate3d(' + (-(pageIndex + 1) * step) + 'px, 0, 0)';
+        contentB.style.transition = 'transform ' + duration + 'ms ease-out';
+        contentB.style.transform = 'translate3d(' + (-(pageIndex - 1) * step) + 'px, 0, 0)';
+        void contentB.offsetHeight;
+        contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
+      } else if (mode === 2) {
+        // cover: a 不动，b 从右滑入覆盖
+        contentA.style.transition = 'none';
+        contentB.style.transition = 'transform ' + duration + 'ms cubic-bezier(0.4, 0, 1, 1)';
+        contentB.style.transform = 'translate3d(' + (-(pageIndex - 1) * step) + 'px, 0, 0)';
+        void contentB.offsetHeight;
+        contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
+      } else if (mode === 3) {
+        // simulation: b 带 rotateY 从右翻折滑入
+        contentA.style.transition = 'none';
+        contentB.style.transition = 'transform ' + duration + 'ms cubic-bezier(0.25, 0.1, 0.25, 1)';
+        contentB.style.transformOrigin = 'left center';
+        contentB.style.transform = 'translate3d(' + (-(pageIndex - 1) * step) + 'px, 0, 0) rotateY(-90deg)';
+        void contentB.offsetHeight;
+        contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(0deg)';
+      }
+    } else {
+      // 后翻（上一页）：b 从左侧（-1 列）滑入到目标页
+      if (mode === 1) {
+        // slide: a 同时向右滑出（少偏移 1 列），b 从左滑入
+        contentA.style.transition = 'transform ' + duration + 'ms ease-out';
+        contentA.style.transform = 'translate3d(' + (-(pageIndex - 1) * step) + 'px, 0, 0)';
+        contentB.style.transition = 'transform ' + duration + 'ms ease-out';
+        contentB.style.transform = 'translate3d(' + (-(pageIndex + 1) * step) + 'px, 0, 0)';
+        void contentB.offsetHeight;
+        contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
+      } else if (mode === 2) {
+        // cover: a 不动，b 从左滑入覆盖
+        contentA.style.transition = 'none';
+        contentB.style.transition = 'transform ' + duration + 'ms cubic-bezier(0.4, 0, 1, 1)';
+        contentB.style.transform = 'translate3d(' + (-(pageIndex + 1) * step) + 'px, 0, 0)';
+        void contentB.offsetHeight;
+        contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
+      } else if (mode === 3) {
+        // simulation: b 带 rotateY 从左翻折滑入
+        contentA.style.transition = 'none';
+        contentB.style.transition = 'transform ' + duration + 'ms cubic-bezier(0.25, 0.1, 0.25, 1)';
+        contentB.style.transformOrigin = 'right center';
+        contentB.style.transform = 'translate3d(' + (-(pageIndex + 1) * step) + 'px, 0, 0) rotateY(90deg)';
+        void contentB.offsetHeight;
+        contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(0deg)';
+      }
     }
-    content.style.transform = 'translateX(-' + offset + 'px)';
+
+    // 4. 兜底超时（防止 transitionend 不触发）
+    if (animEndTimer) clearTimeout(animEndTimer);
+    animEndTimer = setTimeout(function() {
+      onAnimEnd();
+    }, duration + 50);
+
+    currentPage = pageIndex;
+  }
+
+  // a 直接跳到指定页（无动画）
+  function jumpA(pageIndex, useAnim) {
+    if (!contentA) return;
+    var columnWidth = getColumnWidth();
+    var gap = config.columnGap || 0;
+    var step = columnWidth + gap;
     if (!useAnim) {
-      // 强制重排，确保下次 transition 生效
-      void content.offsetHeight;
-      content.style.transition = '';
+      contentA.style.transition = 'none';
     }
+    contentA.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
+    if (!useAnim) {
+      void contentA.offsetHeight;
+      contentA.style.transition = '';
+    }
+  }
+
+  // 隐藏并重置 b 层
+  function hideB() {
+    if (!contentB) return;
+    contentB.classList.remove('animating');
+    contentB.style.transition = 'none';
+    contentB.style.transform = 'translate3d(0, 0, 0)';
+    contentB.style.transformOrigin = '';
+    contentB.style.transformStyle = '';
+    void contentB.offsetHeight;
+    contentB.style.transition = '';
+  }
+
+  // 动画结束回调
+  function onAnimEnd() {
+    if (!isAnimating) return;
+    if (animEndTimer) {
+      clearTimeout(animEndTimer);
+      animEndTimer = null;
+    }
+    isAnimating = false;
+    // a 跳到当前页（无动画）
+    jumpA(currentPage, false);
+    // b 隐藏重置
+    hideB();
     // 通知 Dart 侧页码变更
-    notifyPageChanged(pageIndex);
+    notifyPageChanged(currentPage);
   }
 
   function getScrollProgress() {
@@ -479,34 +645,30 @@ window.readerApi = (function() {
       var sh = body.scrollHeight - window.innerHeight;
       return sh > 0 ? st / sh : 0;
     }
-    return getPageCount() > 0 ? getCurrentPage() / getPageCount() : 0;
+    return getPageCount() > 0 ? currentPage / getPageCount() : 0;
   }
 
   function setScrollProgress(ratio) {
     if (!config.isScrollMode) {
       var pageCount = getPageCount();
       var page = Math.round(ratio * pageCount);
-      jumpToPage(page);
+      jumpToPage(page, false);
       return;
     }
     var sh = body.scrollHeight - window.innerHeight;
     body.scrollTop = sh * ratio;
   }
 
-  // 获取当前滚动像素偏移（滚动模式进度保存用）
   function getScrollOffset() {
     if (!config.isScrollMode) return 0;
     return body.scrollTop || document.documentElement.scrollTop || 0;
   }
 
-  // 滚动到指定像素偏移（滚动模式进度恢复用）
   function scrollToOffset(px) {
     if (!config.isScrollMode) return;
     body.scrollTop = Math.max(0, px);
   }
 
-  // 按视口高度滚动（direction: -1 上翻 / +1 下翻）
-  // 返回滚动后的进度（0-1），若已到顶/底返回 -1 表示触发章节切换
   function scrollByViewport(direction) {
     if (!config.isScrollMode) return -1;
     var viewport = window.innerHeight;
@@ -516,31 +678,26 @@ window.readerApi = (function() {
     var target = current + direction * viewport * 0.9;
     if (target <= 0) {
       body.scrollTop = 0;
-      return -1; // 已到顶
+      return -1;
     }
     if (target >= maxScroll) {
       body.scrollTop = maxScroll;
-      return -1; // 已到底
+      return -1;
     }
     body.scrollTop = target;
     return target / maxScroll;
   }
 
   function checkTap(x, y) {
-    // 转换为 WebView 内部坐标（考虑 padding）
     var root = document.getElementById('reader-root');
     var rect = root.getBoundingClientRect();
     var localX = x - rect.left;
     var localY = y - rect.top;
-
-    // 检测是否点击在交互元素上（目前只有图片）
     var el = document.elementFromPoint(localX, localY);
     if (el && el.tagName === 'IMG') {
       notifyImageTap(el.src, el.getBoundingClientRect());
       return;
     }
-
-    // 通知 Dart 侧普通点击
     notifyTap(x, y);
   }
 

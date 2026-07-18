@@ -1,4 +1,3 @@
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
@@ -149,12 +148,6 @@ window.readerApi.getPageCount();
 ''',
     );
     return _toInt(result);
-  }
-
-  /// 截图（用于翻页动画）
-  Future<ui.Image?> takeScreenshot() async {
-    // 翻页动画暂时不实现截图，返回 null 走简化路径
-    return null;
   }
 
   /// 设置 JS Handler（在 WebView 创建时调用）
