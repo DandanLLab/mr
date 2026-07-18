@@ -562,17 +562,29 @@ window.readerApi = (function() {
   }
 
   // 禁用所有手势缩放
+  // 多层防护：iOS gesture 事件 + touchstart/touchmove 多指拦截 + 双击 + wheel
+  // 关键：必须在 touchstart 阶段就拦截多指，仅 touchmove 拦不住 Android
+  // WebView 底层手势识别器（它在 touchstart 时就进入缩放模式）
   function disableGestureZoom() {
     // iOS: gesturestart/change/end
     document.addEventListener('gesturestart', function(e) { e.preventDefault(); }, { passive: false });
     document.addEventListener('gesturechange', function(e) { e.preventDefault(); }, { passive: false });
     document.addEventListener('gestureend', function(e) { e.preventDefault(); }, { passive: false });
-    // 通用: 双指 touchmove 阻止（防止 WebView 内部双指缩放）
+
+    // 通用: touchstart 阶段检测多指，立即 preventDefault 阻止 WebView 进入缩放模式
+    document.addEventListener('touchstart', function(e) {
+      if (e.touches.length > 1) {
+        e.preventDefault();
+      }
+    }, { passive: false });
+
+    // touchmove 多指也拦截（双保险）
     document.addEventListener('touchmove', function(e) {
       if (e.touches.length > 1) {
         e.preventDefault();
       }
     }, { passive: false });
+
     // 双击缩放
     var lastTouchEnd = 0;
     document.addEventListener('touchend', function(e) {
@@ -582,6 +594,7 @@ window.readerApi = (function() {
       }
       lastTouchEnd = now;
     }, { passive: false });
+
     // 鼠标滚轮缩放（Ctrl+wheel）
     document.addEventListener('wheel', function(e) {
       if (e.ctrlKey) e.preventDefault();
@@ -589,21 +602,26 @@ window.readerApi = (function() {
   }
 
   function getColumnWidth() {
-    // column-width = WebView 实际宽度 - paddingLeft - paddingRight
-    // 必须用 window.innerWidth（= WebView widget 实际尺寸，与 CSS --reader-vw 一致），
-    // 不能用 config.viewWidth（Dart 传入，可能与实际 widget 尺寸有偏差）
-    var viewWidth = window.innerWidth;
-    return viewWidth - getPaddingLeft() - getPaddingRight();
+    // column-width = 安全区宽度（已扣除 padding）
+    // 直接读 CSS 变量 --reader-safe-width（由 :root 上的 calc 计算好），
+    // 不能用 window.innerWidth - paddingLeft（padding 在 html 上而非 #reader-root）
+    var root = document.documentElement;
+    var v = getComputedStyle(root).getPropertyValue('--reader-safe-width').trim();
+    var px = parseFloat(v);
+    if (!px || px <= 0) {
+      // 兜底：用 window.innerWidth（无 padding 情况）
+      px = window.innerWidth;
+    }
+    return px;
   }
 
   function getPaddingLeft() {
-    var root = document.getElementById('reader-root');
-    return parseFloat(getComputedStyle(root).paddingLeft) || 0;
+    // padding 在 html 上（参考 lumina），不在 #reader-root
+    return parseFloat(getComputedStyle(document.documentElement).paddingLeft) || 0;
   }
 
   function getPaddingRight() {
-    var root = document.getElementById('reader-root');
-    return parseFloat(getComputedStyle(root).paddingRight) || 0;
+    return parseFloat(getComputedStyle(document.documentElement).paddingRight) || 0;
   }
 
   function getPageCount() {
@@ -706,16 +724,21 @@ window.readerApi = (function() {
       contentB.style.transition = 'transform ' + duration + 'ms ' + bTiming;
       void contentB.offsetHeight;
       if (mode === 3) {
+        // simulation 模式：rotateY 必须分两帧设置，否则浏览器会批量处理
+        // 跳过 transition（同帧内对同一属性设两个值只保留最后一个）
         if (isForward) {
           contentB.style.transformOrigin = 'right center';
           contentB.style.transform = 'translate3d(' + (-(pageIndex - 1) * step) + 'px, 0, 0) rotateY(90deg)';
-          void contentB.offsetHeight;
-          contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(0deg)';
+          // 下一帧再设终点，触发 transition
+          requestAnimationFrame(function() {
+            contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(0deg)';
+          });
         } else {
           contentB.style.transformOrigin = 'left center';
           contentB.style.transform = 'translate3d(' + (-(pageIndex + 1) * step) + 'px, 0, 0) rotateY(-90deg)';
-          void contentB.offsetHeight;
-          contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(0deg)';
+          requestAnimationFrame(function() {
+            contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(0deg)';
+          });
         }
       } else {
         contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';

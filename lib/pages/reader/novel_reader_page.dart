@@ -130,10 +130,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   bool? _lastKeepScreenOn;
   // 上次记录的 screenBrightness 配置（用于检测变化触发亮度调节）
   double? _lastScreenBrightness;
-  // 双指缩放起始字号（用于计算缩放后的目标字号）
-  double? _scaleStartFontSize;
-  // 双指缩放过程中最新的 scale（onScaleEnd 时取不到 scale，需在 onScaleUpdate 中累积）
-  double _scaleCurrentScale = 1.0;
   // 滑动翻页：pointerDown 时间，用于 _onPointerUp 判断是 tap 还是 swipe
   DateTime? _swipeStartTime;
   // 滑动翻页阈值：水平滑动 > 40px 且垂直偏移 < 60px 判为左右滑翻页
@@ -250,39 +246,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     return KeyEventResult.ignored;
   }
 
-  /// 双指缩放开始：记录起始字号
-  void _onScaleStart(ScaleStartDetails details) {
-    final provider = context.read<ReaderProvider>();
-    _scaleStartFontSize = provider.fontSize;
-    _scaleCurrentScale = 1.0;
-    // 缩放期间清空 tap 判定，避免松手时误触发菜单/翻页
-    _lastDownEvent = null;
-  }
-
-  /// 双指缩放进行中：累积最新 scale（onScaleEnd 取不到 scale）
-  void _onScaleUpdate(ScaleUpdateDetails details) {
-    _scaleCurrentScale = details.scale;
-  }
-
-  /// 双指缩放结束：根据累积的 scale 调整字号
-  void _onScaleEnd(ScaleEndDetails details) {
-    final startSize = _scaleStartFontSize;
-    _scaleStartFontSize = null;
-    final scale = _scaleCurrentScale;
-    _scaleCurrentScale = 1.0;
-    if (startSize == null) return;
-    // scale > 1 表示放大，< 1 表示缩小
-    // 仅在显著缩放（>5%）时调整，避免误触
-    if ((scale - 1.0).abs() < 0.05) return;
-    final provider = context.read<ReaderProvider>();
-    var newSize = startSize * scale;
-    // 至少变化 1px 才生效
-    if ((newSize - startSize).abs() < 1.0) {
-      newSize = startSize + (scale > 1.0 ? 1.0 : -1.0);
-    }
-    // 字号范围：12-48
-    provider.setFontSize(newSize.clamp(12.0, 48.0));
-  }
 
   @override
   void dispose() {
@@ -1317,27 +1280,20 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           focusNode: _focusNode,
           autofocus: true,
           onKeyEvent: _onKeyEvent,
-          child: GestureDetector(
-            // 双指缩放字号（替代迁移前 onScaleEnd）
-            // behavior 必须为 translucent，否则会拦截 WebView 的点击
+          child: Listener(
+            onPointerDown: _onPointerDown,
+            onPointerUp: _onPointerUp,
             behavior: HitTestBehavior.translucent,
-            onScaleStart: _onScaleStart,
-            onScaleUpdate: _onScaleUpdate,
-            onScaleEnd: _onScaleEnd,
-            child: Listener(
-              onPointerDown: _onPointerDown,
-              onPointerUp: _onPointerUp,
-              behavior: HitTestBehavior.translucent,
-              child: Stack(
-                children: [
-                  if (_hasBackgroundImage(provider))
-                    Positioned.fill(
-                      child: Image.file(
-                        File(provider.backgroundImagePath!),
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                      ),
+            child: Stack(
+              children: [
+                if (_hasBackgroundImage(provider))
+                  Positioned.fill(
+                    child: Image.file(
+                      File(provider.backgroundImagePath!),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                     ),
+                  ),
                   // WebView 渲染层：文字选择由 WebView 内部 CSS user-select 控制
                   // 旧的 SelectionArea 仅对 flutter_html 生效，对 PlatformView 无效
                   _buildContent(provider),
@@ -1436,9 +1392,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                     _loadChapterContent();
                   },
                 )
-            ],
-          ),
-        ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1516,6 +1471,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       _webviewReady = true;
       _webviewReloading = false;
     });
+    // 关键：标记 controller 就绪，否则 jumpToPage 第一行 if (!_isReady) return
+    // 直接返回，翻页完全失效（之前 markReady() 方法定义了但从未被调用）
+    _readerWebViewController.markReady();
     final provider = context.read<ReaderProvider>();
     final isScrollMode = _isScrollLikeMode(provider);
 
