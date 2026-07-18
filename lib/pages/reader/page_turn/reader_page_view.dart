@@ -109,21 +109,6 @@ class _ReaderPageViewState extends State<ReaderPageView>
   Timer? _pointerUpFallbackTimer;
   static const Duration _pointerUpFallbackDelay = Duration(milliseconds: 600);
 
-  /// 动画安全兜底 timer（问题 A 修复）
-  ///
-  /// 背景：用户反馈「动画卡住不销毁」——动画启动后画面不动，覆盖层不消失。
-  /// 根因可能：
-  /// 1. Ticker.start() 后因 widget 重建/SchedulerBinding 调度异常，
-  ///    _onTick 没被调用 → _scroller 不更新 → onAnimStop 不触发
-  /// 2. _scroller.computeScrollOffset 因时间戳异常永远返回 true
-  /// 3. onAnimStart 中 _scroller.startScroll 后 startTicker 调用链异常
-  ///
-  /// 兜底策略：onAnimStart 后启动 1.5 秒 timer，正常情况下 onAnimStop
-  /// 会取消它；若 timer 触发说明动画卡住，强制清理覆盖层。
-  /// 1.5 秒 > 动画最大时长 500ms + onPerformPageTurn 200ms + 截图 200ms ≈ 900ms
-  Timer? _animSafetyTimer;
-  static const Duration _animSafetyTimeout = Duration(milliseconds: 1500);
-
   /// 截图像素比（自适应屏幕 DPR）
   ///
   /// 之前硬编码 3.0：
@@ -187,9 +172,6 @@ class _ReaderPageViewState extends State<ReaderPageView>
       // 取消 pointerUp 兜底 timer（避免切换后误触发 _onPointerUpFallback）
       _pointerUpFallbackTimer?.cancel();
       _pointerUpFallbackTimer = null;
-      // 问题 A 修复：取消动画兜底 timer
-      _animSafetyTimer?.cancel();
-      _animSafetyTimer = null;
       // 自增 token 让正在进行的异步操作（_startTurnSequence/_finalizeTurn 的
       // await 链）失效，避免它们在新 delegate 创建后还注入旧 bitmap
       _turnToken++;
@@ -287,8 +269,6 @@ class _ReaderPageViewState extends State<ReaderPageView>
   /// 实际 WebView 还没跳页。此时通知 onPageTurnCompleted 会多保存一次进度，
   /// 但 _onPageTurnCompleted 只做 _isPageTurning=false + setState，无副作用。
   void _forceFinishCurrentTurn() {
-    _animSafetyTimer?.cancel();
-    _animSafetyTimer = null;
     _ticker.stop();
     _delegate.abortAnim();
     final direction = _delegate.direction;
@@ -313,7 +293,11 @@ class _ReaderPageViewState extends State<ReaderPageView>
   void _onPointerMove(PointerMoveEvent event) {
     if (widget.isScrollMode) return;
     if (_downPosition == null) return;
-    if (_isTurning) return; // 翻页中不响应新移动
+    // _startTurnSequence 在 await 截图期间（_isTurning=true 但 _showAnimationLayer=false）
+    // 暂时忽略 move，避免 delegate 没图可画导致空白
+    // 一旦 _showAnimationLayer=true（截图完成覆盖层已显示），恢复正常处理
+    // 让 delegate.onTouch 跟随手指实时绘制翻折效果（丝滑流畅的关键）
+    if (_isTurning && !_showAnimationLayer) return;
 
     // 用户在拖动，重置 pointerUp 兜底定时器
     _pointerUpFallbackTimer?.cancel();
@@ -421,33 +405,25 @@ class _ReaderPageViewState extends State<ReaderPageView>
 
   /// 结束翻页流程（用户松手时调用）
   ///
-  /// 统一时序控制：不管 _startTurnSequence 是否完成，都从这里串行处理。
+  /// 设计变更（用户原话「只要用户触摸，就有动画；没摸就没动画」）：
+  /// - 触摸时：delegate.onTouch 实时绘制翻折效果跟随手指
+  /// - 松手时：直接跳到目标页，不播放完成动画
   ///
-  /// 步骤：
-  /// 1. 等待 _startTurnSequence 完成（如果有）—— 通过 _isTurning 标记
-  /// 2. 判断 isCancel：回拖取消，跑回弹动画
-  /// 3. 截图当前页（如果 _startTurnSequence 没截到，这里补截）
-  /// 4. 调用 onPerformPageTurn 让 WebView 跳页
-  /// 5. 等帧 + 截图目标页
-  /// 6. 注入 delegate + 启动动画
+  /// 不再做的步骤：
+  /// - 截图 targetBitmap（不播完成动画就不需要目标页截图）
+  /// - _delegate.onAnimStart / 启动 ticker（不播完成动画）
+  /// - 回弹动画（isCancel 时直接销毁，不跑回弹）
   Future<void> _finalizeTurn() async {
     final token = _turnToken;
 
-    // 用户回拖取消：不翻页，直接回弹动画
+    // 用户回拖取消：立即销毁覆盖层，不跑回弹动画
+    // （符合「没摸就没动画」原则：松手瞬间不再有任何自动播放的动画）
     if (_delegate.isCancel) {
-      // 等 _startTurnSequence 截图完成（如果有），否则 delegate 没图可画
-      // 简化：如果 _showAnimationLayer=false，说明截图还没完成或失败，
-      // 此时直接取消，不跑回弹动画
-      if (!_showAnimationLayer) {
-        _cancelTurn();
-        return;
-      }
-      _delegate.onAnimStart(_delegate.defaultAnimationSpeed);
-      setState(() {});
+      _cancelTurn();
       return;
     }
 
-    // NoAnimPageDelegate：不需要截图，直接跳页
+    // NoAnimPageDelegate：直接跳页（none 模式无动画，原逻辑保留）
     if (_delegate is NoAnimPageDelegate) {
       bool ok = true;
       try {
@@ -467,31 +443,7 @@ class _ReaderPageViewState extends State<ReaderPageView>
       return;
     }
 
-    // 确保 curBitmap 已注入（_finalizeTurn 时序简化）
-    //
-    // - 慢拖：_startTurnSequence 已完成，_showAnimationLayer=true，跳过自己截图
-    // - 快松：_startTurnSequence 还没截完，_finalizeStarted=true 让它后续
-    //   dispose return（不再注入），这里自己 _captureBoundary 作为 curBitmap
-    //
-    // 优化：原代码用 200ms 轮询（10ms × 20 次）等 _startTurnSequence 完成，
-    // 现在直接自己截图（耗时 50-100ms，比 200ms 轮询快）。
-    if (!_showAnimationLayer) {
-      final curBitmap = await _captureBoundary();
-      if (token != _turnToken || !mounted) {
-        curBitmap?.dispose();
-        return;
-      }
-      if (curBitmap == null) {
-        _cancelTurn();
-        return;
-      }
-      _delegate.setBitmaps(cur: curBitmap);
-      setState(() {
-        _showAnimationLayer = true;
-      });
-    }
-
-    // 调用外部翻页（此处才真正让 WebView 跳页）
+    // 让 WebView 立即跳页（覆盖层仍显示挡住跳页瞬间，避免视觉跳跃）
     bool ok = true;
     try {
       ok = await widget.onPerformPageTurn(_delegate.direction);
@@ -506,37 +458,20 @@ class _ReaderPageViewState extends State<ReaderPageView>
       return;
     }
 
-    // 截图目标页（此时 WebView 已跳到目标页，覆盖层仍显示挡住用户视线）
-    final targetBitmap = await _captureBoundary();
-    if (token != _turnToken || !mounted) {
-      targetBitmap?.dispose();
-      return;
-    }
-    if (targetBitmap == null) {
-      _cancelTurn();
-      return;
-    }
-
-    // 注入目标页截图
-    if (_delegate.direction == PageDirection.next) {
-      _delegate.setBitmaps(next: targetBitmap);
-    } else {
-      _delegate.setBitmaps(prev: targetBitmap);
-    }
-
-    // 启动自动动画
-    _delegate.onAnimStart(_delegate.defaultAnimationSpeed);
-    // 问题 A 修复：启动动画安全兜底 timer
-    // 若 1.5 秒后动画还没正常结束（onAnimStop 未触发），强制清理覆盖层
-    _animSafetyTimer?.cancel();
-    _animSafetyTimer = Timer(_animSafetyTimeout, _onAnimSafetyTimeout);
-    setState(() {});
+    // 立即销毁覆盖层 + 重置 delegate
+    // （用户已松手，按「没摸就没动画」原则不再播放任何完成动画）
+    _isTurning = false;
+    _finalizeStarted = false;
+    setState(() {
+      _showAnimationLayer = false;
+    });
+    _delegate.recycleBitmaps();
+    widget.onPageTurnCompleted?.call(_delegate.direction);
+    _delegate.onDown(); // 重置 delegate 状态供下次翻页
   }
 
   /// 取消翻页（用户回拖或外部中断）
   void _cancelTurn() {
-    _animSafetyTimer?.cancel(); // 问题 A 修复：取消兜底 timer
-    _animSafetyTimer = null;
     _turnToken++; // 使正在进行的截图/切换失效
     _ticker.stop(); // 保险：防止 delegate 自己没停干净
     _isTurning = false;
@@ -551,8 +486,6 @@ class _ReaderPageViewState extends State<ReaderPageView>
   }
 
   void _onAnimStop(PageDirection direction) {
-    _animSafetyTimer?.cancel(); // 问题 A 修复：动画正常结束，取消兜底 timer
-    _animSafetyTimer = null;
     _ticker.stop(); // delegate.onAnimStop 已停过，这里再保险一次
     _isTurning = false;
     _finalizeStarted = false;
@@ -564,29 +497,6 @@ class _ReaderPageViewState extends State<ReaderPageView>
     widget.onPageTurnCompleted?.call(direction);
   }
 
-  /// 问题 A 修复：动画安全兜底
-  ///
-  /// 触发条件：onAnimStart 后 1.5 秒内 onAnimStop 没被调用
-  /// （Ticker 异常 / _scroller 卡死 / 调度链断开等）
-  ///
-  /// 策略：强制模拟 onAnimStop 流程清理覆盖层。
-  /// WebView 此时已跳到目标页（onPerformPageTurn 已完成），
-  /// 所以 onPageTurnCompleted 应该被调用（进度保存由其处理）。
-  void _onAnimSafetyTimeout() {
-    if (!mounted) return;
-    if (!_showAnimationLayer) return; // 动画已正常结束，无需兜底
-    debugPrint('[ReaderPageView] 动画安全兜底触发（Ticker 异常或 onAnimStop 未触发）');
-    _ticker.stop();
-    _delegate.abortAnim(); // 兜底停 scroller 和 ticker
-    _isTurning = false;
-    _finalizeStarted = false;
-    setState(() {
-      _showAnimationLayer = false;
-    });
-    _delegate.recycleBitmaps();
-    widget.onPageTurnCompleted?.call(_delegate.direction);
-  }
-
   void _onAnimCancel() {
     _cancelTurn();
   }
@@ -594,7 +504,6 @@ class _ReaderPageViewState extends State<ReaderPageView>
   @override
   void dispose() {
     _pointerUpFallbackTimer?.cancel();
-    _animSafetyTimer?.cancel(); // 问题 A 修复
     _ticker.dispose();
     _delegate.onDestroy();
     super.dispose();
