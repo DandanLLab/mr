@@ -51,13 +51,11 @@ class ReaderHtmlTemplate {
 <body>
   <div id="reader-root">
     $titleHtml
-    <div id="reader-stage">
-      <div id="reader-content-a" class="reader-content">
-        $paragraphsHtml
-      </div>
-      <div id="reader-content-b" class="reader-content">
-        $paragraphsHtml
-      </div>
+    <div id="reader-content-a" class="reader-content">
+      $paragraphsHtml
+    </div>
+    <div id="reader-content-b" class="reader-content">
+      $paragraphsHtml
     </div>
   </div>
   <script>
@@ -147,11 +145,14 @@ class ReaderHtmlTemplate {
   user-select: text;
 }
 
+/* 参考 lumina：html/body 统一 100%/100%，padding 放 html 上
+   100vw/100vh 在 InAppWebView 里可能等于屏幕尺寸而非 widget 尺寸，
+   所以用 --reader-vw/vh（JS 注入 window.innerWidth/innerHeight）替代 */
 html, body {
   margin: 0;
   padding: 0;
-  width: 100%;
-  height: 100%;
+  width: var(--reader-vw);
+  height: var(--reader-vh);
   background-color: var(--reader-bg-color);
   color: var(--reader-text-color);
   font-family: var(--reader-font-family);
@@ -166,7 +167,8 @@ html, body {
   touch-action: manipulation;
 }
 
-#reader-root {
+/* padding 放 html 上（与 lumina 一致），body 不设 padding */
+html {
   padding-top: var(--reader-padding-top);
   padding-bottom: var(--reader-padding-bottom);
   padding-left: var(--reader-padding-left);
@@ -201,30 +203,26 @@ html, body {
 ${generateHighlightCss(provider)}
 
 /* ============ 分页模式 ============ */
+/* 参考 lumina：body 直接做 stage（position:relative + overflow:hidden），
+   a/b 作为 body 的直接子元素，column 布局放在 a/b 上。
+   不再用 #reader-root/#reader-stage 多层嵌套，避免 CSS 变量在多层
+   计算时出现精度误差。 */
 body.reader-paged {
+  position: relative;
   overflow: hidden;
 }
 
 body.reader-paged #reader-root {
-  height: var(--reader-vh);
-  width: var(--reader-vw);
-  overflow: hidden;
-}
-
-/* stage：a/b 的定位容器，尺寸 = 安全区，负责裁剪溢出内容 */
-body.reader-paged #reader-stage {
   position: relative;
   width: var(--reader-safe-width);
   height: var(--reader-safe-height);
   overflow: hidden;
 }
 
-/* a/b 共用样式：absolute 重叠，column 分栏
+/* a/b 共用样式：absolute 重叠在 #reader-root 内，column 分栏
    关键：不设 width，让 column 布局自动扩展到内容总宽度，
    这样 scrollWidth 才能返回所有列的总宽度（= pageCount * columnWidth）。
-   裁剪由父容器 #reader-stage 的 overflow:hidden 负责。
-   如果在元素自身设 overflow:hidden + width，scrollWidth 只返回
-   元素自身宽度（一屏），getPageCount() 永远算出 1 页，翻页失效。 */
+   裁剪由父容器 #reader-root 的 overflow:hidden 负责。 */
 body.reader-paged .reader-content {
   position: absolute;
   top: 0;
@@ -265,11 +263,8 @@ body.reader-scroll {
 }
 
 body.reader-scroll #reader-root {
-  min-height: var(--reader-vh);
-}
-
-body.reader-scroll #reader-stage {
   position: relative;
+  min-height: var(--reader-safe-height);
   width: 100%;
   height: auto;
 }
@@ -464,6 +459,10 @@ window.readerApi = (function() {
     contentA = document.getElementById('reader-content-a');
     contentB = document.getElementById('reader-content-b');
     body.classList.add(config.isScrollMode ? 'reader-scroll' : 'reader-paged');
+
+    // 强制 html/body 不允许溢出（防止系统层因内容溢出而启用双指缩放）
+    document.documentElement.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
 
     // 关键：注入 WebView 实际尺寸到 CSS 变量
     // window.innerWidth/innerHeight = WebView widget 实际尺寸（DIP）

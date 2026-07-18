@@ -29,7 +29,6 @@ import '../../widgets/reader/reader_settings_sheet.dart';
 import '../../widgets/reader/reader_tts_bar.dart';
 import '../../widgets/change_source_sheet.dart';
 import '../../routes/app_routes.dart';
-import '../../services/app_logger.dart';
 import '../../utils/design_tokens.dart';
 import '../../utils/chinese_converter.dart';
 import 'webview/reader_webview.dart';
@@ -1423,7 +1422,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   },
                   onStartTts: _startTts,
                   onShowInterface: _showEnhancedSettings,
-                  onShowLog: _showLogDialog,
                   onShowSettings: () {
                     _hideMenu();
                     _showMoreSettingsDialog(provider);
@@ -1637,92 +1635,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   void _onWebviewImageTap(String src, Rect rect) {
     // 图片点击：打开图片预览（暂未实现，与旧 flutter_html 行为一致）
     debugPrint('[NovelReader] Image tap: $src');
-  }
-
-  // ==================== 日志对话框（抄 search_page） ====================
-
-  /// 显示日志对话框，过滤 JS 引擎类别（与搜索页一致风格）
-  void _showLogDialog() {
-    final logs = AppLogger.instance.getLogs(category: LogCategory.js);
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Row(
-            children: [
-              const Text('阅读器日志'),
-              const Spacer(),
-              Text(
-                '${logs.length} 条',
-                style: TextStyle(
-                  fontSize: DesignTokens.fontCaption,
-                  color: Theme.of(dialogContext).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-          content: SizedBox(
-            width: double.maxFinite,
-            height: 400,
-            child: logs.isEmpty
-                ? const Center(child: Text('暂无日志'))
-                : ListView.builder(
-                    itemCount: logs.length,
-                    itemBuilder: (context, index) {
-                      final entry = logs[logs.length - 1 - index];
-                      final timeStr =
-                          '${entry.time.hour.toString().padLeft(2, '0')}:'
-                          '${entry.time.minute.toString().padLeft(2, '0')}:'
-                          '${entry.time.second.toString().padLeft(2, '0')}';
-                      final levelIcon = entry.level == LogLevel.error
-                          ? '🔴'
-                          : entry.level == LogLevel.warning
-                              ? '🟡'
-                              : '🔵';
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: RichText(
-                          maxLines: 4,
-                          overflow: TextOverflow.ellipsis,
-                          text: TextSpan(
-                            style: DefaultTextStyle.of(context).style.copyWith(
-                                  fontSize: DesignTokens.fontCaption,
-                                ),
-                            children: [
-                              TextSpan(
-                                text: '$timeStr $levelIcon ',
-                                style: TextStyle(
-                                  fontFamily: 'monospace',
-                                  color: Theme.of(dialogContext)
-                                      .colorScheme
-                                      .onSurfaceVariant,
-                                ),
-                              ),
-                              TextSpan(
-                                text: '[${entry.category.label}] ',
-                                style: TextStyle(
-                                  color: Theme.of(dialogContext)
-                                      .colorScheme
-                                      .primary,
-                                ),
-                              ),
-                              TextSpan(text: entry.message),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('关闭'),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   bool _hasBackgroundImage(ReaderProvider provider) {
