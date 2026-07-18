@@ -109,6 +109,21 @@ class _ReaderPageViewState extends State<ReaderPageView>
   Timer? _pointerUpFallbackTimer;
   static const Duration _pointerUpFallbackDelay = Duration(milliseconds: 600);
 
+  /// 动画安全兜底 timer（问题 A 修复）
+  ///
+  /// 背景：用户反馈「动画卡住不销毁」——动画启动后画面不动，覆盖层不消失。
+  /// 根因可能：
+  /// 1. Ticker.start() 后因 widget 重建/SchedulerBinding 调度异常，
+  ///    _onTick 没被调用 → _scroller 不更新 → onAnimStop 不触发
+  /// 2. _scroller.computeScrollOffset 因时间戳异常永远返回 true
+  /// 3. onAnimStart 中 _scroller.startScroll 后 startTicker 调用链异常
+  ///
+  /// 兜底策略：onAnimStart 后启动 1.5 秒 timer，正常情况下 onAnimStop
+  /// 会取消它；若 timer 触发说明动画卡住，强制清理覆盖层。
+  /// 1.5 秒 > 动画最大时长 500ms + onPerformPageTurn 200ms + 截图 200ms ≈ 900ms
+  Timer? _animSafetyTimer;
+  static const Duration _animSafetyTimeout = Duration(milliseconds: 1500);
+
   @override
   void initState() {
     super.initState();
@@ -159,6 +174,9 @@ class _ReaderPageViewState extends State<ReaderPageView>
       // 取消 pointerUp 兜底 timer（避免切换后误触发 _onPointerUpFallback）
       _pointerUpFallbackTimer?.cancel();
       _pointerUpFallbackTimer = null;
+      // 问题 A 修复：取消动画兜底 timer
+      _animSafetyTimer?.cancel();
+      _animSafetyTimer = null;
       // 自增 token 让正在进行的异步操作（_startTurnSequence/_finalizeTurn 的
       // await 链）失效，避免它们在新 delegate 创建后还注入旧 bitmap
       _turnToken++;
@@ -438,11 +456,17 @@ class _ReaderPageViewState extends State<ReaderPageView>
 
     // 启动自动动画
     _delegate.onAnimStart(_delegate.defaultAnimationSpeed);
+    // 问题 A 修复：启动动画安全兜底 timer
+    // 若 1.5 秒后动画还没正常结束（onAnimStop 未触发），强制清理覆盖层
+    _animSafetyTimer?.cancel();
+    _animSafetyTimer = Timer(_animSafetyTimeout, _onAnimSafetyTimeout);
     setState(() {});
   }
 
   /// 取消翻页（用户回拖或外部中断）
   void _cancelTurn() {
+    _animSafetyTimer?.cancel(); // 问题 A 修复：取消兜底 timer
+    _animSafetyTimer = null;
     _turnToken++; // 使正在进行的截图/切换失效
     _ticker.stop(); // 保险：防止 delegate 自己没停干净
     _isTurning = false;
@@ -457,6 +481,8 @@ class _ReaderPageViewState extends State<ReaderPageView>
   }
 
   void _onAnimStop(PageDirection direction) {
+    _animSafetyTimer?.cancel(); // 问题 A 修复：动画正常结束，取消兜底 timer
+    _animSafetyTimer = null;
     _ticker.stop(); // delegate.onAnimStop 已停过，这里再保险一次
     _isTurning = false;
     _finalizeStarted = false;
@@ -468,6 +494,29 @@ class _ReaderPageViewState extends State<ReaderPageView>
     widget.onPageTurnCompleted?.call(direction);
   }
 
+  /// 问题 A 修复：动画安全兜底
+  ///
+  /// 触发条件：onAnimStart 后 1.5 秒内 onAnimStop 没被调用
+  /// （Ticker 异常 / _scroller 卡死 / 调度链断开等）
+  ///
+  /// 策略：强制模拟 onAnimStop 流程清理覆盖层。
+  /// WebView 此时已跳到目标页（onPerformPageTurn 已完成），
+  /// 所以 onPageTurnCompleted 应该被调用（进度保存由其处理）。
+  void _onAnimSafetyTimeout() {
+    if (!mounted) return;
+    if (!_showAnimationLayer) return; // 动画已正常结束，无需兜底
+    debugPrint('[ReaderPageView] 动画安全兜底触发（Ticker 异常或 onAnimStop 未触发）');
+    _ticker.stop();
+    _delegate.abortAnim(); // 兜底停 scroller 和 ticker
+    _isTurning = false;
+    _finalizeStarted = false;
+    setState(() {
+      _showAnimationLayer = false;
+    });
+    _delegate.recycleBitmaps();
+    widget.onPageTurnCompleted?.call(_delegate.direction);
+  }
+
   void _onAnimCancel() {
     _cancelTurn();
   }
@@ -475,6 +524,7 @@ class _ReaderPageViewState extends State<ReaderPageView>
   @override
   void dispose() {
     _pointerUpFallbackTimer?.cancel();
+    _animSafetyTimer?.cancel(); // 问题 A 修复
     _ticker.dispose();
     _delegate.onDestroy();
     super.dispose();
