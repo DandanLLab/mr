@@ -451,7 +451,12 @@ window.readerApi = (function() {
 
     // b 层 transitionend 监听（动画结束清理）
     if (contentB) {
-      contentB.addEventListener('transitionend', onAnimEnd);
+      contentB.addEventListener('transitionend', function(e) {
+        // 只响应 b 自身的 transform transition，忽略子元素冒泡
+        if (e.target !== contentB) return;
+        if (e.propertyName !== 'transform') return;
+        onAnimEnd();
+      });
     }
 
     // 等待 DOM 渲染完成后通知 Dart 侧
@@ -504,6 +509,12 @@ window.readerApi = (function() {
 
     if (!useAnim) {
       // 无动画：a 直接跳到目标页，b 隐藏重置
+      // 清除动画状态（防止上次动画残留的 isAnimating/animEndTimer 干扰）
+      if (animEndTimer) {
+        clearTimeout(animEndTimer);
+        animEndTimer = null;
+      }
+      isAnimating = false;
       jumpA(pageIndex, false);
       hideB();
       currentPage = pageIndex;
@@ -516,77 +527,79 @@ window.readerApi = (function() {
     var columnWidth = getColumnWidth();
     var gap = config.columnGap || 0;
     var step = columnWidth + gap;
-
-    // 1. b 跳到目标页（无动画）
-    contentB.style.transition = 'none';
-    contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
-    contentB.style.transformStyle = 'preserve-3d';
-    // 强制重排
-    void contentB.offsetHeight;
-
-    // 2. 显示 b 并标记动画中
-    contentB.classList.add('animating');
-    isAnimating = true;
-
-    // 3. 设置 a/b 的起始 transform（动画起点）
     var mode = config.pageModeIndex;
     var duration = config.pageAnimDurationMs;
 
+    // 1. 显式重置 a 起点到当前页（无动画），防止上次动画残留
+    contentA.style.transition = 'none';
+    contentA.style.transform = 'translate3d(' + (-currentPage * step) + 'px, 0, 0)';
+    void contentA.offsetHeight;
+
+    // 2. b 跳到动画起点（无动画），具体位置由 mode 决定
+    contentB.style.transition = 'none';
+    contentB.style.transformStyle = 'preserve-3d';
     if (isForward) {
-      // 前翻（下一页）：b 从右侧（+1 列）滑入到目标页
-      if (mode === 1) {
-        // slide: a 同时向左滑出（多偏移 1 列），b 从右滑入
-        contentA.style.transition = 'transform ' + duration + 'ms ease-out';
-        contentA.style.transform = 'translate3d(' + (-(pageIndex + 1) * step) + 'px, 0, 0)';
-        contentB.style.transition = 'transform ' + duration + 'ms ease-out';
-        contentB.style.transform = 'translate3d(' + (-(pageIndex - 1) * step) + 'px, 0, 0)';
+      // 前翻：b 起点在视口右侧一列（比目标少偏移一列）
+      contentB.style.transform = 'translate3d(' + (-(pageIndex - 1) * step) + 'px, 0, 0)';
+    } else {
+      // 后翻：b 起点在视口左侧一列（比目标多偏移一列）
+      contentB.style.transform = 'translate3d(' + (-(pageIndex + 1) * step) + 'px, 0, 0)';
+    }
+    void contentB.offsetHeight;
+
+    // 3. 显示 b 并标记动画中
+    contentB.classList.add('animating');
+    isAnimating = true;
+
+    // 4. 设置 transition，并设置 a/b 的终点 transform
+    //    a 终点 = -pageIndex*step（与 b 终点一致，动画后 a 无跳跃）
+    //    b 终点 = -pageIndex*step（滑入视口中央显示目标页）
+    var aTiming = 'ease-out';
+    var bTiming = 'ease-out';
+    if (mode === 2) {
+      aTiming = 'none'; // cover: a 不动
+      bTiming = 'cubic-bezier(0.4, 0, 1, 1)';
+    } else if (mode === 3) {
+      aTiming = 'none'; // simulation: a 不动
+      bTiming = 'cubic-bezier(0.25, 0.1, 0.25, 1)';
+    }
+
+    // a 动画（cover/simulation 时 a 不动，transition 设 none）
+    if (aTiming === 'none') {
+      contentA.style.transition = 'none';
+      // a 保持当前页位置（已在步骤 1 设置）
+    } else {
+      contentA.style.transition = 'transform ' + duration + 'ms ' + aTiming;
+      // 强制重排，确保 transition 生效后再设置 transform（否则同帧批量处理会跳过动画）
+      void contentA.offsetHeight;
+      contentA.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
+    }
+
+    // b 动画
+    contentB.style.transition = 'transform ' + duration + 'ms ' + bTiming;
+    // 强制重排，确保 transition 生效后再设置 transform
+    void contentB.offsetHeight;
+    if (mode === 3) {
+      // simulation: 带 rotateY 翻折
+      if (isForward) {
+        // 前翻：b 从右侧来，绕右边翻折（右边固定，左边向用户翻过来）
+        contentB.style.transformOrigin = 'right center';
+        contentB.style.transform = 'translate3d(' + (-(pageIndex - 1) * step) + 'px, 0, 0) rotateY(90deg)';
         void contentB.offsetHeight;
-        contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
-      } else if (mode === 2) {
-        // cover: a 不动，b 从右滑入覆盖
-        contentA.style.transition = 'none';
-        contentB.style.transition = 'transform ' + duration + 'ms cubic-bezier(0.4, 0, 1, 1)';
-        contentB.style.transform = 'translate3d(' + (-(pageIndex - 1) * step) + 'px, 0, 0)';
-        void contentB.offsetHeight;
-        contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
-      } else if (mode === 3) {
-        // simulation: b 带 rotateY 从右翻折滑入
-        contentA.style.transition = 'none';
-        contentB.style.transition = 'transform ' + duration + 'ms cubic-bezier(0.25, 0.1, 0.25, 1)';
+        contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(0deg)';
+      } else {
+        // 后翻：b 从左侧来，绕左边翻折（左边固定，右边向用户翻过来）
         contentB.style.transformOrigin = 'left center';
-        contentB.style.transform = 'translate3d(' + (-(pageIndex - 1) * step) + 'px, 0, 0) rotateY(-90deg)';
+        contentB.style.transform = 'translate3d(' + (-(pageIndex + 1) * step) + 'px, 0, 0) rotateY(-90deg)';
         void contentB.offsetHeight;
         contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(0deg)';
       }
     } else {
-      // 后翻（上一页）：b 从左侧（-1 列）滑入到目标页
-      if (mode === 1) {
-        // slide: a 同时向右滑出（少偏移 1 列），b 从左滑入
-        contentA.style.transition = 'transform ' + duration + 'ms ease-out';
-        contentA.style.transform = 'translate3d(' + (-(pageIndex - 1) * step) + 'px, 0, 0)';
-        contentB.style.transition = 'transform ' + duration + 'ms ease-out';
-        contentB.style.transform = 'translate3d(' + (-(pageIndex + 1) * step) + 'px, 0, 0)';
-        void contentB.offsetHeight;
-        contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
-      } else if (mode === 2) {
-        // cover: a 不动，b 从左滑入覆盖
-        contentA.style.transition = 'none';
-        contentB.style.transition = 'transform ' + duration + 'ms cubic-bezier(0.4, 0, 1, 1)';
-        contentB.style.transform = 'translate3d(' + (-(pageIndex + 1) * step) + 'px, 0, 0)';
-        void contentB.offsetHeight;
-        contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
-      } else if (mode === 3) {
-        // simulation: b 带 rotateY 从左翻折滑入
-        contentA.style.transition = 'none';
-        contentB.style.transition = 'transform ' + duration + 'ms cubic-bezier(0.25, 0.1, 0.25, 1)';
-        contentB.style.transformOrigin = 'right center';
-        contentB.style.transform = 'translate3d(' + (-(pageIndex + 1) * step) + 'px, 0, 0) rotateY(90deg)';
-        void contentB.offsetHeight;
-        contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(0deg)';
-      }
+      // slide/cover: 纯平移
+      contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
     }
 
-    // 4. 兜底超时（防止 transitionend 不触发）
+    // 5. 兜底超时（防止 transitionend 不触发）
     if (animEndTimer) clearTimeout(animEndTimer);
     animEndTimer = setTimeout(function() {
       onAnimEnd();
