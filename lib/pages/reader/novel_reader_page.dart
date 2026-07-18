@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_html/flutter_html.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/book.dart';
@@ -30,6 +29,8 @@ import '../../widgets/change_source_sheet.dart';
 import '../../routes/app_routes.dart';
 import '../../utils/design_tokens.dart';
 import '../../utils/chinese_converter.dart';
+import 'webview/reader_webview.dart';
+import 'webview/reader_webview_controller.dart';
 
 class NovelReaderPage extends StatefulWidget {
   final String bookUrl;
@@ -67,39 +68,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   List<Chapter> _chapters = [];
   BookDataProvider? _dataProvider;
   double _sliderValue = 0; // 滑动进度条的实时值
-  // 下一章预加载缓存
-  String? _nextContent;
-  int? _nextContentChapterIndex;
-  // 上一章缓存（用于滚动模式往上滑无缝衔接）
-  String? _prevContent;
-  int? _prevContentChapterIndex;
   int _chapterLoadToken = 0;
-  // 预加载防重入标志位（避免滚动时多次触发 _preloadNextChapter/_preloadPrevChapter
-  // 导致重复 getContent 请求）
-  bool _isLoadingNext = false;
-  bool _isLoadingPrev = false;
-
-  // Pagination for non-scroll modes
-  List<String> _pages = [];
-  int _currentPage = 0;
-  PageController? _pageController;
-
-  // Scroll mode controller
-  final ScrollController _scrollController = ScrollController();
-  // 标记当前章节内容的边界，用于检测滚动到下一章
-  final GlobalKey _currentChapterKey = GlobalKey();
-  // 标记上一章缓存块的边界，用于跨章切换时测量其高度
-  final GlobalKey _prevChapterKey = GlobalKey();
-  // 跨章切换时临时禁用 _onScroll，避免在 jumpTo 期间误触发预加载或二次切章
-  bool _isSwitchingChapter = false;
 
   // Animation
   late AnimationController _menuAnimController;
-
-  // Simulation page curl
-  double _dragStartX = 0;
-  double _dragCurrentX = 0;
-  bool _isDragging = false;
 
   // 增强版控制
   bool _hasBookmark = false;
@@ -123,6 +95,28 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   final ValueNotifier<double> _scrollProgressNotifier = ValueNotifier(0);
   double get _scrollProgress => _scrollProgressNotifier.value;
 
+  // ==================== WebView 渲染层 ====================
+  // 替代 flutter_html，使用 WebView 原生渲染 HTML+CSS+JS
+  // - CSS column-width 原生分栏分页（无需 Dart 侧 TextPainter 测量）
+  // - text-indent 原生支持（首行缩进准确）
+  // - 高亮规则用真正的 CSS class（支持 text-decoration-thickness 等）
+  final ReaderWebViewController _readerWebViewController =
+      ReaderWebViewController();
+  // WebView 总页数（每次内容或样式变化后由 onPageCountReady 回调更新）
+  int _webviewPageCount = 1;
+  // WebView 当前页码（由 onPageChanged 回调更新）
+  int _webviewCurrentPage = 0;
+  // WebView 是否已就绪（HTML 加载完成，可调用 JS API）
+  bool _webviewReady = false;
+  // 待恢复的初始页码（章节加载时设置，WebView 就绪后调用 jumpToPage）
+  // 约定：>= (1 << 30) 表示「跳到最后一页」
+  int _pendingWebviewInitialPage = 0;
+  // 待恢复的页码比例（样式变化后保留位置用，0.0-1.0）
+  // 与 _pendingWebviewInitialPage 互斥使用：fraction >= 0 时优先用 fraction
+  double _pendingWebviewFraction = -1.0;
+  // WebView 是否正在重新加载内容（避免回调串扰）
+  bool _webviewReloading = false;
+
   @override
   void initState() {
     super.initState();
@@ -135,7 +129,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       duration: const Duration(milliseconds: 250),
     );
 
-    _scrollController.addListener(_onScroll);
     _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
@@ -152,8 +145,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     _autoScrollTimer?.cancel();
     _scrollProgressNotifier.dispose();
     _menuAnimController.dispose();
-    _scrollController.dispose();
-    _pageController?.dispose();
+    _readerWebViewController.detach();
     context.read<ReaderProvider>().disposeTts();
     super.dispose();
   }
@@ -371,30 +363,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   void _startAutoScrollTimer() {
     _autoScrollTimer?.cancel();
     final provider = context.read<ReaderProvider>();
-    if (_isScrollLikeMode(provider)) {
-      _autoScrollTimer = Timer.periodic(const Duration(milliseconds: 80), (_) {
-        if (!mounted || !_isAutoScroll || _isLoading) return;
-        // 跨章切换期间禁用滚动驱动，避免 jumpTo 与 timer 冲突
-        if (_isSwitchingChapter) return;
-        if (!_scrollController.hasClients) return;
-        final position = _scrollController.position;
-        final step = 0.8 + provider.autoScrollSpeed * 0.055;
-        if (position.pixels < position.maxScrollExtent) {
-          _scrollController.jumpTo(
-            min(position.pixels + step, position.maxScrollExtent),
-          );
-        } else if (_nextContent != null &&
-            _nextContentChapterIndex != null) {
-          // 已预加载下一章，主动走无缝切换（_nextPage 在到底部时会走 _nextChapter 重新 load）
-          _switchToPreloadedChapter();
-        } else if (_nextReadableChapterIndex(_currentChapterIndex) != null) {
-          _nextChapter();
-        } else {
-          _stopAutoScroll();
-        }
-      });
-      return;
-    }
     final configured = provider.autoPageIntervalSeconds;
     final seconds = configured > 0
         ? configured
@@ -402,7 +370,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     _autoScrollTimer = Timer.periodic(Duration(seconds: seconds), (_) {
       if (!mounted || !_isAutoScroll || _isLoading) return;
       final atBookEnd =
-          _currentPage >= _pages.length - 1 &&
+          _webviewCurrentPage >= _webviewPageCount - 1 &&
           _nextReadableChapterIndex(_currentChapterIndex) == null;
       if (atBookEnd) {
         _stopAutoScroll();
@@ -522,45 +490,19 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     int offset,
     int contentLength,
   ) {
+    // WebView 渲染：用进度比例跳转
+    // 滚动模式：setScrollProgress
+    // 分页模式：按比例计算目标页码后 jumpToPage
     final provider = context.read<ReaderProvider>();
+    final fraction = contentLength == 0 ? 0.0 : (offset / contentLength).clamp(0.0, 1.0);
     if (_isScrollLikeMode(provider)) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!_scrollController.hasClients) return;
-        final fraction = contentLength == 0 ? 0.0 : offset / contentLength;
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent * fraction,
-          duration: const Duration(milliseconds: 350),
-          curve: Curves.easeOut,
-        );
-      });
+      _readerWebViewController.setScrollProgress(fraction);
       return;
     }
-
-    var seen = 0;
-    var targetPage = 0;
-    var found = false;
-    for (var pageIndex = 0; pageIndex < _pages.length; pageIndex++) {
-      var start = 0;
-      while (start < _pages[pageIndex].length) {
-        final match = _pages[pageIndex].indexOf(query, start);
-        if (match < 0) break;
-        if (seen == occurrence) {
-          targetPage = pageIndex;
-          found = true;
-          break;
-        }
-        seen++;
-        start = match + max(query.length, 1);
-      }
-      if (found) break;
-    }
-    setState(() => _currentPage = targetPage);
-    if (provider.pageMode == PageMode.simulation) return;
-    if (_pageController?.hasClients == true) {
-      _pageController!.jumpToPage(targetPage + _pagedLeadingCount);
-    } else {
-      _swapPageController(targetPage + _pagedLeadingCount);
-    }
+    final targetPage = (fraction * (_webviewPageCount - 1))
+        .round()
+        .clamp(0, max(_webviewPageCount - 1, 0)).toInt();
+    _readerWebViewController.jumpToPage(targetPage);
   }
 
   Future<void> _editChapterContent() async {
@@ -673,213 +615,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     setState(() {});
   }
 
-  void _onScroll() {
-    if (!_scrollController.hasClients) return;
-    final provider = context.read<ReaderProvider>();
-    if (!_isScrollLikeMode(provider)) return;
-    // 跨章切换期间（jumpTo 调整 offset）禁用滚动监听，避免误触发二次切章或预加载
-    if (_isSwitchingChapter) return;
-
-    final maxScroll = _scrollController.position.maxScrollExtent;
-    final currentScroll = _scrollController.position.pixels;
-    final progress = maxScroll <= 0
-        ? 0.0
-        : (currentScroll / maxScroll).clamp(0.0, 1.0);
-    if ((progress - _scrollProgress).abs() >= 0.01) {
-      _scrollProgressNotifier.value = progress;
-    }
-    _scheduleProgressSave(pos: currentScroll.round());
-
-    // 检测是否已滚动到下一章内容区域
-    if (_nextContent != null && _nextContentChapterIndex != null) {
-      final chapterContext = _currentChapterKey.currentContext;
-      if (chapterContext != null) {
-        final renderBox = chapterContext.findRenderObject() as RenderBox;
-        // 获取当前章节内容的底部在视口中的位置
-        final chapterBottom = renderBox.localToGlobal(
-          Offset(0, renderBox.size.height),
-        );
-        // 如果当前章节底部已在视口顶部上方，说明用户已滚动到下一章
-        if (chapterBottom.dy < 100) {
-          _switchToPreloadedChapter();
-          return;
-        }
-      }
-    }
-
-    // 检测是否已滚动到上一章内容区域
-    if (_prevContent != null && _prevContentChapterIndex != null) {
-      final chapterContext = _currentChapterKey.currentContext;
-      if (chapterContext != null) {
-        final renderBox = chapterContext.findRenderObject() as RenderBox;
-        // 获取当前章节内容的顶部在视口中的位置
-        final chapterTop = renderBox.localToGlobal(Offset.zero);
-        // 如果当前章节顶部在视口底部下方，说明用户已滚动到上一章
-        if (chapterTop.dy > MediaQuery.of(context).size.height - 100) {
-          _switchToPrevChapter();
-          return;
-        }
-      }
-    }
-
-    // Auto-load next chapter when near bottom
-    // 阈值基于视口尺寸，确保用户接近底部时预加载已完成
-    final viewport = _scrollController.position.viewportDimension;
-    final preloadThreshold = viewport * 1.5;
-    if (maxScroll - currentScroll < preloadThreshold && _nextContent == null) {
-      _preloadNextChapter();
-    }
-
-    // 接近顶部时预加载上一章
-    if (currentScroll < viewport * 1.5 && _prevContent == null) {
-      _preloadPrevChapter();
-    }
-  }
-
-  /// 滚动模式下无缝切换到预加载的下一章
-  void _switchToPreloadedChapter() {
-    if (_nextContent == null || _nextContentChapterIndex == null) return;
-    if (_isSwitchingChapter) return;
-    _isSwitchingChapter = true;
-
-    final provider = context.read<ReaderProvider>();
-    final oldOffset =
-        _scrollController.hasClients ? _scrollController.offset : 0.0;
-
-    // 测量原 prevContent 块高度（含相邻 padding，用于正确计算新 offset）
-    double prevBlockHeight = 0;
-    final prevContext = _prevChapterKey.currentContext;
-    if (prevContext != null) {
-      final renderBox = prevContext.findRenderObject() as RenderBox;
-      prevBlockHeight = renderBox.size.height;
-    }
-    // 测量原当前章块高度（不含 padding，因为当前章块直接是 Container）
-    double currentChapterHeight = 0;
-    final currentContext = _currentChapterKey.currentContext;
-    if (currentContext != null) {
-      final renderBox = currentContext.findRenderObject() as RenderBox;
-      currentChapterHeight = renderBox.size.height;
-    }
-
-    // 计算用户在原 nextContent 内的偏移（相对 nextContent 开头）
-    final nextContentInnerOffset = max(
-      0.0,
-      oldOffset - prevBlockHeight - currentChapterHeight,
-    );
-
-    // 更新状态：将下一章设为当前章，当前章变为上一章缓存
-    setState(() {
-      _prevContent = _content;
-      _prevContentChapterIndex = _currentChapterIndex;
-      _currentChapterIndex = _nextContentChapterIndex!;
-      _chapterTitle = _chapters[_currentChapterIndex].title;
-      _content = _nextContent!;
-      _nextContent = null;
-      _nextContentChapterIndex = null;
-      _sliderValue = _currentChapterIndex.toDouble();
-    });
-
-    // 新布局里新当前章（原 nextContent）开头的 offset =
-    // 新 prevContent 块高度 = 相邻 padding + 原当前章高度
-    final newPrevBlockHeight =
-        provider.paragraphSpacing * 2 + currentChapterHeight;
-    final newOffset = newPrevBlockHeight + nextContentInnerOffset;
-
-    // 立即同步 jumpTo，避免 setState 后到下一帧之间渲染一帧错误位置
-    // （jumpTo 在新内容布局完成前可能被 clamp，下一帧再纠正）
-    if (_scrollController.hasClients) {
-      try {
-        _scrollController.jumpTo(newOffset);
-      } catch (_) {}
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) {
-          _isSwitchingChapter = false;
-          return;
-        }
-        if (_scrollController.hasClients &&
-            (_scrollController.offset - newOffset).abs() > 1) {
-          _scrollController.jumpTo(newOffset);
-        }
-        _isSwitchingChapter = false;
-      });
-    } else {
-      _isSwitchingChapter = false;
-    }
-
-    _preloadNextChapter();
-    _scheduleProgressSave(pos: newOffset.round());
-  }
-
-  /// 滚动模式下无缝切换到预加载的上一章
-  void _switchToPrevChapter() {
-    if (_prevContent == null || _prevContentChapterIndex == null) return;
-    if (_isSwitchingChapter) return;
-    _isSwitchingChapter = true;
-
-    final provider = context.read<ReaderProvider>();
-    final oldOffset =
-        _scrollController.hasClients ? _scrollController.offset : 0.0;
-
-    // 用户原来在原当前章内的偏移（相对原当前章开头）
-    // 原布局里原当前章开头 offset = 原 prevContent 块高度（如果有）
-    double prevBlockHeight = 0;
-    final prevContext = _prevChapterKey.currentContext;
-    if (prevContext != null) {
-      final renderBox = prevContext.findRenderObject() as RenderBox;
-      prevBlockHeight = renderBox.size.height;
-    }
-    final currentChapterInnerOffset = max(
-      0.0,
-      oldOffset - prevBlockHeight,
-    );
-
-    // 更新状态：将上一章设为当前章，当前章变为下一章缓存
-    setState(() {
-      _nextContent = _content;
-      _nextContentChapterIndex = _currentChapterIndex;
-      _currentChapterIndex = _prevContentChapterIndex!;
-      _chapterTitle = _chapters[_currentChapterIndex].title;
-      _content = _prevContent!;
-      _prevContent = null;
-      _prevContentChapterIndex = null;
-      _sliderValue = _currentChapterIndex.toDouble();
-    });
-
-    // 新布局 = [新当前章=原prevContent] + [新 nextContent 块（相邻 padding + 原当前章）]
-    // 用户希望停留在原当前章内的相同视觉位置，现在变成新 nextContent 内偏移
-    // 新 nextContent 块开头 offset = 新当前章高度（原 prevContent 高度）
-    // 但我们无法在 setState 后立即测量新当前章高度，用相邻 padding + 原当前章高度近似
-    // 新 nextContent 块开头 offset = 原prevContent块高度 - 相邻padding（因为原prevContent块含padding，新当前章不含padding）
-    // 简化：新 offset = 原 prevContent 块高度（新当前章）+ 相邻 padding + 用户在原当前章内偏移
-    final adjacentPadding = provider.paragraphSpacing * 2;
-    // 新当前章高度 ≈ 原 prevContent 块高度 - 相邻 padding（因为原 prevContent 块含 padding）
-    final newCurrentChapterHeight = max(0.0, prevBlockHeight - adjacentPadding);
-    final newOffset =
-        newCurrentChapterHeight + adjacentPadding + currentChapterInnerOffset;
-
-    if (_scrollController.hasClients) {
-      try {
-        _scrollController.jumpTo(newOffset);
-      } catch (_) {}
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) {
-          _isSwitchingChapter = false;
-          return;
-        }
-        if (_scrollController.hasClients &&
-            (_scrollController.offset - newOffset).abs() > 1) {
-          _scrollController.jumpTo(newOffset);
-        }
-        _isSwitchingChapter = false;
-      });
-    } else {
-      _isSwitchingChapter = false;
-    }
-
-    _preloadPrevChapter();
-    _scheduleProgressSave(pos: newOffset.round());
-  }
-
   Future<void> _loadBookAndChapters() async {
     try {
       final bookData = StorageService.instance.getBook(widget.bookUrl);
@@ -939,10 +674,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     setState(() {
       _isLoading = true;
       _sliderValue = _currentChapterIndex.toDouble();
-      _nextContent = null;
-      _nextContentChapterIndex = null;
-      _prevContent = null;
-      _prevContentChapterIndex = null;
     });
 
     final chapter = chapterIndex < _chapters.length
@@ -1024,33 +755,30 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         // 检查书签
         _checkBookmark();
 
-        final provider = context.read<ReaderProvider>();
         final restorePos = pendingToLast
             ? 1 << 30
             : (restoreInitial ? _initialChapterPos : 0);
-        _repaginate(initialPage: restorePos);
 
-        // 滚动模式下重置滚动位置到顶部
-        if (_isScrollLikeMode(provider)) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && _scrollController.hasClients) {
-              final target = restorePos > 0 ? restorePos.toDouble() : 0.0;
-              _scrollController.jumpTo(
-                target.clamp(0.0, _scrollController.position.maxScrollExtent),
-              );
-            }
-          });
+        // WebView 渲染：不再调用 _repaginate（CSS column 原生分页）
+        // 设置待恢复页码，等 WebView 加载完成 + onPageCountReady 后 jumpToPage
+        _webviewReloading = true;
+        _webviewReady = false;
+        _webviewCurrentPage = 0;
+        _webviewPageCount = 1;
+        if (restorePos > 0) {
+          // 用大数表示「跳到最后一页」，onPageCountReady 时会 clamp
+          _pendingWebviewInitialPage =
+              pendingToLast ? (1 << 30) : restorePos;
+        } else {
+          _pendingWebviewInitialPage = 0;
         }
+        // 触发 WebView 重新加载（didUpdateWidget 检测 content 变化）
+        if (mounted) setState(() {});
 
-        // 用 clamp 后的真实位置保存到数据库，避免把 1<<30 写入 durChapterPos
-        // 造成跨模式恢复时位置错误（_repaginate 已把 initialPage clamp 到 _pages.length-1）
-        final actualPos = _isScrollLikeMode(provider)
-            ? (_scrollController.hasClients
-                  ? _scrollController.offset.round()
-                  : 0)
-            : _currentPage;
+        // 用 clamp 后的真实位置保存到数据库
+        // （_onWebviewPageCountReady 会再次保存校正后的位置）
+        final actualPos = restorePos > 0 ? restorePos.clamp(0, 1 << 30) : 0;
         unawaited(_saveCurrentProgress(chapter: chapter, pos: actualPos));
-        unawaited(_preloadAdjacentChapters(_currentChapterIndex));
 
         // 后台预取后续 N 章（Phase 3 流水线化：用户翻页时瞬时返回）
         if (_book!.originType == BookOriginType.online &&
@@ -1081,20 +809,17 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       // 旧 load 的异常必须丢弃，不能覆盖新 load 的成功结果
       if (loadToken != _chapterLoadToken) return;
       if (mounted) {
-        final provider = context.read<ReaderProvider>();
         setState(() {
           _content = '加载失败：$e';
           _chapterTitle = '加载失败';
           _isLoading = false;
-          if (!_isScrollLikeMode(provider)) {
-            // 重建分页，避免翻页/仿真模式显示旧章节内容
-            _pages = [_content];
-            _currentPage = 0;
-          }
+          // WebView 模式：重置状态，触发 WebView 重新加载错误信息
+          _webviewReady = false;
+          _webviewCurrentPage = 0;
+          _webviewPageCount = 1;
+          _pendingWebviewInitialPage = 0;
+          _pendingWebviewFraction = -1.0;
         });
-        if (!_isScrollLikeMode(provider)) {
-          _swapPageController(_currentPage + _pagedLeadingCount);
-        }
       }
     } finally {
       // 仅当前 load 是最新时才释放翻页导航锁，避免被旧 load 提前释放
@@ -1106,7 +831,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   int _readableChapterIndex(int index) {
     if (_chapters.isEmpty) return 0;
-    var target = index.clamp(0, _chapters.length - 1);
+    final target = index.clamp(0, _chapters.length - 1);
     if (!_chapters[target].isVolume) return target;
 
     for (var i = target + 1; i < _chapters.length; i++) {
@@ -1132,13 +857,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     return null;
   }
 
-  void _scheduleProgressSave({int? pos}) {
-    _progressSaveTimer?.cancel();
-    _progressSaveTimer = Timer(const Duration(milliseconds: 700), () {
-      unawaited(_saveCurrentProgress(pos: pos));
-    });
-  }
-
   Future<void> _saveCurrentProgress({Chapter? chapter, int? pos}) async {
     if (!mounted) return;
     final book = _book;
@@ -1162,463 +880,25 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   int _currentChapterPos() {
-    final provider = context.read<ReaderProvider>();
-    if (_isScrollLikeMode(provider) && _scrollController.hasClients) {
-      return _scrollController.offset.round();
-    }
-    return _currentPage;
-  }
-
-  Future<void> _preloadAdjacentChapters(int chapterIndex) async {
-    if (_book == null || _dataProvider == null) return;
-
-    // 复用 _isLoadingNext / _isLoadingPrev 锁，避免与 _preloadNextChapter / _preloadPrevChapter
-    // 并发触发导致重复 getContent 请求
-    String? nextContent;
-    final nextIndex = _nextReadableChapterIndex(chapterIndex);
-    if (nextIndex != null && !_isLoadingNext && _nextContent == null) {
-      _isLoadingNext = true;
-      try {
-        final nextChapter = _chapters[nextIndex];
-        nextContent = await _dataProvider!.getContent(
-          _book!,
-          nextChapter,
-          allChapters: _chapters,
-        );
-      } finally {
-        _isLoadingNext = false;
-      }
-    }
-
-    String? prevContent;
-    final prevIndex = _previousReadableChapterIndex(chapterIndex);
-    if (prevIndex != null && !_isLoadingPrev && _prevContent == null) {
-      _isLoadingPrev = true;
-      try {
-        final prevChapter = _chapters[prevIndex];
-        prevContent = await _dataProvider!.getContent(
-          _book!,
-          prevChapter,
-          allChapters: _chapters,
-        );
-      } finally {
-        _isLoadingPrev = false;
-      }
-    }
-
-    if (!mounted || _currentChapterIndex != chapterIndex) return;
-    setState(() {
-      if (nextContent != null && _nextContent == null) {
-        _nextContent = nextContent;
-        _nextContentChapterIndex = nextIndex;
-      }
-      if (prevContent != null && _prevContent == null) {
-        _prevContent = prevContent;
-        _prevContentChapterIndex = prevIndex;
-      }
-    });
-  }
-
-  Future<void> _preloadNextChapter() async {
-    if (_book == null ||
-        _dataProvider == null ||
-        _nextContent != null ||
-        _isLoadingNext) {
-      return;
-    }
-    final nextIndex = _nextReadableChapterIndex(_currentChapterIndex);
-    if (nextIndex != null) {
-      _isLoadingNext = true;
-      try {
-        final nextChapter = _chapters[nextIndex];
-        final content = await _dataProvider!.getContent(
-          _book!,
-          nextChapter,
-          allChapters: _chapters,
-        );
-        if (!mounted) return;
-        // 章节切换守卫：await 期间用户已切到其他章节时丢弃结果，
-        // 避免把旧章节的下一章内容赋给 _nextContent 导致后续预加载永久失效
-        if (nextIndex != _nextReadableChapterIndex(_currentChapterIndex)) {
-          return;
-        }
-        _nextContent = content;
-        _nextContentChapterIndex = nextIndex;
-        setState(() {});
-      } finally {
-        _isLoadingNext = false;
-      }
-    }
-  }
-
-  /// 预加载上一章（用于滚动模式往上滑）
-  Future<void> _preloadPrevChapter() async {
-    if (_book == null ||
-        _dataProvider == null ||
-        _prevContent != null ||
-        _isLoadingPrev) {
-      return;
-    }
-    final prevIndex = _previousReadableChapterIndex(_currentChapterIndex);
-    if (prevIndex != null) {
-      _isLoadingPrev = true;
-      try {
-        final prevChapter = _chapters[prevIndex];
-        final content = await _dataProvider!.getContent(
-          _book!,
-          prevChapter,
-          allChapters: _chapters,
-        );
-        if (!mounted) return;
-        // 章节切换守卫：await 期间用户已切到其他章节时丢弃结果
-        if (prevIndex != _previousReadableChapterIndex(_currentChapterIndex)) {
-          return;
-        }
-        _prevContent = content;
-        _prevContentChapterIndex = prevIndex;
-        setState(() {});
-      } finally {
-        _isLoadingPrev = false;
-      }
-    }
+    // WebView 渲染：用 WebView 当前页码（滚动模式也用进度近似页码）
+    return _webviewCurrentPage;
   }
 
   // ==================== Pagination ====================
-
-  void _repaginate({int initialPage = 0}) {
-    final provider = context.read<ReaderProvider>();
-    if (_isScrollLikeMode(provider)) return;
-
-    _pages = _splitContentToPages(_processedContent(_content), provider);
-    _currentPage = initialPage.clamp(0, max(_pages.length - 1, 0));
-    _swapPageController(_currentPage + _pagedLeadingCount);
-    _isChangingChapterByPageView = false;
-    if (mounted) setState(() {});
-  }
+  //
+  // WebView 渲染模式下，分页由 CSS column-width 原生完成，无需 Dart 侧测量。
+  // _repaginatePreservingPosition 作为样式变化后的触发点，
+  // 通过 setState 通知 ReaderWebView.didUpdateWidget 检测样式变化并重新加载 HTML。
 
   void _repaginatePreservingPosition() {
-    final provider = context.read<ReaderProvider>();
-    var fraction = 0.0;
-    if (_pages.length > 1) {
-      fraction = _currentPage / (_pages.length - 1);
-    } else if (_scrollController.hasClients &&
-        _scrollController.position.maxScrollExtent > 0) {
-      fraction =
-          _scrollController.offset / _scrollController.position.maxScrollExtent;
-    }
-
-    if (_isScrollLikeMode(provider)) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_scrollController.hasClients) return;
-        _scrollController.jumpTo(
-          (_scrollController.position.maxScrollExtent *
-                  fraction.clamp(0.0, 1.0))
-              .clamp(0.0, _scrollController.position.maxScrollExtent),
-        );
-      });
-      return;
-    }
-
-    _pages = _splitContentToPages(_processedContent(_content), provider);
-    final lastPage = max(_pages.length - 1, 0);
-    _currentPage = (fraction.clamp(0.0, 1.0) * lastPage).round();
-    _swapPageController(_currentPage + _pagedLeadingCount);
-    _isChangingChapterByPageView = false;
-    if (mounted) setState(() {});
-    unawaited(_saveCurrentProgress(pos: _currentPage));
-  }
-
-  /// 安全替换 PageController：先创建新 controller 立即生效，
-  /// 旧 controller 延迟到下一帧 dispose，避免 dispose 后到 setState 之间
-  /// 的滚动通知触发 "ScrollController not attached" 异常
-  void _swapPageController(int initialPage) {
-    final oldController = _pageController;
-    _pageController = PageController(initialPage: initialPage);
-    if (oldController != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        oldController.dispose();
-      });
-    }
-  }
-
-  /// 续页首行标记：\u0001 (SOH)
-  /// 用于标记"本段是上一页段落的剩余部分，渲染时不加首行缩进"
-  /// 详见 _buildUnifiedHtml 的处理逻辑
-  static const String _continuationMarker = '\u0001';
-
-  List<String> _splitContentToPages(String content, ReaderProvider provider) {
-    final displayContent = ChineseConverter.convert(
-      content,
-      provider.chineseConverterType,
-    );
-    final paragraphs = _splitToParagraphs(displayContent);
-    final pages = <String>[];
-    if (paragraphs.isEmpty) return [''];
-
-    final metrics = _pageMetrics(provider);
-    final textStyle = _readerTextStyle(provider);
-    final paragraphSpacing = provider.paragraphSpacing;
-    final indent = provider.paragraphIndent;
-    final singleLineHeight = _singleLineHeight(textStyle, metrics.width);
-    var page = StringBuffer();
-    var pageParagraphCount = 0;
-    var usedHeight = _showChapterTitle(provider)
-        ? _measureTextHeight(
-                _displayChapterTitle(provider),
-                _titleTextStyle(provider),
-                metrics.width,
-              ) +
-              provider.titleTopSpacing.toDouble() +
-              provider.titleBottomSpacing.toDouble()
+    // WebView 模式下：记录当前页码比例，等 WebView 重新加载后按比例恢复
+    _pendingWebviewFraction = _webviewPageCount > 1
+        ? _webviewCurrentPage / (_webviewPageCount - 1)
         : 0.0;
-
-    for (final rawParagraph in paragraphs) {
-      // 剥掉源内容自带缩进，统一由 <span style="white-space:pre"> 提供缩进
-      var paragraph = rawParagraph.replaceAll(_leadingIndentRegex, '');
-      // isContinuation 标记：本段是否是被切分的续页部分
-      // - false（首段）：测量时加 indent 前缀，渲染时加 indent
-      // - true（续页）：测量时不加 indent，渲染时也不加 indent（用 _continuationMarker 标记）
-      var isContinuation = false;
-
-      while (paragraph.isNotEmpty) {
-        // 测量文本：首段加缩进字符，续页不加
-        final measuredText = (!isContinuation && indent.isNotEmpty)
-            ? '$indent$paragraph'
-            : paragraph;
-        final paragraphHeight =
-            _measureTextHeight(measuredText, textStyle, metrics.width) +
-            paragraphSpacing;
-
-        // 1. 当前页能放下整段 → 直接放入
-        if (usedHeight + paragraphHeight <= metrics.height) {
-          // 续页首行用 _continuationMarker 标记，渲染时不加 indent
-          page.writeln(isContinuation ? '$_continuationMarker$paragraph' : paragraph);
-          usedHeight += paragraphHeight;
-          pageParagraphCount++;
-          paragraph = '';
-          continue;
-        }
-
-        // 2. 整段放不下当前页 → 计算剩余可用高度（扣除段距）
-        final remainingHeight = metrics.height - usedHeight - paragraphSpacing;
-
-        // 3. 剩余空间还能放下至少一行 → 字符级切割，把能放下的部分填到当前页
-        //    关键：这是"页面填充满"的核心 —— 不允许整段翻页留下大片空白，
-        //    必须把剩余空间用尽，剩余部分断到下一页（同页内填充生效，跨页该断就断）
-        if (remainingHeight >= singleLineHeight) {
-          final splitIndex = _findFittingTextIndex(
-            measuredText,
-            textStyle,
-            metrics.width,
-            remainingHeight,
-          );
-
-          if (splitIndex > 0) {
-            // splitIndex 是针对 measuredText 的，需要扣除缩进字符长度
-            final actualSplitIndex = (!isContinuation && indent.isNotEmpty)
-                ? max(1, splitIndex - indent.length)
-                : splitIndex;
-            // 填充当前页（把切分的前半部分加到当前页），然后翻页
-            page.writeln(paragraph.substring(0, actualSplitIndex));
-            pages.add(page.toString().trimRight());
-            page = StringBuffer();
-            pageParagraphCount = 0;
-            usedHeight = 0;
-            paragraph = paragraph.substring(actualSplitIndex);
-            isContinuation = true;
-            continue;
-          }
-        }
-
-        // 4. 剩余空间不足以放下任何字符，或字符级切割失败 → 翻页重试本段
-        if (pageParagraphCount > 0) {
-          pages.add(page.toString().trimRight());
-          page = StringBuffer();
-          pageParagraphCount = 0;
-          usedHeight = 0;
-          // continue 重试本段（新页）
-          continue;
-        }
-
-        // 5. 兜底：当前页为空 + 整段也放不下整页 + 字符级切割也失败
-        //    强制取 1 个字符，避免死循环
-        pages.add(paragraph.substring(0, 1).trimRight());
-        paragraph = paragraph.substring(1);
-        usedHeight = 0;
-        isContinuation = true;
-      }
-    }
-
-    if (pageParagraphCount > 0) {
-      pages.add(page.toString().trimRight());
-    }
-
-    return pages.isEmpty ? [''] : pages;
-  }
-
-  /// 测量单行文本高度（用于 splitIndex 兜底，确保至少能放 1 行）
-  double _singleLineHeight(TextStyle style, double width) {
-    return _measureTextHeight('一', style, width);
-  }
-
-  ({double width, double height}) _pageMetrics(ReaderProvider provider) {
-    final mq = MediaQuery.of(context);
-    final width = max(
-      80.0,
-      mq.size.width -
-          mq.padding.left -
-          mq.padding.right -
-          provider.paddingLeft -
-          provider.paddingRight,
-    );
-    final height = max(
-      120.0,
-      mq.size.height -
-          mq.padding.top -
-          mq.padding.bottom -
-          provider.paddingTop -
-          provider.paddingBottom -
-          _headerExtent(provider) -
-          _footerExtent(provider),
-    );
-    return (width: width, height: height);
-  }
-
-  TextStyle _titleTextStyle(ReaderProvider provider) {
-    return TextStyle(
-      fontSize: max(10.0, provider.fontSize + provider.titleSize),
-      fontWeight: _fontWeight(provider.titleFontWeight),
-      color: provider.textColor,
-      height: provider.lineHeight,
-      fontFamily: provider.fontFamily.isNotEmpty ? provider.fontFamily : null,
-    );
-  }
-
-  /// 从 _readerHtmlStyle 派生的 TextStyle，用于 TextPainter 测量。
-  /// 关键：测量和渲染用同一份样式定义（字号、行高、字距、字重、字族），
-  /// 保证分页测量高度与 Html 组件渲染高度零偏差。
-  TextStyle _readerTextStyle(ReaderProvider provider) {
-    return TextStyle(
-      fontSize: provider.fontSize,
-      color: provider.textColor,
-      height: provider.lineHeight,
-      letterSpacing: provider.letterSpacing,
-      fontWeight: _readerFontWeight(provider),
-      fontFamily: provider.fontFamily.isNotEmpty ? provider.fontFamily : null,
-    );
-  }
-
-  /// 测量 HTML 段落的渲染高度（用与 _readerHtmlStyle 一致的 TextStyle）
-  /// 纯文本直接用 TextPainter；HTML 段落先剥离标签再测量，
-  /// 因为 Html 组件内部用 RichText 渲染，TextSpan 高度 = 剥离标签后文本高度。
-  /// textAlign 与 _readerHtmlStyle 的 body.textAlign 保持一致（justify），
-  /// 避免测量与渲染在断行行为上产生细微差异。
-  double _measureTextHeight(String text, TextStyle style, double width) {
-    final painter = TextPainter(
-      text: TextSpan(text: text, style: style),
-      textDirection: TextDirection.ltr,
-      maxLines: null,
-      textAlign: TextAlign.justify,
-    )..layout(maxWidth: width);
-    return painter.height;
-  }
-
-  int _findFittingTextIndex(
-    String text,
-    TextStyle style,
-    double width,
-    double height,
-  ) {
-    // 边界守卫：空文本直接返回 0（外层会走兜底逻辑，强制取 1 字符）
-    if (text.isEmpty) return 0;
-
-    // 单行都放不下时直接返回 1（至少放 1 字符，避免死循环）
-    final singleCharHeight = _measureTextHeight(
-      text.substring(0, 1),
-      style,
-      width,
-    );
-    if (singleCharHeight > height) return 1;
-
-    // 二分搜索：找到最大的 mid 使得 text[0..mid] 高度 <= height
-    // 关键：low/high 都向 best 收敛，保证循环终止
-    var low = 1;
-    var high = text.length;
-    var best = 1;
-    var iterations = 0;
-    // 安全上限：log2(N) + 常数，避免极端情况死循环
-    final maxIterations = 64;
-    while (low <= high && iterations < maxIterations) {
-      iterations++;
-      final mid = (low + high) >> 1;
-      final candidate = text.substring(0, mid);
-      final h = _measureTextHeight(candidate, style, width);
-      if (h <= height) {
-        best = mid;
-        low = mid + 1;
-      } else {
-        high = mid - 1;
-      }
-    }
-    // 最终守卫：best 至少为 1（前面已保证单字符能放下）
-    return best.clamp(1, text.length);
-  }
-
-  static final _asciiEdgeWhitespace = RegExp(r'^[\t \r\f]+|[\t \r\f]+$');
-
-  /// 将 HTML 内容标准化为纯文本：
-  /// - 块级标签（p/div）的闭标签转为双换行（确保段落分隔）
-  /// - 块级标签的开标签转为单换行
-  /// - `<br>` 转为换行
-  /// - 其他标签直接剥掉（保留内容）
-  /// - HTML 实体解码
-  ///
-  /// 标准化后所有内容统一走纯文本路径，避免 `_splitToParagraphs` 按 `\n`
-  /// 切分时破坏 HTML 标签结构（如 `<p>第一行\n第二行</p>` 被切成碎片，
-  /// 闭标签 `</p>` 被当作纯文本处理，flutter_html 解析出错）。
-  String _normalizeHtmlToText(String content) {
-    if (!_containsHtml(content)) return content;
-    var result = content;
-    // </p>、</div> 后补双换行（确保段落分隔）
-    result = result.replaceAll(
-      RegExp(r'</(?:p|div)\b[^>]*>', caseSensitive: false),
-      '\n\n',
-    );
-    // <p>、<div> 开标签转为换行
-    result = result.replaceAll(
-      RegExp(r'<(?:p|div)\b[^>]*>', caseSensitive: false),
-      '\n',
-    );
-    // <br> 转为换行
-    result = result.replaceAll(
-      RegExp(r'<br\s*/?>', caseSensitive: false),
-      '\n',
-    );
-    // 剥掉其他所有标签（保留内容）
-    result = result.replaceAll(_htmlTagStripRegex, '');
-    // HTML 实体解码
-    result = result.replaceAll('&nbsp;', ' ');
-    result = result.replaceAll('&#x3000;', '\u3000');
-    result = result.replaceAll('&amp;', '&');
-    result = result.replaceAll('&lt;', '<');
-    result = result.replaceAll('&gt;', '>');
-    result = result.replaceAll('&quot;', '"');
-    result = result.replaceAll('&#39;', "'");
-    return result;
-  }
-
-  List<String> _splitToParagraphs(String content) {
-    // 如果内容含 HTML，先标准化为纯文本，避免按 \n 切分时破坏标签结构
-    if (_containsHtml(content)) {
-      content = _normalizeHtmlToText(content);
-    }
-    // 不能用 String.trim()：它会剥离全角空格 \u3000（首行缩进）。
-    // 仅剥离 ASCII 边缘空白；空行判断时把 \u3000 也视作空白。
-    return content
-        .split(RegExp(r'\r\n|\r|\n'))
-        .map((line) => line.replaceAll(_asciiEdgeWhitespace, ''))
-        .where((line) => line.replaceAll('\u3000', '').isNotEmpty)
-        .toList();
+    _pendingWebviewInitialPage = 0;
+    _webviewReloading = true;
+    _webviewReady = false;
+    if (mounted) setState(() {});
   }
 
   // ==================== Tap Zone ====================
@@ -1699,38 +979,24 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   void _previousPage() {
     final provider = context.read<ReaderProvider>();
     if (_isScrollLikeMode(provider)) {
-      if (!_scrollController.hasClients) return;
-      if (_scrollController.offset <= 8) {
-        // 已预加载上一章时优先走无缝切换，避免丢弃缓存重新 load
-        if (_prevContent != null && _prevContentChapterIndex != null) {
-          _switchToPrevChapter();
-        } else {
+      // 滚动模式：WebView 内部 body 已设置 overflow-y: auto，由 JS 处理滚动
+      if (!_webviewReady) return;
+      _readerWebViewController.getScrollProgress().then((progress) {
+        if (progress <= 0.01) {
+          // 已到顶部，切换上一章（从最后一页开始）
           _previousChapter(toLastPage: true);
+          return;
         }
-        return;
-      }
-      _scrollController.animateTo(
-        max(_scrollController.offset - _scrollPageExtent(), 0),
-        duration: _pageAnimationDuration(provider),
-        curve: Curves.easeOutCubic,
-      );
+        // 向上滚动 10%
+        _readerWebViewController.setScrollProgress(
+          (progress - 0.1).clamp(0.0, 1.0),
+        );
+      });
     } else {
-      if (_currentPage > 0) {
-        if (provider.pageMode == PageMode.simulation) {
-          setState(() => _currentPage--);
-          _scheduleProgressSave(pos: _currentPage);
-        } else if (_pageController?.hasClients == true) {
-          _pageController?.previousPage(
-            duration: _pageAnimationDuration(provider),
-            curve: Curves.easeOut,
-          );
-        } else {
-          // PageController 未挂载，重建控制器以跳转到目标页
-          _currentPage--;
-          _swapPageController(_currentPage + _pagedLeadingCount);
-          _scheduleProgressSave(pos: _currentPage);
-          setState(() {});
-        }
+      // 分页模式：通过 JS jumpToPage 翻页
+      if (!_webviewReady) return;
+      if (_webviewCurrentPage > 0) {
+        _readerWebViewController.jumpToPage(_webviewCurrentPage - 1);
       } else {
         _previousChapter(toLastPage: true);
       }
@@ -1740,64 +1006,28 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   void _nextPage() {
     final provider = context.read<ReaderProvider>();
     if (_isScrollLikeMode(provider)) {
-      if (!_scrollController.hasClients) return;
-      final maxScroll = _scrollController.position.maxScrollExtent;
-      // 已预加载下一章：到底部时走无缝切换（保留缓存），否则继续向下滚动
-      if (_nextContent != null) {
-        if (_scrollController.offset >= maxScroll - 8) {
-          _switchToPreloadedChapter();
+      // 滚动模式
+      if (!_webviewReady) return;
+      _readerWebViewController.getScrollProgress().then((progress) {
+        if (progress >= 0.99) {
+          // 已到底部，切换下一章
+          _nextChapter();
           return;
         }
-        _scrollController.animateTo(
-          min(_scrollController.offset + _scrollPageExtent(), maxScroll),
-          duration: _pageAnimationDuration(provider),
-          curve: Curves.easeOutCubic,
+        // 向下滚动 10%
+        _readerWebViewController.setScrollProgress(
+          (progress + 0.1).clamp(0.0, 1.0),
         );
-        return;
-      }
-      // 只有当下一章未预加载时，才在接近底部时加载下一章
-      if (_scrollController.offset >= maxScroll - 8) {
-        _nextChapter();
-        return;
-      }
-      _scrollController.animateTo(
-        min(_scrollController.offset + _scrollPageExtent(), maxScroll),
-        duration: _pageAnimationDuration(provider),
-        curve: Curves.easeOutCubic,
-      );
+      });
     } else {
-      if (_currentPage < _pages.length - 1) {
-        if (provider.pageMode == PageMode.simulation) {
-          setState(() => _currentPage++);
-          _scheduleProgressSave(pos: _currentPage);
-        } else if (_pageController?.hasClients == true) {
-          _pageController?.nextPage(
-            duration: _pageAnimationDuration(provider),
-            curve: Curves.easeOut,
-          );
-        } else {
-          // PageController 未挂载，重建控制器以跳转到目标页
-          _currentPage++;
-          _swapPageController(_currentPage + _pagedLeadingCount);
-          _scheduleProgressSave(pos: _currentPage);
-          setState(() {});
-        }
+      // 分页模式
+      if (!_webviewReady) return;
+      if (_webviewCurrentPage < _webviewPageCount - 1) {
+        _readerWebViewController.jumpToPage(_webviewCurrentPage + 1);
       } else {
         _nextChapter();
       }
     }
-  }
-
-  double _scrollPageExtent() {
-    final viewport = _scrollController.hasClients
-        ? _scrollController.position.viewportDimension
-        : MediaQuery.of(context).size.height;
-    // 90% 视口高度，保留 10% 重叠让上下滚动连续感更强、视觉更丝滑
-    return max(120.0, viewport * 0.9);
-  }
-
-  Duration _pageAnimationDuration(ReaderProvider provider) {
-    return Duration(milliseconds: provider.pageAnimDurationMs.clamp(80, 1200));
   }
 
   void _previousChapter({bool toLastPage = false}) {
@@ -1894,8 +1124,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                     errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                   ),
                 ),
-              // 使用 SelectionArea 包裹正文，长按即可选择文字
-              SelectionArea(child: _buildContent(provider)),
+              // WebView 渲染层：文字选择由 WebView 内部 CSS user-select 控制
+              // 旧的 SelectionArea 仅对 flutter_html 生效，对 PlatformView 无效
+              _buildContent(provider),
               // TTS 播放控制条
               if (provider.isTtsPlaying)
                 ReaderTtsBar(
@@ -2006,80 +1237,46 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       );
     }
 
-    switch (provider.pageMode) {
-      case PageMode.scroll:
-        return _buildScrollContent(provider);
-      case PageMode.slide:
-        return _buildSlideContent(provider);
-      case PageMode.cover:
-        return _buildCoverContent(provider);
-      case PageMode.simulation:
-        return _buildSimulationContent(provider);
-      case PageMode.none:
-        // 无动画模式，使用滚动模式渲染
-        return _buildScrollContent(provider);
-    }
+    // 统一走 WebView 渲染：
+    // - 滚动模式（scroll/none）：WebView 内部 body.reader-scroll + overflow-y:auto
+    // - 分页模式（slide/cover/simulation）：WebView 内部 body.reader-paged + CSS column 分栏
+    // 翻页交互由 _onPointerUp/_onPointerDown + _executeTapAction 处理，
+    // 通过 _readerWebViewController.jumpToPage() 调用 JS 翻页
+    return _buildWebViewContent(provider);
   }
 
-  // ==================== Scroll Mode ====================
+  // ==================== WebView Content ====================
 
-  Widget _buildScrollContent(ReaderProvider provider) {
+  /// 构建 WebView 阅读内容
+  ///
+  /// 替代旧的 _buildScrollContent / _buildSlideContent / _buildCoverContent
+  /// / _buildSimulationContent，统一由 WebView 渲染 HTML+CSS+JS。
+  ///
+  /// 章节内容 / 样式变化由 ReaderWebView.didUpdateWidget 自动检测并重新加载。
+  /// 翻页进度通过 onPageCountReady / onPageChanged 回调同步到本 State。
+  Widget _buildWebViewContent(ReaderProvider provider) {
+    final isScrollMode = provider.pageMode == PageMode.scroll ||
+        provider.pageMode == PageMode.none;
+
     return SafeArea(
       child: Column(
         children: [
           if (_headerVisible(provider))
             _buildScrollPageTip(provider, isHeader: true),
           Expanded(
-            child: SingleChildScrollView(
-              controller: _scrollController,
-              // 始终使用带弹性的滚动物理，让上下滚动到边界时有 iOS 风格的回弹，
-              // 视觉上更柔和、更有"丝滑"感
-              physics: const BouncingScrollPhysics(
-                parent: RangeMaintainingScrollPhysics(),
-              ),
-              padding: EdgeInsets.fromLTRB(
-                provider.paddingLeft,
-                provider.paddingTop,
-                provider.paddingRight,
-                provider.paddingBottom,
-              ),
-              child: RepaintBoundary(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (_prevContent != null &&
-                        _prevContentChapterIndex != null &&
-                        _prevContentChapterIndex! < _chapters.length &&
-                        _prevContentChapterIndex ==
-                            _previousReadableChapterIndex(_currentChapterIndex))
-                      Container(
-                        key: _prevChapterKey,
-                        child: _buildAdjacentChapterContent(
-                          provider,
-                          _prevContent!,
-                          _chapters[_prevContentChapterIndex!].title,
-                        ),
-                      ),
-                    Container(
-                      key: _currentChapterKey,
-                      child: _buildChapterContent(
-                        provider,
-                        _processedContent(_content),
-                        _chapterTitle,
-                      ),
-                    ),
-                    if (_nextContent != null &&
-                        _nextContentChapterIndex != null &&
-                        _nextContentChapterIndex! < _chapters.length &&
-                        _nextContentChapterIndex ==
-                            _nextReadableChapterIndex(_currentChapterIndex))
-                      _buildAdjacentChapterContent(
-                        provider,
-                        _nextContent!,
-                        _chapters[_nextContentChapterIndex!].title,
-                      ),
-                  ],
-                ),
+            child: ReaderWebView(
+              content: _processedContent(_content),
+              title: _chapterTitle,
+              provider: provider,
+              isScrollMode: isScrollMode,
+              controller: _readerWebViewController,
+              initialPage: _pendingWebviewInitialPage,
+              callbacks: ReaderWebViewCallbacks(
+                onInitialized: _onWebviewInitialized,
+                onPageCountReady: _onWebviewPageCountReady,
+                onPageChanged: _onWebviewPageChanged,
+                onTap: _onWebviewTap,
+                onImageTap: _onWebviewImageTap,
               ),
             ),
           ),
@@ -2090,566 +1287,104 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     );
   }
 
+  void _onWebviewInitialized() {
+    // WebView 首次加载完成，等待分页计算
+    _webviewReady = true;
+    // 若有待恢复的初始页码（章节切换/进度恢复），等 onPageCountReady 后再 jumpToPage
+  }
+
+  void _onWebviewPageCountReady(int totalPages) {
+    if (!mounted) return;
+    setState(() {
+      _webviewPageCount = max(1, totalPages);
+      _webviewReady = true;
+      _webviewReloading = false;
+    });
+    // 优先用 fraction 恢复（样式变化后保留位置）
+    if (_pendingWebviewFraction >= 0) {
+      final target = (_pendingWebviewFraction * (_webviewPageCount - 1))
+          .round()
+          .clamp(0, _webviewPageCount - 1);
+      _pendingWebviewFraction = -1.0;
+      _webviewCurrentPage = target;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _readerWebViewController.jumpToPage(target);
+      });
+    } else if (_pendingWebviewInitialPage > 0) {
+      // 章节切换/进度恢复：跳到指定页
+      // 1 << 30 表示「跳到最后一页」
+      final target = _pendingWebviewInitialPage >= (1 << 30)
+          ? _webviewPageCount - 1
+          : _pendingWebviewInitialPage.clamp(0, _webviewPageCount - 1);
+      _pendingWebviewInitialPage = 0;
+      _webviewCurrentPage = target;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _readerWebViewController.jumpToPage(target);
+      });
+    } else {
+      _webviewCurrentPage = 0;
+    }
+    // 保存当前进度（页数变化时位置可能需要校正）
+    unawaited(_saveCurrentProgress(pos: _webviewCurrentPage));
+  }
+
+  void _onWebviewPageChanged(int pageIndex) {
+    if (!mounted) return;
+    if (_webviewReloading) return;
+    setState(() {
+      _webviewCurrentPage = pageIndex;
+    });
+    _scrollProgressNotifier.value =
+        _webviewPageCount > 1 ? pageIndex / (_webviewPageCount - 1) : 0;
+    unawaited(_saveCurrentProgress(pos: pageIndex));
+  }
+
+  /// WebView 内部点击事件（由 JS 检测后回调）
+  ///
+  /// x, y 是相对 WebView 视口的坐标（clientX/clientY）。
+  /// WebView 是 PlatformView，会消费 pointer 事件，外层 Listener 收不到
+  /// pointerUp，所以 tap 分区只能在这里处理。
+  void _onWebviewTap(double x, double y) {
+    // 菜单显示时点击任意区域关闭菜单
+    if (_showMenu) {
+      _hideMenu();
+      return;
+    }
+    if (_isLoading) return;
+    final provider = context.read<ReaderProvider>();
+    final size = MediaQuery.of(context).size;
+    // x, y 是相对 WebView 视口的坐标，需要加上 WebView 在屏幕中的偏移
+    // WebView 位于 SafeArea 内的 Expanded 区域，顶部可能有 header
+    final headerExtent = _headerVisible(provider) ? _headerExtent(provider) : 0.0;
+    final screenX = x;
+    final screenY = y + headerExtent +
+        MediaQuery.of(context).padding.top +
+        provider.paddingTop;
+
+    final col = (screenX / (size.width / 3)).clamp(0, 2).toInt();
+    final row = (screenY / (size.height / 3)).clamp(0, 2).toInt();
+
+    final actions = provider.tapZoneActions;
+    if (row >= actions.length || col >= actions[row].length) return;
+
+    final action = actions[row][col];
+    _executeTapAction(action);
+  }
+
+  void _onWebviewImageTap(String src, Rect rect) {
+    // 图片点击：打开图片预览（暂未实现，与旧 flutter_html 行为一致）
+    debugPrint('[NovelReader] Image tap: $src');
+  }
+
   bool _hasBackgroundImage(ReaderProvider provider) {
     final path = provider.backgroundImagePath;
     return !kIsWeb && path != null && path.isNotEmpty;
   }
 
-  Color _pageBackgroundColor(ReaderProvider provider) {
-    return _hasBackgroundImage(provider)
-        ? Colors.transparent
-        : provider.backgroundColor;
-  }
-
-  Widget _buildAdjacentChapterContent(
-    ReaderProvider provider,
-    String content,
-    String title,
-  ) {
-    // 上一章最后 <p> 的 margin-bottom 已经提供一次段距，
-    // 这里再补一次段距作为章节间额外间隔（总间隔 = paragraphSpacing × 2，
-    // 与章节内段距 paragraphSpacing × 1 形成合理的视觉层次）
-    return Padding(
-      padding: EdgeInsets.only(top: provider.paragraphSpacing),
-      child: _buildChapterContent(provider, _processedContent(content), title),
-    );
-  }
-
-  /// 构建章节标题 Widget（统一入口）
-  ///
-  /// 关键渲染层级修复：
-  /// - 外层包 MediaQuery 强制 textScaler=1.0，与正文 Html 行为一致
-  /// - 避免 main.dart 的 MaterialApp.builder 注入的 textScaler=currentFontScale/10
-  ///   导致标题字号被缩放，而正文 Html 内部覆盖 textScaler=1.0 不被缩放，
-  ///   产生标题与正文比例失调
-  /// - _buildChapterContent（滚动模式）和 _buildPageContent（分页模式）共用此方法
-  Widget _buildChapterTitle(ReaderProvider provider, String title) {
-    return MediaQuery(
-      data: MediaQuery.of(context).copyWith(
-        textScaler: const TextScaler.linear(1.0),
-      ),
-      child: Align(
-        alignment: _titleAlignment(provider),
-        child: Text(
-          ChineseConverter.convert(title, provider.chineseConverterType),
-          style: _titleTextStyle(provider),
-          textAlign: _titleTextAlign(provider),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildChapterContent(
-    ReaderProvider provider,
-    String content,
-    String title,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // 章节标题
-        if (_showChapterTitle(provider)) ...[
-          SizedBox(height: provider.titleTopSpacing.toDouble()),
-          _buildChapterTitle(provider, title),
-          SizedBox(height: provider.titleBottomSpacing.toDouble()),
-        ],
-        _buildRichContent(provider, content),
-      ],
-    );
-  }
-
   // ==================== Rich Content with Highlights ====================
-
-  /// 检测内容是否包含 HTML 标签
-  static final _htmlTagRegex = RegExp(
-    r'<(?:br|p|div|span|a|img|b|i|strong|em|h[1-6]|ul|ol|li|table|tr|td|th|blockquote|pre|code|hr|font)\b[^>]*>',
-    caseSensitive: false,
-  );
-
-  bool _containsHtml(String content) {
-    return _htmlTagRegex.hasMatch(content);
-  }
-
-  Widget _buildRichContent(
-    ReaderProvider provider,
-    String content, {
-    bool convertChinese = true,
-  }) {
-    final displayContent = convertChinese
-        ? ChineseConverter.convert(content, provider.chineseConverterType)
-        : content;
-    // 统一走 HTML 渲染路径：纯文本也包装成 <p> 标签，所有样式用 CSS 定义，
-    // 分页测量和渲染用同一套样式数据源，消除双套计算偏差。
-    // 高亮规则通过内联 <span style="..."> 注入到 HTML 字符串。
-    // 首行缩进由 CSS before 处理（见 _readerHtmlStyle 的 p.before）。
-    final html = _buildUnifiedHtml(provider, displayContent);
-    // 关键修复：外层包 MediaQuery 强制 textScaler = 1.0
-    // - flutter_html 内部 CssBoxWidget 对 top:false 子节点会强制 textScaler=1.0
-    //   但 top:true 的 body 根节点不覆盖，会受外层 MediaQuery 影响
-    // - main.dart 的 MaterialApp.builder 注入了 textScaler = currentFontScale/10
-    //   这会导致 Html 的 body 几何计算被缩放，但正文 Text.rich 不被缩放（内部覆盖）
-    //   产生 body 容器与文本不匹配的几何偏差
-    // - 这里显式覆盖为 1.0，让 Html 整体不受 UI 字号缩放影响
-    //   章节标题 Text 也用同样处理（见 _buildChapterContent），保持比例一致
-    return MediaQuery(
-      data: MediaQuery.of(context).copyWith(
-        textScaler: const TextScaler.linear(1.0),
-      ),
-      child: Html(
-        data: html,
-        style: _readerHtmlStyle(provider),
-      ),
-    );
-  }
-
-  /// 统一构建 HTML 内容：所有内容统一走纯文本路径。
-  ///
-  /// 缩进实现方案（关键）：
-  /// flutter_html 3.0.0 的 WhitespaceProcessing 会 trimLeft 所有段首空白
-  /// （包括全角空格 \u3000 和 HTML 实体 &#x3000; 解码后的字符），
-  /// `Style.before` 注入的文本也会被 trim。
-  ///
-  /// 唯一可行方案：用 `<span style="white-space: pre">` 包裹缩进字符。
-  /// WhiteSpace.pre 会让 WhitespaceProcessing 跳过该节点的所有空白处理，
-  /// 缩进字符得以保留。这是真正的 CSS 实现，不依赖任何 hack。
-  ///
-  /// 高亮规则：用 `<span style="...">` 内联样式注入，flutter_html 支持
-  /// 内联 CSS 解析（见 html_parser.dart 的 inlineCssToStyle 调用）。
-  String _buildUnifiedHtml(
-    ReaderProvider provider,
-    String content,
-  ) {
-    final rules = provider.highlightRules.where((r) => r.enabled).toList();
-    final paragraphs = _splitToParagraphs(content);
-    final indent = provider.paragraphIndent;
-    final buf = StringBuffer();
-    for (final rawPara in paragraphs) {
-      // 续页首行用 _continuationMarker 标记，不加首行缩进
-      // 否则剥掉源内容自带缩进，统一由 <span style="white-space:pre"> 提供缩进
-      var para = rawPara;
-      final isContinuation = para.startsWith(_continuationMarker);
-      if (isContinuation) {
-        para = para.substring(_continuationMarker.length);
-      } else {
-        para = para.replaceAll(_leadingIndentRegex, '');
-      }
-      final highlighted = _wrapWithHighlightHtml(para, rules);
-      // 缩进字符用 white-space:pre 的 span 包裹，避免被 whitespace 处理 trim
-      // 续页首行不加缩进（段落剩余部分，不是段落开头）
-      final indentHtml = (!isContinuation && indent.isNotEmpty)
-          ? '<span style="white-space: pre">$indent</span>'
-          : '';
-      buf.write('<p>');
-      buf.write(indentHtml);
-      buf.write(highlighted);
-      buf.write('</p>');
-    }
-    return buf.toString();
-  }
-
-  /// 统一的 HTML CSS 样式表：字号、行高、字距、段距、缩进、颜色、字重
-  ///
-  /// 关键修复：flutter_html 的根 StyledElement 会继承 DefaultTextStyle.of(context).style，
-  /// 所有未显式设置的字段都会继承 Scaffold/Material 注入的 DefaultTextStyle。
-  /// 因此必须显式设置所有可能影响布局/视觉的字段，避免继承导致样式不可控。
-  ///
-  /// 同时清零 flutter_html 默认样式：
-  /// - <body> 默认 margin: Margins.all(8.0) → 显式 margin: Margins.zero
-  /// - <p> 默认 margin: Margins.symmetric(vertical: 1, unit: Unit.em) → 显式 only(bottom)
-  /// - <p> 默认 display: Display.block → 保留（block 才能独占一行）
-  Map<String, Style> _readerHtmlStyle(ReaderProvider provider) {
-    final fontFamily = provider.fontFamily.isNotEmpty ? provider.fontFamily : null;
-    return {
-      'body': Style(
-        fontSize: FontSize(provider.fontSize),
-        color: provider.textColor,
-        lineHeight: LineHeight(provider.lineHeight),
-        fontFamily: fontFamily,
-        fontWeight: _readerFontWeight(provider),
-        letterSpacing: provider.letterSpacing,
-        textAlign: TextAlign.justify,
-        // 显式设置可能被 DefaultTextStyle 继承的字段，避免继承导致样式不可控
-        backgroundColor: Colors.transparent,
-        fontStyle: FontStyle.normal,
-        textDecoration: TextDecoration.none,
-        wordSpacing: 0,
-        // 显式清零 flutter_html <body> 默认 margin: Margins.all(8.0)
-        padding: HtmlPaddings.zero,
-        margin: Margins.zero,
-        display: Display.block,
-      ),
-      'p': Style(
-        // 显式清零 flutter_html <p> 默认 margin: Margins.symmetric(vertical: 1, unit: Unit.em)
-        // 只保留 bottom margin 作为段距，top/left/right 全部为 0
-        margin: Margins.only(
-          top: 0,
-          bottom: provider.paragraphSpacing,
-          left: 0,
-          right: 0,
-        ),
-        // 首行缩进由 HTML 字符串中的 <span style="white-space:pre"> 提供
-        // （见 _buildUnifiedHtml），不使用 Style.before（会被 whitespace trim 掉）
-        // 继承 body 的字号/颜色/行高/字距/字重/字体等（通过 copyOnlyInherited）
-        // 但显式设置以下字段避免继承 DefaultTextStyle
-        letterSpacing: provider.letterSpacing,
-        padding: HtmlPaddings.zero,
-        backgroundColor: Colors.transparent,
-        display: Display.block,
-      ),
-      'div': Style(
-        margin: Margins.only(
-          top: 0,
-          bottom: provider.paragraphSpacing,
-          left: 0,
-          right: 0,
-        ),
-        letterSpacing: provider.letterSpacing,
-        padding: HtmlPaddings.zero,
-        backgroundColor: Colors.transparent,
-        display: Display.block,
-      ),
-      // span 标签：用于首行缩进 span 和高亮 span
-      // 关键：whiteSpace: WhiteSpace.pre 让 WhitespaceProcessing 跳过该节点
-      // 否则首行缩进字符 \u3000 会被 _removeLeadingSpace trim 掉（导致缩进消失）
-      // flutter_html 3.0.0 的 css_parser 不解析内联 white-space 属性，
-      // 所以必须通过 Style map 设置，内联 style="white-space:pre" 无效
-      'span': Style(
-        backgroundColor: Colors.transparent,
-        whiteSpace: WhiteSpace.pre,
-      ),
-    };
-  }
-
-  /// 把高亮规则应用到文本，包装成内联 <span style="..."> 标签
-  /// flutter_html 3.0.0-beta.2 不支持 CSS class 选择器扩展，
-  /// 所以直接用内联 style 属性，兼容性最好。
-  String _wrapWithHighlightHtml(String html, List<HighlightRule> rules) {
-    if (rules.isEmpty) return html;
-    var result = html;
-    for (final rule in rules) {
-      if (rule.pattern.isEmpty) continue;
-      try {
-        // 多行模式：^ $ 匹配每行开头结尾（分隔线规则需要）
-        final regex = RegExp(rule.pattern, multiLine: true);
-        final styleStr = _highlightStyleToCss(rule);
-        result = result.replaceAllMapped(regex, (match) {
-          final matched = match.group(0) ?? '';
-          if (matched.isEmpty) return '';
-          // 转义 HTML 特殊字符，避免破坏标签
-          final escaped = matched
-              .replaceAll('&', '&amp;')
-              .replaceAll('<', '&lt;')
-              .replaceAll('>', '&gt;');
-          return '<span style="$styleStr">$escaped</span>';
-        });
-      } catch (error) {
-        debugPrint('[NovelReader] 高亮规则 "${rule.name}" 正则错误: $error');
-      }
-    }
-    return result;
-  }
-
-  String _highlightStyleToCss(HighlightRule rule) {
-    // Flutter 3.41 起 Color.red/green/blue/alpha 已弃用，改用 r/g/b/a (0.0-1.0)
-    final c = rule.color.color;
-    final r = (c.r * 255).round().clamp(0, 255);
-    final g = (c.g * 255).round().clamp(0, 255);
-    final b = (c.b * 255).round().clamp(0, 255);
-    final a = (c.a * 255).round().clamp(0, 255);
-    final rgba = 'rgba($r, $g, $b, ${a / 255})';
-    // 注意：flutter_html 3.0.0 不支持 text-decoration-thickness，
-    // 但支持 text-decoration / text-decoration-color / text-decoration-style
-    return switch (rule.style) {
-      HighlightStyle.background =>
-        'background-color: rgba($r, $g, $b, 0.4);',
-      HighlightStyle.underline =>
-        'text-decoration: underline; text-decoration-color: $rgba;',
-      HighlightStyle.strikethrough =>
-        'text-decoration: line-through; text-decoration-color: $rgba;',
-      HighlightStyle.wavy =>
-        'text-decoration: underline; text-decoration-style: wavy; text-decoration-color: $rgba;',
-    };
-  }
-
-  static final _leadingIndentRegex = RegExp(r'^[\u3000\t ]+');
-
-  /// 剥离 HTML 标签的正则（用于 _normalizeHtmlToText）
-  static final _htmlTagStripRegex = RegExp(r'<[^>]+>');
-
-  FontWeight _readerFontWeight(ReaderProvider provider) {
-    return _fontWeight(provider.textFontWeight);
-  }
-
-  FontWeight _fontWeight(int value) {
-    final index = ((value.clamp(100, 900) / 100).round() - 1).clamp(0, 8);
-    return FontWeight.values[index];
-  }
-
-  bool _showChapterTitle(ReaderProvider provider) =>
-      provider.showChapterTitle && provider.titleMode != 2;
 
   String _displayChapterTitle(ReaderProvider provider) =>
       ChineseConverter.convert(_chapterTitle, provider.chineseConverterType);
-
-  TextAlign _titleTextAlign(ReaderProvider provider) {
-    return switch (provider.titleMode) {
-      1 => TextAlign.center,
-      3 => TextAlign.right,
-      _ => TextAlign.left,
-    };
-  }
-
-  Alignment _titleAlignment(ReaderProvider provider) {
-    return switch (provider.titleMode) {
-      1 => Alignment.center,
-      3 => Alignment.centerRight,
-      _ => Alignment.centerLeft,
-    };
-  }
-
-  // ==================== Slide Mode (PageView) ====================
-
-  Widget _buildSlideContent(ReaderProvider provider) {
-    return SafeArea(child: _buildPagedView(provider));
-  }
-
-  // ==================== Cover Mode ====================
-
-  Widget _buildCoverContent(ReaderProvider provider) {
-    return SafeArea(
-      child: _pages.isEmpty
-          ? Center(
-              child: Text('无内容', style: TextStyle(color: provider.textColor)),
-            )
-          : AnimatedSwitcher(
-              duration: _pageAnimationDuration(provider),
-              switchInCurve: Curves.easeOut,
-              switchOutCurve: Curves.easeOut,
-              transitionBuilder: (child, animation) {
-                return FadeTransition(opacity: animation, child: child);
-              },
-              child: RepaintBoundary(
-                key: ValueKey(
-                  'cover-${_currentChapterIndex}-${_currentPage.clamp(0, _pages.length - 1)}',
-                ),
-                child: _buildPageContent(
-                  provider,
-                  _pages[_currentPage.clamp(0, _pages.length - 1)],
-                  pageIndex: _currentPage.clamp(0, _pages.length - 1),
-                ),
-              ),
-            ),
-    );
-  }
-
-  Widget _buildPagedView(ReaderProvider provider) {
-    if (_pages.isEmpty) {
-      return Center(
-        child: Text('无内容', style: TextStyle(color: provider.textColor)),
-      );
-    }
-    final leadingCount = _pagedLeadingCount;
-    final itemCount = _pages.length + leadingCount + _pagedTrailingCount;
-    return PageView.builder(
-      controller: _pageController,
-      onPageChanged: _onPageChanged,
-      itemCount: itemCount,
-      itemBuilder: (context, index) {
-        if (index < leadingCount) {
-          return _buildChapterBoundaryPage(provider, '正在加载上一章...');
-        }
-        final pageIndex = index - leadingCount;
-        if (pageIndex >= _pages.length) {
-          return _buildChapterBoundaryPage(provider, '正在加载下一章...');
-        }
-        return RepaintBoundary(
-          child: _buildPageContent(
-            provider,
-            _pages[pageIndex],
-            pageIndex: pageIndex,
-          ),
-        );
-      },
-    );
-  }
-
-  int get _pagedLeadingCount =>
-      _previousReadableChapterIndex(_currentChapterIndex) == null ? 0 : 1;
-
-  int get _pagedTrailingCount =>
-      _nextReadableChapterIndex(_currentChapterIndex) == null ? 0 : 1;
-
-  void _onPageChanged(int index) {
-    if (_isChangingChapterByPageView) return;
-    final leadingCount = _pagedLeadingCount;
-    if (index < leadingCount) {
-      _isChangingChapterByPageView = true;
-      setState(() => _isLoading = true);
-      _previousChapter(toLastPage: true);
-      return;
-    }
-    final pageIndex = index - leadingCount;
-    if (pageIndex >= _pages.length) {
-      _isChangingChapterByPageView = true;
-      setState(() => _isLoading = true);
-      _nextChapter();
-      return;
-    }
-    setState(() {
-      _currentPage = pageIndex;
-    });
-    unawaited(_saveCurrentProgress(pos: pageIndex));
-  }
-
-  Widget _buildChapterBoundaryPage(ReaderProvider provider, String text) {
-    return Container(
-      color: _pageBackgroundColor(provider),
-      alignment: Alignment.center,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: provider.textColor.withValues(alpha: 0.6),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            text,
-            style: TextStyle(
-              color: provider.textColor.withValues(alpha: 0.58),
-              fontSize: max(14, provider.fontSize - 2),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ==================== Simulation Mode ====================
-
-  Widget _buildSimulationContent(ReaderProvider provider) {
-    return SafeArea(
-      child: _pages.isEmpty
-          ? Center(
-              child: Text('无内容', style: TextStyle(color: provider.textColor)),
-            )
-          : GestureDetector(
-              onHorizontalDragStart: (details) {
-                _dragStartX = details.globalPosition.dx;
-                _isDragging = true;
-              },
-              onHorizontalDragUpdate: (details) {
-                if (!_isDragging) return;
-                _dragCurrentX = details.globalPosition.dx;
-                setState(() {});
-              },
-              onHorizontalDragEnd: (details) {
-                if (!_isDragging) return;
-                _isDragging = false;
-                final delta = _dragCurrentX - _dragStartX;
-                _dragCurrentX = 0;
-                _dragStartX = 0;
-                if (delta < -50) {
-                  _nextPage();
-                } else if (delta > 50) {
-                  _previousPage();
-                } else {
-                  // 未触发翻页，仅刷新以隐藏卷曲效果
-                  setState(() {});
-                }
-              },
-              child: Stack(
-                children: [
-                  RepaintBoundary(
-                    child: _buildPageContent(
-                      provider,
-                      _pages[_currentPage.clamp(0, _pages.length - 1)],
-                      pageIndex: _currentPage,
-                    ),
-                  ),
-                  if (_isDragging) _buildCurlEffect(provider),
-                ],
-              ),
-            ),
-    );
-  }
-
-  Widget _buildCurlEffect(ReaderProvider provider) {
-    final size = MediaQuery.of(context).size;
-    final dragDelta = _dragCurrentX - _dragStartX;
-    final isDragLeft = dragDelta < 0;
-
-    return Positioned(
-      left: 0,
-      top: 0,
-      right: 0,
-      bottom: 0,
-      child: CustomPaint(
-        painter: _PageCurlPainter(
-          dragDelta: dragDelta.abs(),
-          isDragLeft: isDragLeft,
-          backgroundColor: provider.backgroundColor,
-          width: size.width,
-          height: size.height,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPageContent(
-    ReaderProvider provider,
-    String pageText, {
-    required int pageIndex,
-  }) {
-    final showTitle = _showChapterTitle(provider) && pageIndex == 0;
-    return Container(
-      color: _pageBackgroundColor(provider),
-      child: Column(
-        children: [
-          if (_headerVisible(provider))
-            _buildPageTip(provider, isHeader: true, pageIndex: pageIndex),
-          Expanded(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                provider.paddingLeft,
-                provider.paddingTop,
-                provider.paddingRight,
-                provider.paddingBottom,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (showTitle) ...[
-                    SizedBox(height: provider.titleTopSpacing.toDouble()),
-                    _buildChapterTitle(provider, _chapterTitle),
-                    SizedBox(height: provider.titleBottomSpacing.toDouble()),
-                  ],
-                  Expanded(
-                    child: SingleChildScrollView(
-                      physics: const NeverScrollableScrollPhysics(),
-                      child: _buildRichContent(
-                        provider,
-                        pageText,
-                        // 分页结果已是纯文本（_splitContentToPages 已剥源缩进），
-                        // 缩进由 CSS before 统一处理
-                        convertChinese: false,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (_footerVisible(provider))
-            _buildPageTip(provider, isHeader: false, pageIndex: pageIndex),
-        ],
-      ),
-    );
-  }
 
   bool _headerVisible(ReaderProvider provider) {
     if (!provider.showReadingInfo) return false;
@@ -2686,7 +1421,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         return _buildPageTip(
           provider,
           isHeader: isHeader,
-          pageIndex: _currentPage,
+          pageIndex: _webviewCurrentPage,
         );
       },
     );
@@ -2770,7 +1505,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final now = DateTime.now();
     final time =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-    final pageCount = max(_pages.length, 1);
+    final pageCount = max(_webviewPageCount, 1);
     final withinChapter = _isScrollLikeMode(provider)
         ? _scrollProgress
         : pageIndex / max(pageCount - 1, 1);
@@ -4029,100 +2764,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         );
       },
     );
-  }
-}
-
-// ==================== Page Curl Painter ====================
-
-class _PageCurlPainter extends CustomPainter {
-  final double dragDelta;
-  final bool isDragLeft;
-  final Color backgroundColor;
-  final double width;
-  final double height;
-
-  _PageCurlPainter({
-    required this.dragDelta,
-    required this.isDragLeft,
-    required this.backgroundColor,
-    required this.width,
-    required this.height,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (dragDelta < 1) return;
-
-    final paint = Paint()..color = Colors.white.withValues(alpha: 0.9);
-    final shadowPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.3)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
-
-    final curlWidth = dragDelta.clamp(0.0, width);
-    final touchX = isDragLeft ? width - curlWidth : curlWidth;
-
-    // Draw shadow
-    final shadowPath = Path();
-    if (isDragLeft) {
-      shadowPath.moveTo(touchX, 0);
-      shadowPath.lineTo(touchX + 20, 0);
-      shadowPath.lineTo(touchX + 20, height);
-      shadowPath.lineTo(touchX, height);
-    } else {
-      shadowPath.moveTo(touchX, 0);
-      shadowPath.lineTo(touchX - 20, 0);
-      shadowPath.lineTo(touchX - 20, height);
-      shadowPath.lineTo(touchX, height);
-    }
-    canvas.drawPath(shadowPath, shadowPaint);
-
-    // Draw curl effect with bezier curve
-    final curlPath = Path();
-    final curlHeight = min(40.0, curlWidth * 0.15);
-
-    if (isDragLeft) {
-      curlPath.moveTo(touchX, 0);
-      curlPath.lineTo(width, 0);
-      curlPath.lineTo(width, height);
-      curlPath.lineTo(touchX, height);
-      // Bezier curl at the edge
-      curlPath.cubicTo(
-        touchX + curlHeight,
-        height * 0.75,
-        touchX + curlHeight,
-        height * 0.25,
-        touchX,
-        0,
-      );
-    } else {
-      curlPath.moveTo(touchX, 0);
-      curlPath.lineTo(0, 0);
-      curlPath.lineTo(0, height);
-      curlPath.lineTo(touchX, height);
-      curlPath.cubicTo(
-        touchX - curlHeight,
-        height * 0.75,
-        touchX - curlHeight,
-        height * 0.25,
-        touchX,
-        0,
-      );
-    }
-
-    paint.color = backgroundColor.withValues(alpha: 0.95);
-    canvas.drawPath(curlPath, paint);
-
-    // Draw curl line
-    final linePaint = Paint()
-      ..color = Colors.grey.withValues(alpha: 0.5)
-      ..strokeWidth = 1;
-    canvas.drawLine(Offset(touchX, 0), Offset(touchX, height), linePaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _PageCurlPainter oldDelegate) {
-    return oldDelegate.dragDelta != dragDelta ||
-        oldDelegate.isDragLeft != isDragLeft;
   }
 }
 
