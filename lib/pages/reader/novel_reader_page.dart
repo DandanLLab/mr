@@ -1413,8 +1413,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   /// - ReaderWebView.didUpdateWidget 已特判滚动模式下 title 变化不触发 reload，
   ///   所以这里 setState 更新 _chapterTitle 不会让 WebView 重新加载
   /// - _saveCurrentProgress 用 _currentChapterIndex 保存章节，自动联动
-  /// - 不主动调 _scheduleProgressSave，由 _onWebviewPageChanged 的 200ms 防抖处理
-  ///   （IntersectionObserver 触发频率低，但 _onWebviewPageChanged 高频触发）
+  /// - 主动调 _scheduleProgressSave：章节切换是重要进度变化，必须及时保存
+  ///   否则用户滚到新章节后立即退出（300ms 内），pending timer 被 cancel，
+  ///   _currentChapterIndex 更新丢失，下次打开恢复到旧章节
   void _onChapterVisible(int chapterIndex) {
     if (!mounted) return;
     if (_book == null) return;
@@ -1427,6 +1428,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       _chapterTitle = chapter.title;
       _sliderValue = chapterIndex.toDouble();
     });
+    // 章节切换后主动触发防抖保存，确保进度及时持久化
+    _scheduleProgressSave(pos: null);
   }
 
   /// 异步加载下一章内容并追加到 WebView DOM
@@ -1494,6 +1497,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         debugPrint(
           '[NovelReader] _appendNextChapter 内容为空: index=$chapterIndex',
         );
+        // 跳过空章节：更新 _scrollChapterMax 让下次接近底部时加载下一个章节
+        // 否则用户在底部连续滚动会频繁触发无效加载（每次都尝试网络请求）
+        // 空章节对用户无价值，跳过是安全的；下次打开时 _scrollChapterMax 重置
+        // 为 _currentChapterIndex，用户仍可重新加载
+        _scrollChapterMax = chapterIndex;
         // 重置 JS 端 nearEndNotified，否则用户必须滚回上方 2*threshold
         // 才能再次触发 onScrollNearEnd（A3 Bug：底部空白卡死）
         if (_readerWebViewController.isReady) {
@@ -1640,6 +1648,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         debugPrint(
           '[NovelReader] _prependPrevChapter 内容为空: index=$chapterIndex',
         );
+        // 跳过空章节：更新 _scrollChapterMin 让下次接近顶部时加载上一个章节
+        // 否则用户在顶部连续滚动会频繁触发无效加载（每次都尝试网络请求）
+        _scrollChapterMin = chapterIndex;
         if (_readerWebViewController.isReady) {
           try {
             await _readerWebViewController.resetNearStartNotify();

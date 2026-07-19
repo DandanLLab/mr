@@ -38,6 +38,19 @@ class ReaderHtmlTemplate {
     final js = _readerJs();
     final paragraphsHtml = buildParagraphsHtml(content, provider);
     final titleHtml = buildTitleHtml(title, provider, chapterIndex);
+    // 滚动模式：初始章节标题放进 #reader-content-a 内部第一个位置
+    // - prependChapter 才能正确插入到初始标题之前，避免顶部出现两个标题
+    //   （否则初始标题在 #reader-root 顶部「悬浮」，prepend 的新章节标题在
+    //    #reader-content-a 内，滚到顶部时两个标题同时可见）
+    // - initChapterObserver 用 contentA.querySelectorAll 查找标题，放进去后
+    //   初始章节标题才能被 IntersectionObserver 注册，滚动时正确触发
+    //   onChapterVisible 回调
+    // 分页模式：保持原结构（标题在 #reader-root 顶部，#reader-stage 外），
+    //   因为 #reader-content-a 是 absolute 定位的 column 容器，标题放进去
+    //   会被当成 column 内容影响分页计算
+    final contentAInner =
+        isScrollMode ? '$titleHtml\n        $paragraphsHtml' : paragraphsHtml;
+    final rootTitle = isScrollMode ? '' : titleHtml;
 
     return '''
 <!DOCTYPE html>
@@ -52,10 +65,10 @@ class ReaderHtmlTemplate {
 </head>
 <body>
   <div id="reader-root">
-    $titleHtml
+    $rootTitle
     <div id="reader-stage">
       <div id="reader-content-a" class="reader-content">
-        $paragraphsHtml
+        $contentAInner
       </div>
       <div id="reader-content-b" class="reader-content">
         $paragraphsHtml
