@@ -255,6 +255,10 @@ class _ReaderPageViewState extends State<ReaderPageView>
 
     _downPosition = event.position;
     _finalizeStarted = false;
+    // 防御性清理：理论上 _startTurnSequence 完成时会清空，
+    // 但若上一手势异常退出（如截图失败+token 失效路径）可能残留，
+    // 不清的话下一手势截图完成后会用旧位置补帧
+    _pendingMoveDuringCapture = null;
     _delegate.onDown();
     _delegate.setStartPoint(event.position.dx, event.position.dy);
     _delegate.onTouch(event);
@@ -294,6 +298,9 @@ class _ReaderPageViewState extends State<ReaderPageView>
     _turnToken++;
     _isTurning = false;
     _finalizeStarted = false;
+    // 清理跨手势残留：上一手势截图期间缓存的 move 位置不能带到下一手势
+    // 否则下一手势的 _startTurnSequence 截图完成后会用旧位置补帧（视觉跳跃）
+    _pendingMoveDuringCapture = null;
     setState(() {
       _showAnimationLayer = false;
     });
@@ -338,7 +345,9 @@ class _ReaderPageViewState extends State<ReaderPageView>
     if (_delegate is NoAnimPageDelegate) return;
 
     // 用户已滑动一定距离且未启动截图 → 启动截图序列（异步）
-    if (_delegate.isMoved && !_showAnimationLayer) {
+    // 必须加 !_isTurning 检查：截图期间 _isTurning=true 但 _showAnimationLayer=false，
+    // 不加检查会重复触发 _startTurnSequence，token 不断自增导致状态混乱
+    if (_delegate.isMoved && !_showAnimationLayer && !_isTurning) {
       _startTurnSequence();
     }
   }
@@ -520,6 +529,8 @@ class _ReaderPageViewState extends State<ReaderPageView>
     _ticker.stop(); // 保险：防止 delegate 自己没停干净
     _isTurning = false;
     _finalizeStarted = false;
+    // 清理跨手势残留：同 _forceFinishCurrentTurn
+    _pendingMoveDuringCapture = null;
     setState(() {
       _showAnimationLayer = false;
     });

@@ -66,15 +66,6 @@ class ReaderWebViewCallbacks {
   /// 让 UI 章节标题、进度条实时跟随用户滚动更新
   final void Function(int chapterIndex)? onChapterVisible;
 
-  /// 滚动模式：长按段落触发（用户长按段落 >500ms 时触发）
-  ///
-  /// 参数：
-  /// - text：段落文本内容
-  /// - rect：段落元素在 WebView 内的 rect
-  ///
-  /// 用途：Dart 弹出段落操作菜单（复制段落/高亮段落/段落笔记/分享段落）
-  final void Function(String text, Rect rect)? onParagraphLongpress;
-
   const ReaderWebViewCallbacks({
     required this.onInitialized,
     required this.onPageCountReady,
@@ -86,7 +77,6 @@ class ReaderWebViewCallbacks {
     this.onSelectionAction,
     this.onHideSelectionMenu,
     this.onChapterVisible,
-    this.onParagraphLongpress,
   });
 }
 
@@ -328,28 +318,6 @@ class ReaderWebViewController {
     return false;
   }
 
-  /// Phase 4：高亮整段文本（按段落文本匹配）
-  ///
-  /// 用于长按段落菜单的"高亮段落"操作。
-  /// JS 在 #reader-content-a 中查找 textContent === text 的段落，
-  /// 创建覆盖整个段落的 Range，用 .sel-hl 包裹。
-  Future<bool> highlightParagraphByText(
-    String text,
-    int colorIndex,
-    int styleIndex,
-  ) async {
-    if (!_isReady) return false;
-    final textJs = jsonEncode(text);
-    final result = await _webviewController?.evaluateJavascript(
-      source:
-          'window.readerApi.highlightParagraphByText($textJs, $colorIndex, $styleIndex);',
-    );
-    if (result is bool) return result;
-    if (result is String) return result == 'true';
-    if (result is num) return result != 0;
-    return false;
-  }
-
   /// 重新计算页数（样式更新后调用）
   Future<int> recalcPageCount() async {
     if (!_isReady) return 1;
@@ -457,26 +425,6 @@ window.readerApi.getPageCount();
         } else if (idx is num) {
           _callbacks?.onChapterVisible?.call(idx.toInt());
         }
-      },
-    );
-
-    // 滚动模式：长按段落触发（Phase 4）
-    // - JS 端 touchstart 计时，touchend/touchmove 判断
-    // - 持续 >500ms 且未移动 → callHandler('onParagraphLongpress', text, l, t, w, h)
-    controller.addJavaScriptHandler(
-      handlerName: 'onParagraphLongpress',
-      callback: (args) {
-        if (args.length < 5) return;
-        final text = args[0]?.toString() ?? '';
-        _callbacks?.onParagraphLongpress?.call(
-          text,
-          Rect.fromLTWH(
-            (args[1] as num).toDouble(),
-            (args[2] as num).toDouble(),
-            (args[3] as num).toDouble(),
-            (args[4] as num).toDouble(),
-          ),
-        );
       },
     );
 

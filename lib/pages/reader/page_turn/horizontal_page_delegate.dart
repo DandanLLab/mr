@@ -137,10 +137,14 @@ abstract class HorizontalPageDelegate extends PageDelegate {
       }
     }
     if (isMoved) {
-      // isCancel: 与当前方向反向移动
+      // isCancel: 基于「相对起点」的总位移方向判断，避免单帧抖动误判
+      // - direction=next（向左翻下一页）：sumX > startX 表示用户已回到起点右侧，取消
+      // - direction=prev（向右翻上一页）：sumX < startX 表示用户已回到起点左侧，取消
+      // 旧实现 `sumX > lastX / sumX < lastX` 只看单帧方向：
+      // 用户向左滑到一半再向右微调（仍在起点左侧）就被误判为取消，导致松手不跳转
       isCancel = (direction == PageDirection.next)
-          ? sumX > lastX
-          : sumX < lastX;
+          ? sumX > startX
+          : sumX < startX;
       isRunning = true;
       setTouchPoint(sumX, sumY);
       notifyStateChanged();

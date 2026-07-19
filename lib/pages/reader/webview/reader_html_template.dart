@@ -738,12 +738,6 @@ window.readerApi = (function() {
     // - 让 UI 章节标题/进度条实时跟随用户滚动更新
     initChapterObserver();
 
-    // Phase 4：长按段落菜单
-    // - touchstart 500ms 触发 onParagraphLongpress(text, rect)
-    // - 移动距离 > 10px 取消（视为滚动）
-    // - 选区存在时不触发（避免与选择菜单冲突）
-    initLongpressMenu();
-
     // 等待 DOM 渲染完成后通知 Dart 侧
     // 首次通知：rAF 双帧后立即通知，让 Dart 尽快拿到初步 pageCount 启动渲染
     // （避免首次通知延迟导致首屏白屏）
@@ -858,88 +852,7 @@ window.readerApi = (function() {
     });
   }
 
-  // ============ Phase 4：长按段落菜单 ============
-  // 触发条件：
-  // - touchstart 在 #reader-content-a 内的段落元素（p / .reader-paragraph）
-  // - 持续 > 500ms 且 touchmove 距离 < 10px（避免与滚动冲突）
-  // - 排除选区存在场景（避免长按选区时误触发）
-  // 回调：callHandler('onParagraphLongpress', text, l, t, w, h)
-  var longpressTimer = null;
-  var longpressStartPos = null;
-  var longpressTarget = null;
-  var LONGPRESS_DELAY = 500;     // ms，参考 Android ViewConfiguration.getLongPressTimeout
-  var LONGPRESS_MOVE_TOLERANCE = 10;  // px，超过此距离视为滚动
-
-  function initLongpressMenu() {
-    if (!contentA) return;
-
-    contentA.addEventListener('touchstart', function(e) {
-      if (e.touches.length !== 1) {
-        // 多指：取消
-        if (longpressTimer) { clearTimeout(longpressTimer); longpressTimer = null; }
-        return;
-      }
-      // 选区存在时不触发长按（避免与选择菜单冲突）
-      var sel = window.getSelection();
-      if (sel && sel.rangeCount > 0 && !sel.getRangeAt(0).collapsed) {
-        return;
-      }
-      // 找到段落祖先（p / .reader-paragraph）
-      var target = e.target;
-      var paragraph = null;
-      while (target && target !== contentA) {
-        if (target.tagName === 'P' ||
-            (target.classList && target.classList.contains('reader-paragraph'))) {
-          paragraph = target;
-          break;
-        }
-        target = target.parentNode;
-      }
-      if (!paragraph) return;
-
-      longpressTarget = paragraph;
-      longpressStartPos = {
-        x: e.touches[0].clientX,
-        y: e.touches[0].clientY
-      };
-      if (longpressTimer) clearTimeout(longpressTimer);
-      longpressTimer = setTimeout(function() {
-        if (!longpressTarget) return;
-        var text = (longpressTarget.textContent || '').trim();
-        if (text.length === 0) return;
-        var rect = longpressTarget.getBoundingClientRect();
-        if (window.flutter_inappwebview) {
-          window.flutter_inappwebview.callHandler(
-            'onParagraphLongpress',
-            text,
-            rect.left, rect.top, rect.width, rect.height
-          );
-        }
-      }, LONGPRESS_DELAY);
-    }, { passive: true });
-
-    contentA.addEventListener('touchmove', function(e) {
-      if (!longpressStartPos || !longpressTimer) return;
-      var dx = e.touches[0].clientX - longpressStartPos.x;
-      var dy = e.touches[0].clientY - longpressStartPos.y;
-      if (Math.sqrt(dx * dx + dy * dy) > LONGPRESS_MOVE_TOLERANCE) {
-        // 移动距离过大：取消
-        clearTimeout(longpressTimer);
-        longpressTimer = null;
-        longpressTarget = null;
-      }
-    }, { passive: true });
-
-    contentA.addEventListener('touchend', function() {
-      if (longpressTimer) { clearTimeout(longpressTimer); longpressTimer = null; }
-      longpressTarget = null;
-    }, { passive: true });
-
-    contentA.addEventListener('touchcancel', function() {
-      if (longpressTimer) { clearTimeout(longpressTimer); longpressTimer = null; }
-      longpressTarget = null;
-    }, { passive: true });
-  }
+  // ============ Phase 4：长按段落菜单（已移除，统一走文字选择菜单） ============
 
   function getSelectionText() {
     var sel = window.getSelection();
@@ -1384,42 +1297,6 @@ window.readerApi = (function() {
       console.warn('[reader] scrollToSearchResult failed:', e);
       return false;
     }
-  }
-
-  // Phase 4：高亮整段（按段落文本匹配）
-  // - 遍历 #reader-content-a 下所有 p / .reader-paragraph
-  // - 找到 textContent === text 的段落
-  // - 创建覆盖整个段落的 Range，用 .sel-hl 包裹
-  function highlightParagraphByText(text, colorIndex, styleIndex) {
-    if (!text || !contentA) return false;
-    var paragraphs = contentA.querySelectorAll('p, .reader-paragraph');
-    var colors = ['#FFF176', '#A5D6A7', '#90CAF9', '#F48FB1', '#FFCC80', '#CE93D8'];
-    var color = colors[colorIndex] || colors[0];
-    var textDecoration = styleIndex === 1 ? 'underline'
-      : (styleIndex === 2 ? 'line-through' : (styleIndex === 3 ? 'underline wavy' : ''));
-    for (var i = 0; i < paragraphs.length; i++) {
-      var p = paragraphs[i];
-      if (p.textContent.trim() === text.trim()) {
-        var r = document.createRange();
-        r.selectNodeContents(p);
-        try {
-          var mark = document.createElement('span');
-          mark.className = 'sel-hl';
-          mark.style.backgroundColor = styleIndex === 0 ? color : 'transparent';
-          if (textDecoration) {
-            mark.style.textDecoration = textDecoration;
-            mark.style.textDecorationColor = color;
-            mark.style.webkitTextDecorationColor = color;
-          }
-          r.surroundContents(mark);
-          return true;
-        } catch (e) {
-          console.warn('[reader] highlightParagraphByText failed:', e);
-          return false;
-        }
-      }
-    }
-    return false;
   }
 
   // 更新视口尺寸 CSS 变量
@@ -1937,13 +1814,12 @@ window.readerApi = (function() {
     getAppendedChapterCount: getAppendedChapterCount,
     hideSelectionMenu: hideSelectionMenu,
     highlightSelection: highlightSelection,
-    // Phase 3.1 / 3.2 / 3.4 / 4 新增
+    // Phase 3.1 / 3.2 / 3.4 新增
     removeHighlightInSelection: removeHighlightInSelection,
     restoreHighlights: restoreHighlights,
     removeHighlightByText: removeHighlightByText,
     searchText: searchText,
-    scrollToSearchResult: scrollToSearchResult,
-    highlightParagraphByText: highlightParagraphByText
+    scrollToSearchResult: scrollToSearchResult
   };
 })();
 ''';
