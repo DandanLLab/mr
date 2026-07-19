@@ -1137,7 +1137,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       _startWebviewReloadTimeout();
       _webviewReady = false;
     } catch (_) {
-      // 异常时退化为不恢复进度（_pendingWebviewFraction 保持 -1）
+      // 异常时显式重置为 -1，确保不恢复进度。
+      // 不能依赖「进入本方法前 fraction 已是 -1」的假设：
+      // 连续触发尺寸变化时，前一次保存的 fraction 可能尚未被消费，
+      // 若 try 块中途异常而不重置，会用旧 fraction 恢复到错误位置。
+      _pendingWebviewFraction = -1.0;
+      _pendingWebviewInitialPage = 0;
     }
   }
 
