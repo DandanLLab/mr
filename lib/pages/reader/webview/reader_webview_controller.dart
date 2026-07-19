@@ -29,6 +29,15 @@ class ReaderWebViewCallbacks {
   /// 仅滚动模式（PageMode.scroll）会触发。
   final void Function()? onScrollNearEnd;
 
+  /// 滚动模式接近顶部时触发（用于向上衔接上一章）
+  ///
+  /// 与 [onScrollNearEnd] 对称：滚动到距顶部 < 2.0 视口高度时通知一次，
+  /// Dart 侧加载上一章并调 prependChapter 插入到 DOM 顶部，
+  /// 插入后 JS 端会重置标志允许下次触发，并同步调整 scrollTop 保持视觉位置。
+  /// 用户主动滚回下方也会重置，允许下次触发。
+  /// 仅滚动模式（PageMode.scroll）会触发。
+  final void Function()? onScrollNearStart;
+
   /// 文字选区完成（防抖 250ms 稳定后触发）
   ///
   /// 参数：
@@ -98,6 +107,7 @@ class ReaderWebViewCallbacks {
     required this.onTap,
     required this.onImageTap,
     this.onScrollNearEnd,
+    this.onScrollNearStart,
     this.onSelectionReady,
     this.onSelectionAction,
     this.onHideSelectionMenu,
@@ -250,6 +260,36 @@ class ReaderWebViewController {
     return _toInt(result);
   }
 
+  /// 向前插入章节内容到 DOM 顶部（滚动模式向上衔接）
+  ///
+  /// 与 [appendChapter] 对称，用于「滚动到顶部时加载上一章」。
+  /// 在不触发整页 reload 的前提下，把上一章标题 + 段落 HTML 插入到
+  /// #reader-content-a 顶部，JS 端会同步调整 body.scrollTop 保持视觉位置。
+  ///
+  /// - [title]：章节标题（纯文本，已做简繁转换）
+  /// - [paragraphsHtml]：段落 HTML（由 ReaderHtmlTemplate.buildParagraphsHtml 生成）
+  /// - [chapterIndex]：章节索引，用于 IntersectionObserver 监测
+  ///
+  /// 插入后 JS 端会重置 nearStartNotified，允许下次接近顶部时再次触发。
+  /// 仅滚动模式有效。
+  Future<void> prependChapter(String title, String paragraphsHtml, int chapterIndex) async {
+    if (!_isReady) return;
+    final titleJs = jsonEncode(title);
+    final htmlJs = jsonEncode(paragraphsHtml);
+    await _webviewController?.evaluateJavascript(
+      source: 'window.readerApi.prependChapter($titleJs, $htmlJs, $chapterIndex);',
+    );
+  }
+
+  /// 获取向前插入的章节数
+  Future<int> getPrependedChapterCount() async {
+    if (!_isReady) return 0;
+    final result = await _webviewController?.evaluateJavascript(
+      source: 'window.readerApi.getPrependedChapterCount();',
+    );
+    return _toInt(result);
+  }
+
   /// 主动隐藏 JS 自定义文字选择菜单
   ///
   /// 触发场景：
@@ -356,6 +396,18 @@ class ReaderWebViewController {
     );
   }
 
+  /// 重置 nearStartNotified 标志（_prependPrevChapter 失败/空内容时调用）
+  ///
+  /// 与 [resetNearEndNotify] 对称：避免空章节或网络失败时
+  /// nearStartNotified=true 死锁，导致用户必须滚回下方才能再次触发
+  /// onScrollNearStart。
+  Future<void> resetNearStartNotify() async {
+    if (!_isReady) return;
+    await _webviewController?.evaluateJavascript(
+      source: 'window.readerApi.resetNearStartNotify();',
+    );
+  }
+
   /// 重新计算页数（样式更新后调用）
   Future<int> recalcPageCount() async {
     if (!_isReady) return 1;
@@ -444,6 +496,16 @@ class ReaderWebViewController {
       handlerName: 'onScrollNearEnd',
       callback: (args) {
         _callbacks?.onScrollNearEnd?.call();
+      },
+    );
+
+    // 滚动模式向上衔接：滚动接近顶部时通知 Dart 侧加载上一章
+    // - 与 onScrollNearEnd 对称
+    // - JS 端已做去重（nearStartNotified），prependChapter 后会重置
+    controller.addJavaScriptHandler(
+      handlerName: 'onScrollNearStart',
+      callback: (args) {
+        _callbacks?.onScrollNearStart?.call();
       },
     );
 

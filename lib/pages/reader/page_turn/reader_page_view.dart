@@ -1,4 +1,4 @@
-import 'dart:async' show Timer;
+import 'dart:async' show Completer, Timer;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
@@ -239,7 +239,6 @@ class ReaderPageViewState extends State<ReaderPageView>
       // 配合 drawBitmapFull 的 src=bitmap 物理尺寸，绘制时精准 1:1 还原
       return await boundary.toImage(pixelRatio: _devicePixelRatio);
     } catch (e) {
-      debugPrint('[ReaderPageView] 截图失败: $e');
       return null;
     }
   }
@@ -360,7 +359,6 @@ class ReaderPageViewState extends State<ReaderPageView>
 
     _pointerUpFallbackTimer?.cancel();
     _pointerUpFallbackTimer = null;
-    debugPrint('[ReaderPageView] _onPointerUp 被 Flutter 触发（未被吞）isMoved=${_delegate.isMoved} finalizeStarted=$_finalizeStarted');
 
     // tap 召唤菜单不再由 Flutter Listener 处理 —— InAppWebView 是 PlatformView
     // 会吃掉 pointerUp，所以 tap 改由 JS click 事件回传到 _onWebviewJsTap
@@ -394,7 +392,6 @@ class ReaderPageViewState extends State<ReaderPageView>
     }
     if (_finalizeStarted) return;
     _finalizeStarted = true;
-    debugPrint('[ReaderPageView] pointerUp 兜底触发（被 WebView 吞）');
     _finalizeTurn();
   }
   /// 开始翻页流程（用户开始滑动时调用）
@@ -483,9 +480,6 @@ class ReaderPageViewState extends State<ReaderPageView>
   /// - _delegate.onAnimStart / 启动 ticker（不播完成动画）
   /// - 回弹动画（isCancel 时直接销毁，不跑回弹）
   Future<void> _finalizeTurn() async {
-    final token = _turnToken;
-    debugPrint('[ReaderPageView] _finalizeTurn 启动 token=$token isCancel=${_delegate.isCancel} isNoAnim=${_delegate is NoAnimPageDelegate} showLayer=$_showAnimationLayer isTurning=$_isTurning');
-
     // 用户回拖取消：立即销毁覆盖层，不跑回弹动画
     // （符合「没摸就没动画」原则：松手瞬间不再有任何自动播放的动画）
     if (_delegate.isCancel) {
@@ -507,11 +501,9 @@ class ReaderPageViewState extends State<ReaderPageView>
             widget.onPageTurnCancelled?.call();
           }
         }).catchError((e) {
-          debugPrint('[ReaderPageView] onPerformPageTurn 异常: $e');
           if (mounted) widget.onPageTurnCancelled?.call();
         });
       } catch (e) {
-        debugPrint('[ReaderPageView] onPerformPageTurn 同步异常: $e');
         syncOk = false;
       }
       _isTurning = false;
@@ -543,7 +535,6 @@ class ReaderPageViewState extends State<ReaderPageView>
     final direction = _delegate.direction;
     bool syncOk = true;
     try {
-      debugPrint('[ReaderPageView] _finalizeTurn fire-and-forget 跳页 dir=$direction');
       // 不 await：立即返回，跳页在后台执行
       widget.onPerformPageTurn(direction).then((asyncOk) {
         if (!mounted) return;
@@ -553,17 +544,14 @@ class ReaderPageViewState extends State<ReaderPageView>
           widget.onPageTurnCancelled?.call();
         }
       }).catchError((e) {
-        debugPrint('[ReaderPageView] onPerformPageTurn 异常: $e');
         if (mounted) widget.onPageTurnCancelled?.call();
       });
     } catch (e) {
-      debugPrint('[ReaderPageView] onPerformPageTurn 同步异常: $e');
       syncOk = false;
     }
 
     // 立即销毁覆盖层 + 重置 delegate
     // （用户已松手，按「没摸就没动画」原则不再播放任何完成动画）
-    debugPrint('[ReaderPageView] _finalizeTurn 立即销毁覆盖层 syncOk=$syncOk');
     _isTurning = false;
     _finalizeStarted = false;
     // 关键：自增 _turnToken 让正在 await 的 _startTurnSequence 截图回调失效。
@@ -628,6 +616,156 @@ class ReaderPageViewState extends State<ReaderPageView>
     _cancelTurn();
   }
 
+  /// 点击区域翻页入口（由父级通过 GlobalKey 调用）
+  ///
+  /// 与触摸翻页（_startTurnSequence + _finalizeTurn）的差异：
+  /// - 触摸翻页：用户拖动时 delegate 实时绘制 → 松手立即销毁覆盖层（不播完成动画）
+  /// - 点击翻页：用户没拖动，直接启动完整动画流程
+  ///   （截图cur → 显示覆盖层 → 跳页 → 截图target → 启动动画 → 动画结束销毁）
+  ///
+  /// 用户设定什么 pageMode，就走什么动画（slide/cover/simulation/none）。
+  /// NoAnim 模式：无覆盖层，直接 fire-and-forget 跳页。
+  ///
+  /// 注意：动画结束由 _onAnimStop 处理（已存在，会调 onPageTurnCompleted），
+  /// 所以本方法跳页成功后不要重复调 onPageTurnCompleted（截图失败除外）。
+  /// 点击区域翻页入口
+  ///
+  /// [tapPosition]：用户点击屏幕坐标（全局）。
+  /// - 仿真翻页会以点击横坐标作为翻折起点（限制方向：next 在右半屏，prev 在左半屏）
+  /// - 未提供时（如键盘/章节按钮调用）fallback 到角落 hardcode
+  /// - slide/cover/none 不依赖此参数（仅平移，起点不影响视觉）
+  Future<void> performTapTurn(PageDirection direction, {Offset? tapPosition}) async {
+    if (!mounted) return;
+    if (widget.isScrollMode) return;
+
+    // 上一次翻页动画未结束 → 强制结束（避免覆盖层残留 + 状态混乱）
+    if (_isTurning || _showAnimationLayer) {
+      _forceFinishCurrentTurn();
+    }
+
+    // NoAnim：直接跳页，无截图无覆盖层
+    if (_delegate is NoAnimPageDelegate) {
+      try {
+        final ok = await widget.onPerformPageTurn(direction);
+        if (!mounted) return;
+        if (ok) {
+          widget.onPageTurnCompleted?.call(direction);
+        } else {
+          widget.onPageTurnCancelled?.call();
+        }
+      } catch (e) {
+        if (mounted) widget.onPageTurnCancelled?.call();
+      }
+      return;
+    }
+
+    final token = ++_turnToken;
+    _isTurning = true;
+    _finalizeStarted = false; // 点击翻页不走 _finalizeTurn（无触摸流程）
+
+    // 1. 截图当前页
+    final curBitmap = await _captureBoundary();
+    if (!mounted || token != _turnToken) {
+      curBitmap?.dispose();
+      return;
+    }
+    if (curBitmap == null) {
+      _isTurning = false;
+      if (mounted) setState(() => _showAnimationLayer = false);
+      widget.onPageTurnCancelled?.call();
+      return;
+    }
+
+    // 2. 设置 delegate 状态（方向 + 起点）+ 显示覆盖层
+    // 起点策略：
+    // - 有 tapPosition（点击区域翻页）：跟随用户点击横坐标，让仿真翻页从点击位置开始翻折
+    //   - next 限制在屏幕右半部分（>=width*0.5），保证右页向左翻的方向正确
+    //   - prev 限制在屏幕左半部分（<=width*0.5），保证左页向右翻的方向正确
+    // - 无 tapPosition（键盘/章节按钮）：fallback 到角落 hardcode（原行为）
+    // - y 固定在屏幕底部 0.9*height（仿真翻页经典手势，从底部翻起；
+    //   slide/cover 不依赖起点，y 不影响视觉）
+    _delegate.onDown();
+    _delegate.setDirection(direction);
+    final double startY = _delegate.viewHeight * 0.9;
+    double startX;
+    if (tapPosition != null) {
+      if (direction == PageDirection.next) {
+        startX = tapPosition.dx.clamp(_delegate.viewWidth * 0.5, _delegate.viewWidth);
+      } else {
+        startX = tapPosition.dx.clamp(0.0, _delegate.viewWidth * 0.5);
+      }
+    } else {
+      startX = direction == PageDirection.next
+          ? _delegate.viewWidth * 0.9
+          : _delegate.viewWidth * 0.1;
+    }
+    _delegate.setStartPoint(startX, startY);
+
+    setState(() {
+      _delegate.setBitmaps(cur: curBitmap);
+      _showAnimationLayer = true;
+    });
+
+    // 3. 跳页（onPerformPageTurn 内部已 await _waitForWebViewFrame 等 WebView 渲染）
+    bool turnOk = false;
+    try {
+      turnOk = await widget.onPerformPageTurn(direction);
+    } catch (e) {
+      turnOk = false;
+    }
+    if (!mounted || token != _turnToken) return;
+
+    if (!turnOk) {
+      // 跳页失败（章节边界等由外部处理）：销毁覆盖层，通知取消
+      _isTurning = false;
+      _finalizeStarted = false;
+      setState(() => _showAnimationLayer = false);
+      _delegate.recycleBitmaps();
+      widget.onPageTurnCancelled?.call();
+      return;
+    }
+
+    // 4. 再等一帧让 Surface 合成到 RepaintBoundary（onPerformPageTurn 已等过，
+    //    这里再等一帧保险，避免截图拿到旧内容）
+    await _nextFlutterFrame();
+    if (!mounted || token != _turnToken) return;
+
+    // 5. 截图目标页
+    final targetBitmap = await _captureBoundary();
+    if (!mounted || token != _turnToken) {
+      targetBitmap?.dispose();
+      return;
+    }
+    if (targetBitmap == null) {
+      // 截图失败：销毁覆盖层，但跳页已成功 → 通知完成
+      _isTurning = false;
+      _finalizeStarted = false;
+      setState(() => _showAnimationLayer = false);
+      _delegate.recycleBitmaps();
+      widget.onPageTurnCompleted?.call(direction);
+      return;
+    }
+
+    // 6. 注入目标页 bitmap + 启动动画
+    // 动画结束由 _onAnimStop 处理（销毁覆盖层 + 调 onPageTurnCompleted）
+    setState(() {
+      if (direction == PageDirection.next) {
+        _delegate.setBitmaps(next: targetBitmap);
+      } else {
+        _delegate.setBitmaps(prev: targetBitmap);
+      }
+    });
+
+    _delegate.onAnimStart(_delegate.defaultAnimationSpeed);
+  }
+
+  /// 等待下一个 Flutter 帧
+  Future<void> _nextFlutterFrame() {
+    final completer = Completer<void>();
+    WidgetsBinding.instance.addPostFrameCallback((_) => completer.complete());
+    return completer.future;
+  }
+
   /// JS touchend 回调入口（由父级通过 GlobalKey 调用）
   ///
   /// 背景：InAppWebView 是 PlatformView，会吞掉 Flutter 的 PointerUpEvent，
@@ -648,17 +786,14 @@ class ReaderPageViewState extends State<ReaderPageView>
     // _downPosition==null 说明 _onPointerUp 已被 Flutter 正常触发，
     // 不需要 JS 兜底，避免重复 _finalizeTurn
     if (_downPosition == null) {
-      debugPrint('[ReaderPageView] handleTouchEnd: _downPosition==null（_onPointerUp 已处理）');
       return;
     }
     // _finalizeStarted=true 说明 _finalizeTurn 已在进行中（可能是 _onPointerUp
     // 或 _pointerUpFallbackTimer 触发的），不要重复触发
     if (_finalizeStarted) {
-      debugPrint('[ReaderPageView] handleTouchEnd: _finalizeStarted=true（已在收尾）');
       return;
     }
 
-    debugPrint('[ReaderPageView] handleTouchEnd: JS touchend 触发 _finalizeTurn');
     _pointerUpFallbackTimer?.cancel();
     _pointerUpFallbackTimer = null;
 

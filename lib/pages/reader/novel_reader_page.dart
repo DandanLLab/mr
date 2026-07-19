@@ -136,6 +136,16 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   int _scrollChapterMax = -1;
   // _appendNextChapter 防重入标志：避免 onScrollNearEnd 高频触发时重复加载
   bool _isAppendingChapter = false;
+
+  // 滚动模式向上衔接：当前已加载到第几章（最小 index）
+  //
+  // - 与 _scrollChapterMax 对称，章节切换时重置为 _currentChapterIndex
+  // - 滚动到接近顶部触发 _onScrollNearStart 时，加载上一章并 _scrollChapterMin=prevIndex
+  // - 用户主动翻到上一章 / 跳转章节时，_content 变化触发 WebView reload，
+  //   _scrollChapterMin 同步重置为新章节 index，旧前置内容随 reload 清空
+  int _scrollChapterMin = -1;
+  // _prependPrevChapter 防重入标志：避免 onScrollNearStart 高频触发时重复加载
+  bool _isPrependingChapter = false;
   // 待恢复的初始页码（章节加载时设置，WebView 就绪后调用 jumpToPage）
   // 约定：>= (1 << 30) 表示「跳到最后一页」
   int _pendingWebviewInitialPage = 0;
@@ -845,6 +855,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     // WebView 会因 _content 变化 reload，旧追加内容随 reload 清空
     _scrollChapterMax = chapterIndex;
     _isAppendingChapter = false;
+    // 滚动模式向上衔接：同步重置最小章节索引和防重入标志
+    _scrollChapterMin = chapterIndex;
+    _isPrependingChapter = false;
     setState(() {
       _isLoading = true;
       _sliderValue = _currentChapterIndex.toDouble();
@@ -1174,7 +1187,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     if (row >= actions.length || col >= actions[row].length) return;
 
     final action = actions[row][col];
-    _executeTapAction(action);
+    // 点击区域翻页时把点击坐标传下去，让仿真翻页的起点跟随用户点击位置
+    // （用户设定什么 pageMode，点击区域翻页就用什么动画；起点位置让动画视觉更贴合用户预期）
+    _executeTapAction(action, tapPosition: details.globalPosition);
   }
 
   /// 用 Listener 在 hit-test 阶段拦截 pointerUp，转成 tap 事件。
@@ -1213,19 +1228,16 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     // - 时长 < 500ms（长按选文字不算）
     // - 主轴位移 > 40px
     // - 副轴位移 < 60px（避免误识别对角线滑动）
+    //
+    // 滚动模式下只识别「水平滑动」翻页，竖向滑动完全交给 WebView 自由滚动：
+    // - 之前竖向滑动也识别为翻页 → 调 scrollByViewport → body.scrollTop=target 立即跳一屏
+    // - 这破坏了 WebView 原生滚动跟手 + 惯性，且打断用户长按选文字
+    // - 用户反馈「拖动时跳」「松手后惯性跳」「召唤不了选择文字菜单」根因均为此
+    // - 水平滑动翻页保留（左右滑翻页是阅读器常见交互，不与竖向滚动冲突）
     if (!isPagedMode && elapsed < _swipeTimeoutMs) {
       if (absDx >= _swipeThreshold && absDy < _swipeOrthogonalMax) {
         // 水平滑动：右滑=上一页，左滑=下一页
         if (dx > 0) {
-          _previousPage();
-        } else {
-          _nextPage();
-        }
-        return;
-      }
-      if (absDy >= _swipeThreshold && absDx < _swipeOrthogonalMax) {
-        // 垂直滑动：下滑=上一页，上滑=下一页
-        if (dy > 0) {
           _previousPage();
         } else {
           _nextPage();
@@ -1248,16 +1260,16 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     _swipeStartTime = DateTime.now();
   }
 
-  void _executeTapAction(TapZoneAction action) {
+  void _executeTapAction(TapZoneAction action, {Offset? tapPosition}) {
     switch (action) {
       case TapZoneAction.showMenu:
         _toggleMenu();
         break;
       case TapZoneAction.previousPage:
-        _previousPage();
+        _previousPage(tapPosition: tapPosition);
         break;
       case TapZoneAction.nextPage:
-        _nextPage();
+        _nextPage(tapPosition: tapPosition);
         break;
       case TapZoneAction.previousChapter:
         _previousChapter();
@@ -1270,7 +1282,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     }
   }
 
-  void _previousPage() {
+  void _previousPage({Offset? tapPosition}) {
     final provider = context.read<ReaderProvider>();
     if (_isScrollLikeMode(provider)) {
       // 滚动模式：按视口高度向上翻
@@ -1282,17 +1294,22 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         }
       });
     } else {
-      // 分页模式：通过 JS jumpToPage 翻页
+      // 分页模式：走 ReaderPageView 翻页动画系统
+      // 用户设定什么 pageMode（slide/cover/simulation/none），就走什么动画
+      // tapPosition 让仿真翻页起点跟随用户点击位置（其他模式不影响视觉）
       if (!_webviewReady) return;
       if (_webviewCurrentPage > 0) {
-        _readerWebViewController.jumpToPage(_webviewCurrentPage - 1);
+        _readerPageViewKey.currentState?.performTapTurn(
+          PageDirection.prev,
+          tapPosition: tapPosition,
+        );
       } else {
         _previousChapter(toLastPage: true);
       }
     }
   }
 
-  void _nextPage() {
+  void _nextPage({Offset? tapPosition}) {
     final provider = context.read<ReaderProvider>();
     if (_isScrollLikeMode(provider)) {
       // 滚动模式：按视口高度向下翻
@@ -1304,10 +1321,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         }
       });
     } else {
-      // 分页模式
+      // 分页模式：走 ReaderPageView 翻页动画系统
+      // tapPosition 让仿真翻页起点跟随用户点击位置
       if (!_webviewReady) return;
       if (_webviewCurrentPage < _webviewPageCount - 1) {
-        _readerWebViewController.jumpToPage(_webviewCurrentPage + 1);
+        _readerPageViewKey.currentState?.performTapTurn(
+          PageDirection.next,
+          tapPosition: tapPosition,
+        );
       } else {
         _nextChapter();
       }
@@ -1382,7 +1403,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   /// 滚动模式：当前可见章节变化（IntersectionObserver 触发）
   ///
-  /// JS 端监听 [data-chapter-index] 元素，进入屏幕中部 10% 区域时回调。
+  /// JS 端监听 [data-chapter-index] 元素，进入屏幕中部 20% 横条时回调。
+  /// 多个标题同时进入判定区时，JS 端选最接近视口中线的"主导章节"只回调一次，
+  /// 避免短章节边界附近 UI 标题闪烁。
   /// Dart 侧更新 _currentChapterIndex / _chapterTitle / _sliderValue，
   /// 让 UI 章节标题、进度条实时跟随用户滚动更新。
   ///
@@ -1525,6 +1548,145 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       }
     } finally {
       _isAppendingChapter = false;
+    }
+  }
+
+  // ==================== 滚动模式向上衔接 ====================
+  // 与「无缝衔接下一章」对称：滚动到接近顶部时自动加载上一章并前置到 DOM 顶部，
+  // 保留用户当前滚动位置（JS 端 prependChapter 会同步调整 scrollTop）。
+  //
+  // 数据流：
+  // 1. JS 端 scroll listener 检测 scrollTop < 2.0 视口高度 → callHandler('onScrollNearStart')
+  // 2. ReaderWebViewController 转发到 callbacks.onScrollNearStart
+  // 3. _onScrollNearStart 检查是否有上一章 → _prependPrevChapter 异步加载
+  // 4. _prependPrevChapter 拉取章节内容 → 简繁转换 + 替换规则 + 生成段落 HTML
+  //    → controller.prependChapter 插入到 DOM 顶部（JS 同步调整 scrollTop 保持视觉位置）
+  // 5. _scrollChapterMin 更新为 prevIndex，下次接近顶部时继续加载上一章
+
+  /// 滚动接近顶部时触发：加载上一章并前置到 WebView DOM
+  void _onScrollNearStart() {
+    if (!mounted) return;
+    if (_isPrependingChapter) return; // 防重入
+    if (_book == null || _dataProvider == null || _chapters.isEmpty) return;
+
+    final prevIndex = _previousReadableChapterIndex(_scrollChapterMin);
+    if (prevIndex == null) return; // 没有上一章
+
+    _isPrependingChapter = true;
+    _prependPrevChapter(prevIndex);
+  }
+
+  /// 异步加载上一章内容并前置到 WebView DOM 顶部
+  ///
+  /// 与 _appendNextChapter 对称：不走 _loadChapterContent（会触发 WebView reload
+  /// 丢失滚动位置）。而是直接拉取内容、生成段落 HTML、调用 controller.prependChapter
+  /// 插入到现有 DOM 顶部，JS 端同步调整 scrollTop 保持视觉位置。
+  Future<void> _prependPrevChapter(int chapterIndex) async {
+    final chapter =
+        chapterIndex < _chapters.length ? _chapters[chapterIndex] : null;
+    if (chapter == null || chapter.isVolume) {
+      _isPrependingChapter = false;
+      // 卷标题/越界：同样重置 nearStartNotified，否则用户必须滚回下方才能再触发
+      if (_readerWebViewController.isReady) {
+        try {
+          await _readerWebViewController.resetNearStartNotify();
+        } catch (_) {}
+      }
+      return;
+    }
+
+    // 在 await 之前先取 provider，避免异步间隙后访问 BuildContext（info 警告）
+    final provider = context.read<ReaderProvider>();
+    final book = _book!;
+    final dataProvider = _dataProvider!;
+
+    try {
+      // 1. 优先从预取内存缓存读取
+      String? content;
+      if (book.originType == BookOriginType.online && chapter.url != null) {
+        content = ChapterPrefetchService.instance.getCachedContent(
+          book.bookUrl,
+          chapter.url!,
+        );
+      }
+      // 2. 内存未命中则从文件缓存读取
+      if ((content == null || content.isEmpty) &&
+          book.originType == BookOriginType.online) {
+        content = await ChapterCacheService.instance.readChapterContent(
+          book,
+          chapter,
+        );
+      }
+      // 3. 缓存没有则从网络获取
+      if (content == null || content.isEmpty) {
+        content = await dataProvider.getContent(
+          book,
+          chapter,
+          allChapters: _chapters,
+        );
+        if (content != null &&
+            content.isNotEmpty &&
+            book.originType == BookOriginType.online) {
+          unawaited(
+            ChapterCacheService.instance.saveChapterContent(
+              book,
+              chapter,
+              content,
+            ),
+          );
+        }
+      }
+      if (content == null || content.isEmpty) {
+        debugPrint(
+          '[NovelReader] _prependPrevChapter 内容为空: index=$chapterIndex',
+        );
+        if (_readerWebViewController.isReady) {
+          try {
+            await _readerWebViewController.resetNearStartNotify();
+          } catch (_) {}
+        }
+        return;
+      }
+
+      // 4. 简繁转换 + 替换规则
+      final displayContent = ChineseConverter.convert(
+        content,
+        provider.chineseConverterType,
+      );
+      final displayTitle = ChineseConverter.convert(
+        chapter.title,
+        provider.chineseConverterType,
+      );
+      final processedContent = _processedContent(displayContent);
+
+      // 5. 生成段落 HTML
+      final paragraphsHtml = ReaderHtmlTemplate.buildParagraphsHtml(
+        processedContent,
+        provider,
+      );
+
+      // 6. 调用 JS 前置到 DOM 顶部（不触发 reload，JS 同步调整 scrollTop）
+      if (!mounted) return;
+      await _readerWebViewController.prependChapter(
+        displayTitle,
+        paragraphsHtml,
+        chapterIndex,
+      );
+
+      // 7. 恢复该章节的持久化高亮
+      await _restoreHighlights(chapterIndex);
+
+      // 8. 更新已加载最小章节索引
+      _scrollChapterMin = chapterIndex;
+    } catch (e) {
+      debugPrint('[NovelReader] _prependPrevChapter 失败: $e');
+      if (_readerWebViewController.isReady) {
+        try {
+          await _readerWebViewController.resetNearStartNotify();
+        } catch (_) {}
+      }
+    } finally {
+      _isPrependingChapter = false;
     }
   }
 
@@ -2276,6 +2438,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   onImageTap: _onWebviewImageTap,
                   // 滚动模式无缝衔接：接近底部时加载下一章
                   onScrollNearEnd: _onScrollNearEnd,
+                  // 滚动模式向上衔接：接近顶部时加载上一章
+                  onScrollNearStart: _onScrollNearStart,
                   // 滚动模式：当前可见章节变化时更新 UI 章节标题/进度
                   onChapterVisible: _onChapterVisible,
                   // 文字选择菜单（JS 自定义浮动菜单，替代 Android ActionMode）

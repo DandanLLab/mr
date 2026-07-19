@@ -627,8 +627,14 @@ window.readerApi = (function() {
   // - 触发后置 true 避免重复通知，Flutter 加载下章调 appendChapter 后会重置为 false
   // - 用户主动滚回顶部区域（remaining > threshold*1.5）也会重置，允许下次触发
   var nearEndNotified = false;
+  // 滚动模式向上衔接：是否已通知「接近顶部」
+  // - 与 nearEndNotified 对称，触发后置 true，prependChapter 后重置为 false
+  // - 用户主动滚回下方（scrollTop > threshold*2）也会重置，允许下次触发
+  var nearStartNotified = false;
   // 滚动模式无缝衔接：追加的章节数（用于 Dart 侧查询当前已加载到第几章）
   var appendedChapterCount = 0;
+  // 滚动模式向上衔接：向前插入的章节数
+  var prependedChapterCount = 0;
 
   function init(cfg) {
     config = cfg;
@@ -689,30 +695,55 @@ window.readerApi = (function() {
     // 而 body 自身滚动不会派发 window 的 scroll 事件（scroll 事件不冒泡）。
     // 之前监听 window 导致滚动进度永远不回调（C4 bug）
     if (config.isScrollMode) {
+      // 进度回调走 200ms 防抖（避免高频 setState）；
+      // 接近底部/顶部检测每次 scroll 都执行（nearEndNotified / nearStartNotified 防重入）。
+      //
+      // 关键修复：原版把接近检测也放在 200ms 防抖回调里，用户持续滚动时
+      // scrollTimer 被不断 clearTimeout + setTimeout 重置，回调永远不执行
+      // → onScrollNearEnd / onScrollNearStart 永远不触发 → 用户滚到末尾看到空白
+      // → 章节内容"晚一拍冒出来"形成视觉跳动。
+      // 拆出来后每次 scroll 都检测，配合 nearEndNotified / nearStartNotified
+      // 防重入标志，能及时触发预加载。
       var scrollTimer = null;
       body.addEventListener('scroll', function() {
+        // 1. 即时检测：接近底部/顶部（每次 scroll 都执行，防重入靠标志位）
+        var viewport = body.clientHeight;
+        var scrollTop = body.scrollTop || 0;
+        var remaining = body.scrollHeight - scrollTop - viewport;
+        var threshold = viewport * 2.0;
+
+        // 无缝衔接：检测是否接近底部，触发 onScrollNearEnd 让 Dart 加载下一章
+        // - threshold = 2.0 * clientHeight（约 2 屏）：提前加载给章节拉取留时间
+        // - 触发后 nearEndNotified=true 防止重复通知；appendChapter 后会重置
+        // - 用户滚回上方（remaining > threshold*2）也会重置，允许下次触发
+        if (remaining < threshold && !nearEndNotified) {
+          nearEndNotified = true;
+          if (window.flutter_inappwebview) {
+            window.flutter_inappwebview.callHandler('onScrollNearEnd');
+          }
+        } else if (remaining > threshold * 2 && nearEndNotified) {
+          nearEndNotified = false;
+        }
+
+        // 向上衔接：检测是否接近顶部，触发 onScrollNearStart 让 Dart 加载上一章
+        // - 与接近底部对称，threshold = 2.0 * clientHeight
+        // - 触发后 nearStartNotified=true 防止重复通知；prependChapter 后会重置
+        // - 用户滚回下方（scrollTop > threshold*2）也会重置，允许下次触发
+        if (scrollTop < threshold && !nearStartNotified) {
+          nearStartNotified = true;
+          if (window.flutter_inappwebview) {
+            window.flutter_inappwebview.callHandler('onScrollNearStart');
+          }
+        } else if (scrollTop > threshold * 2 && nearStartNotified) {
+          nearStartNotified = false;
+        }
+
+        // 2. 防抖回调：进度通知（避免高频 setState 让 UI 卡顿）
         if (scrollTimer) clearTimeout(scrollTimer);
         scrollTimer = setTimeout(function() {
           var progress = getScrollProgress();
           if (window.flutter_inappwebview) {
             window.flutter_inappwebview.callHandler('onPageChanged', Math.round(progress * 1000));
-          }
-          // 无缝衔接：检测是否接近底部，触发 onScrollNearEnd 让 Dart 加载下一章
-          // - threshold = 2.0 * clientHeight（约 2 屏）：提前加载给章节拉取留时间
-          //   原 1.5 屏在用户快滚时不够，章节加载完用户已滚到末尾出现「画面跳」感
-          // - 触发后 nearEndNotified=true 防止重复通知；appendChapter 后会重置
-          // - 用户滚回上方（remaining > threshold*2）也会重置，允许下次触发
-          var viewport = body.clientHeight;
-          var remaining = body.scrollHeight - body.scrollTop - viewport;
-          var threshold = viewport * 2.0;
-          if (remaining < threshold && !nearEndNotified) {
-            nearEndNotified = true;
-            console.log('[reader] scroll near end, remaining=' + Math.round(remaining) + 'px');
-            if (window.flutter_inappwebview) {
-              window.flutter_inappwebview.callHandler('onScrollNearEnd');
-            }
-          } else if (remaining > threshold * 2 && nearEndNotified) {
-            nearEndNotified = false;
           }
         }, 200);
       }, { passive: true });
@@ -1705,18 +1736,22 @@ window.readerApi = (function() {
   // - 段落 HTML 由 Dart 侧 ReaderHtmlTemplate.buildParagraphsHtml 生成，可信
   // - 追加后重置 nearEndNotified，允许下次接近底部时再次触发
   // - 给章节标题元素加 data-chapter-index，供 IntersectionObserver 监测当前可见章节
-  // - 章节内容（分隔符 + 标题 + 段落）初始隐藏，淡入动画消除「画面突然出现」的跳动感
+  //
+  // 关键：不要用 transform/opacity 淡入动画
+  // - body.reader-scroll 有 `transform: translateZ(0); will-change: scroll-position`
+  //   让 body 成为合成层
+  // - wrap 元素 append 后立即占布局空间，body.scrollHeight 立即增加
+  // - 如果 wrap 自身有 transform，会创建嵌套合成层，部分 Android WebView 上
+  //   合成层在 scrollHeight 变化时可能重新计算 scroll 位置 → 用户看到「画面跳」
+  // - 直接显示内容（无动画），用户在原滚动位置看到新内容从下方冒出，视觉无跳动
   function appendChapter(title, paragraphsHtml, chapterIndex) {
     if (!contentA) {
       console.warn('[reader] appendChapter: contentA is null');
       return;
     }
-    // 包裹层：用于一组元素统一应用淡入动画
+    // 包裹层：仅用于把章节分隔符 + 标题 + 段落组成一组，不做动画
     var wrap = document.createElement('div');
     wrap.className = 'chapter-append-wrap';
-    wrap.style.cssText =
-      'opacity: 0; transform: translateY(8px);' +
-      ' transition: opacity 320ms ease-out, transform 320ms ease-out;';
 
     // 章节分隔符：视觉提示用户进入新章节（32px 间距）
     var sep = document.createElement('div');
@@ -1750,26 +1785,24 @@ window.readerApi = (function() {
 
     contentA.appendChild(wrap);
 
-    // 双重 rAF 保证浏览器先渲染初始（隐藏）状态，再切换到显示状态触发过渡
-    // - 第一帧：DOM 已 append，浏览器计算出初始 opacity:0
-    // - 第二帧：切换到 opacity:1，触发 transition
-    requestAnimationFrame(function() {
-      requestAnimationFrame(function() {
-        wrap.style.opacity = '1';
-        wrap.style.transform = 'translateY(0)';
-      });
-    });
-
     appendedChapterCount++;
     nearEndNotified = false; // 重置以允许下次触发
     console.log('[reader] appendChapter: idx=' + chapterIndex +
       ' title=' + title + ' appendedCount=' + appendedChapterCount);
   }
 
-  // 章节观察器：监听 [data-chapter-index] 元素，进入屏幕中部 10% 区域时
+  // 章节观察器：监听 [data-chapter-index] 元素，进入屏幕中部 20% 区域时
   // 回调 Dart 侧 onChapterVisible(chapterIndex)，让 UI 章节标题实时跟随滚动更新。
-  // - rootMargin: -50% 0px -40% 0px → 仅当元素位于屏幕中部 10% 横条时才算"进入"
-  //   （避免多个章节标题同时进入视口时来回切换）
+  //
+  // 主导章节策略（避免短章节场景下多标题同时进入判定区导致 UI 闪烁）：
+  // - 不再 forEach 全部触发回调（否则短章节边界附近 A、B 两标题同时进入 20% 横条
+  //   会依次回调 onChapterVisible(A) → onChapterVisible(B)，Dart 侧 setState 两次
+  //   → UI 章节标题先变 A 再变 B → 视觉闪烁）
+  // - 改为从 entries 中选 boundingClientRect.top 最接近视口中线的那个（"主导章节"）
+  //   只回调一次，保证 UI 标题稳定
+  // - 仅处理 isIntersecting=true（不处理离开），保证单向切换
+  //
+  // - rootMargin: -40% 0px -40% 0px → 中部 20% 横条
   // - threshold: 0 → 元素任意像素进入判定区即触发
   // - 仅滚动模式启用，分页模式不需要（每次只显示一章）
   var chapterObserver = null;
@@ -1780,19 +1813,37 @@ window.readerApi = (function() {
       return;
     }
     chapterObserver = new IntersectionObserver(function(entries) {
-      entries.forEach(function(entry) {
-        if (!entry.isIntersecting) return;
+      // 收集所有当前进入判定区的章节标题，选最接近视口中线的作为主导
+      var best = null;        // { idx, dist }
+      var viewportMid = body.clientHeight / 2;
+      for (var i = 0; i < entries.length; i++) {
+        var entry = entries[i];
+        if (!entry.isIntersecting) continue;
         var idxAttr = entry.target.getAttribute('data-chapter-index');
-        if (idxAttr === null) return;
+        if (idxAttr === null) continue;
         var idx = parseInt(idxAttr, 10);
-        if (isNaN(idx)) return;
-        if (window.flutter_inappwebview) {
-          window.flutter_inappwebview.callHandler('onChapterVisible', idx);
+        if (isNaN(idx)) continue;
+        // entry.boundingClientRect.top 是相对视口顶部的坐标
+        // 取标题中心点与视口中线的距离，越小越"主导"
+        var rect = entry.boundingClientRect;
+        var titleCenter = rect.top + rect.height / 2;
+        var dist = Math.abs(titleCenter - viewportMid);
+        if (best === null || dist < best.dist) {
+          best = { idx: idx, dist: dist };
         }
-      });
+      }
+      if (best !== null && window.flutter_inappwebview) {
+        window.flutter_inappwebview.callHandler('onChapterVisible', best.idx);
+      }
     }, {
       root: null,
-      rootMargin: '-50% 0px -40% 0px',
+      // 章节捕捉判定区：屏幕中部 20% 横条
+      // - 原 -50%/-40% → 中部 10% 太窄，用户在章节边界附近来回滚动时
+      //   章节标题频繁进出，UI 章节标题频繁切换让用户感觉"捕捉不稳定"
+      // - 改为 -40%/-40% → 中部 20%，章节标题进入更稳定的判定区才触发
+      //   减少边界附近的频繁切换；同时配合下方 IntersectionObserver 只
+      //   处理 isIntersecting=true（不处理离开），保证单向切换
+      rootMargin: '-40% 0px -40% 0px',
       threshold: 0
     });
     // 初始章节标题（contentA 中已有的第一个 .reader-title）也注册
@@ -1816,6 +1867,120 @@ window.readerApi = (function() {
     nearEndNotified = false;
   }
 
+  // ============ 滚动模式向上衔接 ============
+  // 在 #reader-content-a 顶部插入章节标题 + 段落 HTML，不触发整页 reload
+  // - 与 appendChapter 对称，用于「滚动到顶部时加载上一章」
+  // - 关键：插入后必须调整 body.scrollTop 保持视觉位置
+  //   否则新内容会"覆盖"用户当前看到的内容（scrollTop 不变但 DOM 整体下移）
+  // - 调整量 = 新增内容的实际渲染高度（scrollHeight 增量）
+  // - 异步补偿：上一章可能含图片/Web 字体等异步资源，加载完成后段落高度变化
+  //   会导致 scrollHeight 二次增加，scrollTop 不再补偿 → 用户看到内容向上漂移
+  //   用 ResizeObserver 监听 wrap 高度变化，在 2 秒内持续补偿 scrollTop
+  function prependChapter(title, paragraphsHtml, chapterIndex) {
+    if (!contentA) {
+      console.warn('[reader] prependChapter: contentA is null');
+      return;
+    }
+    // 包裹层：仅用于把章节分隔符 + 标题 + 段落组成一组
+    var wrap = document.createElement('div');
+    wrap.className = 'chapter-prepend-wrap';
+
+    // 章节标题（textContent 避免 XSS）
+    if (title && title.length > 0) {
+      var h1 = document.createElement('h1');
+      h1.className = 'reader-title';
+      h1.setAttribute('data-chapter-index', String(chapterIndex));
+      h1.textContent = title;
+      wrap.appendChild(h1);
+      if (chapterObserver && h1) {
+        chapterObserver.observe(h1);
+      }
+    }
+
+    // 段落
+    if (paragraphsHtml && paragraphsHtml.length > 0) {
+      var tmp = document.createElement('div');
+      tmp.innerHTML = paragraphsHtml;
+      while (tmp.firstChild) {
+        wrap.appendChild(tmp.firstChild);
+      }
+    }
+
+    // 章节分隔符（在末尾，与 appendChapter 对称：分隔符在两章之间）
+    var sep = document.createElement('div');
+    sep.className = 'chapter-separator';
+    sep.style.cssText = 'height: 32px; width: 100%;';
+    wrap.appendChild(sep);
+
+    // 关键：记录插入前的 scrollHeight 和 scrollTop
+    // 插入后 scrollHeight 增加，需要把 scrollTop 也增加相同量
+    // 否则用户看到的内容会被新章节"顶下去"（视觉跳动）
+    var oldScrollHeight = body.scrollHeight;
+    var oldScrollTop = body.scrollTop || 0;
+
+    // 插入到 contentA 的第一个子元素之前
+    if (contentA.firstChild) {
+      contentA.insertBefore(wrap, contentA.firstChild);
+    } else {
+      contentA.appendChild(wrap);
+    }
+
+    // 计算新增内容的高度，同步调整 scrollTop 保持视觉位置
+    var newScrollHeight = body.scrollHeight;
+    var heightAdded = newScrollHeight - oldScrollHeight;
+    if (heightAdded > 0) {
+      body.scrollTop = oldScrollTop + heightAdded;
+    }
+
+    // 异步高度补偿：监听 wrap 高度变化（图片加载、字体替换导致段落高度变化）
+    // - 每次高度增加 delta，同步增加 scrollTop 保持视觉位置
+    // - 2 秒后自动断开（避免长期监听浪费资源；多数图片/字体在 2 秒内加载完成）
+    // - 用户主动滚动时不补偿（避免与用户操作冲突）
+    if (typeof ResizeObserver !== 'undefined') {
+      var lastWrapHeight = wrap.offsetHeight;
+      var userScrolled = false;
+      var onUserScroll = function() { userScrolled = true; };
+      body.addEventListener('scroll', onUserScroll, { passive: true });
+      var ro = new ResizeObserver(function(entries) {
+        if (userScrolled) {
+          ro.disconnect();
+          return;
+        }
+        for (var i = 0; i < entries.length; i++) {
+          var newH = entries[i].contentRect.height;
+          var delta = newH - lastWrapHeight;
+          if (delta > 0.5) {
+            // wrap 高度增加 delta → scrollTop 也增加 delta 保持视觉位置
+            body.scrollTop = (body.scrollTop || 0) + delta;
+            lastWrapHeight = newH;
+          } else if (delta < -0.5) {
+            // 高度减少（罕见，如图片加载失败回退）：更新基准但不调整 scrollTop
+            lastWrapHeight = newH;
+          }
+        }
+      });
+      ro.observe(wrap);
+      // 2 秒后自动断开 + 移除 scroll 监听
+      setTimeout(function() {
+        ro.disconnect();
+        body.removeEventListener('scroll', onUserScroll);
+      }, 2000);
+    }
+
+    prependedChapterCount++;
+    nearStartNotified = false; // 重置以允许下次触发
+  }
+
+  // 重置 nearStartNotified 标志（Dart 侧 _prependPrevChapter 失败/空内容时调用）
+  function resetNearStartNotify() {
+    nearStartNotified = false;
+  }
+
+  // 获取向前插入的章节数
+  function getPrependedChapterCount() {
+    return prependedChapterCount;
+  }
+
   return {
     init: init,
     getPageCount: getPageCount,
@@ -1828,8 +1993,11 @@ window.readerApi = (function() {
     scrollByViewport: scrollByViewport,
     checkTap: checkTap,
     appendChapter: appendChapter,
+    prependChapter: prependChapter,
     getAppendedChapterCount: getAppendedChapterCount,
+    getPrependedChapterCount: getPrependedChapterCount,
     resetNearEndNotify: resetNearEndNotify,
+    resetNearStartNotify: resetNearStartNotify,
     hideSelectionMenu: hideSelectionMenu,
     highlightSelection: highlightSelection,
     // Phase 3.1 / 3.2 / 3.4 新增
