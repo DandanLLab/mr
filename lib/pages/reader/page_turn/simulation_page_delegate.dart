@@ -549,10 +549,13 @@ class SimulationPageDelegate extends HorizontalPageDelegate {
     stopTicker();
     if (!_scroller.isFinished) {
       _scroller.abortAnimation();
-      if (!isCancel) {
-        // 通知完成翻页
-        notifyAnimStop();
-      }
+      // 不调 notifyAnimStop：abortAnim 是被外部强制中止（用户快速连翻/
+      // PointerCancel/didUpdateWidget 切模式），调用方自己处理回调。
+      // 若调 notifyAnimStop 会触发 _onAnimStop → onPageTurnCompleted，
+      // 然后 _forceFinishCurrentTurn 又调 onPageTurnCompleted/Cancelled，
+      // 导致回调重复且 hadFinalized 被错误重置为 false（Bug：
+      // abortAnim 在 _forceFinishCurrentTurn 读取 hadFinalized 之前
+      // 触发 _onAnimStop 重置 _finalizeStarted，导致后续分支判断错乱）
     }
     isStarted = false;
     isMoved = false;

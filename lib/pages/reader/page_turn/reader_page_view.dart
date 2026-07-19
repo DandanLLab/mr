@@ -425,15 +425,29 @@ class _ReaderPageViewState extends State<ReaderPageView>
       return;
     }
 
-    // 用户已松手：_finalizeTurn 会自己接管截图（_finalizeTurn 不再轮询等待
-    // _startTurnSequence 完成），这里 dispose 当前截图避免泄漏，不注入
-    // （_finalizeTurn 后续会自己 _captureBoundary 作为 curBitmap）
+    // 用户已松手：_finalizeTurn 会自己接管跳页流程
+    // 但仍然注入截图 + 显示覆盖层，让 _finalizeTurn 复用（避免它再截一次图）
     //
-    // 这样做的好处：
-    // - 去掉 _finalizeTurn 的 200ms 轮询等待，改为自己截图（50-100ms 更快）
-    // - 避免双份截图（_startTurnSequence 注入后 _finalizeTurn 又截图造成闪烁）
+    // 为什么要注入而不是 dispose：
+    // - _finalizeTurn 非 NoAnim 分支需要覆盖层挡住 WebView 跳页瞬间
+    // - 如果 _startTurnSequence dispose 截图，_finalizeTurn 必须自己再截一次
+    //   （50-100ms），期间 WebView 跳页已完成，用户看到白屏闪烁
+    // - 注入截图后 _finalizeTurn 检查 _showAnimationLayer=true，直接跳页
+    //
+    // 但要处理 _finalizeTurn 已完成的情况（_isTurning=false）：
+    // - 此时覆盖层已被 _finalizeTurn 销毁，再注入会导致覆盖层残留
+    // - 检查 _isTurning=false 时 dispose 截图，不注入
     if (_finalizeStarted) {
-      curBitmap.dispose();
+      if (!_isTurning) {
+        // _finalizeTurn 已完成，dispose 截图避免泄漏
+        curBitmap.dispose();
+        return;
+      }
+      // _finalizeTurn 还在 await onPerformPageTurn，注入截图供其使用
+      setState(() {
+        _delegate.setBitmaps(cur: curBitmap);
+        _showAnimationLayer = true;
+      });
       return;
     }
 
@@ -486,7 +500,8 @@ class _ReaderPageViewState extends State<ReaderPageView>
         ok = false;
       }
       if (!ok || token != _turnToken || !mounted) {
-        if (token == _turnToken) _cancelTurn();
+        // mounted 守卫：widget 销毁后 _cancelTurn 内部 setState 会抛异常
+        if (token == _turnToken && mounted) _cancelTurn();
         return;
       }
       _isTurning = false;
@@ -494,6 +509,32 @@ class _ReaderPageViewState extends State<ReaderPageView>
       widget.onPageTurnCompleted?.call(_delegate.direction);
       _delegate.onDown(); // 重置 delegate 状态
       return;
+    }
+
+    // 非 NoAnim：确保覆盖层显示，避免 WebView 跳页时视觉跳跃
+    // 场景：用户在 _startTurnSequence 截图完成前松手（_showAnimationLayer=false），
+    // 若直接调 onPerformPageTurn 让 WebView 跳页，用户会看到白屏闪一下
+    // 修复：_finalizeTurn 自己截图作为覆盖层，等覆盖层显示后再跳页
+    if (!_showAnimationLayer) {
+      final curBitmap = await _captureBoundary();
+      if (curBitmap == null) {
+        if (token == _turnToken && mounted) _cancelTurn();
+        return;
+      }
+      // 截图完成后再次检查：
+      // - _startTurnSequence 可能在 await 期间完成了截图注入，此时复用它的
+      // - token 不匹配或 widget 销毁：dispose 并退出
+      if (_showAnimationLayer) {
+        curBitmap.dispose();
+      } else if (token != _turnToken || !mounted) {
+        curBitmap.dispose();
+        return;
+      } else {
+        setState(() {
+          _delegate.setBitmaps(cur: curBitmap);
+          _showAnimationLayer = true;
+        });
+      }
     }
 
     // 让 WebView 立即跳页（覆盖层仍显示挡住跳页瞬间，避免视觉跳跃）
@@ -507,7 +548,8 @@ class _ReaderPageViewState extends State<ReaderPageView>
 
     if (!ok || token != _turnToken || !mounted) {
       // 章节边界或 token 失效：取消翻页
-      if (token == _turnToken) _cancelTurn();
+      // mounted 守卫：同上
+      if (token == _turnToken && mounted) _cancelTurn();
       return;
     }
 
@@ -515,11 +557,15 @@ class _ReaderPageViewState extends State<ReaderPageView>
     // （用户已松手，按「没摸就没动画」原则不再播放任何完成动画）
     _isTurning = false;
     _finalizeStarted = false;
-    setState(() {
-      _showAnimationLayer = false;
-    });
+    if (mounted) {
+      setState(() {
+        _showAnimationLayer = false;
+      });
+    }
     _delegate.recycleBitmaps();
-    widget.onPageTurnCompleted?.call(_delegate.direction);
+    if (mounted) {
+      widget.onPageTurnCompleted?.call(_delegate.direction);
+    }
     _delegate.onDown(); // 重置 delegate 状态供下次翻页
   }
 
@@ -531,17 +577,26 @@ class _ReaderPageViewState extends State<ReaderPageView>
     _finalizeStarted = false;
     // 清理跨手势残留：同 _forceFinishCurrentTurn
     _pendingMoveDuringCapture = null;
-    setState(() {
-      _showAnimationLayer = false;
-    });
+    // mounted 检查：_cancelTurn 可能在 _finalizeTurn 的 await 之后被调用，
+    // 此时 widget 可能已销毁，setState 会抛 setState() called after dispose()
+    if (mounted) {
+      setState(() {
+        _showAnimationLayer = false;
+      });
+    }
     // 真正 dispose 所有 ui.Image 资源（不能调 setBitmaps(cur:null,...)，
     // setBitmaps 对 null 参数不做处理，会导致内存泄漏）
     _delegate.recycleBitmaps();
-    widget.onPageTurnCancelled?.call();
+    if (mounted) {
+      widget.onPageTurnCancelled?.call();
+    }
   }
 
   void _onAnimStop(PageDirection direction) {
     _ticker.stop(); // delegate.onAnimStop 已停过，这里再保险一次
+    // mounted 检查：widget 在动画期间被销毁（页面切换/父级移除 ReaderPageView）
+    // 时，delegate 仍会通过 notifyAnimStop 触发本方法，setState 会抛异常
+    if (!mounted) return;
     _isTurning = false;
     _finalizeStarted = false;
     setState(() {

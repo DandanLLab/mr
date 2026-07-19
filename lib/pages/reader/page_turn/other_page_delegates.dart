@@ -119,9 +119,8 @@ class SlidePageDelegate extends HorizontalPageDelegate {
     stopTicker();
     if (!_scroller.isFinished) {
       _scroller.abortAnimation();
-      if (!isCancel) {
-        notifyAnimStop();
-      }
+      // 不调 notifyAnimStop：同 SimulationPageDelegate.abortAnim 注释
+      // 调用方（_forceFinishCurrentTurn/_onPointerCancel）自己处理回调
     }
     isStarted = false;
     isMoved = false;
@@ -280,9 +279,7 @@ class CoverPageDelegate extends HorizontalPageDelegate {
     stopTicker();
     if (!_scroller.isFinished) {
       _scroller.abortAnimation();
-      if (!isCancel) {
-        notifyAnimStop();
-      }
+      // 不调 notifyAnimStop：同 SimulationPageDelegate.abortAnim 注释
     }
     isStarted = false;
     isMoved = false;
