@@ -46,7 +46,7 @@ class StorageService {
     }
   }
 
-  /// 重建 Box：close → 等待事件循环 → delete → 等待 → openBox
+  /// 重建 Box：close → 等待事件循环 → delete → 等待 → openBox → healthCheck
   ///
   /// 关键修复：Hive 2.x 在 deleteBoxFromDisk 后立即 openBox 会抛
   /// PathNotFoundException —— Hive 内部 isBoxOpen 状态没及时清理，
@@ -54,6 +54,10 @@ class StorageService {
   /// 这里通过 Future.delayed(Duration.zero) 让出事件循环，确保
   /// Hive 内部 registry 完全清理后再 openBox。
   /// 同时如果首次重建仍失败，再重试一次（双重保险）。
+  ///
+  /// 关键修复 2：deleteBoxFromDisk 失败被 catch 吞掉时，openBox 打开的是
+  /// 旧损坏文件（仍含 typeId 非法的 frame）。这里在 openBox 后强制
+  /// _healthCheck 逐 key 试读，删除损坏 key，避免损坏数据继续存在。
   Future<Box?> _rebuildBox(String name, {int retry = 0}) async {
     try {
       await _safeCloseBox(name);
@@ -73,6 +77,9 @@ class StorageService {
       }
       await Future.delayed(Duration.zero);
       final box = await Hive.openBox(name);
+      // 健康检查：若 delete 失败，openBox 打开的是旧损坏文件，
+      // 这里逐 key 试读把损坏数据清理掉（_healthCheck 内部 keys 读取失败会 rethrow）
+      await _healthCheck(box);
       debugPrint('✅ $name Box 重建成功（该 Box 数据已清空）');
       return box;
     } catch (e2) {
@@ -165,7 +172,10 @@ class StorageService {
     });
   }
 
-  /// 恢复损坏的 Box：关闭 → 删文件 → 重新打开
+  /// 恢复损坏的 Box：关闭 → 删文件 → 重新打开 → healthCheck
+  ///
+  /// 关键修复：与 _rebuildBox 一致，openBox 后调用 _healthCheck，
+  /// 应对 deleteBoxFromDisk 失败导致 openBox 打开旧损坏文件的情况。
   Future<void> _recoverBox(String name, void Function(Box) onRecovered) async {
     debugPrint('🔧 StorageService: 恢复损坏的 Box: $name');
     await _safeCloseBox(name);
@@ -174,6 +184,13 @@ class StorageService {
     } catch (_) {}
     try {
       final box = await Hive.openBox(name);
+      // 健康检查：清理可能残留的损坏 key
+      try {
+        await _healthCheck(box);
+      } catch (e) {
+        // keys 读取失败，Box 严重损坏，但不再 retry，直接返回（业务层会再次触发恢复）
+        debugPrint('⚠️ StorageService: Box $name 恢复后健康检查失败: $e');
+      }
       onRecovered(box);
       debugPrint('✅ StorageService: Box $name 恢复成功');
     } catch (e) {
@@ -287,7 +304,14 @@ class StorageService {
 
   Future<void> setSetting(String key, dynamic value) async {
     _settingsBox = await _ensureBox('settings', _settingsBox);
-    await _settingsBox?.put(key, value);
+    if (_settingsBox == null) return;
+    try {
+      await _settingsBox!.put(key, value);
+    } catch (e) {
+      debugPrint('❌ StorageService: setSetting 写入失败: $e');
+      _settingsBox = null;
+      _recoverBoxAsync('settings', (box) => _settingsBox = box);
+    }
   }
 
   dynamic getSetting(String key, {dynamic defaultValue}) {
@@ -315,12 +339,25 @@ class StorageService {
         bookData['bookUrl'] as String? ?? bookData['id'] as String? ?? '';
     _bookshelfBox = await _ensureBox('bookshelf', _bookshelfBox);
     if (_bookshelfBox == null) return;
-    await _bookshelfBox!.put(bookUrl, bookData);
+    try {
+      await _bookshelfBox!.put(bookUrl, bookData);
+    } catch (e) {
+      debugPrint('❌ StorageService: addToBookshelf 写入失败: $e');
+      _bookshelfBox = null;
+      _recoverBoxAsync('bookshelf', (box) => _bookshelfBox = box);
+    }
   }
 
   Future<void> removeFromBookshelf(String bookUrl) async {
     _bookshelfBox = await _ensureBox('bookshelf', _bookshelfBox);
-    await _bookshelfBox?.delete(bookUrl);
+    if (_bookshelfBox == null) return;
+    try {
+      await _bookshelfBox!.delete(bookUrl);
+    } catch (e) {
+      debugPrint('❌ StorageService: removeFromBookshelf 删除失败: $e');
+      _bookshelfBox = null;
+      _recoverBoxAsync('bookshelf', (box) => _bookshelfBox = box);
+    }
   }
 
   List<Map<String, dynamic>> getAllBooks() {
@@ -384,12 +421,14 @@ class StorageService {
     int durChapterPos,
   ) async {
     _bookshelfBox = await _ensureBox('bookshelf', _bookshelfBox);
+    if (_bookshelfBox == null) return;
     dynamic rawBook;
     try {
-      rawBook = _bookshelfBox?.get(bookUrl);
+      rawBook = _bookshelfBox!.get(bookUrl);
     } catch (e) {
       debugPrint('❌ StorageService: updateBookProgress 读取失败: $e');
-      await _recoverBox('bookshelf', (box) => _bookshelfBox = box);
+      _bookshelfBox = null;
+      _recoverBoxAsync('bookshelf', (box) => _bookshelfBox = box);
       return;
     }
     final book = rawBook is Map ? Map<String, dynamic>.from(rawBook) : null;
@@ -398,7 +437,13 @@ class StorageService {
       book['durChapterTitle'] = durChapterTitle;
       book['durChapterPos'] = durChapterPos;
       book['durChapterTime'] = DateTime.now().toIso8601String();
-      await _bookshelfBox?.put(bookUrl, book);
+      try {
+        await _bookshelfBox!.put(bookUrl, book);
+      } catch (e) {
+        debugPrint('❌ StorageService: updateBookProgress 写入失败: $e');
+        _bookshelfBox = null;
+        _recoverBoxAsync('bookshelf', (box) => _bookshelfBox = box);
+      }
     }
   }
 
@@ -412,7 +457,13 @@ class StorageService {
     final bookUrl = data['bookUrl'] as String? ?? '';
     _bookshelfBox = await _ensureBox('bookshelf', _bookshelfBox);
     if (_bookshelfBox == null) return;
-    await _bookshelfBox!.put(bookUrl, data);
+    try {
+      await _bookshelfBox!.put(bookUrl, data);
+    } catch (e) {
+      debugPrint('❌ StorageService: saveBook 写入失败: $e');
+      _bookshelfBox = null;
+      _recoverBoxAsync('bookshelf', (box) => _bookshelfBox = box);
+    }
   }
 
   Future<void> saveBookSource(Map<String, dynamic> sourceData) async {
@@ -428,7 +479,12 @@ class StorageService {
       // 最后一次尝试：完全重新初始化
       final ok = await _ensureInitialized();
       if (!ok) {
-        throw Exception('StorageService: 初始化失败，无法保存书源。请重启应用后重试。');
+        debugPrint('❌ StorageService: 初始化失败，无法保存书源: $sourceUrl');
+        // 不抛异常，触发紧急重建由 zone 兜底
+        emergencyRecoverAll().catchError((e) {
+          debugPrint('❌ StorageService: 紧急重建失败: $e');
+        });
+        return;
       }
     }
 
@@ -437,16 +493,22 @@ class StorageService {
       await _bookSourceBox!.flush();
       debugPrint('✅ 书源保存成功: $sourceUrl');
     } catch (e) {
-      debugPrint('❌ 书源写入失败: $e');
-      // 尝试重建 Box
+      debugPrint('❌ 书源写入失败: $e，尝试重建 Box...');
+      // 重建 Box：用 _openBoxWithRecovery 走完整 healthCheck 流程
+      _bookSourceBox = null;
+      _bookSourceBox = await _openBoxWithRecovery('bookSource');
+      if (_bookSourceBox == null) {
+        debugPrint('❌ StorageService: bookSource 重建失败，放弃保存: $sourceUrl');
+        // 不抛异常，避免逃逸到 zone
+        return;
+      }
       try {
-        await Hive.deleteBoxFromDisk('bookSource');
-        _bookSourceBox = await Hive.openBox('bookSource');
         await _bookSourceBox!.put(sourceUrl, sourceData);
         await _bookSourceBox!.flush();
         debugPrint('✅ 书源重建后保存成功: $sourceUrl');
       } catch (e2) {
-        throw Exception('StorageService: 书源保存失败: $e2');
+        debugPrint('❌ StorageService: 重建后仍保存失败: $sourceUrl - $e2');
+        // 不抛异常，避免逃逸到 zone
       }
     }
   }
@@ -521,17 +583,38 @@ class StorageService {
 
   Future<void> deleteBookSource(String sourceUrl) async {
     _bookSourceBox = await _ensureBox('bookSource', _bookSourceBox);
-    await _bookSourceBox?.delete(sourceUrl);
+    if (_bookSourceBox == null) return;
+    try {
+      await _bookSourceBox!.delete(sourceUrl);
+    } catch (e) {
+      debugPrint('❌ StorageService: deleteBookSource 删除失败: $e');
+      _bookSourceBox = null;
+      _recoverBoxAsync('bookSource', (box) => _bookSourceBox = box);
+    }
   }
 
   Future<void> clearBookSources() async {
     _bookSourceBox = await _ensureBox('bookSource', _bookSourceBox);
-    await _bookSourceBox?.clear();
+    if (_bookSourceBox == null) return;
+    try {
+      await _bookSourceBox!.clear();
+    } catch (e) {
+      debugPrint('❌ StorageService: clearBookSources 清空失败: $e');
+      _bookSourceBox = null;
+      _recoverBoxAsync('bookSource', (box) => _bookSourceBox = box);
+    }
   }
 
   Future<void> cacheData(String key, dynamic data) async {
     _cacheBox = await _ensureBox('cache', _cacheBox);
-    await _cacheBox?.put(key, data);
+    if (_cacheBox == null) return;
+    try {
+      await _cacheBox!.put(key, data);
+    } catch (e) {
+      debugPrint('❌ StorageService: cacheData 写入失败: $e');
+      _cacheBox = null;
+      _recoverBoxAsync('cache', (box) => _cacheBox = box);
+    }
   }
 
   dynamic getCachedData(String key) {
@@ -566,12 +649,26 @@ class StorageService {
 
   Future<void> clearCache() async {
     _cacheBox = await _ensureBox('cache', _cacheBox);
-    await _cacheBox?.clear();
+    if (_cacheBox == null) return;
+    try {
+      await _cacheBox!.clear();
+    } catch (e) {
+      debugPrint('❌ StorageService: clearCache 清空失败: $e');
+      _cacheBox = null;
+      _recoverBoxAsync('cache', (box) => _cacheBox = box);
+    }
   }
 
   Future<void> saveReaderConfig(Map<String, dynamic> config) async {
     _settingsBox = await _ensureBox('settings', _settingsBox);
-    await _settingsBox?.put('readerConfig', config);
+    if (_settingsBox == null) return;
+    try {
+      await _settingsBox!.put('readerConfig', config);
+    } catch (e) {
+      debugPrint('❌ StorageService: saveReaderConfig 写入失败: $e');
+      _settingsBox = null;
+      _recoverBoxAsync('settings', (box) => _settingsBox = box);
+    }
   }
 
   Map<String, dynamic>? getReaderConfig() {
@@ -606,7 +703,14 @@ class StorageService {
 
   Future<void> saveLegadoUrl(String url) async {
     _settingsBox = await _ensureBox('settings', _settingsBox);
-    await _settingsBox?.put('legadoUrl', url);
+    if (_settingsBox == null) return;
+    try {
+      await _settingsBox!.put('legadoUrl', url);
+    } catch (e) {
+      debugPrint('❌ StorageService: saveLegadoUrl 写入失败: $e');
+      _settingsBox = null;
+      _recoverBoxAsync('settings', (box) => _settingsBox = box);
+    }
   }
 
   String? getLegadoUrl() {
@@ -632,12 +736,26 @@ class StorageService {
   Future<void> saveHighlight(Map<String, dynamic> highlightData) async {
     final id = highlightData['id'] as String? ?? '';
     _cacheBox = await _ensureBox('cache', _cacheBox);
-    await _cacheBox?.put('highlight_$id', highlightData);
+    if (_cacheBox == null) return;
+    try {
+      await _cacheBox!.put('highlight_$id', highlightData);
+    } catch (e) {
+      debugPrint('❌ StorageService: saveHighlight 写入失败: $e');
+      _cacheBox = null;
+      _recoverBoxAsync('cache', (box) => _cacheBox = box);
+    }
   }
 
   Future<void> deleteHighlight(String id) async {
     _cacheBox = await _ensureBox('cache', _cacheBox);
-    await _cacheBox?.delete('highlight_$id');
+    if (_cacheBox == null) return;
+    try {
+      await _cacheBox!.delete('highlight_$id');
+    } catch (e) {
+      debugPrint('❌ StorageService: deleteHighlight 删除失败: $e');
+      _cacheBox = null;
+      _recoverBoxAsync('cache', (box) => _cacheBox = box);
+    }
   }
 
   List<Map<String, dynamic>> getChapterHighlights(
@@ -697,11 +815,26 @@ class StorageService {
   Future<void> saveHighlightRule(Map<String, dynamic> ruleData) async {
     final id = ruleData['id'] as String? ?? '';
     _settingsBox = await _ensureBox('settings', _settingsBox);
-    await _settingsBox?.put('highlightRule_$id', ruleData);
+    if (_settingsBox == null) return;
+    try {
+      await _settingsBox!.put('highlightRule_$id', ruleData);
+    } catch (e) {
+      debugPrint('❌ StorageService: saveHighlightRule 写入失败: $e');
+      _settingsBox = null;
+      _recoverBoxAsync('settings', (box) => _settingsBox = box);
+    }
   }
 
   Future<void> deleteHighlightRule(String id) async {
-    await _settingsBox?.delete('highlightRule_$id');
+    _settingsBox = await _ensureBox('settings', _settingsBox);
+    if (_settingsBox == null) return;
+    try {
+      await _settingsBox!.delete('highlightRule_$id');
+    } catch (e) {
+      debugPrint('❌ StorageService: deleteHighlightRule 删除失败: $e');
+      _settingsBox = null;
+      _recoverBoxAsync('settings', (box) => _settingsBox = box);
+    }
   }
 
   List<Map<String, dynamic>> getAllHighlightRules() {
