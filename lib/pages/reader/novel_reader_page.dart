@@ -62,6 +62,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   /// 翻页动画进行中标记，用于阻止动画期间 JS click 误触发菜单
   /// 由 _onPageTurnCompleted / _onPageTurnCancelled 复位
   bool _isPageTurning = false;
+
+  /// ReaderPageView 的 GlobalKey，用于 JS touchend 回调时调用
+  /// state.handleTouchEnd() 即时销毁翻页动画覆盖层
+  /// （InAppWebView 吞 PointerUpEvent，靠 JS touchend 兜底）
+  final GlobalKey<ReaderPageViewState> _readerPageViewKey =
+      GlobalKey<ReaderPageViewState>();
+
   /// 翻页时等 onPageChanged 回调作为「JS 已设 transform」确认信号
   /// 由 _onWebviewPageChanged complete，由 _waitForWebViewFrame 等待
   Completer<void>? _pageRenderedCompleter;
@@ -2246,6 +2253,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             _buildScrollPageTip(provider, isHeader: true),
           Expanded(
             child: ReaderPageView(
+              key: _readerPageViewKey,
               isScrollMode: isScrollMode,
               pageModeIndex: pageModeIndex,
               onPerformPageTurn: _onPerformPageTurn,
@@ -2276,6 +2284,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   onHideSelectionMenu: _onHideSelectionMenu,
                   // 尺寸变化 reload 前保存进度（E1 Bug 修复）
                   onBeforeSizeReload: _saveProgressBeforeReload,
+                  // JS touchend：InAppWebView 吞 PointerUpEvent，靠 JS touchend
+                  // 即时触发 ReaderPageView._finalizeTurn，避免覆盖层残留
+                  onTouchEnd: () {
+                    _readerPageViewKey.currentState?.handleTouchEnd();
+                  },
                 ),
               ),
             ),

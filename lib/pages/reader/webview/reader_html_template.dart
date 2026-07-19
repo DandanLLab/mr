@@ -1345,6 +1345,16 @@ window.readerApi = (function() {
         console.log('[reader] double tap detected');
       }
       lastTouchEnd = now;
+      // 通知 Dart 端用户手指已离开 WebView
+      // InAppWebView 是 PlatformView，会吞掉 Flutter 的 PointerUpEvent，
+      // 导致 ReaderPageView._onPointerUp 不被调用，翻页动画覆盖层无法及时
+      // 销毁（原靠 600ms 兜底 timer，用户感觉"要再点一次才能销毁动画"）
+      // 通过 touchend handler 即时通知 Dart 触发 _finalizeTurn
+      try {
+        window.flutter_inappwebview.callHandler('onTouchEnd');
+      } catch (e) {
+        console.log('[reader] callHandler onTouchEnd 失败:', e);
+      }
     }, { passive: true });
 
     // 鼠标滚轮缩放（Ctrl+wheel）

@@ -68,10 +68,10 @@ class ReaderPageView extends StatefulWidget {
   });
 
   @override
-  State<ReaderPageView> createState() => _ReaderPageViewState();
+  State<ReaderPageView> createState() => ReaderPageViewState();
 }
 
-class _ReaderPageViewState extends State<ReaderPageView>
+class ReaderPageViewState extends State<ReaderPageView>
     with SingleTickerProviderStateMixin {
   final GlobalKey _boundaryKey = GlobalKey();
 
@@ -609,6 +609,41 @@ class _ReaderPageViewState extends State<ReaderPageView>
 
   void _onAnimCancel() {
     _cancelTurn();
+  }
+
+  /// JS touchend 回调入口（由父级通过 GlobalKey 调用）
+  ///
+  /// 背景：InAppWebView 是 PlatformView，会吞掉 Flutter 的 PointerUpEvent，
+  /// 导致 _onPointerUp 不被调用，_finalizeTurn 不触发，翻页动画覆盖层
+  /// 一直显示，用户必须再点一次屏幕（触发 _onPointerDown → _forceFinishCurrentTurn）
+  /// 才能销毁覆盖层。
+  ///
+  /// 修复：JS 端 touchend 监听器 → controller handler → 父级 → 本方法
+  /// → 复用 _onPointerUp 的核心逻辑，即时触发 _finalizeTurn。
+  ///
+  /// 与 _onPointerUp 的区别：
+  /// - 没有 PointerUpEvent 参数（JS 不传坐标）
+  /// - _downPosition==null 时直接 return（_onPointerUp 已被 Flutter 触发过）
+  /// - 仍保留 _pointerUpFallbackTimer 作为最后兜底（防 JS handler 也丢失）
+  void handleTouchEnd() {
+    if (!mounted) return;
+    if (widget.isScrollMode) return;
+    // _downPosition==null 说明 _onPointerUp 已被 Flutter 正常触发，
+    // 不需要 JS 兜底，避免重复 _finalizeTurn
+    if (_downPosition == null) return;
+    // _finalizeStarted=true 说明 _finalizeTurn 已在进行中（可能是 _onPointerUp
+    // 或 _pointerUpFallbackTimer 触发的），不要重复触发
+    if (_finalizeStarted) return;
+
+    _pointerUpFallbackTimer?.cancel();
+    _pointerUpFallbackTimer = null;
+
+    if (_delegate.isMoved) {
+      _finalizeStarted = true;
+      _finalizeTurn();
+    }
+    _downPosition = null;
+    _pendingMoveDuringCapture = null;
   }
 
   @override

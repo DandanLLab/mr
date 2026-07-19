@@ -77,6 +77,20 @@ class ReaderWebViewCallbacks {
   /// async 保存留出执行时间。
   final Future<void> Function()? onBeforeSizeReload;
 
+  /// 用户手指离开 WebView（touchend）
+  ///
+  /// 背景：InAppWebView 是 PlatformView，会吞掉 Flutter 的 PointerUpEvent，
+  /// 导致 ReaderPageView._onPointerUp 不被调用，翻页动画覆盖层无法及时销毁。
+  /// 原本靠 600ms 兜底 timer 触发 _finalizeTurn，用户感觉"翻完页要再点一次
+  /// 才能销毁动画"。
+  ///
+  /// 修复：JS 端 touchend 监听器通过 handler 回调到 Dart，Dart 转发给
+  /// ReaderPageView 触发 _finalizeTurn，即时销毁覆盖层。
+  ///
+  /// 仅分页模式（!isScrollMode）需要：滚动模式的"翻页"是 native scroll，
+  /// 没有 animation layer 需要销毁。
+  final void Function()? onTouchEnd;
+
   const ReaderWebViewCallbacks({
     required this.onInitialized,
     required this.onPageCountReady,
@@ -89,6 +103,7 @@ class ReaderWebViewCallbacks {
     this.onHideSelectionMenu,
     this.onChapterVisible,
     this.onBeforeSizeReload,
+    this.onTouchEnd,
   });
 }
 
@@ -486,6 +501,15 @@ class ReaderWebViewController {
       handlerName: 'onHideSelectionMenu',
       callback: (args) {
         _callbacks?.onHideSelectionMenu?.call();
+      },
+    );
+
+    // touchend：用户手指离开 WebView
+    // InAppWebView 吞 PointerUpEvent，靠 JS touchend 即时通知 Dart
+    controller.addJavaScriptHandler(
+      handlerName: 'onTouchEnd',
+      callback: (args) {
+        _callbacks?.onTouchEnd?.call();
       },
     );
   }
