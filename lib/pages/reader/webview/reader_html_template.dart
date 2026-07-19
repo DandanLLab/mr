@@ -32,11 +32,12 @@ class ReaderHtmlTemplate {
     required bool isScrollMode,
     required int pageAnimDurationMs,
     required int pageModeIndex,
+    required int chapterIndex,
   }) {
     final css = _generateCss(provider, isScrollMode);
     final js = _readerJs();
     final paragraphsHtml = buildParagraphsHtml(content, provider);
-    final titleHtml = buildTitleHtml(title, provider);
+    final titleHtml = buildTitleHtml(title, provider, chapterIndex);
 
     return '''
 <!DOCTYPE html>
@@ -104,6 +105,16 @@ class ReaderHtmlTemplate {
             ? 'right'
             : 'left';
     final titleFontSizeCalc = 'calc(var(--reader-font-size) * 1.4 + ${provider.titleSize}px)';
+    // Phase 3.3：菜单毛玻璃主题色（按背景亮度自动切换亮/暗菜单）
+    // - 用 computeLuminance() 判断：暗色背景 → 深色菜单 + 浅字；亮色背景 → 白底 + 深字
+    // - 不再用 var(--reader-text-color) 反色风格（与毛玻璃不搭）
+    final isDarkBg = provider.backgroundColor.computeLuminance() < 0.5;
+    final menuBg = isDarkBg ? 'rgba(38, 38, 38, 0.78)' : 'rgba(255, 255, 255, 0.82)';
+    final menuText = isDarkBg ? '#FAFAFA' : '#1A1A1A';
+    final menuDivider = isDarkBg ? 'rgba(255, 255, 255, 0.16)' : 'rgba(0, 0, 0, 0.10)';
+    final menuShadow = isDarkBg
+        ? '0 6px 24px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.28)'
+        : '0 6px 24px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.10)';
 
     return '''
 :root {
@@ -140,6 +151,11 @@ class ReaderHtmlTemplate {
   --reader-safe-height: calc(var(--reader-vh) - var(--reader-padding-top) - var(--reader-padding-bottom));
   --reader-title-top-spacing: ${provider.titleTopSpacing}px;
   --reader-title-bottom-spacing: ${provider.titleBottomSpacing}px;
+  /* Phase 3.3：菜单专用变量（按阅读器背景亮度自动适配亮/暗） */
+  --reader-menu-bg: $menuBg;
+  --reader-menu-text: $menuText;
+  --reader-menu-divider: $menuDivider;
+  --reader-menu-shadow: $menuShadow;
 }
 
 * {
@@ -213,39 +229,56 @@ ${generateHighlightCss(provider)}
 
 /* ============ 文字选择菜单 CSS ============ */
 /* 自定义浮动菜单：选区上方/下方显示，替代 Android 默认 ActionMode（更美观、统一） */
+/* Phase 3.3：毛玻璃 + 淡入缩放动画（opacity + transform 过渡替代 display 切换） */
 #reader-selection-menu {
   position: fixed;
-  display: none;
+  /* 用 opacity + pointer-events 控制可见性，保留 display:flex 让 transform 生效 */
+  display: flex;
+  opacity: 0;
+  transform: scale(0.92);
+  pointer-events: none;
   flex-direction: row;
   align-items: center;
   padding: 0 4px;
-  background-color: var(--reader-text-color);
-  border-radius: 10px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28), 0 1px 4px rgba(0, 0, 0, 0.18);
+  /* 毛玻璃：半透明背景 + backdrop-filter 模糊
+     - Android WebView 5+ / iOS WKWebView 都支持 backdrop-filter
+     - 不支持时降级到半透明背景（仍是可用样式） */
+  background-color: var(--reader-menu-bg);
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  backdrop-filter: blur(14px) saturate(180%);
+  border-radius: 12px;
+  /* 1px 内边框增加质感（亮暗都用低对比白） */
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: var(--reader-menu-shadow);
   z-index: 9999;
   /* 避免 long-press 系统菜单与本菜单同时弹出 */
   -webkit-touch-callout: none;
-  /* transform 加速合成，避免滚动时位置漂移 */
-  transform: translateZ(0);
+  /* will-change 提示浏览器合成层加速（替代原 translateZ(0)） */
+  will-change: transform, opacity;
   /* 防止菜单自身被选中导致选区变化 */
   user-select: none;
   -webkit-user-select: none;
   max-width: 90vw;
   overflow: hidden;
+  /* 淡入缩放过渡 */
+  transition: opacity 120ms ease-out, transform 120ms ease-out;
+  /* transform-origin 顶部居中：缩放从选区上方展开 */
+  transform-origin: center top;
 }
 
 #reader-selection-menu.visible {
-  display: flex;
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
 }
 
 #reader-selection-menu .menu-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
+  padding: 8px 14px;
   background: transparent;
   border: none;
-  color: var(--reader-bg-color);
+  color: var(--reader-menu-text);
   font-size: 14px;
   font-family: var(--reader-font-family);
   cursor: pointer;
@@ -255,6 +288,7 @@ ${generateHighlightCss(provider)}
 
 #reader-selection-menu .menu-item:active {
   background-color: rgba(128, 128, 128, 0.18);
+  border-radius: 8px;
 }
 
 #reader-selection-menu .menu-item .menu-icon {
@@ -265,9 +299,16 @@ ${generateHighlightCss(provider)}
 #reader-selection-menu .menu-divider {
   width: 1px;
   height: 18px;
-  background-color: rgba(128, 128, 128, 0.32);
+  background-color: var(--reader-menu-divider);
   margin: 0 2px;
   flex-shrink: 0;
+}
+
+/* Phase 3.4：搜索结果高亮样式 */
+.sel-hl-search {
+  background-color: #FFEB3B !important;
+  color: #000 !important;
+  border-radius: 2px;
 }
 
 /* ============ 分页模式 ============ */
@@ -367,6 +408,13 @@ body.reader-scroll {
   transform: translateZ(0);
   /* 关键：让滚动贴近物理手感，禁用边界回弹（避免过度滚动反而卡顿） */
   overscroll-behavior: contain;
+  /* scroll-behavior: auto 让滚动 1:1 跟手
+     - smooth 会让滚动有缓动效果，但用户停止滑动后还会继续滚一段，
+       造成「惯性停不下来」的视觉感受
+     - auto 模式下，滚动完全跟随手势，停手即停滚（浏览器原生物理惯性仍存在，
+       但不会有额外的 JS/CSS 缓动叠加）
+     - 这是用户反馈「惯性停不下来」的修复 */
+  scroll-behavior: auto;
 }
 
 body.reader-scroll #reader-root {
@@ -476,10 +524,12 @@ body.reader-scroll #reader-content-b {
   ///
   /// 改为 public（原 _buildTitleHtml）以支持滚动模式无缝衔接：
   /// 与 buildParagraphsHtml 配合使用，生成下章标题 HTML 供 appendChapter 追加。
-  static String buildTitleHtml(String title, ReaderProvider provider) {
+  static String buildTitleHtml(String title, ReaderProvider provider, int chapterIndex) {
     if (!provider.showChapterTitle || title.isEmpty) return '';
     if (provider.titleMode == 2) return '';
-    return '<h1 id="reader-title" class="reader-title">${_escapeHtml(title)}</h1>';
+    // 加 data-chapter-index 属性供 IntersectionObserver 监测
+    // 滚动模式下用户滚到此标题时 Dart 侧 _onChapterVisible 触发更新 UI
+    return '<h1 id="reader-title" class="reader-title" data-chapter-index="$chapterIndex">${_escapeHtml(title)}</h1>';
   }
 
   /// 把内容切分成段落
@@ -648,12 +698,13 @@ window.readerApi = (function() {
             window.flutter_inappwebview.callHandler('onPageChanged', Math.round(progress * 1000));
           }
           // 无缝衔接：检测是否接近底部，触发 onScrollNearEnd 让 Dart 加载下一章
-          // - threshold = 1.5 * clientHeight（约 1.5 屏）：提前加载避免用户看到空白
+          // - threshold = 2.0 * clientHeight（约 2 屏）：提前加载给章节拉取留时间
+          //   原 1.5 屏在用户快滚时不够，章节加载完用户已滚到末尾出现「画面跳」感
           // - 触发后 nearEndNotified=true 防止重复通知；appendChapter 后会重置
           // - 用户滚回上方（remaining > threshold*2）也会重置，允许下次触发
           var viewport = body.clientHeight;
           var remaining = body.scrollHeight - body.scrollTop - viewport;
-          var threshold = viewport * 1.5;
+          var threshold = viewport * 2.0;
           if (remaining < threshold && !nearEndNotified) {
             nearEndNotified = true;
             console.log('[reader] scroll near end, remaining=' + Math.round(remaining) + 'px');
@@ -680,6 +731,18 @@ window.readerApi = (function() {
     // - 监听 selectionchange 防抖显示菜单
     // - 监听 scroll/touchstart 隐藏菜单
     initSelectionMenu();
+
+    // 滚动模式：初始化章节边界观察器
+    // - 监听所有 [data-chapter-index] 元素（初始标题 + appendChapter 追加的标题）
+    // - 进入屏幕中部 10% 区域时回调 Dart 侧 onChapterVisible(chapterIndex)
+    // - 让 UI 章节标题/进度条实时跟随用户滚动更新
+    initChapterObserver();
+
+    // Phase 4：长按段落菜单
+    // - touchstart 500ms 触发 onParagraphLongpress(text, rect)
+    // - 移动距离 > 10px 取消（视为滚动）
+    // - 选区存在时不触发（避免与选择菜单冲突）
+    initLongpressMenu();
 
     // 等待 DOM 渲染完成后通知 Dart 侧
     // 首次通知：rAF 双帧后立即通知，让 Dart 尽快拿到初步 pageCount 启动渲染
@@ -766,10 +829,13 @@ window.readerApi = (function() {
     if (!selMenuEl) return;
     selMenuEl.innerHTML = '';
     var items = [
-      { icon: '\\u{1F4CB}', label: '复制', action: 'copy' },
-      { icon: '\\u{1F58D}\\u{FE0F}', label: '高亮', action: 'highlight' },
-      { icon: '\\u{1F4D6}', label: '查词', action: 'lookup' },
-      { icon: '\\u{2197}\\u{FE0F}', label: '分享', action: 'share' }
+      { label: '复制', action: 'copy' },
+      { label: '高亮', action: 'highlight' },
+      { label: '查词', action: 'lookup' },
+      { label: '分享', action: 'share' },
+      { label: '全选', action: 'selectAll' },
+      { label: '删高亮', action: 'removeHighlight' },
+      { label: '搜索', action: 'search' }
     ];
     items.forEach(function(item, idx) {
       if (idx > 0) {
@@ -780,7 +846,7 @@ window.readerApi = (function() {
       var btn = document.createElement('button');
       btn.className = 'menu-item';
       btn.type = 'button';
-      btn.innerHTML = '<span class="menu-icon">' + item.icon + '</span><span>' + item.label + '</span>';
+      btn.textContent = item.label;
       // 用 pointerdown 而非 click：避免 button 点击导致 selection 被清除
       // （Android WebView 中点击 button 会清除 window.getSelection()）
       btn.addEventListener('pointerdown', function(e) {
@@ -790,6 +856,89 @@ window.readerApi = (function() {
       });
       selMenuEl.appendChild(btn);
     });
+  }
+
+  // ============ Phase 4：长按段落菜单 ============
+  // 触发条件：
+  // - touchstart 在 #reader-content-a 内的段落元素（p / .reader-paragraph）
+  // - 持续 > 500ms 且 touchmove 距离 < 10px（避免与滚动冲突）
+  // - 排除选区存在场景（避免长按选区时误触发）
+  // 回调：callHandler('onParagraphLongpress', text, l, t, w, h)
+  var longpressTimer = null;
+  var longpressStartPos = null;
+  var longpressTarget = null;
+  var LONGPRESS_DELAY = 500;     // ms，参考 Android ViewConfiguration.getLongPressTimeout
+  var LONGPRESS_MOVE_TOLERANCE = 10;  // px，超过此距离视为滚动
+
+  function initLongpressMenu() {
+    if (!contentA) return;
+
+    contentA.addEventListener('touchstart', function(e) {
+      if (e.touches.length !== 1) {
+        // 多指：取消
+        if (longpressTimer) { clearTimeout(longpressTimer); longpressTimer = null; }
+        return;
+      }
+      // 选区存在时不触发长按（避免与选择菜单冲突）
+      var sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && !sel.getRangeAt(0).collapsed) {
+        return;
+      }
+      // 找到段落祖先（p / .reader-paragraph）
+      var target = e.target;
+      var paragraph = null;
+      while (target && target !== contentA) {
+        if (target.tagName === 'P' ||
+            (target.classList && target.classList.contains('reader-paragraph'))) {
+          paragraph = target;
+          break;
+        }
+        target = target.parentNode;
+      }
+      if (!paragraph) return;
+
+      longpressTarget = paragraph;
+      longpressStartPos = {
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY
+      };
+      if (longpressTimer) clearTimeout(longpressTimer);
+      longpressTimer = setTimeout(function() {
+        if (!longpressTarget) return;
+        var text = (longpressTarget.textContent || '').trim();
+        if (text.length === 0) return;
+        var rect = longpressTarget.getBoundingClientRect();
+        if (window.flutter_inappwebview) {
+          window.flutter_inappwebview.callHandler(
+            'onParagraphLongpress',
+            text,
+            rect.left, rect.top, rect.width, rect.height
+          );
+        }
+      }, LONGPRESS_DELAY);
+    }, { passive: true });
+
+    contentA.addEventListener('touchmove', function(e) {
+      if (!longpressStartPos || !longpressTimer) return;
+      var dx = e.touches[0].clientX - longpressStartPos.x;
+      var dy = e.touches[0].clientY - longpressStartPos.y;
+      if (Math.sqrt(dx * dx + dy * dy) > LONGPRESS_MOVE_TOLERANCE) {
+        // 移动距离过大：取消
+        clearTimeout(longpressTimer);
+        longpressTimer = null;
+        longpressTarget = null;
+      }
+    }, { passive: true });
+
+    contentA.addEventListener('touchend', function() {
+      if (longpressTimer) { clearTimeout(longpressTimer); longpressTimer = null; }
+      longpressTarget = null;
+    }, { passive: true });
+
+    contentA.addEventListener('touchcancel', function() {
+      if (longpressTimer) { clearTimeout(longpressTimer); longpressTimer = null; }
+      longpressTarget = null;
+    }, { passive: true });
   }
 
   function getSelectionText() {
@@ -866,15 +1015,60 @@ window.readerApi = (function() {
 
   function onSelectionMenuItemClick(action) {
     var text = selLastText || getSelectionText();
-    if (!text) {
-      hideSelectionMenu();
-      return;
-    }
     var rect = getSelectionRect();
     var rl = rect ? rect.left : 0;
     var rt = rect ? rect.top : 0;
     var rw = rect ? rect.width : 0;
     var rh = rect ? rect.height : 0;
+
+    // Phase 3.1：全选 - JS 直接处理，扩展 Range 到 #reader-content-a 全文
+    // - 不调 Dart（纯前端操作）
+    // - 选区变化后 selectionchange 监听会触发 showSelectionMenu 重新定位
+    if (action === 'selectAll') {
+      var contentAll = document.getElementById('reader-content-a') || contentA;
+      if (contentAll) {
+        var rangeAll = document.createRange();
+        rangeAll.selectNodeContents(contentAll);
+        var selAll = window.getSelection();
+        if (selAll) {
+          selAll.removeAllRanges();
+          selAll.addRange(rangeAll);
+        }
+      }
+      return;
+    }
+
+    // Phase 3.1：删除当前选区命中的 .sel-hl 元素
+    // - JS 端先移除视觉标记，再通知 Dart 删除持久化记录
+    if (action === 'removeHighlight') {
+      removeHighlightInSelection();
+      if (window.flutter_inappwebview) {
+        window.flutter_inappwebview.callHandler(
+          'onSelectionAction', 'removeHighlight', text, rl, rt, rw, rh);
+      }
+      var selRm = window.getSelection();
+      if (selRm) selRm.removeAllRanges();
+      hideSelectionMenu();
+      return;
+    }
+
+    // Phase 3.1：全文搜索 - Dart 弹 BottomSheet
+    if (action === 'search') {
+      if (window.flutter_inappwebview) {
+        window.flutter_inappwebview.callHandler(
+          'onSelectionAction', 'search', text, rl, rt, rw, rh);
+      }
+      var selS = window.getSelection();
+      if (selS) selS.removeAllRanges();
+      hideSelectionMenu();
+      return;
+    }
+
+    // 原有 copy / highlight / lookup / share 分支
+    if (!text) {
+      hideSelectionMenu();
+      return;
+    }
     if (window.flutter_inappwebview) {
       window.flutter_inappwebview.callHandler(
         'onSelectionAction', action, text, rl, rt, rw, rh);
@@ -960,6 +1154,272 @@ window.readerApi = (function() {
       hideSelectionMenu();
     }
     return success;
+  }
+
+  // Phase 3.1：删除当前选区命中的 .sel-hl 元素
+  //
+  // 实现：
+  // - 用 TreeWalker 遍历选区公共祖先下所有 .sel-hl 元素
+  // - 通过 range.intersectsNode 验证与当前选区有交集
+  // - 把命中的 .sel-hl span 内容（文本节点）提到父级，移除 span
+  //
+  // 返回：删除的 .sel-hl 数量（用于 SnackBar 提示，由 Dart 侧通过持久化查询确认）
+  function removeHighlightInSelection() {
+    var sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return 0;
+    var range = sel.getRangeAt(0);
+    if (range.collapsed) return 0;
+
+    // 收集选区命中的 .sel-hl 元素
+    var toRemove = [];
+    var marks = contentA
+      ? contentA.querySelectorAll('.sel-hl')
+      : document.querySelectorAll('.sel-hl');
+    for (var i = 0; i < marks.length; i++) {
+      var mark = marks[i];
+      if (range.intersectsNode(mark)) {
+        toRemove.push(mark);
+      }
+    }
+
+    // 移除每个 .sel-hl span，把内部子节点提到父级
+    for (var j = toRemove.length - 1; j >= 0; j--) {
+      var m = toRemove[j];
+      var parent = m.parentNode;
+      while (m.firstChild) {
+        parent.insertBefore(m.firstChild, m);
+      }
+      parent.removeChild(m);
+    }
+    return toRemove.length;
+  }
+
+  // Phase 3.2：恢复持久化高亮（Dart 在章节加载后传入 JSON 列表）
+  //
+  // 参数 list: [{ id, selectedText, color, style, note, ... }]
+  // - 用 TreeWalker 遍历 #reader-content-a 文本节点，查找 selectedText 第一次出现位置
+  // - 用 range.surroundContents 包到 .sel-hl 里（跨段落匹配跳过，surroundContents 不支持）
+  // - 同时给 mark 加 data-highlight-id 属性，便于按 id 删除
+  function restoreHighlights(list) {
+    if (!list || !list.length) return;
+    if (!contentA) return;
+    var colors = ['#FFF176', '#A5D6A7', '#90CAF9', '#F48FB1', '#FFCC80', '#CE93D8'];
+    list.forEach(function(item) {
+      try {
+        var text = item.selectedText;
+        if (!text || text.length === 0) return;
+        var colorIndex = item.color || 0;
+        var styleIndex = item.style || 0;
+        var color = colors[colorIndex] || colors[0];
+        var textDecoration = styleIndex === 1 ? 'underline'
+          : (styleIndex === 2 ? 'line-through' : (styleIndex === 3 ? 'underline wavy' : ''));
+
+        // 跳过已经恢复过的（按 data-highlight-id 防重复）
+        if (item.id) {
+          var exists = contentA.querySelector('[data-highlight-id="' + item.id + '"]');
+          if (exists) return;
+        }
+
+        // 用 TreeWalker 找文本节点中第一次匹配
+        var walker = document.createTreeWalker(contentA, NodeFilter.SHOW_TEXT, null);
+        var found = false;
+        while (walker.nextNode() && !found) {
+          var node = walker.currentNode;
+          var idx = node.nodeValue.indexOf(text);
+          if (idx >= 0) {
+            var r = document.createRange();
+            r.setStart(node, idx);
+            r.setEnd(node, idx + text.length);
+            var mark = document.createElement('span');
+            mark.className = 'sel-hl';
+            if (item.id) mark.setAttribute('data-highlight-id', item.id);
+            mark.style.backgroundColor = styleIndex === 0 ? color : 'transparent';
+            if (textDecoration) {
+              mark.style.textDecoration = textDecoration;
+              mark.style.textDecorationColor = color;
+              mark.style.webkitTextDecorationColor = color;
+            }
+            try {
+              r.surroundContents(mark);
+              found = true;
+            } catch (e) {
+              // 跨元素，跳过该文本节点继续找下一个
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[reader] restoreHighlights item failed:', e);
+      }
+    });
+  }
+
+  // Phase 3.2：按 selectedText 删除视觉高亮（持久化由 Dart 侧处理）
+  // - 遍历 #reader-content-a 下所有 .sel-hl
+  // - textContent 完全匹配的移除 span（把内部子节点提到父级）
+  function removeHighlightByText(text) {
+    if (!text || !contentA) return 0;
+    var marks = contentA.querySelectorAll('.sel-hl');
+    var removed = 0;
+    for (var i = marks.length - 1; i >= 0; i--) {
+      var mark = marks[i];
+      if (mark.textContent === text) {
+        var parent = mark.parentNode;
+        while (mark.firstChild) {
+          parent.insertBefore(mark.firstChild, mark);
+        }
+        parent.removeChild(mark);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  // Phase 3.4：全文搜索
+  //
+  // 遍历 #reader-content-a 下所有文本节点，查找 query 出现的所有位置。
+  // - chapterIndex 通过查找祖先 [data-chapter-index] 或 .chapter-append-wrap 推断
+  // - snippet 取匹配前后 20 字符作为预览
+  // - 缓存到 searchResultsCache，供 scrollToSearchResult 复用
+  //
+  // 返回 JSON 字符串：[{ idx, chapterIndex, offset, length, snippet, top }]
+  var searchResultsCache = [];
+  function searchText(query) {
+    searchResultsCache = [];
+    if (!query || query.length === 0) return '[]';
+    if (!contentA) return '[]';
+    var results = [];
+    var walker = document.createTreeWalker(contentA, NodeFilter.SHOW_TEXT, null);
+    var idx = 0;
+    while (walker.nextNode()) {
+      var node = walker.currentNode;
+      var text = node.nodeValue;
+      var pos = 0;
+      while (true) {
+        var found = text.indexOf(query, pos);
+        if (found < 0) break;
+        // 推断 chapterIndex：找最近的 [data-chapter-index] 祖先或 .chapter-append-wrap
+        var chapterIdx = -1;
+        var parent = node.parentNode;
+        while (parent && parent !== contentA) {
+          if (parent.getAttribute && parent.getAttribute('data-chapter-index')) {
+            chapterIdx = parseInt(parent.getAttribute('data-chapter-index'), 10);
+            break;
+          }
+          if (parent.classList && parent.classList.contains('chapter-append-wrap')) {
+            var title = parent.querySelector('[data-chapter-index]');
+            if (title) {
+              chapterIdx = parseInt(title.getAttribute('data-chapter-index'), 10);
+            }
+            break;
+          }
+          parent = parent.parentNode;
+        }
+        // 取前后 20 字符作为 snippet
+        var snipStart = Math.max(0, found - 20);
+        var snipEnd = Math.min(text.length, found + query.length + 20);
+        var snippet = text.substring(snipStart, snipEnd);
+        // 计算该位置在文档中的 top（用于结果列表展示）
+        var rectRange = document.createRange();
+        rectRange.setStart(node, found);
+        rectRange.setEnd(node, found + query.length);
+        var rect = rectRange.getBoundingClientRect();
+        results.push({
+          idx: idx,
+          chapterIndex: chapterIdx,
+          offset: found,
+          length: query.length,
+          snippet: snippet,
+          top: rect.top + (window.scrollY || 0)
+        });
+        searchResultsCache.push({
+          node: node,
+          found: found,
+          length: query.length
+        });
+        idx++;
+        pos = found + query.length;
+      }
+    }
+    return JSON.stringify(results);
+  }
+
+  // Phase 3.4：滚动到第 idx 个搜索结果并高亮
+  // - 清除上次搜索高亮（lastSearchMark）
+  // - 重新创建 range（旧 range 可能因 DOM 变化失效）
+  // - 用 .sel-hl-search class 包裹，黄底黑字突出
+  // - smooth 滚动到该位置（视口居中）
+  var lastSearchMark = null;
+  function scrollToSearchResult(idx) {
+    if (idx < 0 || idx >= searchResultsCache.length) return false;
+    // 清除上次高亮
+    if (lastSearchMark && lastSearchMark.parentNode) {
+      try {
+        var parent = lastSearchMark.parentNode;
+        while (lastSearchMark.firstChild) {
+          parent.insertBefore(lastSearchMark.firstChild, lastSearchMark);
+        }
+        parent.removeChild(lastSearchMark);
+      } catch (e) {
+        console.warn('[reader] clear lastSearchMark failed:', e);
+      }
+      lastSearchMark = null;
+    }
+    var item = searchResultsCache[idx];
+    var r = document.createRange();
+    try {
+      r.setStart(item.node, item.found);
+      r.setEnd(item.node, item.found + item.length);
+      var mark = document.createElement('span');
+      mark.className = 'sel-hl sel-hl-search';
+      mark.style.backgroundColor = '#FFEB3B';
+      mark.style.color = '#000';
+      r.surroundContents(mark);
+      lastSearchMark = mark;
+      // 滚动到该位置（视口居中）
+      var rect = mark.getBoundingClientRect();
+      var targetY = (window.scrollY || 0) + rect.top - window.innerHeight / 2;
+      window.scrollTo({ top: targetY, behavior: 'smooth' });
+      return true;
+    } catch (e) {
+      console.warn('[reader] scrollToSearchResult failed:', e);
+      return false;
+    }
+  }
+
+  // Phase 4：高亮整段（按段落文本匹配）
+  // - 遍历 #reader-content-a 下所有 p / .reader-paragraph
+  // - 找到 textContent === text 的段落
+  // - 创建覆盖整个段落的 Range，用 .sel-hl 包裹
+  function highlightParagraphByText(text, colorIndex, styleIndex) {
+    if (!text || !contentA) return false;
+    var paragraphs = contentA.querySelectorAll('p, .reader-paragraph');
+    var colors = ['#FFF176', '#A5D6A7', '#90CAF9', '#F48FB1', '#FFCC80', '#CE93D8'];
+    var color = colors[colorIndex] || colors[0];
+    var textDecoration = styleIndex === 1 ? 'underline'
+      : (styleIndex === 2 ? 'line-through' : (styleIndex === 3 ? 'underline wavy' : ''));
+    for (var i = 0; i < paragraphs.length; i++) {
+      var p = paragraphs[i];
+      if (p.textContent.trim() === text.trim()) {
+        var r = document.createRange();
+        r.selectNodeContents(p);
+        try {
+          var mark = document.createElement('span');
+          mark.className = 'sel-hl';
+          mark.style.backgroundColor = styleIndex === 0 ? color : 'transparent';
+          if (textDecoration) {
+            mark.style.textDecoration = textDecoration;
+            mark.style.textDecorationColor = color;
+            mark.style.webkitTextDecorationColor = color;
+          }
+          r.surroundContents(mark);
+          return true;
+        } catch (e) {
+          console.warn('[reader] highlightParagraphByText failed:', e);
+          return false;
+        }
+      }
+    }
+    return false;
   }
 
   // 更新视口尺寸 CSS 变量
@@ -1357,34 +1817,104 @@ window.readerApi = (function() {
   // - 标题用 createElement + textContent 创建，避免 XSS
   // - 段落 HTML 由 Dart 侧 ReaderHtmlTemplate.buildParagraphsHtml 生成，可信
   // - 追加后重置 nearEndNotified，允许下次接近底部时再次触发
-  function appendChapter(title, paragraphsHtml) {
+  // - 给章节标题元素加 data-chapter-index，供 IntersectionObserver 监测当前可见章节
+  // - 章节内容（分隔符 + 标题 + 段落）初始隐藏，淡入动画消除「画面突然出现」的跳动感
+  function appendChapter(title, paragraphsHtml, chapterIndex) {
     if (!contentA) {
       console.warn('[reader] appendChapter: contentA is null');
       return;
     }
+    // 包裹层：用于一组元素统一应用淡入动画
+    var wrap = document.createElement('div');
+    wrap.className = 'chapter-append-wrap';
+    wrap.style.cssText =
+      'opacity: 0; transform: translateY(8px);' +
+      ' transition: opacity 320ms ease-out, transform 320ms ease-out;';
+
     // 章节分隔符：视觉提示用户进入新章节（32px 间距）
     var sep = document.createElement('div');
     sep.className = 'chapter-separator';
     sep.style.cssText = 'height: 32px; width: 100%;';
-    contentA.appendChild(sep);
+    wrap.appendChild(sep);
+
     // 章节标题（textContent 避免 XSS）
+    // - 加 data-chapter-index 属性供 IntersectionObserver 监测
+    // - 用属性选择器 [data-chapter-index] 即可获取所有追加章节标题
     if (title && title.length > 0) {
       var h1 = document.createElement('h1');
       h1.className = 'reader-title';
+      h1.setAttribute('data-chapter-index', String(chapterIndex));
       h1.textContent = title;
-      contentA.appendChild(h1);
+      wrap.appendChild(h1);
+      // 注册到章节观察器（追加后立即可被 IntersectionObserver 跟踪）
+      if (chapterObserver && h1) {
+        chapterObserver.observe(h1);
+      }
     }
-    // 段落（用临时 div 解析 HTML 字符串，再 append 移到 contentA）
+
+    // 段落（用临时 div 解析 HTML 字符串，再 append 移到 wrap）
     if (paragraphsHtml && paragraphsHtml.length > 0) {
       var tmp = document.createElement('div');
       tmp.innerHTML = paragraphsHtml;
       while (tmp.firstChild) {
-        contentA.appendChild(tmp.firstChild);
+        wrap.appendChild(tmp.firstChild);
       }
     }
+
+    contentA.appendChild(wrap);
+
+    // 双重 rAF 保证浏览器先渲染初始（隐藏）状态，再切换到显示状态触发过渡
+    // - 第一帧：DOM 已 append，浏览器计算出初始 opacity:0
+    // - 第二帧：切换到 opacity:1，触发 transition
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        wrap.style.opacity = '1';
+        wrap.style.transform = 'translateY(0)';
+      });
+    });
+
     appendedChapterCount++;
     nearEndNotified = false; // 重置以允许下次触发
-    console.log('[reader] appendChapter: title=' + title + ' appendedCount=' + appendedChapterCount);
+    console.log('[reader] appendChapter: idx=' + chapterIndex +
+      ' title=' + title + ' appendedCount=' + appendedChapterCount);
+  }
+
+  // 章节观察器：监听 [data-chapter-index] 元素，进入屏幕中部 10% 区域时
+  // 回调 Dart 侧 onChapterVisible(chapterIndex)，让 UI 章节标题实时跟随滚动更新。
+  // - rootMargin: -50% 0px -40% 0px → 仅当元素位于屏幕中部 10% 横条时才算"进入"
+  //   （避免多个章节标题同时进入视口时来回切换）
+  // - threshold: 0 → 元素任意像素进入判定区即触发
+  // - 仅滚动模式启用，分页模式不需要（每次只显示一章）
+  var chapterObserver = null;
+  function initChapterObserver() {
+    if (!config.isScrollMode) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      console.warn('[reader] IntersectionObserver not supported, chapter UI 不会跟随更新');
+      return;
+    }
+    chapterObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (!entry.isIntersecting) return;
+        var idxAttr = entry.target.getAttribute('data-chapter-index');
+        if (idxAttr === null) return;
+        var idx = parseInt(idxAttr, 10);
+        if (isNaN(idx)) return;
+        if (window.flutter_inappwebview) {
+          window.flutter_inappwebview.callHandler('onChapterVisible', idx);
+        }
+      });
+    }, {
+      root: null,
+      rootMargin: '-50% 0px -40% 0px',
+      threshold: 0
+    });
+    // 初始章节标题（contentA 中已有的第一个 .reader-title）也注册
+    var titles = contentA
+      ? contentA.querySelectorAll('[data-chapter-index]')
+      : [];
+    for (var i = 0; i < titles.length; i++) {
+      chapterObserver.observe(titles[i]);
+    }
   }
 
   // 获取已追加的章节数（用于 Dart 侧查询当前已加载到第几章）
@@ -1406,7 +1936,14 @@ window.readerApi = (function() {
     appendChapter: appendChapter,
     getAppendedChapterCount: getAppendedChapterCount,
     hideSelectionMenu: hideSelectionMenu,
-    highlightSelection: highlightSelection
+    highlightSelection: highlightSelection,
+    // Phase 3.1 / 3.2 / 3.4 / 4 新增
+    removeHighlightInSelection: removeHighlightInSelection,
+    restoreHighlights: restoreHighlights,
+    removeHighlightByText: removeHighlightByText,
+    searchText: searchText,
+    scrollToSearchResult: scrollToSearchResult,
+    highlightParagraphByText: highlightParagraphByText
   };
 })();
 ''';

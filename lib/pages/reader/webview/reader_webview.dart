@@ -28,6 +28,13 @@ class ReaderWebView extends StatefulWidget {
   /// 章节标题
   final String title;
 
+  /// 章节索引（用于 IntersectionObserver 监测当前可见章节）
+  ///
+  /// 仅用于初始 HTML 生成时给 <h1> 加 data-chapter-index 属性。
+  /// 滚动模式中追加章节时由 appendChapter 单独传入 chapterIndex 参数，
+  /// 不依赖此字段（因为 ReaderWebView 的 chapterIndex 只反映初始章节）。
+  final int chapterIndex;
+
   /// 阅读器配置
   final ReaderProvider provider;
 
@@ -44,6 +51,7 @@ class ReaderWebView extends StatefulWidget {
     super.key,
     required this.content,
     required this.title,
+    required this.chapterIndex,
     required this.provider,
     required this.isScrollMode,
     required this.controller,
@@ -87,9 +95,15 @@ class _ReaderWebViewState extends State<ReaderWebView> {
   void didUpdateWidget(ReaderWebView oldWidget) {
     super.didUpdateWidget(oldWidget);
     // 内容/模式变化 → 重新生成 HTML 并加载（不走防抖，立即生效）
+    // 滚动模式下 title 变化不触发 reload：
+    // - 滚动模式中 IntersectionObserver 监测到用户滚到下一章时，Dart 侧
+    //   setState 更新 _chapterTitle（让 UI 顶栏跟随显示），但 WebView 内部
+    //   已通过 appendChapter 写入了新章节标题，不需要重新生成 HTML
+    // - 若 reload 会清空所有 appendChapter 追加的内容，破坏滚动状态
+    // - 分页模式下 title 变化 = 章节切换，content 也会变，由前一个条件触发 reload
     if (oldWidget.content != widget.content ||
-        oldWidget.title != widget.title ||
-        oldWidget.isScrollMode != widget.isScrollMode) {
+        oldWidget.isScrollMode != widget.isScrollMode ||
+        (!widget.isScrollMode && oldWidget.title != widget.title)) {
       _styleReloadDebounce?.cancel();
       _currentHtml = _generateHtml();
       _lastStyleSnapshot = _StyleSnapshot.fromProvider(widget.provider);
@@ -136,6 +150,7 @@ class _ReaderWebViewState extends State<ReaderWebView> {
       isScrollMode: widget.isScrollMode,
       pageAnimDurationMs: widget.provider.pageAnimDurationMs,
       pageModeIndex: widget.provider.pageMode.index,
+      chapterIndex: widget.chapterIndex,
     );
   }
 

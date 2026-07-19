@@ -1319,6 +1319,326 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     _appendNextChapter(nextIndex);
   }
 
+  /// 滚动模式：当前可见章节变化（IntersectionObserver 触发）
+  ///
+  /// JS 端监听 [data-chapter-index] 元素，进入屏幕中部 10% 区域时回调。
+  /// Dart 侧更新 _currentChapterIndex / _chapterTitle / _sliderValue，
+  /// 让 UI 章节标题、进度条实时跟随用户滚动更新。
+  ///
+  /// 注意：
+  /// - ReaderWebView.didUpdateWidget 已特判滚动模式下 title 变化不触发 reload，
+  ///   所以这里 setState 更新 _chapterTitle 不会让 WebView 重新加载
+  /// - _saveCurrentProgress 用 _currentChapterIndex 保存章节，自动联动
+  /// - 不主动调 _scheduleProgressSave，由 _onWebviewPageChanged 的 200ms 防抖处理
+  ///   （IntersectionObserver 触发频率低，但 _onWebviewPageChanged 高频触发）
+  void _onChapterVisible(int chapterIndex) {
+    if (!mounted) return;
+    if (_book == null) return;
+    if (chapterIndex == _currentChapterIndex) return;
+    if (chapterIndex < 0 || chapterIndex >= _chapters.length) return;
+
+    final chapter = _chapters[chapterIndex];
+    setState(() {
+      _currentChapterIndex = chapterIndex;
+      _chapterTitle = chapter.title;
+      _sliderValue = chapterIndex.toDouble();
+    });
+  }
+
+  /// Phase 4：长按段落触发操作菜单
+  ///
+  /// JS 端 touchstart 500ms 计时 + 移动 < 10px 触发，回传段落文本和 rect。
+  /// Dart 弹出 BottomSheet 提供 4 项操作：
+  /// - 复制段落：Clipboard.setData + SnackBar
+  /// - 高亮段落：复用颜色选择器，确认后调 highlightParagraphByText + 持久化
+  /// - 段落笔记：先高亮段落，再弹 TextField 输入 note 保存到 Highlight.note
+  /// - 分享段落：ShareHelper.shareText
+  void _onParagraphLongpress(String text, Rect rect) {
+    if (!mounted) return;
+    if (text.isEmpty) return;
+
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final preview = text.length > 32 ? '${text.substring(0, 32)}…' : text;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+                child: Text(
+                  preview,
+                  style: const TextStyle(fontSize: 13, color: Colors.black54),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.copy),
+                title: const Text('复制段落'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _onSelectionCopy(text);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.highlight),
+                title: const Text('高亮段落'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _showParagraphHighlightPicker(text);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.note_add),
+                title: const Text('段落笔记'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _showParagraphNoteEditor(text);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.share),
+                title: const Text('分享段落'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _onSelectionShare(text);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Phase 4：段落高亮颜色选择器
+  ///
+  /// 复用 _showHighlightColorPicker 的颜色 + 样式 Wrap UI，
+  /// 确认后调 highlightParagraphByText（按段落文本匹配）+ 持久化。
+  void _showParagraphHighlightPicker(String text) {
+    var selectedColorIndex = 0;
+    var selectedStyleIndex = 0;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            const colors = <HighlightColor>[
+              HighlightColor.yellow,
+              HighlightColor.green,
+              HighlightColor.blue,
+              HighlightColor.pink,
+              HighlightColor.orange,
+              HighlightColor.purple,
+            ];
+            const styleLabels = <String>['背景色', '下划线', '删除线', '波浪线'];
+            final preview = text.length > 24
+                ? '${text.substring(0, 24)}…'
+                : text;
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '预览: $preview',
+                    style: const TextStyle(fontSize: 13, color: Colors.black54),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    '颜色',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
+                    children: List.generate(colors.length, (idx) {
+                      final c = colors[idx];
+                      final selected = selectedColorIndex == idx;
+                      return GestureDetector(
+                        onTap: () {
+                          setSheetState(() {
+                            selectedColorIndex = idx;
+                          });
+                        },
+                        child: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: c.color,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: selected ? Colors.black87 : Colors.black12,
+                              width: selected ? 2.5 : 1,
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    '样式',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: List.generate(styleLabels.length, (idx) {
+                      return ChoiceChip(
+                        label: Text(styleLabels[idx]),
+                        selected: selectedStyleIndex == idx,
+                        onSelected: (_) {
+                          setSheetState(() {
+                            selectedStyleIndex = idx;
+                          });
+                        },
+                      );
+                    }),
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(sheetContext),
+                          child: const Text('取消'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: () async {
+                            Navigator.pop(sheetContext);
+                            final success = await _readerWebViewController
+                                .highlightParagraphByText(
+                              text,
+                              selectedColorIndex,
+                              selectedStyleIndex,
+                            );
+                            if (success) {
+                              await _persistHighlight(
+                                text: text,
+                                colorIndex: selectedColorIndex,
+                                styleIndex: selectedStyleIndex,
+                              );
+                            }
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(success ? '已高亮段落' : '段落高亮失败'),
+                                duration: const Duration(seconds: 1),
+                              ),
+                            );
+                          },
+                          child: const Text('高亮'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Phase 4：段落笔记编辑器
+  ///
+  /// 弹 TextField 输入笔记内容，保存时先调 highlightParagraphByText
+  /// 给段落加视觉标记，再调 _persistHighlight 把 note 存入 Highlight.note 字段。
+  /// 重启后 restoreHighlights 会恢复视觉标记，note 通过 StorageService 查询。
+  void _showParagraphNoteEditor(String text) {
+    final noteController = TextEditingController();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            20, 4, 20, 16 + MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                '段落笔记',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: noteController,
+                autofocus: true,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  hintText: '写下你的想法...',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(sheetContext),
+                      child: const Text('取消'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () async {
+                        final note = noteController.text.trim();
+                        Navigator.pop(sheetContext);
+                        if (note.isEmpty) return;
+                        // 先高亮段落（视觉标记），再保存笔记
+                        final success = await _readerWebViewController
+                            .highlightParagraphByText(text, 0, 0);
+                        if (success) {
+                          await _persistHighlight(
+                            text: text,
+                            colorIndex: 0,
+                            styleIndex: 0,
+                            note: note,
+                          );
+                        }
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('已保存笔记'),
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                      child: const Text('保存'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   /// 异步加载下一章内容并追加到 WebView DOM
   ///
   /// 不走 _loadChapterContent（会 setState(_isLoading=true) + 触发 _content 变化
@@ -1399,19 +1719,114 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       );
 
       // 6. 调用 JS 追加到 DOM（不触发 reload）
+      //    传入 chapterIndex 让 JS 端给 <h1> 加 data-chapter-index 属性，
+      //    供 IntersectionObserver 监测当前可见章节
       if (!mounted) return;
-      await _readerWebViewController.appendChapter(displayTitle, paragraphsHtml);
+      await _readerWebViewController.appendChapter(
+        displayTitle,
+        paragraphsHtml,
+        chapterIndex,
+      );
+
+      // Phase 3.2：追加后恢复该章节的持久化高亮
+      // - 章节内容已写入 DOM，此时调用 restoreHighlights 让 JS 端按 selectedText
+      //   匹配位置并包裹 .sel-hl，使重启后高亮自动恢复
+      await _restoreHighlights(chapterIndex);
 
       // 7. 更新已加载章节索引
       _scrollChapterMax = chapterIndex;
-
-      debugPrint(
-        '[NovelReader] appendChapter 完成: index=$chapterIndex title=$displayTitle',
-      );
     } catch (e) {
       debugPrint('[NovelReader] _appendNextChapter 失败: $e');
     } finally {
       _isAppendingChapter = false;
+    }
+  }
+
+  /// Phase 3.2：恢复某章节的所有持久化高亮
+  ///
+  /// 章节加载完成后调用：从 StorageService 取该章节的高亮列表，
+  /// 通过 JS 端 restoreHighlights 重新绘制 .sel-hl 视觉标记。
+  /// - 跨进程重启后高亮自动恢复
+  /// - JS 端按 data-highlight-id 跳过已恢复的，避免重复
+  Future<void> _restoreHighlights(int chapterIndex) async {
+    final book = _book;
+    if (book == null) return;
+    try {
+      final list = StorageService.instance.getChapterHighlights(
+        book.bookUrl,
+        chapterIndex,
+      );
+      if (list.isEmpty) return;
+      await _readerWebViewController.restoreHighlights(list);
+    } catch (e) {
+      debugPrint('[NovelReader] 恢复高亮失败: $e');
+    }
+  }
+
+  /// Phase 3.2：把当前选区高亮持久化到 StorageService
+  ///
+  /// 简化方案：用 selectedText 作为唯一标识（重复文本可能误匹配，实际场景可接受）。
+  /// - startIndex/endIndex 暂用 0/length（不依赖偏移，JS 端用文本匹配）
+  /// - id 用 bookUrl + 时间戳保证唯一
+  Future<void> _persistHighlight({
+    required String text,
+    required int colorIndex,
+    required int styleIndex,
+    String? note,
+  }) async {
+    final book = _book;
+    if (book == null) return;
+    final highlight = Highlight(
+      id: '${book.bookUrl}_${DateTime.now().millisecondsSinceEpoch}',
+      bookUrl: book.bookUrl,
+      chapterIndex: _currentChapterIndex,
+      startIndex: 0,
+      endIndex: text.length,
+      selectedText: text,
+      style: HighlightStyle.values[styleIndex],
+      color: HighlightColor.values[colorIndex],
+      note: note,
+      createdAt: DateTime.now(),
+    );
+    try {
+      await StorageService.instance.saveHighlight(highlight.toJson());
+    } catch (e) {
+      debugPrint('[NovelReader] 保存高亮失败: $e');
+    }
+  }
+
+  /// Phase 3.2：删除当前章节内匹配 text 的所有持久化高亮
+  ///
+  /// JS 端已通过 removeHighlightInSelection 移除视觉标记，
+  /// Dart 侧同步删除 StorageService 中的记录。
+  Future<void> _removeHighlightByText(String text) async {
+    final book = _book;
+    if (book == null) return;
+    try {
+      final highlights = StorageService.instance.getChapterHighlights(
+        book.bookUrl,
+        _currentChapterIndex,
+      );
+      int removedCount = 0;
+      for (final h in highlights) {
+        if (h['selectedText'] == text) {
+          final id = h['id'] as String?;
+          if (id != null) {
+            await StorageService.instance.deleteHighlight(id);
+            removedCount++;
+          }
+        }
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(removedCount > 0 ? '已删除 $removedCount 处高亮' : '未找到匹配高亮'),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[NovelReader] 删除高亮失败: $e');
     }
   }
 
@@ -1433,15 +1848,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   /// Dart 不需要主动响应；保留此回调供未来「按选区位置/内容自动建议操作」
   /// 等智能菜单扩展用。
   void _onSelectionReady(String text, Rect rect) {
-    debugPrint(
-      '[NovelReader] selection ready: textLen=${text.length} '
-      'rect=${rect.left.toStringAsFixed(1)},${rect.top.toStringAsFixed(1)}',
-    );
+    // 预留：未来可用于联动 Dart 侧 UI（如自动建议菜单）
   }
 
   /// 菜单项点击分发
   ///
-  /// action 取值：'copy' / 'highlight' / 'lookup' / 'share'
+  /// action 取值：
+  /// - 'copy' / 'highlight' / 'lookup' / 'share'（原有 4 项）
+  /// - 'removeHighlight' / 'search'（Phase 3.1 新增 2 项，select 由 JS 自处理）
   void _onSelectionAction(String action, String text, Rect rect) {
     if (!mounted) return;
     switch (action) {
@@ -1456,6 +1870,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         break;
       case 'share':
         _onSelectionShare(text);
+        break;
+      case 'removeHighlight':
+        _removeHighlightByText(text);
+        break;
+      case 'search':
+        _showSearchSheet(text);
         break;
       default:
         debugPrint('[NovelReader] unknown selection action: $action');
@@ -1530,7 +1950,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       showDragHandle: true,
       builder: (sheetContext) {
         return StatefulBuilder(
-          builder: (context, setSheetState) {
+          builder: (sheetContext, setSheetState) {
             const colors = <HighlightColor>[
               HighlightColor.yellow,
               HighlightColor.green,
@@ -1639,10 +2059,16 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                               selectedColorIndex,
                               selectedStyleIndex,
                             );
+                            if (success) {
+                              // Phase 3.2：持久化到 StorageService（重启后可恢复）
+                              await _persistHighlight(
+                                text: text,
+                                colorIndex: selectedColorIndex,
+                                styleIndex: selectedStyleIndex,
+                              );
+                            }
                             if (!mounted) return;
-                            // 用 State.context 而非 BottomSheet 闭包 context：
-                            // BottomSheet 已 pop，闭包内 context 已 dispose
-                            ScaffoldMessenger.of(this.context).showSnackBar(
+                            ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text(
                                   success ? '已高亮' : '选区已失效，请重试',
@@ -1656,6 +2082,149 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                       ),
                     ],
                   ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Phase 3.4：全文搜索 BottomSheet
+  ///
+  /// - 顶部 TextField + 搜索按钮
+  /// - 下方结果列表（snippet + 章节标题）
+  /// - 点击结果项调用 scrollToSearchResult 跳转并高亮
+  void _showSearchSheet(String initialQuery) {
+    final queryController = TextEditingController(text: initialQuery);
+    List<Map<String, dynamic>> results = [];
+    var isSearching = false;
+
+    Future<void> doSearch(StateSetter setSheetState) async {
+      final q = queryController.text.trim();
+      if (q.isEmpty) return;
+      setSheetState(() => isSearching = true);
+      try {
+        final json = await _readerWebViewController.searchText(q);
+        final list = jsonDecode(json) as List<dynamic>;
+        setSheetState(() {
+          results = list.cast<Map<String, dynamic>>();
+          isSearching = false;
+        });
+      } catch (e) {
+        debugPrint('[NovelReader] 搜索失败: $e');
+        setSheetState(() => isSearching = false);
+      }
+    }
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                16, 4, 16, 16 + MediaQuery.of(context).viewInsets.bottom,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: queryController,
+                          autofocus: true,
+                          decoration: const InputDecoration(
+                            hintText: '搜索内容...',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          onSubmitted: (_) => doSearch(setSheetState),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton.filled(
+                        onPressed: isSearching ? null : () => doSearch(setSheetState),
+                        icon: const Icon(Icons.search),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (isSearching)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Center(
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    )
+                  else if (results.isNotEmpty)
+                    Flexible(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '找到 ${results.length} 处结果',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.black54,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Flexible(
+                            child: ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: results.length,
+                              itemBuilder: (ctx, idx) {
+                                final r = results[idx];
+                                final snippet = r['snippet']?.toString() ?? '';
+                                final chapterIdx =
+                                    r['chapterIndex'] as int? ?? -1;
+                                final chapterTitle =
+                                    (chapterIdx >= 0 && chapterIdx < _chapters.length)
+                                        ? _chapters[chapterIdx].title
+                                        : '当前章节';
+                                return ListTile(
+                                  dense: true,
+                                  title: Text(
+                                    snippet,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  subtitle: Text(
+                                    chapterTitle,
+                                    style: const TextStyle(fontSize: 11),
+                                  ),
+                                  onTap: () async {
+                                    await _readerWebViewController
+                                        .scrollToSearchResult(idx);
+                                    if (sheetContext.mounted) {
+                                      Navigator.pop(sheetContext);
+                                    }
+                                  },
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (initialQuery.isNotEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Text(
+                        '点击搜索按钮开始查找',
+                        style: TextStyle(fontSize: 12, color: Colors.black54),
+                      ),
+                    ),
                 ],
               ),
             );
@@ -1906,6 +2475,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               child: ReaderWebView(
                 content: _processedContent(_content),
                 title: _chapterTitle,
+                chapterIndex: _currentChapterIndex,
                 provider: provider,
                 isScrollMode: isScrollMode,
                 controller: _readerWebViewController,
@@ -1919,6 +2489,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   onImageTap: _onWebviewImageTap,
                   // 滚动模式无缝衔接：接近底部时加载下一章
                   onScrollNearEnd: _onScrollNearEnd,
+                  // 滚动模式：当前可见章节变化时更新 UI 章节标题/进度
+                  onChapterVisible: _onChapterVisible,
+                  // Phase 4：长按段落触发操作菜单（复制/高亮/笔记/分享）
+                  onParagraphLongpress: _onParagraphLongpress,
                   // 文字选择菜单（JS 自定义浮动菜单，替代 Android ActionMode）
                   onSelectionReady: _onSelectionReady,
                   onSelectionAction: _onSelectionAction,
@@ -2091,6 +2665,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     // 关键：标记 controller 就绪，否则 jumpToPage 第一行 if (!_isReady) return
     // 直接返回，翻页完全失效（之前 markReady() 方法定义了但从未被调用）
     _readerWebViewController.markReady();
+    // Phase 3.2 补丁：首次 pageCount ready 时恢复初始章节的持久化高亮
+    // - 滚动模式后续追加章节由 _appendNextChapter 单独处理
+    // - 章节切换（_loadChapterContent）触发 WebView reload 后走首次分支，
+    //   同样需要恢复该章节的高亮
+    // - isUpdate=true 时 DOM 没变、高亮已在内存中，跳过避免重复
+    if (!isUpdate) {
+      unawaited(_restoreHighlights(_currentChapterIndex));
+    }
     final provider = context.read<ReaderProvider>();
     final isScrollMode = _isScrollLikeMode(provider);
 

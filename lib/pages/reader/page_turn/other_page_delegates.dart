@@ -193,7 +193,12 @@ class CoverPageDelegate extends HorizontalPageDelegate {
         drawBitmapFull(canvas, curBitmap);
         canvas.restore();
       }
-      _addShadow(distanceX, canvas);
+      // Phase 2.4 修复：阴影应在下一页左边缘（viewWidth - distanceX 处）
+      // - 原代码 _addShadow(distanceX, canvas) 把阴影画在 (distanceX, 0)，
+      //   是下一页中部而非左边缘，造成阴影位置错乱
+      // - distanceX 范围 [0, viewWidth]，viewWidth - distanceX 范围 [viewWidth, 0]
+      //   正好是下一页左边缘从屏幕右边缘滑到屏幕左边缘的轨迹
+      _addShadow(viewWidth - distanceX, canvas);
     }
   }
 
