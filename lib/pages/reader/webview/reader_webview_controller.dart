@@ -66,6 +66,17 @@ class ReaderWebViewCallbacks {
   /// 让 UI 章节标题、进度条实时跟随用户滚动更新
   final void Function(int chapterIndex)? onChapterVisible;
 
+  /// WebView 即将因尺寸变化（旋转/键盘弹出/header-footer 显隐）触发 reload
+  ///
+  /// 在 reload 前由 ReaderWebView 调用，父级可在此通过 controller 异步获取
+  /// 当前进度（滚动模式 getScrollProgress / 分页模式 getCurrentPage）保存到
+  /// _pendingWebviewFraction，避免 reload 后位置丢失跳回顶部（E1 Bug）。
+  ///
+  /// 注意：回调本身是同步的，但内部可以 fire-and-forget 启动 async 保存。
+  /// ReaderWebView 会在下一帧（addPostFrameCallback）才真正 reload，给
+  /// async 保存留出执行时间。
+  final Future<void> Function()? onBeforeSizeReload;
+
   const ReaderWebViewCallbacks({
     required this.onInitialized,
     required this.onPageCountReady,
@@ -77,6 +88,7 @@ class ReaderWebViewCallbacks {
     this.onSelectionAction,
     this.onHideSelectionMenu,
     this.onChapterVisible,
+    this.onBeforeSizeReload,
   });
 }
 
@@ -318,13 +330,22 @@ class ReaderWebViewController {
     return false;
   }
 
+  /// 重置 nearEndNotified 标志（_appendNextChapter 失败/空内容时调用）
+  ///
+  /// 避免空章节或网络失败时 nearEndNotified=true 死锁，导致用户必须滚回上方
+  /// 才能再次触发 onScrollNearEnd（A3 Bug）。
+  Future<void> resetNearEndNotify() async {
+    if (!_isReady) return;
+    await _webviewController?.evaluateJavascript(
+      source: 'window.readerApi.resetNearEndNotify();',
+    );
+  }
+
   /// 重新计算页数（样式更新后调用）
   Future<int> recalcPageCount() async {
     if (!_isReady) return 1;
     final result = await _webviewController?.evaluateJavascript(
-      source: '''
-window.readerApi.getPageCount();
-''',
+      source: 'window.readerApi.getPageCount();',
     );
     return _toInt(result);
   }

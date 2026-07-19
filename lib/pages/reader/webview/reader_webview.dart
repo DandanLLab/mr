@@ -184,6 +184,15 @@ class _ReaderWebViewState extends State<ReaderWebView> {
           _currentHtml = _generateHtml();
           if (!isFirstBuild) {
             // 非首次：尺寸变化需异步重载 HTML（CSS column-width 依赖 viewWidth）
+            // 先通知父级保存当前进度（E1 Bug 修复：避免 reload 后跳回顶部）
+            // 父级会通过 controller.getScrollProgress/getCurrentPage 异步保存
+            // 到 _pendingWebviewFraction，reload 完成后 _onWebviewPageCountReady
+            // 按 fraction 恢复位置
+            final beforeReload = widget.callbacks.onBeforeSizeReload;
+            if (beforeReload != null) {
+              // fire-and-forget：不阻塞 build，父级内部异步保存
+              beforeReload();
+            }
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted) _reloadHtml();
             });

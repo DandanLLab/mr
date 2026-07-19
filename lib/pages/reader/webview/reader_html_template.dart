@@ -1799,6 +1799,13 @@ window.readerApi = (function() {
     return appendedChapterCount;
   }
 
+  // 重置 nearEndNotified 标志（Dart 侧 _appendNextChapter 失败/空内容时调用）
+  // 不重置的话 nearEndNotified=true 永远保持，用户必须滚回上方 2*threshold
+  // 才能再次触发 onScrollNearEnd，期间用户看到底部空白无法继续加载（A3 Bug）
+  function resetNearEndNotify() {
+    nearEndNotified = false;
+  }
+
   return {
     init: init,
     getPageCount: getPageCount,
@@ -1812,6 +1819,7 @@ window.readerApi = (function() {
     checkTap: checkTap,
     appendChapter: appendChapter,
     getAppendedChapterCount: getAppendedChapterCount,
+    resetNearEndNotify: resetNearEndNotify,
     hideSelectionMenu: hideSelectionMenu,
     highlightSelection: highlightSelection,
     // Phase 3.1 / 3.2 / 3.4 新增

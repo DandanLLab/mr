@@ -1070,7 +1070,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   // _repaginatePreservingPosition 作为样式变化后的触发点，
   // 通过 setState 通知 ReaderWebView.didUpdateWidget 检测样式变化并重新加载 HTML。
 
-  void _repaginatePreservingPosition() {
+  Future<void> _repaginatePreservingPosition() async {
     // 唤醒正在等待 onPageChanged 的翻页流程：
     // 样式变化会触发 WebView reload，reload 期间 _webviewReloading=true 让
     // _onWebviewPageChanged 早 return，永远不会 complete 旧 completer。
@@ -1081,15 +1081,64 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     }
     _pageRenderedCompleter = null;
 
-    // WebView 模式下：记录当前页码比例，等 WebView 重新加载后按比例恢复
-    _pendingWebviewFraction = _webviewPageCount > 1
-        ? _webviewCurrentPage / (_webviewPageCount - 1)
-        : 0.0;
+    // WebView 模式下：记录当前进度，等 WebView 重新加载后按进度恢复
+    // - 滚动模式：JS 端 getPageCount() 恒为 1，分母为 0 会让 fraction 恒为 0
+    //   导致 reload 后 setScrollProgress(0) 跳回章节顶部（C1 Bug）
+    //   改为读 getScrollProgress() 拿到 0-1 比例直接保存
+    // - 分页模式：保持原有「当前页 / 总页数-1」逻辑
+    final provider = context.read<ReaderProvider>();
+    if (_isScrollLikeMode(provider) && _readerWebViewController.isReady) {
+      try {
+        _pendingWebviewFraction =
+            await _readerWebViewController.getScrollProgress();
+      } catch (_) {
+        // JS 未就绪/异常时退化为不恢复进度，避免阻塞 reload
+        _pendingWebviewFraction = -1.0;
+      }
+    } else {
+      _pendingWebviewFraction = _webviewPageCount > 1
+          ? _webviewCurrentPage / (_webviewPageCount - 1)
+          : 0.0;
+    }
     _pendingWebviewInitialPage = 0;
     _webviewReloading = true;
     _startWebviewReloadTimeout(); // 问题 9 修复
     _webviewReady = false;
     if (mounted) setState(() {});
+  }
+
+  /// 尺寸变化 reload 前保存当前进度（E1 Bug 修复）
+  ///
+  /// ReaderWebView 在 LayoutBuilder 检测到尺寸变化（旋转/键盘弹出/header-footer
+  /// 显隐）时调用。本方法异步读取当前进度存入 _pendingWebviewFraction，等
+  /// WebView reload 完成后由 _onWebviewPageCountReady 按比例恢复。
+  /// 不保存的话 reload 后位置直接丢失跳回顶部。
+  ///
+  /// 注意：onBeforeSizeReload 是同步回调（不能 await），但本方法内部
+  /// fire-and-forget 启动 async 保存。ReaderWebView 在下一帧 addPostFrameCallback
+  /// 才真正 _reloadHtml，给本方法的 async 保存留出执行时间。
+  Future<void> _saveProgressBeforeReload() async {
+    if (!_readerWebViewController.isReady) return;
+    final provider = context.read<ReaderProvider>();
+    try {
+      if (_isScrollLikeMode(provider)) {
+        _pendingWebviewFraction =
+            await _readerWebViewController.getScrollProgress();
+      } else {
+        // 分页模式：保存「当前页 / 总页数-1」比例
+        final curPage = await _readerWebViewController.getCurrentPage();
+        final pageCount = await _readerWebViewController.getPageCount();
+        _pendingWebviewFraction = pageCount > 1
+            ? (curPage / (pageCount - 1)).clamp(0.0, 1.0)
+            : 0.0;
+      }
+      _pendingWebviewInitialPage = 0;
+      _webviewReloading = true;
+      _startWebviewReloadTimeout();
+      _webviewReady = false;
+    } catch (_) {
+      // 异常时退化为不恢复进度（_pendingWebviewFraction 保持 -1）
+    }
   }
 
   // ==================== Tap Zone ====================
@@ -1355,6 +1404,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         chapterIndex < _chapters.length ? _chapters[chapterIndex] : null;
     if (chapter == null || chapter.isVolume) {
       _isAppendingChapter = false;
+      // 卷标题/越界：同样重置 nearEndNotified，否则用户必须滚回上方才能再触发
+      if (_readerWebViewController.isReady) {
+        try {
+          await _readerWebViewController.resetNearEndNotify();
+        } catch (_) {}
+      }
       return;
     }
 
@@ -1404,6 +1459,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         debugPrint(
           '[NovelReader] _appendNextChapter 内容为空: index=$chapterIndex',
         );
+        // 重置 JS 端 nearEndNotified，否则用户必须滚回上方 2*threshold
+        // 才能再次触发 onScrollNearEnd（A3 Bug：底部空白卡死）
+        if (_readerWebViewController.isReady) {
+          try {
+            await _readerWebViewController.resetNearEndNotify();
+          } catch (_) {}
+        }
         return;
       }
 
@@ -1443,6 +1505,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       _scrollChapterMax = chapterIndex;
     } catch (e) {
       debugPrint('[NovelReader] _appendNextChapter 失败: $e');
+      // 同样重置 nearEndNotified，避免异常时底部空白卡死
+      if (_readerWebViewController.isReady) {
+        try {
+          await _readerWebViewController.resetNearEndNotify();
+        } catch (_) {}
+      }
     } finally {
       _isAppendingChapter = false;
     }
@@ -2201,6 +2269,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                   onSelectionReady: _onSelectionReady,
                   onSelectionAction: _onSelectionAction,
                   onHideSelectionMenu: _onHideSelectionMenu,
+                  // 尺寸变化 reload 前保存进度（E1 Bug 修复）
+                  onBeforeSizeReload: _saveProgressBeforeReload,
                 ),
               ),
             ),
