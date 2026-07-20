@@ -74,6 +74,12 @@ class JsAdvancedService {
         return null;
       }
 
+      // 书源 decryptImage 返回 __PLACEHOLDER__ 占位标记时，
+      // 抛带标记的异常，让 errorBuilder 识别后返回 0 高度占位
+      if (resultStr == '__PLACEHOLDER__') {
+        throw StateError('__PLACEHOLDER__');
+      }
+
       // 尝试 Base64 解码
       try {
         return base64Decode(resultStr);

@@ -1071,8 +1071,6 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             : FilterQuality.medium,
         loadingBuilder: (context, child, loadingProgress) {
           if (loadingProgress == null) return child;
-          // wu55comic 双 img 配对：b_0 是占位图，下载时不需要显示 loading 指示器
-          if (url.contains('.b_0')) return const SizedBox.shrink();
           final total = loadingProgress.expectedTotalBytes;
           final value = (total != null && total > 0)
               ? loadingProgress.cumulativeBytesLoaded / total
@@ -1082,6 +1080,11 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
         },
         errorBuilder: (_, error, ___) {
           _logImageLoadError(url, error);
+          // 书源 decryptImage 返回 __PLACEHOLDER__ 占位标记时，0 高度显示
+          // （wu55comic 双 img 配对：b_0 先到时返回占位标记，不显示）
+          if (error.toString().contains('__PLACEHOLDER__')) {
+            return const SizedBox.shrink();
+          }
           return _buildImageError();
         },
       );
