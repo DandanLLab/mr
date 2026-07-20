@@ -1071,6 +1071,8 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             : FilterQuality.medium,
         loadingBuilder: (context, child, loadingProgress) {
           if (loadingProgress == null) return child;
+          // wu55comic 双 img 配对：b_0 是占位图，下载时不需要显示 loading 指示器
+          if (url.contains('.b_0')) return const SizedBox.shrink();
           final total = loadingProgress.expectedTotalBytes;
           final value = (total != null && total > 0)
               ? loadingProgress.cumulativeBytesLoaded / total
