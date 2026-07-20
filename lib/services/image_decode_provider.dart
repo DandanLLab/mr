@@ -150,6 +150,12 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
       throw StateError('图片解密后字节为空: ${key.url}');
     }
 
+    // 书源返回 __PLACEHOLDER__ 占位标记时，抛带标记的异常
+    // errorBuilder 识别后返回 0 高度占位（wu55comic 双 img 配对方案）
+    if (JsAdvancedService.isPlaceholder(decoded)) {
+      throw StateError('__PLACEHOLDER__');
+    }
+
     final buffer = await ui.ImmutableBuffer.fromUint8List(decoded);
     try {
       return await decode(buffer);

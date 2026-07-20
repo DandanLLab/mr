@@ -13,6 +13,22 @@ class JsAdvancedService {
   JsAdvancedService._();
   static final JsAdvancedService instance = JsAdvancedService._();
 
+  /// 占位图标记字节（书源 decryptImage 返回 __PLACEHOLDER__ 时使用）
+  /// DecodedImageProvider 检测到此字节序列时抛带标记的异常，
+  /// errorBuilder 识别后返回 0 高度占位
+  static final _placeholderBytes =
+      Uint8List.fromList([0x5F, 0x5F, 0x50, 0x4C, 0x41, 0x43, 0x45, 0x48,
+          0x4F, 0x4C, 0x44, 0x45, 0x52, 0x5F, 0x5F]); // __PLACEHOLDER__
+
+  /// 检测字节是否为占位图标记
+  static bool isPlaceholder(Uint8List bytes) {
+    if (bytes.length != _placeholderBytes.length) return false;
+    for (int i = 0; i < bytes.length; i++) {
+      if (bytes[i] != _placeholderBytes[i]) return false;
+    }
+    return true;
+  }
+
   // ===== 1. 图片解密 (coverDecodeJs / imageDecode) =====
 
   /// 解密图片（借鉴 legado ImageUtils.decode）
@@ -75,9 +91,10 @@ class JsAdvancedService {
       }
 
       // 书源 decryptImage 返回 __PLACEHOLDER__ 占位标记时，
-      // 抛带标记的异常，让 errorBuilder 识别后返回 0 高度占位
+      // 返回特殊标记字节，让 DecodedImageProvider 识别后抛带标记的异常
+      // （不能在这里直接 throw，会被外层 catch 吞掉标记）
       if (resultStr == '__PLACEHOLDER__') {
-        throw StateError('__PLACEHOLDER__');
+        return _placeholderBytes;
       }
 
       // 尝试 Base64 解码
