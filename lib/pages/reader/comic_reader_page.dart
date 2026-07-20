@@ -1071,12 +1071,9 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             : FilterQuality.medium,
         loadingBuilder: (context, child, loadingProgress) {
           if (loadingProgress == null) return child;
-          final total = loadingProgress.expectedTotalBytes;
-          final value = (total != null && total > 0)
-              ? loadingProgress.cumulativeBytesLoaded / total
-              : null;
-          _logImageLoadStart(url, value);
-          return _buildImageLoadingIndicator(value, minHeight);
+          // 解密图片的 loading 不显示大块占位（避免占位图下载期间占 55% 屏幕高）
+          // 解密后由 errorBuilder 决定显示完整图或 0 高度占位
+          return const SizedBox.shrink();
         },
         errorBuilder: (_, error, ___) {
           _logImageLoadError(url, error);
