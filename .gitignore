@@ -28,3 +28,6 @@ replay_pid*.log
 reference/
 .reference/
 .trae/
+
+# 测试书源文件（不提交）
+test_sources/
