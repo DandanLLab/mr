@@ -52,6 +52,8 @@ class JsAdvancedService {
       // 如果有配对切片，在调用 decryptImage 之前设置全局变量
       // 必须在同一个 executeAsync 里设置，避免并发图片覆盖全局变量
       // 用 __nativeBase64.decodeToBytes 传字节（和主图 result 一致，不用 atob）
+      // 注意：setters 和 ruleJs 之间必须用换行分隔，否则 _wrapJsCode 认为是单行
+      // 会生成 return A=B; C() → 只执行赋值就 return，decryptImage 不会被调用
       String finalRuleJs = ruleJs;
       if (partsBytes != null && partsBytes.isNotEmpty) {
         final setters = StringBuffer();
@@ -60,8 +62,9 @@ class JsAdvancedService {
           setters.write("globalThis._partBytes_$i = new Uint8Array(__nativeBase64.decodeToBytes('$b64'));");
         }
         setters.write('globalThis._partCount = ${partsBytes.length};');
-        // 先设置切片字节，再调用 decryptImage
-        finalRuleJs = '$setters $ruleJs';
+        // 用换行分隔，让 _wrapJsCode 正确识别为多行代码
+        // 最终生成：return (function() { setters... return decryptImage(result) })()
+        finalRuleJs = '$setters\nreturn $ruleJs';
       }
 
       // 借鉴 legado：result 传入原始字节数组，src 传入图片 URL
