@@ -77,17 +77,17 @@ class ChapterCacheService {
     Book book,
     Chapter chapter,
     List<String> imageUrls, {
-    Map<String, String>? b0Urls,
+    Map<String, List<String>>? partsUrls,
   }) async {
     if (imageUrls.isEmpty) return;
     try {
       final dir = await _getBookCacheDir(book);
       final fileName = getChapterFileName(chapter, suffix: 'cb');
       final file = File('${dir.path}/$fileName');
-      // 缓存格式：{"images": [...], "b0Urls": {"b1Url": "b0Url", ...}}
+      // 缓存格式：{"images": [...], "partsUrls": {"mainUrl": ["part1", "part2"], ...}}
       final data = {
         'images': imageUrls,
-        'b0Urls': b0Urls ?? {},
+        'partsUrls': partsUrls ?? {},
       };
       await file.writeAsString(jsonEncode(data), encoding: utf8);
       debugPrint('✅ 缓存漫画章节: ${chapter.title} -> $fileName');
@@ -112,8 +112,8 @@ class ChapterCacheService {
   }
 
   /// 读取缓存的漫画章节图片列表
-  /// 返回 (图片URL列表, b0Url映射)
-  Future<(List<String>, Map<String, String>)?> readComicChapterContent(
+  /// 返回 (图片URL列表, partsUrls映射)
+  Future<(List<String>, Map<String, List<String>>?)?> readComicChapterContent(
     Book book,
     Chapter chapter,
   ) async {
@@ -126,16 +126,29 @@ class ChapterCacheService {
         final decoded = jsonDecode(content);
         // 兼容旧格式（纯数组）和新格式（对象）
         if (decoded is List) {
-          return (decoded.cast<String>(), <String, String>{});
+          return (decoded.cast<String>(), <String, List<String>>{});
         }
         final map = decoded as Map<String, dynamic>;
         final images = (map['images'] as List).cast<String>();
-        final b0UrlsRaw = map['b0Urls'] as Map?;
-        final b0Urls = <String, String>{};
-        if (b0UrlsRaw != null) {
-          b0UrlsRaw.forEach((k, v) => b0Urls[k.toString()] = v.toString());
+        // 兼容旧格式 b0Urls 和新格式 partsUrls
+        Map<String, List<String>>? partsUrls;
+        final partsRaw = map['partsUrls'] as Map?;
+        if (partsRaw != null) {
+          partsUrls = <String, List<String>>{};
+          partsRaw.forEach((k, v) {
+            partsUrls![k.toString()] = (v as List).cast<String>();
+          });
+        } else {
+          // 旧格式 b0Urls: {"mainUrl": "b0Url"} → 转为 {"mainUrl": ["b0Url"]}
+          final b0Raw = map['b0Urls'] as Map?;
+          if (b0Raw != null) {
+            partsUrls = <String, List<String>>{};
+            b0Raw.forEach((k, v) {
+              partsUrls![k.toString()] = [v.toString()];
+            });
+          }
         }
-        return (images, b0Urls);
+        return (images, partsUrls ?? <String, List<String>>{});
       }
     } catch (e) {
       debugPrint('❌ 读取漫画缓存失败: ${chapter.title} - $e');

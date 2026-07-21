@@ -1846,13 +1846,15 @@ return __returnValue;
   // ===== 共享作用域管理（借鉴 legado SharedJsScope）=====
 
   /// 把 Uint8List 字节数据存入 JS 全局变量
-  /// 书源 decryptImage 可通过 globalThis._b0Bytes 读取配对切片字节
+  /// 书源 decryptImage 可通过 globalThis._partBytes_N 读取配对切片字节
   Future<void> setGlobalBytes(String varName, Uint8List bytes) async {
     if (_jsRuntime == null || !_initialized) return;
     try {
-      // 把字节转为 JS Uint8Array 并挂到 globalThis
-      final jsBytes = 'Uint8Array.from([${bytes.join(',')}])';
-      await executeAsync('globalThis.$varName = $jsBytes');
+      // 用 base64 传字节，避免超长字符串爆内存
+      final b64 = base64Encode(bytes);
+      await executeAsync(
+        "globalThis.$varName = Uint8Array.from(atob('$b64').split('').map(function(c){return c.charCodeAt(0)}))"
+      );
     } catch (e) {
       debugPrint('⚠️ setGlobalBytes 失败: $varName - $e');
     }

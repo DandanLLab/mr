@@ -105,10 +105,10 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   Map<String, String> _imageHeaders = const {};
   final Map<String, Map<String, String>> _imageOptionHeaders = {};
 
-  /// 配对切片 URL 映射（书源 content() 里 img 的 data-b0 属性）
-  /// key: b_1 URL（主图），value: b_0 URL（配对切片）
-  /// DecodedImageProvider 下载 b_1 后，额外下载 b_0，合并后解密
-  final Map<String, String> _imageB0Urls = {};
+  /// 配对切片 URL 映射（书源 content() 里 img 的 data-parts 属性）
+  /// key: 主图 URL，value: 配对切片 URL 列表
+  /// DecodedImageProvider 下载主图后，额外下载所有配对切片，合并后解密
+  final Map<String, List<String>> _imagePartsUrls = {};
   String _sourceName = '';
   BookSource? _bookSource;
 
@@ -344,8 +344,8 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             .readComicChapterContent(book, chapter);
         if (cached != null && cached.$1.isNotEmpty) {
           images = cached.$1;
-          // 缓存命中时也填充 _imageB0Urls
-          _imageB0Urls.addAll(cached.$2);
+          // 缓存命中时也填充 _imagePartsUrls
+          _imagePartsUrls.addAll(cached.$2);
         } else {
           // 缓存没有则从网络获取
           final content = await dataProvider.getContent(
@@ -365,7 +365,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                 book,
                 chapter,
                 images,
-                b0Urls: _imageB0Urls,
+                partsUrls: _imagePartsUrls,
               ),
             );
           }
@@ -545,7 +545,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     final urls = <String>[];
     final seen = <String>{};
     _imageOptionHeaders.clear();
-    _imageB0Urls.clear();
+    _imagePartsUrls.clear();
 
     String? add(String? raw) {
       if (raw == null) return null;
@@ -589,15 +589,24 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             image.attributes['data-lazy-src'] ??
             image.attributes['lazy-src'],
       );
-      // 书源通过 data-b0 属性指定配对切片 URL（如 wu55comic 的 b_0 切片）
-      // Dart 侧下载 b_1 后，额外下载 data-b0 指定的 b_0，合并后解密
+      // 书源通过 data-parts 属性指定配对切片 URL 数组（JSON 格式）
+      // 支持任意数量切片，例如 wu55comic: ["b0_url"]
+      // 别的网站可能: ["b0_url", "b2_url", "b3_url"]
+      // Dart 侧下载主图后，额外下载所有配对切片，合并后解密
       if (addedUrl != null) {
-        final b0Url = image.attributes['data-b0'];
-        if (b0Url != null && b0Url.isNotEmpty) {
-          final parsedB0 = add(b0Url);
-          if (parsedB0 != null) {
-            _imageB0Urls[addedUrl] = parsedB0;
-          }
+        final partsAttr = image.attributes['data-parts'];
+        if (partsAttr != null && partsAttr.isNotEmpty) {
+          try {
+            final parts = jsonDecode(partsAttr) as List;
+            final urls = <String>[];
+            for (final p in parts) {
+              final parsed = add(p.toString());
+              if (parsed != null) urls.add(parsed);
+            }
+            if (urls.isNotEmpty) {
+              _imagePartsUrls[addedUrl] = urls;
+            }
+          } catch (_) {}
         }
       }
       final srcSet = image.attributes['srcset'];
@@ -963,7 +972,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             .readComicChapterContent(book, chapter);
         if (cached != null && cached.$1.isNotEmpty) {
           images = cached.$1;
-          _imageB0Urls.addAll(cached.$2);
+          _imagePartsUrls.addAll(cached.$2);
         } else {
           final content = await dataProvider.getContent(
             book,
@@ -981,7 +990,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                 book,
                 chapter,
                 images,
-                b0Urls: _imageB0Urls,
+                partsUrls: _imagePartsUrls,
               ),
             );
           }
@@ -1085,7 +1094,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
           source: _bookSource!,
           isCover: false,
           book: _book,
-          b0Url: _imageB0Urls[url],
+          partsUrls: _imagePartsUrls[url],
         ),
         width: double.infinity,
         fit: fit,

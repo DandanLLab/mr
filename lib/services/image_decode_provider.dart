@@ -32,7 +32,7 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
     required this.source,
     this.isCover = false,
     this.book,
-    this.b0Url,
+    this.partsUrls,
   });
 
   /// 图片 URL
@@ -50,9 +50,9 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
   /// 书籍信息（可选，传给 JS 上下文）
   final Book? book;
 
-  /// 配对切片 URL（书源 data-b0 属性指定的 b_0 URL）
-  /// 下载主图 b_1 后，额外下载 b_0，通过 JS 全局变量传给 decryptImage 合并解密
-  final String? b0Url;
+  /// 配对切片 URL 列表（书源 data-parts 属性指定的 JSON 数组）
+  /// 下载主图后，额外下载所有切片，通过 JS 全局变量传给 decryptImage 合并解密
+  final List<String>? partsUrls;
 
   /// 判断是否需要走解密链路
   ///
@@ -138,26 +138,35 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
     }
 
     // 调用 JS 解密（借鉴 Legado ImageUtils.decode）
-    // 如果有配对切片 b_0 URL，先下载 b_0 并存入 JS 全局变量
-    if (key.b0Url != null && key.b0Url!.isNotEmpty) {
-      try {
-        final b0Response = await PlatformBridge.instance.dio.get<List<int>>(
-          key.b0Url!,
-          options: Options(
-            headers: key.headers,
-            responseType: ResponseType.bytes,
-            receiveTimeout: const Duration(seconds: 30),
-          ),
-        );
-        final b0Bytes = Uint8List.fromList(b0Response.data ?? const <int>[]);
-        if (b0Bytes.isNotEmpty) {
-          // 把 b_0 字节存入 JS 全局变量，decryptImage 从中读取
-          await JsEngine.instance.setGlobalBytes('_b0Bytes', b0Bytes);
+    // 如果有配对切片 URL 列表，先下载所有切片并存入 JS 全局变量
+    if (key.partsUrls != null && key.partsUrls!.isNotEmpty) {
+      final partsBytes = <Uint8List>[];
+      for (var i = 0; i < key.partsUrls!.length; i++) {
+        final partUrl = key.partsUrls![i];
+        try {
+          final response = await PlatformBridge.instance.dio.get<List<int>>(
+            partUrl,
+            options: Options(
+              headers: key.headers,
+              responseType: ResponseType.bytes,
+              receiveTimeout: const Duration(seconds: 30),
+            ),
+          );
+          final partBytes = Uint8List.fromList(response.data ?? const <int>[]);
+          if (partBytes.isNotEmpty) {
+            partsBytes.add(partBytes);
+          }
+        } catch (e) {
+          // 切片下载失败不中断，decryptImage 会按解密失败处理
+          debugPrint('⚠️ 切片[$i]下载失败: $partUrl - $e');
         }
-      } catch (e) {
-        // b_0 下载失败不中断，decryptImage 会按解密失败处理
-        debugPrint('⚠️ b_0 下载失败: ${key.b0Url} - $e');
       }
+      // 把所有切片字节存入 JS 全局变量数组，decryptImage 从中读取
+      for (var i = 0; i < partsBytes.length; i++) {
+        await JsEngine.instance.setGlobalBytes('_partBytes_$i', partsBytes[i]);
+      }
+      // 存入切片数量，decryptImage 据此读取
+      await JsEngine.instance.executeAsync('globalThis._partCount = ${partsBytes.length}');
     }
 
     final decoded = await JsAdvancedService.instance.decodeImage(
