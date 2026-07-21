@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../models/book.dart';
 import '../models/book_source.dart';
 import 'native/js_advanced_service.dart';
+import 'native/js_engine.dart';
 import 'native/platform_bridge.dart';
 
 /// 支持图片解密的自定义 ImageProvider
@@ -31,6 +32,7 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
     required this.source,
     this.isCover = false,
     this.book,
+    this.b0Url,
   });
 
   /// 图片 URL
@@ -47,6 +49,10 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
 
   /// 书籍信息（可选，传给 JS 上下文）
   final Book? book;
+
+  /// 配对切片 URL（书源 data-b0 属性指定的 b_0 URL）
+  /// 下载主图 b_1 后，额外下载 b_0，通过 JS 全局变量传给 decryptImage 合并解密
+  final String? b0Url;
 
   /// 判断是否需要走解密链路
   ///
@@ -132,6 +138,28 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
     }
 
     // 调用 JS 解密（借鉴 Legado ImageUtils.decode）
+    // 如果有配对切片 b_0 URL，先下载 b_0 并存入 JS 全局变量
+    if (key.b0Url != null && key.b0Url!.isNotEmpty) {
+      try {
+        final b0Response = await PlatformBridge.instance.dio.get<List<int>>(
+          key.b0Url!,
+          options: Options(
+            headers: key.headers,
+            responseType: ResponseType.bytes,
+            receiveTimeout: const Duration(seconds: 30),
+          ),
+        );
+        final b0Bytes = Uint8List.fromList(b0Response.data ?? const <int>[]);
+        if (b0Bytes.isNotEmpty) {
+          // 把 b_0 字节存入 JS 全局变量，decryptImage 从中读取
+          await JsEngine.instance.setGlobalBytes('_b0Bytes', b0Bytes);
+        }
+      } catch (e) {
+        // b_0 下载失败不中断，decryptImage 会按解密失败处理
+        debugPrint('⚠️ b_0 下载失败: ${key.b0Url} - $e');
+      }
+    }
+
     final decoded = await JsAdvancedService.instance.decodeImage(
       bytes,
       key.url,
@@ -148,12 +176,6 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
 
     if (decoded.isEmpty) {
       throw StateError('图片解密后字节为空: ${key.url}');
-    }
-
-    // 书源返回 __PLACEHOLDER__ 占位标记时，抛带标记的异常
-    // errorBuilder 识别后返回 0 高度占位（wu55comic 双 img 配对方案）
-    if (JsAdvancedService.isPlaceholder(decoded)) {
-      throw StateError('__PLACEHOLDER__');
     }
 
     final buffer = await ui.ImmutableBuffer.fromUint8List(decoded);

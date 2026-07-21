@@ -105,9 +105,10 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   Map<String, String> _imageHeaders = const {};
   final Map<String, Map<String, String>> _imageOptionHeaders = {};
 
-  /// 占位图 URL 集合（书源 content() 里 img 带 data-placeholder="1" 标记）
-  /// loadingBuilder 检测到此集合里的 URL 时返回 0 高度
-  final Set<String> _placeholderUrls = {};
+  /// 配对切片 URL 映射（书源 content() 里 img 的 data-b0 属性）
+  /// key: b_1 URL（主图），value: b_0 URL（配对切片）
+  /// DecodedImageProvider 下载 b_1 后，额外下载 b_0，合并后解密
+  final Map<String, String> _imageB0Urls = {};
   String _sourceName = '';
   BookSource? _bookSource;
 
@@ -343,8 +344,8 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             .readComicChapterContent(book, chapter);
         if (cached != null && cached.$1.isNotEmpty) {
           images = cached.$1;
-          // 缓存命中时也填充 _placeholderUrls
-          _placeholderUrls.addAll(cached.$2);
+          // 缓存命中时也填充 _imageB0Urls
+          _imageB0Urls.addAll(cached.$2);
         } else {
           // 缓存没有则从网络获取
           final content = await dataProvider.getContent(
@@ -364,7 +365,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                 book,
                 chapter,
                 images,
-                placeholderUrls: _placeholderUrls,
+                b0Urls: _imageB0Urls,
               ),
             );
           }
@@ -544,7 +545,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     final urls = <String>[];
     final seen = <String>{};
     _imageOptionHeaders.clear();
-    _placeholderUrls.clear();
+    _imageB0Urls.clear();
 
     String? add(String? raw) {
       if (raw == null) return null;
@@ -580,8 +581,6 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
 
     final document = html_parser.parseFragment(content);
     for (final image in document.querySelectorAll('img, image')) {
-      final placeholderAttr = image.attributes['data-placeholder'];
-      final isPlaceholder = placeholderAttr == '1' || placeholderAttr == 'true';
       final addedUrl = add(
         image.attributes['src'] ??
             image.attributes['data-src'] ??
@@ -590,9 +589,16 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             image.attributes['data-lazy-src'] ??
             image.attributes['lazy-src'],
       );
-      // 记录占位图 URL（书源通过 data-placeholder="1" 标记）
-      if (isPlaceholder && addedUrl != null) {
-        _placeholderUrls.add(addedUrl);
+      // 书源通过 data-b0 属性指定配对切片 URL（如 wu55comic 的 b_0 切片）
+      // Dart 侧下载 b_1 后，额外下载 data-b0 指定的 b_0，合并后解密
+      if (addedUrl != null) {
+        final b0Url = image.attributes['data-b0'];
+        if (b0Url != null && b0Url.isNotEmpty) {
+          final parsedB0 = add(b0Url);
+          if (parsedB0 != null) {
+            _imageB0Urls[addedUrl] = parsedB0;
+          }
+        }
       }
       final srcSet = image.attributes['srcset'];
       if (srcSet != null && srcSet.trim().isNotEmpty) {
@@ -957,7 +963,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             .readComicChapterContent(book, chapter);
         if (cached != null && cached.$1.isNotEmpty) {
           images = cached.$1;
-          _placeholderUrls.addAll(cached.$2);
+          _imageB0Urls.addAll(cached.$2);
         } else {
           final content = await dataProvider.getContent(
             book,
@@ -975,7 +981,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                 book,
                 chapter,
                 images,
-                placeholderUrls: _placeholderUrls,
+                b0Urls: _imageB0Urls,
               ),
             );
           }
@@ -1079,6 +1085,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
           source: _bookSource!,
           isCover: false,
           book: _book,
+          b0Url: _imageB0Urls[url],
         ),
         width: double.infinity,
         fit: fit,
@@ -1088,11 +1095,6 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             : FilterQuality.medium,
         loadingBuilder: (context, child, loadingProgress) {
           if (loadingProgress == null) return child;
-          // 书源标记的占位图（data-placeholder="1"）下载时返回 0 高度
-          // 避免占位图 loading 挡住正常图
-          if (_placeholderUrls.contains(url)) {
-            return const SizedBox.shrink();
-          }
           final total = loadingProgress.expectedTotalBytes;
           final value = (total != null && total > 0)
               ? loadingProgress.cumulativeBytesLoaded / total
@@ -1102,11 +1104,6 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
         },
         errorBuilder: (_, error, ___) {
           _logImageLoadError(url, error);
-          // 书源 decryptImage 返回 __PLACEHOLDER__ 占位标记时，0 高度显示
-          // （wu55comic 双 img 配对：b_0 先到时返回占位标记，不显示）
-          if (error.toString().contains('PLACEHOLDER')) {
-            return const SizedBox.shrink();
-          }
           return _buildImageError();
         },
       );

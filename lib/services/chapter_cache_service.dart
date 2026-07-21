@@ -77,17 +77,17 @@ class ChapterCacheService {
     Book book,
     Chapter chapter,
     List<String> imageUrls, {
-    Set<String>? placeholderUrls,
+    Map<String, String>? b0Urls,
   }) async {
     if (imageUrls.isEmpty) return;
     try {
       final dir = await _getBookCacheDir(book);
       final fileName = getChapterFileName(chapter, suffix: 'cb');
       final file = File('${dir.path}/$fileName');
-      // 缓存格式：{"images": [...], "placeholders": [...]}
+      // 缓存格式：{"images": [...], "b0Urls": {"b1Url": "b0Url", ...}}
       final data = {
         'images': imageUrls,
-        'placeholders': placeholderUrls?.toList() ?? [],
+        'b0Urls': b0Urls ?? {},
       };
       await file.writeAsString(jsonEncode(data), encoding: utf8);
       debugPrint('✅ 缓存漫画章节: ${chapter.title} -> $fileName');
@@ -112,8 +112,8 @@ class ChapterCacheService {
   }
 
   /// 读取缓存的漫画章节图片列表
-  /// 返回 (图片URL列表, 占位图URL集合)
-  Future<(List<String>, Set<String>)?> readComicChapterContent(
+  /// 返回 (图片URL列表, b0Url映射)
+  Future<(List<String>, Map<String, String>)?> readComicChapterContent(
     Book book,
     Chapter chapter,
   ) async {
@@ -126,12 +126,16 @@ class ChapterCacheService {
         final decoded = jsonDecode(content);
         // 兼容旧格式（纯数组）和新格式（对象）
         if (decoded is List) {
-          return (decoded.cast<String>(), <String>{});
+          return (decoded.cast<String>(), <String, String>{});
         }
         final map = decoded as Map<String, dynamic>;
         final images = (map['images'] as List).cast<String>();
-        final placeholders = (map['placeholders'] as List?)?.cast<String>() ?? [];
-        return (images, placeholders.toSet());
+        final b0UrlsRaw = map['b0Urls'] as Map?;
+        final b0Urls = <String, String>{};
+        if (b0UrlsRaw != null) {
+          b0UrlsRaw.forEach((k, v) => b0Urls[k.toString()] = v.toString());
+        }
+        return (images, b0Urls);
       }
     } catch (e) {
       debugPrint('❌ 读取漫画缓存失败: ${chapter.title} - $e');
