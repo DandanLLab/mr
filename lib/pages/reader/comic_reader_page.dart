@@ -1105,7 +1105,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
           _logImageLoadError(url, error);
           // 书源 decryptImage 返回 __PLACEHOLDER__ 占位标记时，0 高度显示
           // （wu55comic 双 img 配对：b_0 先到时返回占位标记，不显示）
-          if (error.toString().contains('__PLACEHOLDER__')) {
+          if (error.toString().contains('PLACEHOLDER')) {
             return const SizedBox.shrink();
           }
           return _buildImageError();
