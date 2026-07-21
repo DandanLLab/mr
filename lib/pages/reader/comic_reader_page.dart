@@ -343,6 +343,13 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             .readComicChapterContent(book, chapter);
         if (cachedImages != null && cachedImages.isNotEmpty) {
           images = cachedImages;
+          // 缓存命中时也填充 _placeholderUrls
+          // URL 包含 .b_0 的图片是占位图（书源 content() 双 img 配对方案）
+          for (final img in images) {
+            if (img.contains('.b_0')) {
+              _placeholderUrls.add(img);
+            }
+          }
         } else {
           // 缓存没有则从网络获取
           final content = await dataProvider.getContent(
