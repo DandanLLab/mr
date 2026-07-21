@@ -543,27 +543,27 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     _imageOptionHeaders.clear();
     _placeholderUrls.clear();
 
-    void add(String? raw) {
-      if (raw == null) return;
+    String? add(String? raw) {
+      if (raw == null) return null;
       var value = raw
           .trim()
           .replaceAll('&amp;', '&')
           .replaceAll(r'\/', '/')
           .replaceAll(r'\"', '"');
       if (value.isEmpty || value.startsWith('blob:')) {
-        return;
+        return null;
       }
 
       if (value.startsWith('data:')) {
         if (seen.add(value)) urls.add(value);
-        return;
+        return value;
       }
 
       final parsed = AnalyzeUrl.parse(value, baseUrl: baseUrl);
       value = parsed.url.trim();
       final uri = Uri.tryParse(value);
       if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
-        return;
+        return null;
       }
       if (seen.add(value)) {
         urls.add(value);
@@ -572,13 +572,14 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
           _imageOptionHeaders[value] = optionHeaders;
         }
       }
+      return value;
     }
 
     final document = html_parser.parseFragment(content);
     for (final image in document.querySelectorAll('img, image')) {
       final placeholderAttr = image.attributes['data-placeholder'];
       final isPlaceholder = placeholderAttr == '1' || placeholderAttr == 'true';
-      add(
+      final addedUrl = add(
         image.attributes['src'] ??
             image.attributes['data-src'] ??
             image.attributes['data-original'] ??
@@ -587,9 +588,8 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             image.attributes['lazy-src'],
       );
       // 记录占位图 URL（书源通过 data-placeholder="1" 标记）
-      if (isPlaceholder) {
-        final lastUrl = urls.isNotEmpty ? urls.last : null;
-        if (lastUrl != null) _placeholderUrls.add(lastUrl);
+      if (isPlaceholder && addedUrl != null) {
+        _placeholderUrls.add(addedUrl);
       }
       final srcSet = image.attributes['srcset'];
       if (srcSet != null && srcSet.trim().isNotEmpty) {
