@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import '../models/book.dart';
 import '../models/book_source.dart';
 import 'native/js_advanced_service.dart';
-import 'native/js_engine.dart';
 import 'native/platform_bridge.dart';
 
 /// 支持图片解密的自定义 ImageProvider
@@ -138,9 +137,12 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
     }
 
     // 调用 JS 解密（借鉴 Legado ImageUtils.decode）
-    // 如果有配对切片 URL 列表，先下载所有切片并存入 JS 全局变量
+    // 如果有配对切片 URL 列表，先下载所有切片
+    // 切片字节通过 partsBytes 参数传给 decodeImage，在同一个 executeAsync 里设置
+    // 避免并发图片覆盖 globalThis._partBytes_N
+    List<Uint8List>? partsBytes;
     if (key.partsUrls != null && key.partsUrls!.isNotEmpty) {
-      final partsBytes = <Uint8List>[];
+      partsBytes = <Uint8List>[];
       for (var i = 0; i < key.partsUrls!.length; i++) {
         final partUrl = key.partsUrls![i];
         try {
@@ -161,12 +163,6 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
           debugPrint('⚠️ 切片[$i]下载失败: $partUrl - $e');
         }
       }
-      // 把所有切片字节存入 JS 全局变量数组，decryptImage 从中读取
-      for (var i = 0; i < partsBytes.length; i++) {
-        await JsEngine.instance.setGlobalBytes('_partBytes_$i', partsBytes[i]);
-      }
-      // 存入切片数量，decryptImage 据此读取
-      JsEngine.instance.evaluate('globalThis._partCount = ${partsBytes.length}');
     }
 
     final decoded = await JsAdvancedService.instance.decodeImage(
@@ -175,6 +171,7 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
       source: key.source,
       isCover: key.isCover,
       book: key.book?.toJson(),
+      partsBytes: partsBytes,
     );
 
     // 解密失败（JS 执行错误/返回 null）：有 imageDecode 规则说明图片是加密的，

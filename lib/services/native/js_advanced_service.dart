@@ -37,6 +37,7 @@ class JsAdvancedService {
     required BookSource source,
     bool isCover = false,
     Map<String, dynamic>? book,
+    List<Uint8List>? partsBytes,
   }) async {
     final ruleJs = _getImageDecodeRule(source, isCover);
     if (ruleJs == null || ruleJs.isEmpty) return imageBytes;
@@ -48,9 +49,23 @@ class JsAdvancedService {
         JsEngine.instance.loadJsLib(source.bookSourceUrl, jsLib);
       }
 
+      // 如果有配对切片，在调用 decryptImage 之前设置全局变量
+      // 必须在同一个 executeAsync 里设置，避免并发图片覆盖全局变量
+      String finalRuleJs = ruleJs;
+      if (partsBytes != null && partsBytes.isNotEmpty) {
+        final setters = StringBuffer();
+        for (var i = 0; i < partsBytes.length; i++) {
+          final b64 = base64Encode(partsBytes[i]);
+          setters.write("globalThis._partBytes_$i = Uint8Array.from(atob('$b64').split('').map(function(c){return c.charCodeAt(0)}));");
+        }
+        setters.write('globalThis._partCount = ${partsBytes.length};');
+        // 先设置切片字节，再调用 decryptImage
+        finalRuleJs = '$setters $ruleJs';
+      }
+
       // 借鉴 legado：result 传入原始字节数组，src 传入图片 URL
       final result = await JsEngine.instance.executeAsync(
-        ruleJs,
+        finalRuleJs,
         imageBytes,
         baseUrl: source.bookSourceUrl,
         sourceEngine: source.engineType,
