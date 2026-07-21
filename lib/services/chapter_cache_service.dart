@@ -73,13 +73,23 @@ class ChapterCacheService {
   }
 
   /// 保存漫画章节图片列表到缓存
-  Future<void> saveComicChapterContent(Book book, Chapter chapter, List<String> imageUrls) async {
+  Future<void> saveComicChapterContent(
+    Book book,
+    Chapter chapter,
+    List<String> imageUrls, {
+    Set<String>? placeholderUrls,
+  }) async {
     if (imageUrls.isEmpty) return;
     try {
       final dir = await _getBookCacheDir(book);
       final fileName = getChapterFileName(chapter, suffix: 'cb');
       final file = File('${dir.path}/$fileName');
-      await file.writeAsString(jsonEncode(imageUrls), encoding: utf8);
+      // 缓存格式：{"images": [...], "placeholders": [...]}
+      final data = {
+        'images': imageUrls,
+        'placeholders': placeholderUrls?.toList() ?? [],
+      };
+      await file.writeAsString(jsonEncode(data), encoding: utf8);
       debugPrint('✅ 缓存漫画章节: ${chapter.title} -> $fileName');
     } catch (e) {
       debugPrint('❌ 缓存漫画章节失败: ${chapter.title} - $e');
@@ -102,15 +112,26 @@ class ChapterCacheService {
   }
 
   /// 读取缓存的漫画章节图片列表
-  Future<List<String>?> readComicChapterContent(Book book, Chapter chapter) async {
+  /// 返回 (图片URL列表, 占位图URL集合)
+  Future<(List<String>, Set<String>)?> readComicChapterContent(
+    Book book,
+    Chapter chapter,
+  ) async {
     try {
       final dir = await _getBookCacheDir(book);
       final fileName = getChapterFileName(chapter, suffix: 'cb');
       final file = File('${dir.path}/$fileName');
       if (await file.exists()) {
         final content = await file.readAsString(encoding: utf8);
-        final List<dynamic> urls = jsonDecode(content);
-        return urls.cast<String>();
+        final decoded = jsonDecode(content);
+        // 兼容旧格式（纯数组）和新格式（对象）
+        if (decoded is List) {
+          return (decoded.cast<String>(), <String>{});
+        }
+        final map = decoded as Map<String, dynamic>;
+        final images = (map['images'] as List).cast<String>();
+        final placeholders = (map['placeholders'] as List?)?.cast<String>() ?? [];
+        return (images, placeholders.toSet());
       }
     } catch (e) {
       debugPrint('❌ 读取漫画缓存失败: ${chapter.title} - $e');

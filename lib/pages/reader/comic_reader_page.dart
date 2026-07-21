@@ -339,17 +339,12 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
 
       // 优先从缓存读取
       if (book.originType == BookOriginType.online) {
-        final cachedImages = await ChapterCacheService.instance
+        final cached = await ChapterCacheService.instance
             .readComicChapterContent(book, chapter);
-        if (cachedImages != null && cachedImages.isNotEmpty) {
-          images = cachedImages;
+        if (cached != null && cached.$1.isNotEmpty) {
+          images = cached.$1;
           // 缓存命中时也填充 _placeholderUrls
-          // URL 包含 .b_0 的图片是占位图（书源 content() 双 img 配对方案）
-          for (final img in images) {
-            if (img.contains('.b_0')) {
-              _placeholderUrls.add(img);
-            }
-          }
+          _placeholderUrls.addAll(cached.$2);
         } else {
           // 缓存没有则从网络获取
           final content = await dataProvider.getContent(
@@ -369,6 +364,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                 book,
                 chapter,
                 images,
+                placeholderUrls: _placeholderUrls,
               ),
             );
           }
@@ -957,10 +953,11 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     try {
       List<String> images;
       if (book.originType == BookOriginType.online) {
-        final cachedImages = await ChapterCacheService.instance
+        final cached = await ChapterCacheService.instance
             .readComicChapterContent(book, chapter);
-        if (cachedImages != null && cachedImages.isNotEmpty) {
-          images = cachedImages;
+        if (cached != null && cached.$1.isNotEmpty) {
+          images = cached.$1;
+          _placeholderUrls.addAll(cached.$2);
         } else {
           final content = await dataProvider.getContent(
             book,
@@ -978,6 +975,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
                 book,
                 chapter,
                 images,
+                placeholderUrls: _placeholderUrls,
               ),
             );
           }
@@ -1092,14 +1090,8 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
           if (loadingProgress == null) return child;
           // 书源标记的占位图（data-placeholder="1"）下载时返回 0 高度
           // 避免占位图 loading 挡住正常图
-          final isPlaceholder = _placeholderUrls.contains(url);
-          if (isPlaceholder) {
+          if (_placeholderUrls.contains(url)) {
             return const SizedBox.shrink();
-          }
-          // 调试：占位图未匹配时打印 URL
-          if (_placeholderUrls.isNotEmpty) {
-            debugPrint('[loadingBuilder] url=$url placeholder=${isPlaceholder} '
-                'placeholderUrls=${_placeholderUrls.length}');
           }
           final total = loadingProgress.expectedTotalBytes;
           final value = (total != null && total > 0)
