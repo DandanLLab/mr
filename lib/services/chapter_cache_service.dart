@@ -113,7 +113,7 @@ class ChapterCacheService {
 
   /// 读取缓存的漫画章节图片列表
   /// 返回 (图片URL列表, partsUrls映射)
-  Future<(List<String>, Map<String, List<String>>?)?> readComicChapterContent(
+  Future<(List<String>, Map<String, List<String>>)?> readComicChapterContent(
     Book book,
     Chapter chapter,
   ) async {

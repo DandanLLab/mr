@@ -166,7 +166,7 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
         await JsEngine.instance.setGlobalBytes('_partBytes_$i', partsBytes[i]);
       }
       // 存入切片数量，decryptImage 据此读取
-      await JsEngine.instance.executeAsync('globalThis._partCount = ${partsBytes.length}');
+      JsEngine.instance.evaluate('globalThis._partCount = ${partsBytes.length}');
     }
 
     final decoded = await JsAdvancedService.instance.decodeImage(

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -1852,7 +1851,7 @@ return __returnValue;
     try {
       // 用 base64 传字节，避免超长字符串爆内存
       final b64 = base64Encode(bytes);
-      await executeAsync(
+      evaluate(
         "globalThis.$varName = Uint8Array.from(atob('$b64').split('').map(function(c){return c.charCodeAt(0)}))"
       );
     } catch (e) {
