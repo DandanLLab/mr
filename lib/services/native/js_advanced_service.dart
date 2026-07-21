@@ -51,12 +51,13 @@ class JsAdvancedService {
 
       // 如果有配对切片，在调用 decryptImage 之前设置全局变量
       // 必须在同一个 executeAsync 里设置，避免并发图片覆盖全局变量
+      // 用 __nativeBase64.decodeToBytes 传字节（和主图 result 一致，不用 atob）
       String finalRuleJs = ruleJs;
       if (partsBytes != null && partsBytes.isNotEmpty) {
         final setters = StringBuffer();
         for (var i = 0; i < partsBytes.length; i++) {
           final b64 = base64Encode(partsBytes[i]);
-          setters.write("globalThis._partBytes_$i = Uint8Array.from(atob('$b64').split('').map(function(c){return c.charCodeAt(0)}));");
+          setters.write("globalThis._partBytes_$i = new Uint8Array(__nativeBase64.decodeToBytes('$b64'));");
         }
         setters.write('globalThis._partCount = ${partsBytes.length};');
         // 先设置切片字节，再调用 decryptImage
