@@ -49,23 +49,23 @@ class JsAdvancedService {
         JsEngine.instance.loadJsLib(source.bookSourceUrl, jsLib);
       }
 
-      // 如果有配对切片，在调用 decryptImage 之前设置全局变量
-      // 必须在同一个 executeAsync 里设置，避免并发图片覆盖全局变量
-      // 用 __nativeBase64.decodeToBytes 传字节（和主图 result 一致，不用 atob）
-      // 注意：setters 和 ruleJs 之间必须用换行分隔，否则 _wrapJsCode 认为是单行
-      // 会生成 return A=B; C() → 只执行赋值就 return，decryptImage 不会被调用
-      String finalRuleJs = ruleJs;
+      // 配对切片字节设置 + decryptImage 必须在同一个 executeAsync 里执行
+      // 避免并发图片覆盖 globalThis._partBytes_N
+      // 用 __nativeBase64.decodeToBytes 传字节（和主图 result 一致）
+      String finalRuleJs;
+      final setters = StringBuffer();
       if (partsBytes != null && partsBytes.isNotEmpty) {
-        final setters = StringBuffer();
         for (var i = 0; i < partsBytes.length; i++) {
           final b64 = base64Encode(partsBytes[i]);
           setters.write("globalThis._partBytes_$i = new Uint8Array(__nativeBase64.decodeToBytes('$b64'));");
         }
         setters.write('globalThis._partCount = ${partsBytes.length};');
-        // 用换行分隔，让 _wrapJsCode 正确识别为多行代码
-        // 最终生成：return (function() { setters... return decryptImage(result) })()
-        finalRuleJs = '$setters\nreturn $ruleJs';
+      } else {
+        // 没有配对切片时清除上次的残留，避免读到错误数据
+        setters.write('globalThis._partCount = 0;');
       }
+      // 用换行分隔，让 _wrapJsCode 正确识别为多行代码
+      finalRuleJs = '$setters\nreturn $ruleJs';
 
       // 借鉴 legado：result 传入原始字节数组，src 传入图片 URL
       final result = await JsEngine.instance.executeAsync(
