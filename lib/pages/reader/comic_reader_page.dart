@@ -104,6 +104,10 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
   final Map<String, Uint8List> _dataImageCache = {};
   Map<String, String> _imageHeaders = const {};
   final Map<String, Map<String, String>> _imageOptionHeaders = {};
+
+  /// 占位图 URL 集合（书源 content() 里 img 带 data-placeholder="1" 标记）
+  /// loadingBuilder 检测到此集合里的 URL 时返回 0 高度
+  final Set<String> _placeholderUrls = {};
   String _sourceName = '';
   BookSource? _bookSource;
 
@@ -537,6 +541,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     final urls = <String>[];
     final seen = <String>{};
     _imageOptionHeaders.clear();
+    _placeholderUrls.clear();
 
     void add(String? raw) {
       if (raw == null) return;
@@ -571,6 +576,8 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
 
     final document = html_parser.parseFragment(content);
     for (final image in document.querySelectorAll('img, image')) {
+      final placeholderAttr = image.attributes['data-placeholder'];
+      final isPlaceholder = placeholderAttr == '1' || placeholderAttr == 'true';
       add(
         image.attributes['src'] ??
             image.attributes['data-src'] ??
@@ -579,6 +586,11 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             image.attributes['data-lazy-src'] ??
             image.attributes['lazy-src'],
       );
+      // 记录占位图 URL（书源通过 data-placeholder="1" 标记）
+      if (isPlaceholder) {
+        final lastUrl = urls.isNotEmpty ? urls.last : null;
+        if (lastUrl != null) _placeholderUrls.add(lastUrl);
+      }
       final srcSet = image.attributes['srcset'];
       if (srcSet != null && srcSet.trim().isNotEmpty) {
         for (final candidate in srcSet.split(',')) {
@@ -1071,6 +1083,11 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             : FilterQuality.medium,
         loadingBuilder: (context, child, loadingProgress) {
           if (loadingProgress == null) return child;
+          // 书源标记的占位图（data-placeholder="1"）下载时返回 0 高度
+          // 避免占位图 loading 挡住正常图
+          if (_placeholderUrls.contains(url)) {
+            return const SizedBox.shrink();
+          }
           final total = loadingProgress.expectedTotalBytes;
           final value = (total != null && total > 0)
               ? loadingProgress.cumulativeBytesLoaded / total
