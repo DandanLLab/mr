@@ -1085,8 +1085,14 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
           if (loadingProgress == null) return child;
           // 书源标记的占位图（data-placeholder="1"）下载时返回 0 高度
           // 避免占位图 loading 挡住正常图
-          if (_placeholderUrls.contains(url)) {
+          final isPlaceholder = _placeholderUrls.contains(url);
+          if (isPlaceholder) {
             return const SizedBox.shrink();
+          }
+          // 调试：占位图未匹配时打印 URL
+          if (_placeholderUrls.isNotEmpty) {
+            debugPrint('[loadingBuilder] url=$url placeholder=${isPlaceholder} '
+                'placeholderUrls=${_placeholderUrls.length}');
           }
           final total = loadingProgress.expectedTotalBytes;
           final value = (total != null && total > 0)
