@@ -155,13 +155,20 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
             ),
           );
           final partBytes = Uint8List.fromList(response.data ?? const <int>[]);
-          if (partBytes.isNotEmpty) {
-            partsBytes.add(partBytes);
+          // 检测 HTML 错误页（服务器返回 200 但内容是 HTML 而非图片切片）
+          if (partBytes.isEmpty || _isHtmlResponse(partBytes)) {
+            debugPrint('⚠️ 切片[$i] 数据异常: $partUrl (空或HTML)');
+            continue;
           }
+          partsBytes.add(partBytes);
         } catch (e) {
           // 切片下载失败不中断，decryptImage 会按解密失败处理
           debugPrint('⚠️ 切片[$i]下载失败: $partUrl - $e');
         }
+      }
+      // 所有切片都下载失败时传 null，让 decryptImage 走单切片降级
+      if (partsBytes.isEmpty) {
+        partsBytes = null;
       }
     }
 
