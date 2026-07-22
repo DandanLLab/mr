@@ -569,6 +569,10 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
         return null;
       }
+      // 过滤配对切片 URL（data-parts 里的 b_0 等），不加入图片列表
+      for (final parts in _imagePartsUrls.values) {
+        if (parts.contains(value)) return value;
+      }
       if (seen.add(value)) {
         urls.add(value);
         final optionHeaders = parsed.option?.headers;
@@ -580,6 +584,43 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     }
 
     final document = html_parser.parseFragment(content);
+    // 第一遍：先收集所有 data-parts 配对切片 URL，让 add() 能过滤
+    for (final image in document.querySelectorAll('img, image')) {
+      final partsAttr = image.attributes['data-parts'];
+      if (partsAttr != null && partsAttr.isNotEmpty) {
+        try {
+          final parts = jsonDecode(partsAttr) as List;
+          final partUrls = <String>[];
+          for (final p in parts) {
+            var value = p.toString().trim()
+                .replaceAll('&amp;', '&')
+                .replaceAll(r'\/', '/')
+                .replaceAll(r'\"', '"');
+            if (value.isEmpty) continue;
+            final parsed = AnalyzeUrl.parse(value, baseUrl: baseUrl);
+            value = parsed.url.trim();
+            final uri = Uri.tryParse(value);
+            if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
+              partUrls.add(value);
+            }
+          }
+          if (partUrls.isNotEmpty) {
+            // 先用 src 作为 key 存入，后面 add 时会过滤
+            final srcUrl = image.attributes['src'] ??
+                image.attributes['data-src'] ??
+                image.attributes['data-original'] ??
+                image.attributes['data-url'] ??
+                image.attributes['data-lazy-src'] ??
+                image.attributes['lazy-src'];
+            if (srcUrl != null) {
+              var parsedSrc = AnalyzeUrl.parse(srcUrl, baseUrl: baseUrl);
+              _imagePartsUrls[parsedSrc.url.trim()] = partUrls;
+            }
+          }
+        } catch (_) {}
+      }
+    }
+    // 第二遍：提取图片 URL，add() 会自动过滤 data-parts 里的配对切片
     for (final image in document.querySelectorAll('img, image')) {
       final addedUrl = add(
         image.attributes['src'] ??
@@ -589,37 +630,6 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
             image.attributes['data-lazy-src'] ??
             image.attributes['lazy-src'],
       );
-      // 书源通过 data-parts 属性指定配对切片 URL 数组（JSON 格式）
-      // 支持任意数量切片，例如 wu55comic: ["b0_url"]
-      // 别的网站可能: ["b0_url", "b2_url", "b3_url"]
-      // Dart 侧下载主图后，额外下载所有配对切片，合并后解密
-      // 注意：b_0 URL 不能加入图片列表，它只是配对切片不是独立图片
-      if (addedUrl != null) {
-        final partsAttr = image.attributes['data-parts'];
-        if (partsAttr != null && partsAttr.isNotEmpty) {
-          try {
-            final parts = jsonDecode(partsAttr) as List;
-            final partUrls = <String>[];
-            for (final p in parts) {
-              // 解析 URL 但不调用 add()（add 会加入图片列表导致 b_0 被当作独立图片显示）
-              var value = p.toString().trim()
-                  .replaceAll('&amp;', '&')
-                  .replaceAll(r'\/', '/')
-                  .replaceAll(r'\"', '"');
-              if (value.isEmpty) continue;
-              final parsed = AnalyzeUrl.parse(value, baseUrl: baseUrl);
-              value = parsed.url.trim();
-              final uri = Uri.tryParse(value);
-              if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
-                partUrls.add(value);
-              }
-            }
-            if (partUrls.isNotEmpty) {
-              _imagePartsUrls[addedUrl] = partUrls;
-            }
-          } catch (_) {}
-        }
-      }
       final srcSet = image.attributes['srcset'];
       if (srcSet != null && srcSet.trim().isNotEmpty) {
         for (final candidate in srcSet.split(',')) {
