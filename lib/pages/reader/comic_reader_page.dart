@@ -593,18 +593,29 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
       // 支持任意数量切片，例如 wu55comic: ["b0_url"]
       // 别的网站可能: ["b0_url", "b2_url", "b3_url"]
       // Dart 侧下载主图后，额外下载所有配对切片，合并后解密
+      // 注意：b_0 URL 不能加入图片列表，它只是配对切片不是独立图片
       if (addedUrl != null) {
         final partsAttr = image.attributes['data-parts'];
         if (partsAttr != null && partsAttr.isNotEmpty) {
           try {
             final parts = jsonDecode(partsAttr) as List;
-            final urls = <String>[];
+            final partUrls = <String>[];
             for (final p in parts) {
-              final parsed = add(p.toString());
-              if (parsed != null) urls.add(parsed);
+              // 解析 URL 但不调用 add()（add 会加入图片列表导致 b_0 被当作独立图片显示）
+              var value = p.toString().trim()
+                  .replaceAll('&amp;', '&')
+                  .replaceAll(r'\/', '/')
+                  .replaceAll(r'\"', '"');
+              if (value.isEmpty) continue;
+              final parsed = AnalyzeUrl.parse(value, baseUrl: baseUrl);
+              value = parsed.url.trim();
+              final uri = Uri.tryParse(value);
+              if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
+                partUrls.add(value);
+              }
             }
-            if (urls.isNotEmpty) {
-              _imagePartsUrls[addedUrl] = urls;
+            if (partUrls.isNotEmpty) {
+              _imagePartsUrls[addedUrl] = partUrls;
             }
           } catch (_) {}
         }
