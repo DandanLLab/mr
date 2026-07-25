@@ -299,6 +299,10 @@ class JsEngine {
   /// 借鉴 legado 的 SharedJsScope：同一书源的 jsLib 只加载一次，切换书源时清除旧的
   String? _currentJsLibSourceUrl;
 
+  /// 当前已加载到 globalThis 的 jsLib 代码内容
+  /// 用于检测同一书源 URL 的 jsLib 内容变化（如重新导入更新后的书源）
+  String? _currentJsLibCode;
+
   /// 当前已加载的 jsLib 中定义的全局函数名列表
   /// 用于切换书源时清除旧函数，避免全局污染
   final List<String> _currentJsLibFunctions = [];
@@ -1885,14 +1889,20 @@ return __returnValue;
     // 缓存 jsLib 代码
     _jsLibCache[sourceUrl] = jsLib;
 
-    // 如果当前已加载的就是同一个书源，不需要重新加载
-    if (_currentJsLibSourceUrl == sourceUrl) {
+    // 如果当前已加载的就是同一个书源且代码未变化，不需要重新加载
+    if (_currentJsLibSourceUrl == sourceUrl && _currentJsLibCode == jsLib) {
       AppLogger.instance.info(LogCategory.js,
-          '[loadJsLib] 同一书源，跳过加载: $sourceUrl');
+          '[loadJsLib] 同一书源且代码未变化，跳过加载: $sourceUrl');
       return;
     }
 
-    // 切换书源：先清除旧的 jsLib 全局函数
+    // 同一书源但 jsLib 内容有变化（如重新导入更新后的书源），记录日志
+    if (_currentJsLibSourceUrl == sourceUrl && _currentJsLibCode != jsLib) {
+      AppLogger.instance.info(LogCategory.js,
+          '[loadJsLib] 同一书源但 jsLib 内容已变化，重新加载: $sourceUrl (旧长度=${_currentJsLibCode?.length ?? 0}, 新长度=${jsLib.length})');
+    }
+
+    // 切换书源或 jsLib 内容变化：先清除旧的 jsLib 全局函数
     _clearCurrentJsLib();
 
     // 「全局属性 diff」方案：记录 jsLib 加载前后的全局属性差异
@@ -1922,6 +1932,7 @@ return __returnValue;
         return;
       }
       _currentJsLibSourceUrl = sourceUrl;
+      _currentJsLibCode = jsLib;
       AppLogger.instance.info(LogCategory.js,
           '[loadJsLib] eval 成功: $sourceUrl');
     } catch (e) {
@@ -1987,6 +1998,7 @@ return __returnValue;
     } catch (_) {}
     _currentJsLibFunctions.clear();
     _currentJsLibSourceUrl = null;
+    _currentJsLibCode = null;
   }
 
   /// 获取书源的 jsLib 代码
