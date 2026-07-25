@@ -140,11 +140,23 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
     // 如果有配对切片 URL 列表，先下载所有切片
     // 切片字节通过 partsBytes 参数传给 decodeImage，在同一个 executeAsync 里设置
     // 避免并发图片覆盖 globalThis._partBytes_N
+    //
+    // 封面图没有 data-parts 属性（不在 HTML 中），当 isCover=true 且
+    // partsUrls 为空时，自动从 .b_1 URL 推导 .b_0 URL（同主机，CDN 同时提供 b_0 和 b_1）
+    List<String>? effectivePartsUrls = key.partsUrls;
+    if (key.isCover &&
+        (effectivePartsUrls == null || effectivePartsUrls.isEmpty)) {
+      final derived = _deriveB0Url(key.url);
+      if (derived != null) {
+        effectivePartsUrls = [derived];
+      }
+    }
+
     List<Uint8List>? partsBytes;
-    if (key.partsUrls != null && key.partsUrls!.isNotEmpty) {
+    if (effectivePartsUrls != null && effectivePartsUrls.isNotEmpty) {
       partsBytes = <Uint8List>[];
-      for (var i = 0; i < key.partsUrls!.length; i++) {
-        final partUrl = key.partsUrls![i];
+      for (var i = 0; i < effectivePartsUrls.length; i++) {
+        final partUrl = effectivePartsUrls[i];
         try {
           final response = await PlatformBridge.instance.dio.get<List<int>>(
             partUrl,
@@ -207,6 +219,20 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
     if (bytes.length < 6) return false;
     final prefix = String.fromCharCodes(bytes.take(9)).toLowerCase();
     return prefix.startsWith('<!doctype') || prefix.startsWith('<html');
+  }
+
+  /// 从 .b_1 URL 推导 .b_0 URL（同主机，CDN 同时提供 b_0 和 b_1）
+  ///
+  /// 封面图不在 HTML 中，没有 data-parts 属性。
+  /// 当封面 URL 以 .b_1 结尾时，自动推导对应的 .b_0 URL。
+  /// 返回 null 表示 URL 不匹配 .b_1 模式（非切片图片，无需配对）。
+  static String? _deriveB0Url(String url) {
+    final match = RegExp(r'\.b_1(\?|$)').firstMatch(url);
+    if (match == null) return null;
+    return url.replaceFirstMapped(
+      RegExp(r'\.b_1(\?|$)'),
+      (m) => '.b_0${m.group(1)}',
+    );
   }
 
   @override
