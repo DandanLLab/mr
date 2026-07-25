@@ -102,8 +102,13 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
 
     Uint8List bytes;
     try {
+      // 封面 URL 支持逗号分隔格式：主图,副图1,副图2,...
+      // 只下载第一个（主图），其余切片在下方单独下载
+      final downloadUrl = key.url.contains(',')
+          ? key.url.substring(0, key.url.indexOf(',')).trim()
+          : key.url;
       final response = await PlatformBridge.instance.dio.get<List<int>>(
-        key.url,
+        downloadUrl,
         options: Options(
           headers: key.headers,
           responseType: ResponseType.bytes,
@@ -141,14 +146,20 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
     // 切片字节通过 partsBytes 参数传给 decodeImage，在同一个 executeAsync 里设置
     // 避免并发图片覆盖 globalThis._partBytes_N
     //
-    // 封面图没有 data-parts 属性（不在 HTML 中），当 isCover=true 且
-    // partsUrls 为空时，自动从 .b_1 URL 推导 .b_0 URL（同主机，CDN 同时提供 b_0 和 b_1）
+    // 封面 URL 支持逗号分隔格式：主图,副图1,副图2,...
+    // 第一个是主图 URL（已由上方下载），其余是配对切片 URL
+    // 与正文 data-parts 数组同理，由书源自行指定所有切片，Dart 层不硬编码任何规则
     List<String>? effectivePartsUrls = key.partsUrls;
-    if (key.isCover &&
-        (effectivePartsUrls == null || effectivePartsUrls.isEmpty)) {
-      final derived = _deriveB0Url(key.url);
-      if (derived != null) {
-        effectivePartsUrls = [derived];
+    if (effectivePartsUrls == null || effectivePartsUrls.isEmpty) {
+      final commaIndex = key.url.indexOf(',');
+      if (commaIndex > 0) {
+        final rest = key.url.substring(commaIndex + 1);
+        effectivePartsUrls = rest
+            .split(',')
+            .map((s) => s.trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
+        if (effectivePartsUrls.isEmpty) effectivePartsUrls = null;
       }
     }
 
@@ -184,9 +195,14 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
       }
     }
 
+    // 传给 JS 的 src 应为主图 URL（去掉逗号后的副图部分）
+    final mainUrl = key.url.contains(',')
+        ? key.url.substring(0, key.url.indexOf(',')).trim()
+        : key.url;
+
     final decoded = await JsAdvancedService.instance.decodeImage(
       bytes,
-      key.url,
+      mainUrl,
       source: key.source,
       isCover: key.isCover,
       book: key.book?.toJson(),
@@ -219,20 +235,6 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
     if (bytes.length < 6) return false;
     final prefix = String.fromCharCodes(bytes.take(9)).toLowerCase();
     return prefix.startsWith('<!doctype') || prefix.startsWith('<html');
-  }
-
-  /// 从 .b_1 URL 推导 .b_0 URL（同主机，CDN 同时提供 b_0 和 b_1）
-  ///
-  /// 封面图不在 HTML 中，没有 data-parts 属性。
-  /// 当封面 URL 以 .b_1 结尾时，自动推导对应的 .b_0 URL。
-  /// 返回 null 表示 URL 不匹配 .b_1 模式（非切片图片，无需配对）。
-  static String? _deriveB0Url(String url) {
-    final match = RegExp(r'\.b_1(\?|$)').firstMatch(url);
-    if (match == null) return null;
-    return url.replaceFirstMapped(
-      RegExp(r'\.b_1(\?|$)'),
-      (m) => '.b_0${m.group(1)}',
-    );
   }
 
   @override
