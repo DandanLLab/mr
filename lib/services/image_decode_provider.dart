@@ -107,14 +107,10 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
       final downloadUrl = key.url.contains(',')
           ? key.url.substring(0, key.url.indexOf(',')).trim()
           : key.url;
-      final response = await PlatformBridge.instance.dio.get<List<int>>(
+      bytes = await _fetchBytesWithRetry(
         downloadUrl,
-        options: Options(
-          headers: key.headers,
-          responseType: ResponseType.bytes,
-          receiveTimeout: const Duration(seconds: 30),
-        ),
-        onReceiveProgress: (received, total) {
+        key.headers,
+        onProgress: (received, total) {
           if (total > 0) {
             chunkEvents.add(ImageChunkEvent(
               cumulativeBytesLoaded: received,
@@ -123,7 +119,6 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
           }
         },
       );
-      bytes = Uint8List.fromList(response.data ?? const <int>[]);
     } catch (e) {
       // 包装原始异常（可能是 Dio 内部的 null 断言），防止直接到达
       // FlutterError.reportError 被误判为崩溃（图片加载有 errorBuilder 处理 UI）
@@ -169,15 +164,7 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
       for (var i = 0; i < effectivePartsUrls.length; i++) {
         final partUrl = effectivePartsUrls[i];
         try {
-          final response = await PlatformBridge.instance.dio.get<List<int>>(
-            partUrl,
-            options: Options(
-              headers: key.headers,
-              responseType: ResponseType.bytes,
-              receiveTimeout: const Duration(seconds: 30),
-            ),
-          );
-          final partBytes = Uint8List.fromList(response.data ?? const <int>[]);
+          final partBytes = await _fetchBytesWithRetry(partUrl, key.headers);
           // 检测 HTML 错误页（服务器返回 200 但内容是 HTML 而非图片切片）
           if (partBytes.isEmpty || _isHtmlResponse(partBytes)) {
             debugPrint('⚠️ 切片[$i] 数据异常: $partUrl (空或HTML)');
@@ -225,6 +212,58 @@ class DecodedImageProvider extends ImageProvider<DecodedImageProvider> {
     } catch (e) {
       throw StateError('图片解码失败: ${key.url} - $e');
     }
+  }
+
+  /// 带重试的字节下载（针对 CDN 504/502/503 临时错误）
+  ///
+  /// CDN 服务器（如 bmigmij-wuwu.sqxxov.com）在连续请求时会间歇性返回
+  /// HTTP 504 Gateway Timeout，重试通常能成功。
+  /// 最多重试 3 次，间隔递增（1s → 2s → 4s）。
+  static Future<Uint8List> _fetchBytesWithRetry(
+    String url,
+    Map<String, String> headers, {
+    void Function(int received, int total)? onProgress,
+  }) async {
+    const maxRetries = 3;
+    const retryDelays = [
+      Duration(seconds: 1),
+      Duration(seconds: 2),
+      Duration(seconds: 4),
+    ];
+
+    for (var attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        final response = await PlatformBridge.instance.dio.get<List<int>>(
+          url,
+          options: Options(
+            headers: headers,
+            responseType: ResponseType.bytes,
+            receiveTimeout: const Duration(seconds: 30),
+          ),
+          onReceiveProgress: onProgress,
+        );
+        return Uint8List.fromList(response.data ?? const <int>[]);
+      } on DioException catch (e) {
+        final statusCode = e.response?.statusCode;
+        final isRetryable = (statusCode != null &&
+                (statusCode == 502 ||
+                    statusCode == 503 ||
+                    statusCode == 504)) ||
+            e.type == DioExceptionType.connectionTimeout ||
+            e.type == DioExceptionType.receiveTimeout ||
+            e.type == DioExceptionType.connectionError;
+
+        if (!isRetryable || attempt == maxRetries) rethrow;
+
+        debugPrint(
+          '⚠️ 图片下载重试[$attempt/$maxRetries] $url '
+          '(status=$statusCode ${e.type})',
+        );
+        await Future.delayed(retryDelays[attempt]);
+      }
+    }
+    // 不会到达此处，但编译器需要
+    throw StateError('unreachable: $url');
   }
 
   /// 检测字节数据是否为 HTML 而非图片
