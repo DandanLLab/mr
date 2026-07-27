@@ -300,6 +300,10 @@ class LocalBookService {
         title: epubChapter.title,
         index: epubChapter.index,
         url: epubChapter.href,
+        isVolume: epubChapter.isVolume,
+        spineIndex: epubChapter.spineIndex,
+        depth: epubChapter.depth,
+        parentId: epubChapter.parentId,
       );
     }).toList();
   }
@@ -328,11 +332,147 @@ class LocalBookService {
     if (chapter.index < 0 || chapter.index >= epubBook.chapters.length) return null;
 
     final epubChapter = epubBook.chapters[chapter.index];
-    if (epubChapter.content != null) {
+    if (epubChapter.content == null) return null;
+
+    // 富 HTML 渲染：保留 EPUB 原始标签结构（<p>/<h1>/<img>/<blockquote> 等），
+    // 把图片转 base64 data URI 内嵌，合并 EPUB 自带 CSS。
+    // 返回格式：[[EPUB_CSS]]...[[/EPUB_CSS]][[EPUB_BODY]]...[[/EPUB_BODY]]
+    // 由 ReaderHtmlTemplate 解析后分别注入 <style> 和正文区域。
+    return _buildEpubRichContent(book, epubChapter);
+  }
+
+  /// 构建 EPUB 富 HTML 内容（带排版 + 内嵌图片 + CSS）
+  ///
+  /// 返回特殊包裹格式，让 ReaderHtmlTemplate 能区分 EPUB CSS 和 body HTML：
+  /// [[EPUB_CSS]]<style>...</style>[[/EPUB_CSS]][[EPUB_BODY]]<p>...</p>[[/EPUB_BODY]]
+  Future<String> _buildEpubRichContent(
+    Book book,
+    EpubChapter epubChapter,
+  ) async {
+    final bytes = await _ensureEpubBytes(book);
+    if (bytes == null) {
+      // 后备：无法读 ZIP 时退化为纯文本
       return EpubParser.extractTextFromHtml(epubChapter.content!);
     }
 
-    return null;
+    try {
+      final archive = ZipDecoder().decodeBytes(bytes);
+      final files = <String, List<int>>{};
+      for (final file in archive) {
+        if (file.isFile) {
+          final name = file.name.replaceAll('\\', '/');
+          final data = file.content;
+          if (data is List<int>) files[name] = data;
+        }
+      }
+
+      // 1. 提取 body HTML（保留标签结构 + fragment 切片）
+      final bodyHtml = EpubParser.extractBodyContent(
+        epubChapter.content!,
+        startFragmentId: epubChapter.startFragmentId,
+        endFragmentId: epubChapter.endFragmentId,
+      );
+
+      // 2. 计算章节文件路径（用于解析相对图片路径）
+      final chapterHref = epubChapter.href ?? '';
+      final chapterPath = chapterHref.split('#').first;
+      String? chapterBasePath;
+      if (chapterPath.contains('/')) {
+        chapterBasePath = chapterPath.substring(0, chapterPath.lastIndexOf('/') + 1);
+      }
+
+      // 3. 把 body 中的 <img src="..."> 转成 base64 data URI
+      final richBody = _inlineImagesInHtml(bodyHtml, files, chapterBasePath);
+
+      // 4. 合并 EPUB CSS（从 manifest 中收集所有 .css 文件）
+      final epubCss = _collectEpubCss(files, epubChapter);
+
+      // 5. 包裹成特殊格式返回
+      final cssBlock = epubCss.isNotEmpty
+          ? '[[EPUB_CSS]]<style>$epubCss</style>[[/EPUB_CSS]]'
+          : '';
+      return '$cssBlock[[EPUB_BODY]]$richBody[[/EPUB_BODY]]';
+    } catch (_) {
+      // 出错时退化为纯文本
+      return EpubParser.extractTextFromHtml(epubChapter.content!);
+    }
+  }
+
+  /// 把 HTML 中的 <img src="..."> 替换为 base64 data URI
+  ///
+  /// [files] EPUB ZIP 内文件映射（path -> bytes）
+  /// [chapterBasePath] 章节文件所在目录（用于解析相对路径）
+  String _inlineImagesInHtml(
+    String html,
+    Map<String, List<int>> files,
+    String? chapterBasePath,
+  ) {
+    // 匹配 <img ... src="..." ...>
+    return html.replaceAllMapped(
+      RegExp(r'<img\b([^>]*?)src="([^"]+)"([^>]*)>', caseSensitive: false),
+      (match) {
+        final before = match.group(1) ?? '';
+        var src = match.group(2) ?? '';
+        final after = match.group(3) ?? '';
+
+        // 已经是 data URI 或 http(s) 链接：不动
+        if (src.startsWith('data:') || src.startsWith('http')) {
+          return match.group(0)!;
+        }
+
+        // 解析相对路径到 EPUB ZIP 内的绝对路径
+        final imgPath = _resolveEpubImagePath(src, chapterBasePath);
+        final imgBytes = files[imgPath];
+        if (imgBytes == null) {
+          // 找不到图片：保留原 src（可能是 epub cover-image 等特殊情况）
+          return match.group(0)!;
+        }
+
+        final mediaType = EpubParser.inferMediaType(imgPath);
+        final dataUri = EpubParser.encodeBytesAsDataUri(
+          Uint8List.fromList(imgBytes),
+          mediaType,
+        );
+        return '<img$before src="$dataUri"$after>';
+      },
+    );
+  }
+
+  /// 解析 EPUB 内部图片相对路径到 ZIP 内绝对路径
+  String _resolveEpubImagePath(String src, String? chapterBasePath) {
+    var path = src.split('#').first;
+    if (path.startsWith('/')) return path.substring(1);
+    if (chapterBasePath == null || chapterBasePath.isEmpty) return path;
+    try {
+      final base = Uri.parse(chapterBasePath);
+      return base.resolve(path).toString();
+    } catch (_) {
+      return path;
+    }
+  }
+
+  /// 收集 EPUB 所有 CSS 文件内容并合并
+  ///
+  /// 从 EPUB ZIP 中查找所有 .css 文件，合并内容返回。
+  /// 注：这里不区分 manifest 引用关系，简单合并所有 CSS
+  /// （EPUB CSS 通常互相独立，合并不会有副作用）
+  String _collectEpubCss(
+    Map<String, List<int>> files,
+    EpubChapter epubChapter,
+  ) {
+    final cssBuffer = StringBuffer();
+    for (final entry in files.entries) {
+      final path = entry.key;
+      if (path.toLowerCase().endsWith('.css')) {
+        final content = EpubParser.decodeBytes(entry.value);
+        if (content.isNotEmpty) {
+          cssBuffer.writeln('/* === $path === */');
+          cssBuffer.writeln(content);
+          cssBuffer.writeln();
+        }
+      }
+    }
+    return cssBuffer.toString();
   }
 
   /// Returns the raw HTML content of an EPUB chapter (not stripped by extractTextFromHtml).
@@ -649,6 +789,21 @@ class LocalBookService {
 
   void cacheEpubData(String bookUrl, EpubBook data) {
     _epubCache[bookUrl] = data;
+  }
+
+  /// 获取 EPUB 的 spine 项总数（用于 spine 精确进度计算）
+  ///
+  /// 返回 0 表示非 EPUB 或未加载。阅读器 UI 可据此判断是否显示 spine 进度：
+  /// ```
+  /// final spineCount = LocalBookService.instance.getEpubSpineCount(book);
+  /// if (spineCount > 0) {
+  ///   final curSpine = chapters[currentIndex].spineIndex;
+  ///   final progress = spineCount > 1 ? curSpine / (spineCount - 1) : 0;
+  /// }
+  /// ```
+  int getEpubSpineCount(Book book) {
+    final epubBook = _epubCache[book.bookUrl];
+    return epubBook?.spineCount ?? 0;
   }
 
   void clearCache({String? bookUrl}) {

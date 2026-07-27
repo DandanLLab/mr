@@ -2418,6 +2418,14 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   Widget _buildWebViewContent(ReaderProvider provider) {
     final isScrollMode = _isScrollLikeMode(provider);
     final pageModeIndex = provider.pageMode.index;
+    // 本地 EPUB 富 HTML 模式：
+    // - 仅本地 EPUB 启用（网络书源不会返回 [[EPUB_BODY]] 包裹格式）
+    // - content 必须包含 [[EPUB_BODY]] 标记（防止 EPUB 解析失败回退到纯文本时误判）
+    // - 启用后 ReaderHtmlTemplate 解析 [[EPUB_CSS]]/[[EPUB_BODY]] 包裹格式，
+    //   保留 EPUB 原始标签结构，注入 EPUB 自带 CSS
+    final isRichHtml = _book?.originType == BookOriginType.local &&
+        LocalBookService.detectBookType(_book!.bookUrl) == LocalBookType.epub &&
+        _content.contains('[[EPUB_BODY]]');
 
     return SafeArea(
       child: Column(
@@ -2438,6 +2446,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                 chapterIndex: _currentChapterIndex,
                 provider: provider,
                 isScrollMode: isScrollMode,
+                isRichHtml: isRichHtml,
                 controller: _readerWebViewController,
                 callbacks: ReaderWebViewCallbacks(
                   onInitialized: _onWebviewInitialized,
@@ -2929,12 +2938,24 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final withinChapter = _isScrollLikeMode(provider)
         ? _scrollProgress
         : pageIndex / max(pageCount - 1, 1);
-    final totalProgress = _totalChapters <= 0
-        ? 0.0
-        : ((_currentChapterIndex + withinChapter) / _totalChapters).clamp(
-            0.0,
-            1.0,
-          );
+
+    // EPUB spine 精确进度：
+    // - 优先用 spineIndex 计算（文件级进度，避免 anchor 切片导致的进度偏移）
+    // - spineCount <= 1 或当前 chapter 无 spineIndex 时退化为 chapter-based 进度
+    final spineCount = _book != null
+        ? LocalBookService.instance.getEpubSpineCount(_book!)
+        : 0;
+    final curSpine = (_currentChapterIndex >= 0 &&
+            _currentChapterIndex < _chapters.length)
+        ? _chapters[_currentChapterIndex].spineIndex
+        : -1;
+    final totalProgress = spineCount > 1 && curSpine >= 0
+        ? ((curSpine + withinChapter) / spineCount).clamp(0.0, 1.0)
+        : (_totalChapters <= 0
+            ? 0.0
+            : ((_currentChapterIndex + withinChapter) / _totalChapters)
+                .clamp(0.0, 1.0));
+
     return switch (type) {
       1 => _displayChapterTitle(provider),
       2 => time,
@@ -4516,6 +4537,9 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
           Divider(height: 1, thickness: 0.5, color: fg.withValues(alpha: 0.12)),
       itemBuilder: (context, index) {
         final chapter = display[index];
+        // EPUB 树状目录缩进：depth=0 不缩进，depth=1 缩进 16px，depth=2 缩进 32px...
+        // 非 EPUB（在线书源）depth 全为 0，不缩进，保持原展示
+        final depthIndent = (chapter.depth > 0 ? chapter.depth : 0) * 16.0;
         if (chapter.isVolume) {
           final isExpanded = _expandedVolumes.contains(chapter.index);
           final isCurrentVolume = _isCurrentVolume(chapter.index);
@@ -4528,7 +4552,12 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
               }
             }),
             child: Container(
-              padding: const EdgeInsets.all(12),
+              padding: EdgeInsets.only(
+                left: 12 + depthIndent,
+                top: 12,
+                right: 12,
+                bottom: 12,
+              ),
               color: isCurrentVolume
                   ? accent.withValues(alpha: 0.1)
                   : Colors.transparent,
@@ -4579,7 +4608,12 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
           child: Container(
             key: _keyForChapter(chapter.index),
             color: isSelected ? selectedBg : Colors.transparent,
-            padding: const EdgeInsets.all(12),
+            padding: EdgeInsets.only(
+              left: 12 + depthIndent,
+              top: 12,
+              right: 12,
+              bottom: 12,
+            ),
             child: Row(
               children: [
                 if (chapter.isVip && !chapter.isPay)

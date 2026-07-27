@@ -12,6 +12,22 @@ class Chapter {
   final int? wordCount;
   final String? tag;
 
+  // ===== EPUB 树状目录支持字段 =====
+  // 仅 EPUB 本地书解析时填充，在线书源保持默认值
+  // 用于树状目录缩进展示和 spine 精确进度计算
+
+  /// 对应 OPF spine 的顺序索引（-1 表示无对应，例如纯分组节点）
+  /// 用于 EPUB 精确进度计算（按 spine 项数百分比）
+  final int spineIndex;
+
+  /// 嵌套层级（0=顶层，1=第一层子节点...）
+  /// 用于树状目录缩进展示
+  final int depth;
+
+  /// 父节点 index（-1=顶层，否则为父节点在扁平列表中的 index）
+  /// 用于树状目录折叠/展开
+  final int parentId;
+
   Chapter({
     required this.id,
     required this.bookId,
@@ -25,6 +41,9 @@ class Chapter {
     this.updateTime,
     this.wordCount,
     this.tag,
+    this.spineIndex = -1,
+    this.depth = 0,
+    this.parentId = -1,
   });
 
   Chapter copyWith({
@@ -40,6 +59,9 @@ class Chapter {
     DateTime? updateTime,
     int? wordCount,
     String? tag,
+    int? spineIndex,
+    int? depth,
+    int? parentId,
   }) {
     return Chapter(
       id: id ?? this.id,
@@ -54,6 +76,9 @@ class Chapter {
       updateTime: updateTime ?? this.updateTime,
       wordCount: wordCount ?? this.wordCount,
       tag: tag ?? this.tag,
+      spineIndex: spineIndex ?? this.spineIndex,
+      depth: depth ?? this.depth,
+      parentId: parentId ?? this.parentId,
     );
   }
 
@@ -71,6 +96,9 @@ class Chapter {
       'updateTime': updateTime?.toIso8601String(),
       'wordCount': wordCount,
       'tag': tag,
+      'spineIndex': spineIndex,
+      'depth': depth,
+      'parentId': parentId,
     };
   }
 
@@ -90,6 +118,9 @@ class Chapter {
           : null,
       wordCount: json['wordCount'] as int?,
       tag: json['tag'] as String?,
+      spineIndex: json['spineIndex'] as int? ?? -1,
+      depth: json['depth'] as int? ?? 0,
+      parentId: json['parentId'] as int? ?? -1,
     );
   }
 }

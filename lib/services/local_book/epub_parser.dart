@@ -138,6 +138,10 @@ class EpubBook {
   /// chapters 是此树扁平化后的结果
   final List<EpubChapter> tocTree;
 
+  /// OPF spine 项总数（用于 spine 精确进度计算）
+  /// progress = 当前 chapter.spineIndex / (spineCount - 1)
+  final int spineCount;
+
   final String? language;
 
   const EpubBook({
@@ -147,6 +151,7 @@ class EpubBook {
     this.coverPath,
     this.chapters = const [],
     this.tocTree = const [],
+    this.spineCount = 0,
     this.language,
   });
 }
@@ -433,6 +438,7 @@ class EpubParser {
         coverPath: coverPath,
         chapters: chapters,
         tocTree: tocTree,
+        spineCount: spine.length,
         language: language,
       );
     } catch (e) {
