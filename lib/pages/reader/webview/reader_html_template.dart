@@ -27,7 +27,7 @@ class ReaderHtmlTemplate {
   /// [isRichHtml]：是否为 EPUB 富 HTML 内容。
   /// - true：content 应为 `[[EPUB_CSS]]<style>...</style>[[/EPUB_CSS]]
   ///   [[EPUB_BODY]]<p>...</p>[[/EPUB_BODY]]` 包裹格式，由
-  ///   LocalBookService._buildEpubRichContent 生成。
+  ///   EpubParser.parseFromBytes 在导入时预生成。
   ///   解析后 EPUB CSS 注入到 <style>，body HTML 直接放入 #reader-content-a
   ///   （不走 buildParagraphsHtml 段落包裹，保留 EPUB 原始标签结构）。
   /// - false（默认）：content 视为纯文本，按行切分成 <p class="reader-p">。
@@ -132,7 +132,7 @@ class ReaderHtmlTemplate {
 
   /// 解析 EPUB 富 HTML 内容的包裹格式
   ///
-  /// 输入格式（由 LocalBookService._buildEpubRichContent 生成）：
+  /// 输入格式（由 EpubParser.parseFromBytes 在导入时预生成）：
   /// ```
   /// [[EPUB_CSS]]<style>...</style>[[/EPUB_CSS]][[EPUB_BODY]]<p>...</p>[[/EPUB_BODY]]
   /// ```

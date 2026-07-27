@@ -43,8 +43,8 @@ class ReaderWebView extends StatefulWidget {
 
   /// 是否为 EPUB 富 HTML 内容
   ///
-  /// true：content 为 [[EPUB_CSS]]...[[/EPUB_CSS]][[EPUB_BODY]]...[[/EPUB_BODY]]
-  /// 包裹格式，由 LocalBookService._buildEpubRichContent 生成。
+  /// true：content 为 `[[EPUB_CSS]]...[[/EPUB_CSS]][[EPUB_BODY]]...[[/EPUB_BODY]]`
+  /// 包裹格式，由 EpubParser.parseFromBytes 在导入时预生成。
   /// ReaderHtmlTemplate.generate 会解析此格式，注入 EPUB CSS 并保留原始标签。
   /// false（默认）：content 视为纯文本，按段落切分。
   final bool isRichHtml;
