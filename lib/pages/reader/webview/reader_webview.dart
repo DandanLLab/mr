@@ -41,6 +41,14 @@ class ReaderWebView extends StatefulWidget {
   /// 是否滚动模式
   final bool isScrollMode;
 
+  /// 是否为 EPUB 富 HTML 内容
+  ///
+  /// true：content 为 [[EPUB_CSS]]...[[/EPUB_CSS]][[EPUB_BODY]]...[[/EPUB_BODY]]
+  /// 包裹格式，由 LocalBookService._buildEpubRichContent 生成。
+  /// ReaderHtmlTemplate.generate 会解析此格式，注入 EPUB CSS 并保留原始标签。
+  /// false（默认）：content 视为纯文本，按段落切分。
+  final bool isRichHtml;
+
   /// 控制器
   final ReaderWebViewController controller;
 
@@ -56,6 +64,7 @@ class ReaderWebView extends StatefulWidget {
     required this.isScrollMode,
     required this.controller,
     required this.callbacks,
+    this.isRichHtml = false,
   });
 
   @override
@@ -103,6 +112,7 @@ class _ReaderWebViewState extends State<ReaderWebView> {
     // - 分页模式下 title 变化 = 章节切换，content 也会变，由前一个条件触发 reload
     if (oldWidget.content != widget.content ||
         oldWidget.isScrollMode != widget.isScrollMode ||
+        oldWidget.isRichHtml != widget.isRichHtml ||
         (!widget.isScrollMode && oldWidget.title != widget.title)) {
       _styleReloadDebounce?.cancel();
       _currentHtml = _generateHtml();
@@ -131,11 +141,14 @@ class _ReaderWebViewState extends State<ReaderWebView> {
   /// 内，顶部可能有 header、底部可能有 footer，实际可用区域远小于屏幕。
   /// 传入正确尺寸后 JS 的 column-width 才能正确分页，避免翻页错位。
   String _generateHtml() {
-    // 简繁转换
-    final displayContent = ChineseConverter.convert(
-      widget.content,
-      widget.provider.chineseConverterType,
-    );
+    // EPUB 富 HTML：跳过简繁转换，避免破坏 [[EPUB_CSS]]/[[EPUB_BODY]] 包裹格式
+    // EPUB 内容已是规范化的，简繁转换需求低；如需转换应在对包裹格式解析后对 body 单独处理
+    final displayContent = widget.isRichHtml
+        ? widget.content
+        : ChineseConverter.convert(
+            widget.content,
+            widget.provider.chineseConverterType,
+          );
     final displayTitle = ChineseConverter.convert(
       widget.title,
       widget.provider.chineseConverterType,
@@ -151,6 +164,7 @@ class _ReaderWebViewState extends State<ReaderWebView> {
       pageAnimDurationMs: widget.provider.pageAnimDurationMs,
       pageModeIndex: widget.provider.pageMode.index,
       chapterIndex: widget.chapterIndex,
+      isRichHtml: widget.isRichHtml,
     );
   }
 

@@ -1,8 +1,9 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:archive/archive.dart';
+import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart' as html_dom;
+import 'package:xml/xml.dart' as xml;
 
 /// EPUB 图片资源（被 LocalBookService 用来把 EPUB 内部图片转 data URI）
 class EpubResource {
@@ -298,7 +299,7 @@ class EpubParser {
       if (coverPath == null) {
         for (final item in manifest.values) {
           if (item.mediaType.startsWith('image/') &&
-              (item.properties?.contains('cover-image') == true ||
+              (_containsWholeWord(item.properties, 'cover-image') ||
                   item.id.toLowerCase().contains('cover'))) {
             coverPath = _resolveEpubPath(opfBasePath, item.href);
             break;
@@ -325,14 +326,40 @@ class EpubParser {
           spineIndexByHref[resolvedHref] = i;
         }
       }
+      debugPrint('[EPUB诊断] opfBasePath=$opfBasePath');
+      debugPrint('[EPUB诊断] spine数量=${spine.length} items=${spine.join(",")}');
+      debugPrint('[EPUB诊断] manifest数量=${manifest.length}');
+      debugPrint('[EPUB诊断] spineIndexByHref=$spineIndexByHref');
+      debugPrint('[EPUB诊断] files路径列表=${files.keys.toList()}');
 
-      // 8.2 查找 NCX 目录
+      // 8.2 查找 NAV 目录（EPUB 3，properties='nav' 优先，参考 legado findTableOfContentsResource）
+      String? navHref;
       String? ncxHref;
+      // 优先：manifest 中 properties 整词匹配 'nav' 的项（EPUB 3 标准）
+      // 用整词匹配避免误判 'nav-map'/'nav-reference' 等含 nav 子串的属性
+      // 参考 lumina `_containsWholeWord(properties, 'nav')`
+      for (final item in manifest.values) {
+        if (_containsWholeWord(item.properties, 'nav') &&
+            item.mediaType == 'application/xhtml+xml') {
+          navHref = item.href;
+          debugPrint('[EPUB诊断] properties=nav 找到NAV: id=${item.id} href=$navHref');
+          break;
+        }
+      }
+      // 8.3 查找 NCX 目录（EPUB 2）
       if (tocId != null && manifest.containsKey(tocId)) {
         final tocItem = manifest[tocId]!;
+        debugPrint('[EPUB诊断] spine.toc指向 tocId=$tocId href=${tocItem.href} mediaType=${tocItem.mediaType}');
         if (tocItem.mediaType.contains('ncx') ||
             tocItem.href.endsWith('.ncx')) {
           ncxHref = tocItem.href;
+        } else if (navHref == null &&
+            (tocItem.mediaType == 'application/xhtml+xml' ||
+                tocItem.href.endsWith('.xhtml') ||
+                tocItem.href.endsWith('.html'))) {
+          // spine.toc 指向 xhtml 但不是 .ncx：可能是 EPUB 3 的 nav
+          navHref = tocItem.href;
+          debugPrint('[EPUB诊断] spine.toc指向xhtml，作为NAV: $navHref');
         }
       }
       if (ncxHref == null) {
@@ -340,55 +367,81 @@ class EpubParser {
           if (item.mediaType == 'application/x-dtbncx+xml' ||
               item.href.endsWith('.ncx')) {
             ncxHref = item.href;
+            debugPrint('[EPUB诊断] 全量扫描找到NCX: $ncxHref');
             break;
           }
         }
       }
-
-      // 8.3 查找 NAV 目录
-      String? navHref;
-      for (final item in manifest.values) {
-        if (item.mediaType == 'application/xhtml+xml' &&
-            (item.id.toLowerCase().contains('nav') ||
-                item.href.toLowerCase().contains('nav'))) {
-          navHref = item.href;
-          break;
+      // NAV 兜底：通过 id/href 名字含 nav 查找
+      if (navHref == null) {
+        for (final item in manifest.values) {
+          if (item.mediaType == 'application/xhtml+xml' &&
+              (item.id.toLowerCase().contains('nav') ||
+                  item.href.toLowerCase().contains('nav'))) {
+            navHref = item.href;
+            debugPrint('[EPUB诊断] 名字兜底找到NAV: id=${item.id} href=$navHref');
+            break;
+          }
         }
       }
+      debugPrint('[EPUB诊断] 最终ncxHref=$ncxHref navHref=$navHref');
 
-      // 8.4 优先尝试 NCX → NAV → spine 兜底
+      // 8.4 优先尝试 NAV（EPUB 3）→ NCX（EPUB 2）→ spine 兜底
+      // 参考 legado：EPUB 3 优先用 nav，EPUB 2 用 ncx
       List<EpubChapter> tocTree = [];
       List<EpubChapter> chapters;
 
-      if (ncxHref != null) {
-        final ncxPath = _resolveEpubPath(opfBasePath, ncxHref);
-        final ncxData = files[ncxPath];
-        if (ncxData != null) {
-          tocTree = _parseNcxToc(
-            decodeBytes(ncxData),
-            opfBasePath,
+      if (navHref != null) {
+        final navPath = _resolveEpubPath(opfBasePath, navHref);
+        final navData = files[navPath];
+        debugPrint('[EPUB诊断] NAV解析: navPath=$navPath 数据存在=${navData != null}');
+        if (navData != null) {
+          // 关键：baseDir 用 NAV 文件自身所在目录，而非 OPF 目录
+          // NAV 文件可能在子目录（如 OEBPS/nav.xhtml），其内部相对路径
+          // 是相对 NAV 文件目录解析的，用 OPF 目录会解析错误
+          // 参考 lumina `navDir`
+          final navDir = navPath.contains('/')
+              ? navPath.substring(0, navPath.lastIndexOf('/'))
+              : '';
+          tocTree = _parseNavToc(
+            decodeBytes(navData),
+            navDir,
             spineIndexByHref,
           );
+          debugPrint('[EPUB诊断] NAV解析结果: tocTree节点数=${tocTree.length}');
         }
       }
 
-      if (tocTree.isEmpty && navHref != null) {
-        final navPath = _resolveEpubPath(opfBasePath, navHref);
-        final navData = files[navPath];
-        if (navData != null) {
-          tocTree = _parseNavToc(
-            decodeBytes(navData),
-            opfBasePath,
+      if (tocTree.isEmpty && ncxHref != null) {
+        final ncxPath = _resolveEpubPath(opfBasePath, ncxHref);
+        final ncxData = files[ncxPath];
+        debugPrint('[EPUB诊断] NCX解析: ncxPath=$ncxPath 数据存在=${ncxData != null}');
+        if (ncxData != null) {
+          // 关键：baseDir 用 NCX 文件自身所在目录，而非 OPF 目录
+          // 同 NAV，NCX 文件可能在子目录，其 src 是相对 NCX 文件目录解析的
+          // 参考 lumina `ncxDir`
+          final ncxDir = ncxPath.contains('/')
+              ? ncxPath.substring(0, ncxPath.lastIndexOf('/'))
+              : '';
+          tocTree = _parseNcxToc(
+            decodeBytes(ncxData),
+            ncxDir,
             spineIndexByHref,
           );
+          debugPrint('[EPUB诊断] NCX解析结果: tocTree节点数=${tocTree.length}');
         }
       }
 
       if (tocTree.isNotEmpty) {
         // NCX/NAV 解析成功：扁平化得到 chapters
         chapters = EpubChapter.flatten(tocTree);
+        debugPrint('[EPUB诊断] flatten后chapters数量=${chapters.length}');
+        if (chapters.isNotEmpty) {
+          debugPrint('[EPUB诊断] 第1章: title=${chapters[0].title} href=${chapters[0].href} spineIndex=${chapters[0].spineIndex} depth=${chapters[0].depth}');
+        }
       } else {
         // 后备：使用 spine 条目直接构造扁平 chapters（无嵌套）
+        debugPrint('[EPUB诊断] NCX/NAV都失败，用spine兜底');
         chapters = [];
         for (final idref in spine) {
           if (manifest.containsKey(idref)) {
@@ -409,6 +462,7 @@ class EpubParser {
             ));
           }
         }
+        debugPrint('[EPUB诊断] spine兜底chapters数量=${chapters.length}');
       }
 
       // 9. 从 ZIP 中读取章节内容
@@ -441,7 +495,9 @@ class EpubParser {
         spineCount: spine.length,
         language: language,
       );
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('[EPUB诊断] parseFromBytes异常: $e');
+      debugPrint('[EPUB诊断] 异常堆栈: $st');
       return const EpubBook(title: '未知书名');
     }
   }
@@ -571,6 +627,22 @@ class EpubParser {
     return base.resolve(relativePath).toString();
   }
 
+  /// 整词匹配 properties 中的某个属性值
+  ///
+  /// EPUB 3 的 manifest item properties 是空格分隔的属性列表，
+  /// 例如 "nav cover-image" 或 "svg remote-resources"。
+  /// 用 `contains('nav')` 会误判 `nav-map` 等含 nav 子串的属性，
+  /// 必须用 `\bnav\b` 整词匹配。
+  /// 参考 lumina `_containsWholeWord`。
+  static bool _containsWholeWord(String? value, String word) {
+    if (value == null || value.trim().isEmpty) return false;
+    final pattern = RegExp(
+      '\\b${RegExp.escape(word)}\\b',
+      caseSensitive: false,
+    );
+    return pattern.hasMatch(value);
+  }
+
   /// 解码字节为字符串（优先 UTF-8，后备 Latin-1）
   static String decodeBytes(List<int> data) {
     try {
@@ -605,90 +677,93 @@ class EpubParser {
   ///
   /// [spineIndexByHref]：EPUB 绝对路径 → spine 索引的映射，
   /// 由 [parseFromBytes] 通过 OPF spine + manifest 预先构建。
+  ///
+  /// [baseDir]：NCX 文件自身所在目录（EPUB ZIP 内绝对路径的目录部分），
+  /// 用于解析 NCX 内 `content src` 的相对路径。
+  /// 注意不是 OPF 目录——NCX 文件可能在子目录（如 `OEBPS/toc/toc.ncx`），
+  /// 其 src 是相对 NCX 文件目录解析的。参考 lumina `ncxDir`。
   static List<EpubChapter> _parseNcxToc(
     String ncxXml,
-    String opfBasePath,
+    String baseDir,
     Map<String, int> spineIndexByHref,
   ) {
     try {
-      final doc = html_parser.parse(ncxXml);
-      final navMap = doc.querySelector('navMap');
-      if (navMap == null) return [];
+      // NCX 是 XML 文档（带命名空间 http://www.daisy.org/z3986/2005/ncx/），
+      // 必须用 xml 包解析（html_parser 对 XML 声明+DOCTYPE+命名空间支持差）
+      final doc = xml.XmlDocument.parse(ncxXml);
+      // 查找 navMap（NCX 根元素下的目录容器）
+      // 用 findAllElements 忽略命名空间前缀，按 localName 查找
+      xml.XmlElement? navMap;
+      for (final el in doc.findAllElements('navMap')) {
+        navMap = el;
+        break;
+      }
+      debugPrint('[EPUB诊断-NCX] navMap存在=${navMap != null} baseDir=$baseDir');
+      if (navMap == null) {
+        final preview = ncxXml.length > 500 ? ncxXml.substring(0, 500) : ncxXml;
+        debugPrint('[EPUB诊断-NCX] navMap=null, NCX原文预览: $preview');
+        return [];
+      }
 
-      EpubChapter parseNavPoint(html_dom.Element navPoint, int depth) {
-        // 查找 navLabel > text
-        String? title;
-        html_dom.Element? navLabel;
-        for (final e in navPoint.children) {
-          if (_localName(e) == 'navlabel') {
-            navLabel = e;
-            break;
-          }
-        }
-        if (navLabel != null) {
-          for (final e in navLabel.children) {
-            if (_localName(e) == 'text') {
-              title = e.text.trim();
+      EpubChapter parseNavPoint(xml.XmlElement navPoint, int depth) {
+        // navLabel > text
+        String title = '未命名章节';
+        for (final labelEl in navPoint.findElements('navLabel')) {
+          for (final textEl in labelEl.findElements('text')) {
+            final t = textEl.innerText.trim();
+            if (t.isNotEmpty) {
+              title = t;
               break;
             }
           }
+          break;
         }
 
-        // 查找 content src
-        html_dom.Element? contentEl;
-        for (final e in navPoint.children) {
-          if (_localName(e) == 'content') {
-            contentEl = e;
-            break;
-          }
+        // content src
+        String src = '';
+        for (final contentEl in navPoint.findElements('content')) {
+          src = contentEl.getAttribute('src') ?? '';
+          break;
         }
-        final src = contentEl?.attributes['src'] ?? '';
         final rawHref = src.split('#').first;
-        final href = rawHref.isEmpty ? null : _resolveEpubPath(opfBasePath, rawHref);
+        final href = rawHref.isEmpty ? null : _resolveEpubPath(baseDir, rawHref);
         final anchor = _extractFragmentId(src);
 
-        // 检查子 navPoint
-        final childNavPoints = <html_dom.Element>[];
-        for (final e in navPoint.children) {
-          if (_localName(e) == 'navpoint') {
-            childNavPoints.add(e);
-          }
+        // 递归子 navPoint
+        final children = <EpubChapter>[];
+        for (final child in navPoint.findElements('navPoint')) {
+          children.add(parseNavPoint(child, depth + 1));
         }
 
-        // 递归构建 children
-        final children = childNavPoints
-            .map((c) => parseNavPoint(c, depth + 1))
-            .toList();
-
-        // spineIndex 反查
         final spineIdx = href != null && href.isNotEmpty
             ? (spineIndexByHref[href] ?? -1)
             : -1;
 
         return EpubChapter(
-          index: -1, // 由 flatten 填充
-          title: (title != null && title.isNotEmpty)
-              ? title
-              : '未命名章节',
+          index: -1,
+          title: title,
           href: href,
           anchor: anchor,
           startFragmentId: anchor,
           isVolume: depth == 0 && children.isNotEmpty,
           spineIndex: spineIdx,
           depth: depth,
-          parentId: -1, // 由 flatten 填充
+          parentId: -1,
           children: children,
         );
       }
 
       final tree = <EpubChapter>[];
-      for (final navPoint in navMap.children) {
-        if (_localName(navPoint) == 'navpoint') {
-          tree.add(parseNavPoint(navPoint, 0));
-        }
+      final topNavPoints = navMap.findElements('navPoint').toList();
+      debugPrint('[EPUB诊断-NCX] 顶层navPoint数量=${topNavPoints.length}');
+      for (final navPoint in topNavPoints) {
+        tree.add(parseNavPoint(navPoint, 0));
       }
+      debugPrint('[EPUB诊断-NCX] 解析完成tree节点数=${tree.length}');
       return tree;
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('[EPUB诊断-NCX] 解析异常: $e');
+      debugPrint('[EPUB诊断-NCX] 异常堆栈: $st');
       return [];
     }
   }
@@ -716,100 +791,118 @@ class EpubParser {
   /// - [spineIndex]：通过 [spineIndexByHref] 反查 OPF spine 顺序索引
   /// - [index]/[parentId]：保持 -1，由 [EpubChapter.flatten] 填充
   /// - [isVolume]：顶层且有子节点时为 true（卷头标记）
+  ///
+  /// [baseDir]：NAV 文件自身所在目录（EPUB ZIP 内绝对路径的目录部分），
+  /// 用于解析 NAV 内 `<a href>` 的相对路径。
+  /// 注意不是 OPF 目录——NAV 文件可能在子目录（如 `OEBPS/nav.xhtml`），
+  /// 其 href 是相对 NAV 文件目录解析的。参考 lumina `navDir`。
   static List<EpubChapter> _parseNavToc(
     String navXml,
-    String opfBasePath,
+    String baseDir,
     Map<String, int> spineIndexByHref,
   ) {
     try {
-      final doc = html_parser.parse(navXml);
+      // NAV 是 XHTML（EPUB 3），用 xml 包解析以保留命名空间属性 epub:type
+      final doc = xml.XmlDocument.parse(navXml);
 
       // 查找 TOC nav 元素
-      html_dom.Element? tocNav;
-      for (final nav in doc.querySelectorAll('nav')) {
-        final epubType =
-            nav.attributes['epub:type'] ?? nav.attributes['type'] ?? '';
-        if (epubType.contains('toc')) {
+      // epub:type 是 EPUB 3 的命名空间属性（namespace: http://www.idpf.org/2007/ops）
+      // 三层 fallback 顺序参考 lumina：
+      //   1. 命名空间属性 type（XML 解析后 epub:type 会变成带 namespace 的 type）
+      //   2. 普通属性 epub:type（部分文档未声明命名空间时的兜底）
+      //   3. 普通属性 type（极少见兜底）
+      // 然后用整词匹配 'toc'，避免误判 'toc-brief'/'toc-full' 等含 toc 子串的类型
+      xml.XmlElement? tocNav;
+      final allNavs = doc.findAllElements('nav').toList();
+      debugPrint('[EPUB诊断-NAV] 文档中nav数量=${allNavs.length} baseDir=$baseDir');
+      for (final nav in allNavs) {
+        final epubType = nav.getAttribute(
+              'type',
+              namespaceUri: 'http://www.idpf.org/2007/ops',
+            ) ??
+            nav.getAttribute('epub:type') ??
+            nav.getAttribute('type') ??
+            '';
+        debugPrint('[EPUB诊断-NAV] nav: epub:type=$epubType');
+        if (_containsWholeWord(epubType, 'toc')) {
           tocNav = nav;
           break;
         }
       }
-      tocNav ??= doc.querySelector('nav');
+      // 兜底：取第一个 nav
+      if (tocNav == null && allNavs.isNotEmpty) {
+        tocNav = allNavs.first;
+        debugPrint('[EPUB诊断-NAV] 无epub:type=toc，兜底用第一个nav');
+      }
+      debugPrint('[EPUB诊断-NAV] tocNav存在=${tocNav != null}');
 
-      if (tocNav == null) return [];
+      if (tocNav == null) {
+        final preview = navXml.length > 500 ? navXml.substring(0, 500) : navXml;
+        debugPrint('[EPUB诊断-NAV] 无nav，原文预览: $preview');
+        return [];
+      }
 
-      EpubChapter parseLi(html_dom.Element li, int depth) {
+      EpubChapter parseLi(xml.XmlElement li, int depth) {
         // 查找直接子元素 <a>
-        html_dom.Element? a;
-        for (final child in li.children) {
-          if (_localName(child) == 'a') {
-            a = child;
-            break;
-          }
-        }
-
-        String? title;
+        String title = '未命名章节';
         String? href;
         String? anchor;
-        if (a != null) {
-          title = a.text.trim();
-          final rawHref = a.attributes['href'] ?? '';
+        for (final a in li.findElements('a')) {
+          final t = a.innerText.trim();
+          if (t.isNotEmpty) title = t;
+          final rawHref = a.getAttribute('href') ?? '';
           final rawPath = rawHref.split('#').first;
-          href = rawPath.isEmpty ? null : _resolveEpubPath(opfBasePath, rawPath);
+          href = rawPath.isEmpty ? null : _resolveEpubPath(baseDir, rawPath);
           anchor = _extractFragmentId(rawHref);
+          break;
         }
 
-        // 检查嵌套 <ol>
-        html_dom.Element? nestedOl;
-        for (final child in li.children) {
-          if (_localName(child) == 'ol') {
-            nestedOl = child;
-            break;
-          }
-        }
-
-        // 递归构建 children
+        // 嵌套 <ol>（li > ol > li*）
         final children = <EpubChapter>[];
-        if (nestedOl != null) {
-          for (final childLi in nestedOl.children) {
-            if (_localName(childLi) == 'li') {
-              children.add(parseLi(childLi, depth + 1));
-            }
+        for (final nestedOl in li.findElements('ol')) {
+          for (final childLi in nestedOl.findElements('li')) {
+            children.add(parseLi(childLi, depth + 1));
           }
         }
 
-        // spineIndex 反查
         final spineIdx = href != null && href.isNotEmpty
             ? (spineIndexByHref[href] ?? -1)
             : -1;
 
         return EpubChapter(
-          index: -1, // 由 flatten 填充
-          title: (title != null && title.isNotEmpty)
-              ? title
-              : '未命名章节',
+          index: -1,
+          title: title,
           href: href,
           anchor: anchor,
           startFragmentId: anchor,
           isVolume: depth == 0 && children.isNotEmpty,
           spineIndex: spineIdx,
           depth: depth,
-          parentId: -1, // 由 flatten 填充
+          parentId: -1,
           children: children,
         );
       }
 
       final tree = <EpubChapter>[];
-      final ol = tocNav.querySelector('ol');
+      // 找 tocNav 下的第一个 ol
+      xml.XmlElement? ol;
+      for (final olEl in tocNav.findElements('ol')) {
+        ol = olEl;
+        break;
+      }
+      debugPrint('[EPUB诊断-NAV] 顶层ol存在=${ol != null}');
       if (ol != null) {
-        for (final li in ol.children) {
-          if (_localName(li) == 'li') {
-            tree.add(parseLi(li, 0));
-          }
+        final liList = ol.findElements('li').toList();
+        debugPrint('[EPUB诊断-NAV] 顶层li数量=${liList.length}');
+        for (final li in liList) {
+          tree.add(parseLi(li, 0));
         }
       }
+      debugPrint('[EPUB诊断-NAV] 解析完成tree节点数=${tree.length}');
       return tree;
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('[EPUB诊断-NAV] 解析异常: $e');
+      debugPrint('[EPUB诊断-NAV] 异常堆栈: $st');
       return [];
     }
   }
@@ -1232,17 +1325,21 @@ class EpubParser {
     return result;
   }
 
-  /// 从 EPUB 章节 HTML 中提取 body 内部的 HTML（保留所有标签结构）。
+  /// 从 EPUB 章节 HTML 中提取 body 内部的 HTML（保留所有 HTML5 标签）。
   ///
-  /// 用于富 HTML 渲染：保留 `<p>/<h1>/<img>/<blockquote>/<ul>/<table>` 等
-  /// 标签，让阅读器 WebView 原生渲染 EPUB 排版。
+  /// 用于富 HTML 渲染：完整保留 EPUB 章节的 HTML5 结构，包括
+  /// `<p>/<h1>/<img>/<blockquote>/<ul>/<table>/<svg>/<section>/<article>` 等
+  /// 所有标签，让阅读器 WebView 原生渲染 EPUB 排版。
+  ///
+  /// 不过滤任何标签——HTML5 标准允许 body 内出现 `<style>/<script>` 等，
+  /// EPUB 章节可能内联 `<style>` 控制本章节排版，必须保留。
+  /// `<script>` 由 WebView 沙盒自行决定是否执行（本地 EPUB 无 XSS 风险）。
   ///
   /// 步骤：
-  /// 1. 用 html 包解析，提取 body 元素
-  /// 2. 若没有 body（片段 HTML），返回清理后的原始内容
-  /// 3. 移除 `<script>/<style>/<title>` 等不该出现在正文的标签
-  /// 4. 若有 startFragmentId，截取从该 id 开始的内容
-  /// 5. 返回 body innerHTML
+  /// 1. 用 html 包（HTML5 解析器）解析，提取 body 元素
+  /// 2. 若没有 body（片段 HTML），返回原始内容
+  /// 3. 若有 startFragmentId，截取从该 id 开始的内容
+  /// 4. 返回 body innerHTML
   static String extractBodyContent(
     String html, {
     String? startFragmentId,
@@ -1250,27 +1347,15 @@ class EpubParser {
   }) {
     try {
       final doc = html_parser.parse(html);
-      html_dom.Element? body = doc.body;
+      final body = doc.body;
 
-      String content;
-      if (body != null) {
-        // 移除 script/style/title/link/meta 等非正文标签
-        for (final tag in ['script', 'style', 'title', 'link', 'meta', 'noscript']) {
-          body.querySelectorAll(tag).forEach((e) => e.remove());
-        }
-        content = body.innerHtml;
-      } else {
-        // 片段 HTML：直接清理
-        var text = html;
-        text = _removeTags(text, 'script');
-        text = _removeTags(text, 'style');
-        text = _removeTags(text, 'title');
-        content = text;
-      }
+      // 保留所有 HTML5 标签，包括 <style>/<script>/<svg>/<link> 等
+      // EPUB 章节内联的 <style> 是本章节排版的一部分，必须保留
+      final String content = body != null ? body.innerHtml : html;
 
       // 应用 fragment 切片（NCX/NAV 的 startFragmentId/endFragmentId）
       if (startFragmentId != null || endFragmentId != null) {
-        content = _sliceByFragment(content, startFragmentId, endFragmentId);
+        return _sliceByFragment(content, startFragmentId, endFragmentId).trim();
       }
 
       return content.trim();

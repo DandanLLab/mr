@@ -23,6 +23,14 @@ class ReaderHtmlTemplate {
   ReaderHtmlTemplate._();
 
   /// 生成完整的 HTML 文档
+  ///
+  /// [isRichHtml]：是否为 EPUB 富 HTML 内容。
+  /// - true：content 应为 `[[EPUB_CSS]]<style>...</style>[[/EPUB_CSS]]
+  ///   [[EPUB_BODY]]<p>...</p>[[/EPUB_BODY]]` 包裹格式，由
+  ///   LocalBookService._buildEpubRichContent 生成。
+  ///   解析后 EPUB CSS 注入到 <style>，body HTML 直接放入 #reader-content-a
+  ///   （不走 buildParagraphsHtml 段落包裹，保留 EPUB 原始标签结构）。
+  /// - false（默认）：content 视为纯文本，按行切分成 <p class="reader-p">。
   static String generate({
     required String content,
     required String title,
@@ -33,11 +41,36 @@ class ReaderHtmlTemplate {
     required int pageAnimDurationMs,
     required int pageModeIndex,
     required int chapterIndex,
+    bool isRichHtml = false,
   }) {
     final css = _generateCss(provider, isScrollMode);
     final js = _readerJs();
-    final paragraphsHtml = buildParagraphsHtml(content, provider);
     final titleHtml = buildTitleHtml(title, provider, chapterIndex);
+
+    // 富 HTML（EPUB）：解析 [[EPUB_CSS]]/[[EPUB_BODY]] 包裹格式
+    // - epubCss: EPUB 自带 CSS（注入到 <style>，让 EPUB 排版生效）
+    // - bodyHtml: EPUB 章节正文 HTML（保留 <p>/<h1>/<img>/<blockquote> 等标签）
+    // - 不走 buildParagraphsHtml，避免破坏 EPUB 原始标签结构
+    // - 章节标题仍用 buildTitleHtml 生成（保持阅读器标题样式统一）
+    final String paragraphsHtml;
+    String? epubCss;
+    if (isRichHtml) {
+      final parsed = _parseRichHtmlContent(content);
+      epubCss = parsed.$1;
+      paragraphsHtml = parsed.$2;
+    } else {
+      paragraphsHtml = buildParagraphsHtml(content, provider);
+    }
+
+    // EPUB CSS 追加到主 CSS 之后（优先级高于阅读器默认样式，
+    // 让 EPUB 自带排版生效；但低于 #reader-stage 等布局 CSS 的 !important 规则）
+    // EPUB 富 HTML 模式下内容直接放入 #reader-content-a，不走 .reader-p 包裹，
+    // 所以 .reader-p img 等样式不会作用于 EPUB 内容，需要单独兜底
+    final epubFallbackCss = isRichHtml ? _epubRichHtmlFallbackCss() : '';
+    final fullCss = epubCss != null && epubCss.isNotEmpty
+        ? '$css\n$epubFallbackCss\n/* === EPUB 自带 CSS === */\n$epubCss'
+        : (isRichHtml ? '$css\n$epubFallbackCss' : css);
+
     // 滚动模式：初始章节标题放进 #reader-content-a 内部第一个位置
     // - prependChapter 才能正确插入到初始标题之前，避免顶部出现两个标题
     //   （否则初始标题在 #reader-root 顶部「悬浮」，prepend 的新章节标题在
@@ -60,7 +93,7 @@ class ReaderHtmlTemplate {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="format-detection" content="telephone=no, email=no, address=no">
   <style>
-    $css
+    $fullCss
   </style>
 </head>
 <body>
@@ -95,6 +128,71 @@ class ReaderHtmlTemplate {
 </body>
 </html>
 ''';
+  }
+
+  /// 解析 EPUB 富 HTML 内容的包裹格式
+  ///
+  /// 输入格式（由 LocalBookService._buildEpubRichContent 生成）：
+  /// ```
+  /// [[EPUB_CSS]]<style>...</style>[[/EPUB_CSS]][[EPUB_BODY]]<p>...</p>[[/EPUB_BODY]]
+  /// ```
+  ///
+  /// 返回 (epubCss, epubBody)：
+  /// - epubCss: 提取出的 CSS 文本（已去掉外层 <style> 标签），可能为空字符串
+  /// - epubBody: EPUB 章节正文 HTML（保留原始标签结构）
+  ///
+  /// 容错：
+  /// - 缺少 [[EPUB_CSS]] 块时 epubCss 返回空字符串
+  /// - 缺少 [[EPUB_BODY]] 块时 epubBody 返回原始 content（兜底）
+  /// - 包裹标记格式错误时尝试容错解析，仍失败则返回 (null, content)
+  static (String?, String) _parseRichHtmlContent(String content) {
+    String? epubCss;
+    String epubBody = content;
+
+    try {
+      // 1. 提取 EPUB CSS：[[EPUB_CSS]]...[[/EPUB_CSS]]
+      final cssPattern = RegExp(
+        r'\[\[EPUB_CSS\]\]([\s\S]*?)\[\[/EPUB_CSS\]\]',
+      );
+      final cssMatch = cssPattern.firstMatch(content);
+      if (cssMatch != null) {
+        var cssContent = cssMatch.group(1) ?? '';
+        // 去掉外层 <style>...</style> 包裹（LocalBookService 包了一层）
+        // 仅当首尾完整匹配时才剥离，避免误删
+        final styleWrapper = RegExp(
+          r'^\s*<style[^>]*>([\s\S]*?)</style>\s*$',
+          caseSensitive: false,
+        );
+        final styleMatch = styleWrapper.firstMatch(cssContent);
+        if (styleMatch != null) {
+          cssContent = styleMatch.group(1) ?? '';
+        }
+        epubCss = cssContent.trim();
+      }
+
+      // 2. 提取 EPUB BODY：[[EPUB_BODY]]...[[/EPUB_BODY]]
+      final bodyPattern = RegExp(
+        r'\[\[EPUB_BODY\]\]([\s\S]*?)\[\[/EPUB_BODY\]\]',
+      );
+      final bodyMatch = bodyPattern.firstMatch(content);
+      if (bodyMatch != null) {
+        epubBody = (bodyMatch.group(1) ?? '').trim();
+      } else {
+        // 兜底：没有 [[EPUB_BODY]] 包裹时，去掉 [[EPUB_CSS]] 块后用剩余内容
+        epubBody = content
+            .replaceAll(cssPattern, '')
+            .replaceAll(
+              RegExp(r'\[\[/?EPUB_(?:CSS|BODY)\]\]'),
+              '',
+            )
+            .trim();
+      }
+    } catch (_) {
+      // 解析失败：保持原始 content 作为 body，不注入 CSS
+      return (null, content);
+    }
+
+    return (epubCss, epubBody);
   }
 
   /// 生成完整 CSS
@@ -470,6 +568,109 @@ body.reader-scroll #reader-content-b {
   display: none;
   width: 0;
   height: 0;
+}
+''';
+  }
+
+  /// EPUB 富 HTML 模式下的兜底 CSS
+  ///
+  /// EPUB 章节内容直接放入 #reader-content-a，不走 .reader-p 段落包裹，
+  /// 所以阅读器针对 .reader-p 的样式（如 .reader-p img）不会作用于 EPUB 内容。
+  /// 此方法提供 HTML5 标签的合理默认渲染：
+  /// - 块级元素留合理间距（p/blockquote/h*/ul/ol/table 等）
+  /// - 图片、SVG、表格不溢出容器
+  /// - sup/sub/ruby 等 HTML5 内联标签保留原生样式
+  /// - 链接颜色与主题协调
+  ///
+  /// 兜底 CSS 在 EPUB 自带 CSS 之前，EPUB CSS 可覆盖这些默认值。
+  /// WebView user agent 样式表优先级最低，作者 CSS（含本兜底）都会覆盖它。
+  static String _epubRichHtmlFallbackCss() {
+    return '''
+/* === EPUB 富 HTML 兜底 CSS === */
+#reader-content-a img,
+#reader-content-a svg,
+#reader-content-a video,
+#reader-content-a canvas {
+  max-width: 100%;
+  height: auto;
+}
+#reader-content-a table {
+  max-width: 100%;
+  border-collapse: collapse;
+  word-break: break-word;
+}
+#reader-content-a p {
+  margin: 0 0 var(--reader-paragraph-spacing) 0;
+  text-align: justify;
+  text-indent: var(--reader-text-indent);
+  word-break: break-word;
+  overflow-wrap: break-word;
+  font-weight: var(--reader-text-weight);
+}
+#reader-content-a p:last-child { margin-bottom: 0; }
+#reader-content-a h1,
+#reader-content-a h2,
+#reader-content-a h3,
+#reader-content-a h4,
+#reader-content-a h5,
+#reader-content-a h6 {
+  margin: 1em 0 0.5em;
+  font-weight: bold;
+  line-height: var(--reader-line-height);
+}
+#reader-content-a blockquote {
+  margin: 0 0 var(--reader-paragraph-spacing) 0;
+  padding: 0 1em;
+  border-left: 3px solid currentColor;
+  opacity: 0.85;
+}
+#reader-content-a ul,
+#reader-content-a ol {
+  margin: 0 0 var(--reader-paragraph-spacing) 0;
+  padding-left: 1.5em;
+}
+#reader-content-a li { margin: 0.2em 0; }
+#reader-content-a hr {
+  border: none;
+  border-top: 1px solid currentColor;
+  opacity: 0.3;
+  margin: 1em 0;
+}
+#reader-content-a a {
+  color: var(--reader-text-color);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+/* sup/sub/ruby 等 HTML5 内联标签：保留原生样式
+   WebView user agent 默认已渲染，此处显式声明避免被重置 */
+#reader-content-a sup {
+  vertical-align: super;
+  font-size: smaller;
+  line-height: 0;
+}
+#reader-content-a sub {
+  vertical-align: sub;
+  font-size: smaller;
+  line-height: 0;
+}
+#reader-content-a ruby { ruby-position: over; }
+#reader-content-a rt { font-size: smaller; }
+#reader-content-a mark {
+  background-color: rgba(255, 235, 59, 0.4);
+  color: inherit;
+}
+#reader-content-a code,
+#reader-content-a pre {
+  font-family: monospace;
+  font-size: 0.9em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+#reader-content-a pre {
+  margin: 0 0 var(--reader-paragraph-spacing) 0;
+  padding: 0.5em;
+  background-color: rgba(128, 128, 128, 0.1);
+  border-radius: 4px;
 }
 ''';
   }
