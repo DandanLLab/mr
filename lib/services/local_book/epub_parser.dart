@@ -262,17 +262,34 @@ class EpubParser {
         }
       }
 
-      // 5. 解析 manifest
-      final manifestElement = opfDoc.querySelector('manifest');
+      // 5-6. 用 xml 包解析 manifest 和 spine
+      //
+      // 注意：必须用 xml 包解析 OPF，不能用 html_parser。
+      // OPF 是 XML 文件，<item .../> 和 <itemref .../> 是自闭合标签。
+      // html_parser 是 HTML5 解析器，不认识 XML 自闭合写法
+      // （HTML5 中只有 void 元素如 <img/> 才自闭合），
+      // 会把 <itemref idref="ch1"/> 当作 <itemref idref="ch1"> 开始标签，
+      // 后续 <itemref> 会被嵌套在第一个 itemref 内部，导致只解析出 1 项。
+      // xml 包能正确解析 XML 自闭合标签。
       final manifest = <String, ManifestItem>{};
+      final spine = <String>[];
+      String? tocId;
 
-      if (manifestElement != null) {
-        for (final child in manifestElement.children) {
-          if (_localName(child) == 'item') {
-            final id = child.attributes['id'] ?? '';
-            final href = child.attributes['href'] ?? '';
-            final mediaType = child.attributes['media-type'] ?? '';
-            final properties = child.attributes['properties'];
+      try {
+        final xmlDoc = xml.XmlDocument.parse(decodeBytes(opfData));
+
+        // 5. 解析 manifest
+        xml.XmlElement? xmlManifest;
+        for (final el in xmlDoc.findAllElements('manifest')) {
+          xmlManifest = el;
+          break;
+        }
+        if (xmlManifest != null) {
+          for (final child in xmlManifest.findElements('item')) {
+            final id = child.getAttribute('id') ?? '';
+            final href = child.getAttribute('href') ?? '';
+            final mediaType = child.getAttribute('media-type') ?? '';
+            final properties = child.getAttribute('properties');
             if (id.isNotEmpty && href.isNotEmpty) {
               manifest[id] = ManifestItem(
                 id: id,
@@ -283,23 +300,26 @@ class EpubParser {
             }
           }
         }
-      }
+        debugPrint('[EPUB诊断-OPF] manifest解析: ${manifest.length} 项');
 
-      // 6. 解析 spine
-      final spineElement = opfDoc.querySelector('spine');
-      final spine = <String>[];
-      String? tocId;
-
-      if (spineElement != null) {
-        tocId = spineElement.attributes['toc'];
-        for (final child in spineElement.children) {
-          if (_localName(child) == 'itemref') {
-            final idref = child.attributes['idref'];
+        // 6. 解析 spine
+        xml.XmlElement? xmlSpine;
+        for (final el in xmlDoc.findAllElements('spine')) {
+          xmlSpine = el;
+          break;
+        }
+        if (xmlSpine != null) {
+          tocId = xmlSpine.getAttribute('toc');
+          for (final child in xmlSpine.findElements('itemref')) {
+            final idref = child.getAttribute('idref');
             if (idref != null) {
               spine.add(idref);
             }
           }
         }
+        debugPrint('[EPUB诊断-OPF] spine解析: ${spine.length} 项, tocId=$tocId');
+      } catch (e) {
+        debugPrint('[EPUB诊断-OPF] xml包解析异常: $e');
       }
 
       // 7. 查找封面路径
