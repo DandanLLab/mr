@@ -4,15 +4,67 @@ import 'package:archive/archive.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart' as html_dom;
 
+/// EPUB 图片资源（被 LocalBookService 用来把 EPUB 内部图片转 data URI）
+class EpubResource {
+  final String path;
+  final String mediaType;
+  final Uint8List bytes;
+
+  const EpubResource({
+    required this.path,
+    required this.mediaType,
+    required this.bytes,
+  });
+}
+
 class EpubChapter {
+  /// 扁平列表中的序号（DFS 遍历顺序，用于阅读器按 index 切换章节）
   final int index;
   final String title;
+
+  /// 章节文件路径（已解析为 EPUB ZIP 内绝对路径，不含锚点）
+  /// 例如 "OEBPS/Text/chapter1.xhtml"
   final String? href;
+
+  /// 章节原始 HTML 内容（从 EPUB ZIP 中读取）
   String? content;
+
+  /// 章节起始锚点（NCX/NAV 中 href 的 # 后部分）
+  /// 与 [anchor] 同义，保留是为了向后兼容
   final String? startFragmentId;
+
+  /// 章节结束锚点（下一个章节的 startFragmentId）
   String? endFragmentId;
+
+  /// 下一章节的 href（用于阅读器翻页预加载）
   String? nextUrl;
+
+  /// 是否为卷头（顶层且有子节点，用于目录折叠展示）
   final bool isVolume;
+
+  // ===== 树状目录支持字段 =====
+  // 参考 lumina TocItem 设计，支持多级嵌套目录
+  // 现有 UI 仍用扁平 chapters + isVolume 展示，这些字段为未来树状 UI 铺路
+
+  /// 章节内锚点（从 href 中分离的 # 后部分）
+  /// 例如 href="chap1.xhtml#section2" → anchor="section2"
+  /// 等同于 startFragmentId，但语义更清晰
+  final String? anchor;
+
+  /// 对应 OPF spine 的顺序索引（-1 表示无对应，例如纯分组节点）
+  /// 用于精确计算阅读进度（按 spine 项数计算总进度）
+  final int spineIndex;
+
+  /// 嵌套层级（0=顶层，1=第一层子节点，2=第二层...）
+  /// 用于树状目录缩进展示
+  final int depth;
+
+  /// 父节点 index（-1=顶层，否则为父节点在扁平列表中的 index）
+  final int parentId;
+
+  /// 子节点列表（树状目录结构）
+  /// 扁平 chapters 中此字段为空，仅 tocTree 中的节点有 children
+  final List<EpubChapter> children;
 
   EpubChapter({
     required this.index,
@@ -23,7 +75,54 @@ class EpubChapter {
     this.endFragmentId,
     this.nextUrl,
     this.isVolume = false,
+    this.anchor,
+    this.spineIndex = -1,
+    this.depth = 0,
+    this.parentId = -1,
+    this.children = const [],
   });
+
+  /// 把树状目录扁平化为列表（DFS 遍历顺序）
+  ///
+  /// 用于把 tocTree 转换为 chapters（阅读器按 index 切换）。
+  /// 扁平化过程中同步填充每个节点的 [index]（DFS 序号）和 [parentId]
+  /// （父节点在扁平列表中的 index，顶层为 -1）。
+  ///
+  /// 注意：返回的是新构造的节点列表（原 tree 中节点保持不变），
+  /// 但 children 引用仍指向原 tocTree 的子节点，方便需要树状遍历的场景。
+  /// UI 展示扁平列表时通常用 parentId 重建树。
+  static List<EpubChapter> flatten(List<EpubChapter> tree) {
+    final result = <EpubChapter>[];
+
+    void walk(EpubChapter node, int parentId) {
+      final index = result.length;
+      // 重建节点填充 index 和 parentId（其他字段保留原值）
+      final newNode = EpubChapter(
+        index: index,
+        title: node.title,
+        href: node.href,
+        content: node.content,
+        startFragmentId: node.startFragmentId,
+        endFragmentId: node.endFragmentId,
+        nextUrl: node.nextUrl,
+        isVolume: node.isVolume,
+        anchor: node.anchor,
+        spineIndex: node.spineIndex,
+        depth: node.depth,
+        parentId: parentId,
+        children: node.children,
+      );
+      result.add(newNode);
+      for (final child in node.children) {
+        walk(child, index);
+      }
+    }
+
+    for (final item in tree) {
+      walk(item, -1);
+    }
+    return result;
+  }
 }
 
 class EpubBook {
@@ -31,7 +130,14 @@ class EpubBook {
   final String? author;
   final String? description;
   final String? coverPath;
+
+  /// 扁平章节列表（DFS 遍历顺序，阅读器按 index 切换章节用）
   final List<EpubChapter> chapters;
+
+  /// 树状目录结构（保留原始嵌套层级，目录页展示用）
+  /// chapters 是此树扁平化后的结果
+  final List<EpubChapter> tocTree;
+
   final String? language;
 
   const EpubBook({
@@ -40,6 +146,7 @@ class EpubBook {
     this.description,
     this.coverPath,
     this.chapters = const [],
+    this.tocTree = const [],
     this.language,
   });
 }
@@ -195,9 +302,26 @@ class EpubParser {
       }
 
       // 8. 解析目录
-      List<EpubChapter> chapters = [];
+      //
+      // 整体流程：
+      // 1) 构建 spineIndexByHref 映射：EPUB 绝对路径 → spine 顺序索引
+      //    用于后续给 EpubChapter.spineIndex 字段填充
+      // 2) 优先尝试 NCX（EPUB 2）→ 失败则尝试 NAV（EPUB 3）→ 失败用 spine 兜底
+      // 3) NCX/NAV 返回的是树状结构（tocTree），通过 EpubChapter.flatten 扁平化为 chapters
+      // 4) spine 兜底直接构造扁平 chapters（无嵌套，tocTree 为空）
 
-      // 查找 NCX 目录
+      // 8.1 构建 spineIndexByHref 映射
+      final spineIndexByHref = <String, int>{};
+      for (int i = 0; i < spine.length; i++) {
+        final idref = spine[i];
+        if (manifest.containsKey(idref)) {
+          final item = manifest[idref]!;
+          final resolvedHref = _resolveEpubPath(opfBasePath, item.href);
+          spineIndexByHref[resolvedHref] = i;
+        }
+      }
+
+      // 8.2 查找 NCX 目录
       String? ncxHref;
       if (tocId != null && manifest.containsKey(tocId)) {
         final tocItem = manifest[tocId]!;
@@ -216,7 +340,7 @@ class EpubParser {
         }
       }
 
-      // 查找 NAV 目录
+      // 8.3 查找 NAV 目录
       String? navHref;
       for (final item in manifest.values) {
         if (item.mediaType == 'application/xhtml+xml' &&
@@ -227,26 +351,40 @@ class EpubParser {
         }
       }
 
-      // 优先尝试 NCX
+      // 8.4 优先尝试 NCX → NAV → spine 兜底
+      List<EpubChapter> tocTree = [];
+      List<EpubChapter> chapters;
+
       if (ncxHref != null) {
         final ncxPath = _resolveEpubPath(opfBasePath, ncxHref);
         final ncxData = files[ncxPath];
         if (ncxData != null) {
-          chapters = _parseNcxToc(decodeBytes(ncxData), opfBasePath);
+          tocTree = _parseNcxToc(
+            decodeBytes(ncxData),
+            opfBasePath,
+            spineIndexByHref,
+          );
         }
       }
 
-      // NCX 没有结果则尝试 NAV
-      if (chapters.isEmpty && navHref != null) {
+      if (tocTree.isEmpty && navHref != null) {
         final navPath = _resolveEpubPath(opfBasePath, navHref);
         final navData = files[navPath];
         if (navData != null) {
-          chapters = _parseNavToc(decodeBytes(navData), opfBasePath);
+          tocTree = _parseNavToc(
+            decodeBytes(navData),
+            opfBasePath,
+            spineIndexByHref,
+          );
         }
       }
 
-      // 后备：使用 spine 条目
-      if (chapters.isEmpty) {
+      if (tocTree.isNotEmpty) {
+        // NCX/NAV 解析成功：扁平化得到 chapters
+        chapters = EpubChapter.flatten(tocTree);
+      } else {
+        // 后备：使用 spine 条目直接构造扁平 chapters（无嵌套）
+        chapters = [];
         for (final idref in spine) {
           if (manifest.containsKey(idref)) {
             final item = manifest[idref]!;
@@ -257,10 +395,12 @@ class EpubParser {
             }
             final href = _resolveEpubPath(opfBasePath, item.href);
             final index = chapters.length;
+            final spineIdx = spineIndexByHref[href] ?? -1;
             chapters.add(EpubChapter(
               index: index,
               title: index == 0 ? '封面' : '第$index章',
               href: href,
+              spineIndex: spineIdx,
             ));
           }
         }
@@ -277,8 +417,12 @@ class EpubParser {
         }
       }
 
-      // 设置 nextUrl
+      // 10. 设置 endFragmentId 和 nextUrl（基于扁平 chapters 顺序）
+      // - endFragmentId：当前章节的结束锚点 = 下一章节的 startFragmentId
+      //   （同一 xhtml 文件内多个 anchor 切片时用于界定章节边界）
+      // - nextUrl：下一章节的 href（阅读器翻页预加载用）
       for (int i = 0; i < chapters.length - 1; i++) {
+        chapters[i].endFragmentId = chapters[i + 1].startFragmentId;
         chapters[i].nextUrl = chapters[i + 1].href;
       }
 
@@ -288,6 +432,7 @@ class EpubParser {
         description: description,
         coverPath: coverPath,
         chapters: chapters,
+        tocTree: tocTree,
         language: language,
       );
     } catch (e) {
@@ -429,16 +574,42 @@ class EpubParser {
     }
   }
 
-  /// 解析 NCX 格式目录
+  /// 解析 NCX 格式目录为树状结构
+  ///
+  /// NCX 的 navMap > navPoint 是天然树状嵌套结构：
+  /// ```
+  /// <navMap>
+  ///   <navPoint>
+  ///     <navLabel><text>卷一</text></navLabel>
+  ///     <content src="chapter1.xhtml"/>
+  ///     <navPoint>  <!-- 嵌套子节点 -->
+  ///       <navLabel><text>第一章</text></navLabel>
+  ///       <content src="chapter1.xhtml#section1"/>
+  ///     </navPoint>
+  ///   </navPoint>
+  /// </navMap>
+  /// ```
+  ///
+  /// 返回 [List<EpubChapter>] 树状结构（顶层节点列表）。
+  /// - [depth]：嵌套层级，0=顶层
+  /// - [anchor]：从 href 中分离的 # 后部分
+  /// - [spineIndex]：通过 [spineIndexByHref] 反查 OPF spine 顺序索引
+  /// - [index]/[parentId]：保持 -1，由 [EpubChapter.flatten] 填充
+  /// - [isVolume]：顶层且有子节点时为 true（卷头标记）
+  ///
+  /// [spineIndexByHref]：EPUB 绝对路径 → spine 索引的映射，
+  /// 由 [parseFromBytes] 通过 OPF spine + manifest 预先构建。
   static List<EpubChapter> _parseNcxToc(
-      String ncxXml, String opfBasePath) {
-    final chapters = <EpubChapter>[];
+    String ncxXml,
+    String opfBasePath,
+    Map<String, int> spineIndexByHref,
+  ) {
     try {
       final doc = html_parser.parse(ncxXml);
       final navMap = doc.querySelector('navMap');
-      if (navMap == null) return chapters;
+      if (navMap == null) return [];
 
-      void parseNavPoint(html_dom.Element navPoint, bool isTopLevel) {
+      EpubChapter parseNavPoint(html_dom.Element navPoint, int depth) {
         // 查找 navLabel > text
         String? title;
         html_dom.Element? navLabel;
@@ -466,9 +637,9 @@ class EpubParser {
           }
         }
         final src = contentEl?.attributes['src'] ?? '';
-        var href = src.split('#').first;
-        href = _resolveEpubPath(opfBasePath, href);
-        final startFragmentId = _extractFragmentId(src);
+        final rawHref = src.split('#').first;
+        final href = rawHref.isEmpty ? null : _resolveEpubPath(opfBasePath, rawHref);
+        final anchor = _extractFragmentId(src);
 
         // 检查子 navPoint
         final childNavPoints = <html_dom.Element>[];
@@ -478,40 +649,72 @@ class EpubParser {
           }
         }
 
-        if (chapters.isNotEmpty) {
-          chapters.last.endFragmentId = startFragmentId;
-        }
+        // 递归构建 children
+        final children = childNavPoints
+            .map((c) => parseNavPoint(c, depth + 1))
+            .toList();
 
-        chapters.add(EpubChapter(
-          index: chapters.length,
+        // spineIndex 反查
+        final spineIdx = href != null && href.isNotEmpty
+            ? (spineIndexByHref[href] ?? -1)
+            : -1;
+
+        return EpubChapter(
+          index: -1, // 由 flatten 填充
           title: (title != null && title.isNotEmpty)
               ? title
-              : '第${chapters.length + 1}章',
+              : '未命名章节',
           href: href,
-          startFragmentId: startFragmentId,
-          isVolume: isTopLevel && childNavPoints.isNotEmpty,
-        ));
-
-        for (final child in childNavPoints) {
-          parseNavPoint(child, false);
-        }
+          anchor: anchor,
+          startFragmentId: anchor,
+          isVolume: depth == 0 && children.isNotEmpty,
+          spineIndex: spineIdx,
+          depth: depth,
+          parentId: -1, // 由 flatten 填充
+          children: children,
+        );
       }
 
+      final tree = <EpubChapter>[];
       for (final navPoint in navMap.children) {
         if (_localName(navPoint) == 'navpoint') {
-          parseNavPoint(navPoint, true);
+          tree.add(parseNavPoint(navPoint, 0));
         }
       }
+      return tree;
     } catch (e) {
-      // 返回已解析的部分
+      return [];
     }
-    return chapters;
   }
 
-  /// 解析 NAV 格式目录
+  /// 解析 NAV 格式目录为树状结构
+  ///
+  /// EPUB 3 的 NAV 目录是 HTML5 的 <nav epub:type="toc"> + 嵌套 <ol>/<li>：
+  /// ```
+  /// <nav epub:type="toc">
+  ///   <ol>
+  ///     <li>
+  ///       <a href="chapter1.xhtml">卷一</a>
+  ///       <ol>  <!-- 嵌套子列表 -->
+  ///         <li><a href="chapter1.xhtml#sec1">第一章</a></li>
+  ///       </ol>
+  ///     </li>
+  ///   </ol>
+  /// </nav>
+  /// ```
+  ///
+  /// 返回 [List<EpubChapter>] 树状结构（顶层节点列表）。
+  /// 字段填充逻辑与 [_parseNcxToc] 一致：
+  /// - [depth]：嵌套层级，0=顶层
+  /// - [anchor]：从 href 中分离的 # 后部分
+  /// - [spineIndex]：通过 [spineIndexByHref] 反查 OPF spine 顺序索引
+  /// - [index]/[parentId]：保持 -1，由 [EpubChapter.flatten] 填充
+  /// - [isVolume]：顶层且有子节点时为 true（卷头标记）
   static List<EpubChapter> _parseNavToc(
-      String navXml, String opfBasePath) {
-    final chapters = <EpubChapter>[];
+    String navXml,
+    String opfBasePath,
+    Map<String, int> spineIndexByHref,
+  ) {
     try {
       final doc = html_parser.parse(navXml);
 
@@ -527,64 +730,82 @@ class EpubParser {
       }
       tocNav ??= doc.querySelector('nav');
 
-      if (tocNav == null) return chapters;
+      if (tocNav == null) return [];
 
-      void parseOl(html_dom.Element ol, bool isTopLevel) {
-        for (final li in ol.children) {
-          if (_localName(li) != 'li') continue;
-
-          // 查找直接子元素 <a>
-          html_dom.Element? a;
-          for (final child in li.children) {
-            if (_localName(child) == 'a') {
-              a = child;
-              break;
-            }
+      EpubChapter parseLi(html_dom.Element li, int depth) {
+        // 查找直接子元素 <a>
+        html_dom.Element? a;
+        for (final child in li.children) {
+          if (_localName(child) == 'a') {
+            a = child;
+            break;
           }
+        }
 
-          if (a != null) {
-            final href = a.attributes['href'] ?? '';
-            final title = a.text.trim();
-            final startFragmentId = _extractFragmentId(href);
-            final resolvedHref =
-                _resolveEpubPath(opfBasePath, href.split('#').first);
+        String? title;
+        String? href;
+        String? anchor;
+        if (a != null) {
+          title = a.text.trim();
+          final rawHref = a.attributes['href'] ?? '';
+          final rawPath = rawHref.split('#').first;
+          href = rawPath.isEmpty ? null : _resolveEpubPath(opfBasePath, rawPath);
+          anchor = _extractFragmentId(rawHref);
+        }
 
-            // 检查嵌套 <ol>
-            html_dom.Element? nestedOl;
-            for (final child in li.children) {
-              if (_localName(child) == 'ol') {
-                nestedOl = child;
-                break;
-              }
-            }
+        // 检查嵌套 <ol>
+        html_dom.Element? nestedOl;
+        for (final child in li.children) {
+          if (_localName(child) == 'ol') {
+            nestedOl = child;
+            break;
+          }
+        }
 
-            if (chapters.isNotEmpty) {
-              chapters.last.endFragmentId = startFragmentId;
-            }
-
-            chapters.add(EpubChapter(
-              index: chapters.length,
-              title: title.isNotEmpty ? title : '第${chapters.length + 1}章',
-              href: resolvedHref,
-              startFragmentId: startFragmentId,
-              isVolume: isTopLevel && nestedOl != null,
-            ));
-
-            if (nestedOl != null) {
-              parseOl(nestedOl, false);
+        // 递归构建 children
+        final children = <EpubChapter>[];
+        if (nestedOl != null) {
+          for (final childLi in nestedOl.children) {
+            if (_localName(childLi) == 'li') {
+              children.add(parseLi(childLi, depth + 1));
             }
           }
         }
+
+        // spineIndex 反查
+        final spineIdx = href != null && href.isNotEmpty
+            ? (spineIndexByHref[href] ?? -1)
+            : -1;
+
+        return EpubChapter(
+          index: -1, // 由 flatten 填充
+          title: (title != null && title.isNotEmpty)
+              ? title
+              : '未命名章节',
+          href: href,
+          anchor: anchor,
+          startFragmentId: anchor,
+          isVolume: depth == 0 && children.isNotEmpty,
+          spineIndex: spineIdx,
+          depth: depth,
+          parentId: -1, // 由 flatten 填充
+          children: children,
+        );
       }
 
+      final tree = <EpubChapter>[];
       final ol = tocNav.querySelector('ol');
       if (ol != null) {
-        parseOl(ol, true);
+        for (final li in ol.children) {
+          if (_localName(li) == 'li') {
+            tree.add(parseLi(li, 0));
+          }
+        }
       }
+      return tree;
     } catch (e) {
-      // 返回已解析的部分
+      return [];
     }
-    return chapters;
   }
 
   // ===== 以下为原有方法，保持不变 =====
@@ -1003,6 +1224,125 @@ class EpubParser {
     }
 
     return result;
+  }
+
+  /// 从 EPUB 章节 HTML 中提取 body 内部的 HTML（保留所有标签结构）。
+  ///
+  /// 用于富 HTML 渲染：保留 `<p>/<h1>/<img>/<blockquote>/<ul>/<table>` 等
+  /// 标签，让阅读器 WebView 原生渲染 EPUB 排版。
+  ///
+  /// 步骤：
+  /// 1. 用 html 包解析，提取 body 元素
+  /// 2. 若没有 body（片段 HTML），返回清理后的原始内容
+  /// 3. 移除 `<script>/<style>/<title>` 等不该出现在正文的标签
+  /// 4. 若有 startFragmentId，截取从该 id 开始的内容
+  /// 5. 返回 body innerHTML
+  static String extractBodyContent(
+    String html, {
+    String? startFragmentId,
+    String? endFragmentId,
+  }) {
+    try {
+      final doc = html_parser.parse(html);
+      html_dom.Element? body = doc.body;
+
+      String content;
+      if (body != null) {
+        // 移除 script/style/title/link/meta 等非正文标签
+        for (final tag in ['script', 'style', 'title', 'link', 'meta', 'noscript']) {
+          body.querySelectorAll(tag).forEach((e) => e.remove());
+        }
+        content = body.innerHtml;
+      } else {
+        // 片段 HTML：直接清理
+        var text = html;
+        text = _removeTags(text, 'script');
+        text = _removeTags(text, 'style');
+        text = _removeTags(text, 'title');
+        content = text;
+      }
+
+      // 应用 fragment 切片（NCX/NAV 的 startFragmentId/endFragmentId）
+      if (startFragmentId != null || endFragmentId != null) {
+        content = _sliceByFragment(content, startFragmentId, endFragmentId);
+      }
+
+      return content.trim();
+    } catch (_) {
+      return html;
+    }
+  }
+
+  /// 按 fragment id 切片 HTML 内容
+  static String _sliceByFragment(String html, String? startId, String? endId) {
+    if (startId == null && endId == null) return html;
+    var result = html;
+
+    if (startId != null) {
+      // 匹配 id="xxx" 或 id='xxx'
+      final pattern = RegExp(
+        'id=["\']${RegExp.escape(startId)}["\']',
+        caseSensitive: false,
+      );
+      final match = pattern.firstMatch(result);
+      if (match != null) {
+        result = result.substring(match.start);
+      }
+    }
+
+    if (endId != null && endId != startId) {
+      final pattern = RegExp(
+        'id=["\']${RegExp.escape(endId)}["\']',
+        caseSensitive: false,
+      );
+      final match = pattern.firstMatch(result);
+      if (match != null) {
+        result = result.substring(0, match.start);
+      }
+    }
+
+    return result;
+  }
+
+  /// 把字节编码为 data URI（用于内嵌图片/字体到 HTML）
+  ///
+  /// [mediaType] 例如 'image/jpeg'、'image/png'、'font/ttf'
+  /// 返回 'data:image/jpeg;base64,...'
+  static String encodeBytesAsDataUri(Uint8List bytes, String mediaType) {
+    final b64 = base64Encode(bytes);
+    return 'data:$mediaType;base64,$b64';
+  }
+
+  /// 根据文件扩展名推断 MIME 类型
+  static String inferMediaType(String path) {
+    final ext = path.split('.').last.toLowerCase();
+    switch (ext) {
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'gif':
+        return 'image/gif';
+      case 'svg':
+        return 'image/svg+xml';
+      case 'webp':
+        return 'image/webp';
+      case 'bmp':
+        return 'image/bmp';
+      case 'ttf':
+        return 'font/ttf';
+      case 'otf':
+        return 'font/otf';
+      case 'woff':
+        return 'font/woff';
+      case 'woff2':
+        return 'font/woff2';
+      case 'css':
+        return 'text/css';
+      default:
+        return 'application/octet-stream';
+    }
   }
 
   static String _removeTags(String html, String tagName) {
