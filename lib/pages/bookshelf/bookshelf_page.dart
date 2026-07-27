@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -2081,26 +2082,69 @@ class _BookshelfPageState extends State<BookshelfPage>
 
   void _selectFiles() async {
     try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.platform.pickFiles(
         allowMultiple: true,
         type: FileType.custom,
         allowedExtensions: ['txt', 'epub', 'pdf'],
       );
-      if (result != null) {
-        int successCount = 0;
-        for (final file in result.files) {
-          if (file.path != null) {
-            final book = await LocalBookService.instance.importFile(file.path!);
-            if (book != null) {
-              await context.read<BookshelfProvider>().addToBookshelf(book);
-              successCount++;
-            }
-          }
+      if (result == null || result.files.isEmpty) return;
+
+      // 创建进度控制器，显示导入日志对话框
+      final controller = ImportProgressController();
+      final totalCount = result.files.length;
+
+      // 显示进度对话框
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => _ImportProgressDialog(
+          controller: controller,
+          totalCount: totalCount,
+        ),
+      );
+
+      int successCount = 0;
+      int failedCount = 0;
+
+      for (int i = 0; i < result.files.length; i++) {
+        final file = result.files[i];
+        if (file.path == null) continue;
+
+        controller.add(ImportLogEntry(
+          message: '=== (${i + 1}/$totalCount) ===',
+          level: ImportLogLevel.info,
+        ));
+
+        final book = await LocalBookService.instance.importFileWithProgress(
+          file.path!,
+          controller: controller,
+        );
+
+        if (book != null) {
+          await context.read<BookshelfProvider>().addToBookshelf(book);
+          successCount++;
+        } else {
+          failedCount++;
         }
-        if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('已导入 $successCount 本书籍')));
+      }
+
+      controller.add(ImportLogEntry(
+        message: '导入完成：成功 $successCount 本，失败 $failedCount 本',
+        level: failedCount > 0 ? ImportLogLevel.warning : ImportLogLevel.success,
+      ));
+
+      // 延迟关闭对话框，让用户看到最后一条日志
+      await Future.delayed(const Duration(milliseconds: 800));
+      controller.close();
+
+      if (!mounted) return;
+      Navigator.of(context).pop();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已导入 $successCount 本书籍')),
+        );
       }
     } catch (e) {
       if (!mounted) return;
@@ -2659,6 +2703,188 @@ class _BookshelfPageState extends State<BookshelfPage>
           ),
         ],
       ),
+    );
+  }
+}
+
+/// EPUB 导入进度对话框
+///
+/// 参考 lumina ImportProgressDialog 设计：
+/// - 订阅 ImportProgressController 的日志流
+/// - 实时显示导入进度和解析日志
+/// - 支持成功/警告/错误/信息四种日志级别，颜色区分
+class _ImportProgressDialog extends StatefulWidget {
+  final ImportProgressController controller;
+  final int totalCount;
+
+  const _ImportProgressDialog({
+    required this.controller,
+    required this.totalCount,
+  });
+
+  @override
+  State<_ImportProgressDialog> createState() => _ImportProgressDialogState();
+}
+
+class _ImportProgressDialogState extends State<_ImportProgressDialog> {
+  final List<ImportLogEntry> _logs = [];
+  final ScrollController _scrollController = ScrollController();
+  StreamSubscription<ImportLogEntry>? _sub;
+  int _successCount = 0;
+  int _failedCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = widget.controller.stream.listen((entry) {
+      if (!mounted) return;
+      setState(() {
+        _logs.add(entry);
+        if (entry.level == ImportLogLevel.success) {
+          _successCount++;
+        } else if (entry.level == ImportLogLevel.error) {
+          _failedCount++;
+        }
+      });
+      // 自动滚动到底部
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 100),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Color _logColor(ImportLogLevel level) {
+    switch (level) {
+      case ImportLogLevel.success:
+        return Colors.green;
+      case ImportLogLevel.error:
+        return Colors.red;
+      case ImportLogLevel.warning:
+        return Colors.orange;
+      case ImportLogLevel.info:
+        return Theme.of(context).textTheme.bodySmall?.color ?? Colors.black54;
+    }
+  }
+
+  IconData _logIcon(ImportLogLevel level) {
+    switch (level) {
+      case ImportLogLevel.success:
+        return Icons.check_circle;
+      case ImportLogLevel.error:
+        return Icons.error;
+      case ImportLogLevel.warning:
+        return Icons.warning;
+      case ImportLogLevel.info:
+        return Icons.info;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final processing = _successCount + _failedCount < widget.totalCount;
+    final progress = widget.totalCount > 0
+        ? (_successCount + _failedCount) / widget.totalCount
+        : 0.0;
+
+    return AlertDialog(
+      title: Row(
+        children: [
+          Icon(processing ? Icons.downloading : Icons.check_circle,
+              color: processing ? Colors.blue : Colors.green),
+          const SizedBox(width: 8),
+          Text(processing ? '导入中...' : '导入完成'),
+          const Spacer(),
+          Text(
+            '${_successCount + _failedCount}/${widget.totalCount}',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: double.maxFinite,
+        height: 400,
+        child: Column(
+          children: [
+            // 进度条
+            LinearProgressIndicator(
+              value: processing ? progress : 1.0,
+              backgroundColor: Colors.grey.shade200,
+            ),
+            const SizedBox(height: 8),
+            // 统计信息
+            Row(
+              children: [
+                Text('成功 $_successCount',
+                    style: const TextStyle(color: Colors.green, fontSize: 12)),
+                const SizedBox(width: 16),
+                Text('失败 $_failedCount',
+                    style: const TextStyle(color: Colors.red, fontSize: 12)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Divider(height: 1),
+            const SizedBox(height: 8),
+            // 日志列表
+            Expanded(
+              child: ListView.builder(
+                controller: _scrollController,
+                itemCount: _logs.length,
+                itemBuilder: (ctx, i) {
+                  final log = _logs[i];
+                  final time = '${log.timestamp.hour.toString().padLeft(2, '0')}'
+                      ':${log.timestamp.minute.toString().padLeft(2, '0')}'
+                      ':${log.timestamp.second.toString().padLeft(2, '0')}';
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('$time ',
+                            style: TextStyle(
+                                fontSize: 10, color: Colors.grey.shade500,
+                                fontFeatures: const [FontFeature.tabularFigures()])),
+                        Icon(_logIcon(log.level),
+                            size: 14, color: _logColor(log.level)),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            log.message,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _logColor(log.level),
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        if (!processing)
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('关闭'),
+          ),
+      ],
     );
   }
 }

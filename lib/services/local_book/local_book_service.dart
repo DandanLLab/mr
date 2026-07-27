@@ -1,6 +1,7 @@
+import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:archive/archive.dart';
+import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
 import '../../models/book.dart';
 import '../../models/chapter.dart';
@@ -9,6 +10,48 @@ import 'epub_parser.dart';
 import 'txt_parser.dart';
 
 enum LocalBookType { txt, epub, pdf, unsupported }
+
+/// 导入日志级别（参考 lumina ProgressLogType）
+enum ImportLogLevel { info, warning, error, success }
+
+/// 导入日志条目（参考 lumina ProgressLog）
+class ImportLogEntry {
+  final String message;
+  final ImportLogLevel level;
+  final DateTime timestamp;
+
+  ImportLogEntry({
+    required this.message,
+    required this.level,
+    DateTime? timestamp,
+  }) : timestamp = timestamp ?? DateTime.now();
+}
+
+/// 导入进度控制器
+///
+/// 用 StreamController 向 UI 实时推送导入日志，
+/// UI 通过 [stream] 订阅日志，在进度对话框中实时显示。
+/// 参考 lumina 的 Stream<ProgressLog> 设计。
+class ImportProgressController {
+  final StreamController<ImportLogEntry> _controller =
+      StreamController<ImportLogEntry>.broadcast();
+
+  Stream<ImportLogEntry> get stream => _controller.stream;
+
+  void add(ImportLogEntry entry) {
+    if (!_controller.isClosed) {
+      _controller.add(entry);
+    }
+  }
+
+  void close() {
+    if (!_controller.isClosed) {
+      _controller.close();
+    }
+  }
+
+  bool get isClosed => _controller.isClosed;
+}
 
 class LocalBookService {
   static final LocalBookService instance = LocalBookService._internal();
@@ -73,6 +116,96 @@ class LocalBookService {
       final bytes = await file.readAsBytes();
       return createBookFromFile(filePath, bytes: bytes);
     } catch (e) {
+      return null;
+    }
+  }
+
+  /// 导入进度日志条目
+  ///
+  /// 参考 lumina ProgressLog 设计，用于导入时向 UI 实时反馈解析过程
+  static void _log(
+    ImportProgressController? controller,
+    String message, {
+    ImportLogLevel level = ImportLogLevel.info,
+  }) {
+    debugPrint('[EPUB导入] $message');
+    controller?.add(ImportLogEntry(message: message, level: level));
+  }
+
+  /// 带进度回调的导入方法（参考 lumina importPipelineStream）
+  ///
+  /// [controller] 进度控制器，导入过程中实时推送日志条目到 UI
+  /// - 读取文件 → 解析 EPUB → 预生成富 HTML → 返回 Book
+  /// - 全程通过 controller 推送进度日志，UI 可订阅显示
+  Future<Book?> importFileWithProgress(
+    String filePath, {
+    ImportProgressController? controller,
+  }) async {
+    final fileName = filePath.split('/').last.split('\\').last;
+
+    _log(controller, '开始处理: $fileName');
+
+    if (!isSupported(filePath)) {
+      _log(controller, '不支持的文件类型: $fileName', level: ImportLogLevel.error);
+      return null;
+    }
+
+    try {
+      final file = File(filePath);
+      if (!await file.exists()) {
+        _log(controller, '文件不存在: $filePath', level: ImportLogLevel.error);
+        return null;
+      }
+
+      _log(controller, '读取文件: $fileName');
+      final bytes = await file.readAsBytes();
+      _log(controller, '文件大小: ${(bytes.length / 1024).toStringAsFixed(1)} KB');
+
+      final bookType = detectBookType(filePath);
+      if (bookType == LocalBookType.epub) {
+        _log(controller, '解析 EPUB 结构...');
+        _epubBytesCache[filePath] = bytes;
+        final epubBook = _parseEpubData(bytes);
+        if (epubBook == null) {
+          _log(controller, 'EPUB 解析失败', level: ImportLogLevel.error);
+          return null;
+        }
+        _epubCache[filePath] = epubBook;
+
+        _log(
+          controller,
+          '解析完成: 《${epubBook.title}》'
+          '（${epubBook.chapters.length} 章，'
+          '${epubBook.spineCount} spine 项）',
+          level: ImportLogLevel.success,
+        );
+
+        if (epubBook.chapters.isEmpty) {
+          _log(controller, '警告：章节列表为空', level: ImportLogLevel.warning);
+        }
+
+        final (_, author) = TxtParser.extractNameAndAuthor(fileName);
+        return Book(
+          bookUrl: filePath,
+          name: epubBook.title.isNotEmpty ? epubBook.title : fileName,
+          author: epubBook.author ?? author ?? '',
+          coverUrl: epubBook.coverPath ?? '',
+          intro: epubBook.description ?? '',
+          mediaType: MediaType.novel,
+          originType: BookOriginType.local,
+          canUpdate: false,
+          addedTime: DateTime.now(),
+        );
+      }
+
+      // TXT 等其他类型：走原流程
+      _log(controller, '创建书籍元数据...');
+      final book = createBookFromFile(filePath, bytes: bytes);
+      _log(controller, '导入成功: 《${book.name}》', level: ImportLogLevel.success);
+      return book;
+    } catch (e, st) {
+      _log(controller, '导入异常: $e', level: ImportLogLevel.error);
+      debugPrint('[EPUB导入] 异常堆栈: $st');
       return null;
     }
   }
@@ -651,8 +784,11 @@ class LocalBookService {
       if (epubBook.title != '未知书名' || epubBook.chapters.isNotEmpty) {
         return epubBook;
       }
+      debugPrint('[EPUB导入] 解析返回空（title=未知书名 且 chapters 为空）');
       return null;
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('[EPUB导入] 解析异常: $e');
+      debugPrint('[EPUB导入] 异常堆栈: $st');
       return null;
     }
   }
