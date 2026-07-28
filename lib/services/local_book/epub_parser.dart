@@ -157,6 +157,16 @@ class EpubBook {
 
   final String? language;
 
+  /// 内嵌了所有资源（字体 base64、背景图 base64）的 EPUB CSS
+  ///
+  /// 在 `EpubParser.parseFromBytes` 时一次性生成，只存储一份。
+  /// 阅读器加载章节时由 `LocalBookService._getEpubContent` 拼接到
+  /// `richContent` 前面，避免每个章节都复制一份 CSS（含字体 base64 可达 14MB）。
+  ///
+  /// 之前每个 `EpubChapter.richContent` 都包含完整 CSS（`[[EPUB_CSS]]...[[/EPUB_CSS]]`），
+  /// 1486 章 × 14MB = 20GB 导致 OOM 崩溃。改为书籍级单份存储后仅 14MB。
+  final String inlinedCss;
+
   const EpubBook({
     required this.title,
     this.author,
@@ -166,6 +176,7 @@ class EpubBook {
     this.tocTree = const [],
     this.spineCount = 0,
     this.language,
+    this.inlinedCss = '',
   });
 }
 
@@ -532,6 +543,8 @@ class EpubParser {
       // - 所有 CSS 合并为一份，所有章节共享（字体和背景图只内嵌一次）
       final epubCss = _collectAllCss(files);
       // CSS 中所有 url() 引用转 data URI（字体、背景图等）
+      // CSS 只内嵌一次，存储到 EpubBook.inlinedCss（书籍级单份）
+      // 之前每个章节 richContent 都包含完整 CSS，1486 × 14MB = 20GB 导致 OOM
       final inlinedCss = _inlineUrlsInCss(epubCss, files, 'OEBPS/Styles/');
       debugPrint('[EPUB诊断] CSS内嵌后大小: ${inlinedCss.length} 字符');
 
@@ -587,12 +600,10 @@ class EpubParser {
           const wrapperEnd = '</div>';
           final wrappedBody = '$wrapperStart$richBody$wrapperEnd';
 
-          // 5. 包裹成特殊格式，由 ReaderHtmlTemplate 解析
-          final cssBlock = inlinedCss.isNotEmpty
-              ? '[[EPUB_CSS]]<style>$inlinedCss</style>[[/EPUB_CSS]]'
-              : '';
-          chapter.richContent =
-              '$cssBlock[[EPUB_BODY]]$wrappedBody[[/EPUB_BODY]]';
+          // 5. richContent 只包含 body HTML（不含 CSS）
+          //    CSS 由 LocalBookService._getEpubContent 在返回时拼接，
+          //    避免每个章节都复制一份 14MB CSS
+          chapter.richContent = '[[EPUB_BODY]]$wrappedBody[[/EPUB_BODY]]';
         } catch (e) {
           // 单章节预解析失败：退化为纯文本，不影响其他章节
           debugPrint('[EPUB诊断] 章节${chapter.index}预解析失败: $e');
@@ -620,6 +631,7 @@ class EpubParser {
         tocTree: tocTree,
         spineCount: spine.length,
         language: language,
+        inlinedCss: inlinedCss,
       );
     } catch (e, st) {
       debugPrint('[EPUB诊断] parseFromBytes异常: $e');
@@ -1590,11 +1602,18 @@ class EpubParser {
   ///
   /// 必须处理 poster 属性，否则 video.xhtml 的封面图会丢失，
   /// 导致视频区域在加载前显示空白。
+  ///
+  /// 大视频文件（> 10MB）不内嵌，保留原始路径避免内存爆炸
+  /// （诡秘之主 wqx.mp4 = 64MB，base64 后 85MB 会 OOM）
   static String _inlineVideoSources(
     String html,
     Map<String, List<int>> files,
     String? chapterBasePath,
   ) {
+    /// 单个资源内嵌大小上限（10MB），超过则跳过
+    /// 视频/大字体等大文件内嵌会导致内存爆炸
+    const maxInlineSize = 10 * 1024 * 1024;
+
     // 1. 处理 <source src="...">
     var result = html.replaceAllMapped(
       RegExp(r'<source\b([^>]*?)src="([^"]+)"([^>]*)>', caseSensitive: false),
@@ -1610,6 +1629,8 @@ class EpubParser {
         final resourcePath = _resolveEpubImagePath(src, chapterBasePath);
         final resourceBytes = files[resourcePath];
         if (resourceBytes == null) return match.group(0)!;
+        // 大视频文件不内嵌，避免 OOM
+        if (resourceBytes.length > maxInlineSize) return match.group(0)!;
 
         final mediaType = inferMediaType(resourcePath);
         final dataUri = encodeBytesAsDataUri(
@@ -1635,6 +1656,8 @@ class EpubParser {
         final resourcePath = _resolveEpubImagePath(poster, chapterBasePath);
         final resourceBytes = files[resourcePath];
         if (resourceBytes == null) return match.group(0)!;
+        // poster 是图片，通常不大，但仍检查大小
+        if (resourceBytes.length > maxInlineSize) return match.group(0)!;
 
         final mediaType = inferMediaType(resourcePath);
         final dataUri = encodeBytesAsDataUri(

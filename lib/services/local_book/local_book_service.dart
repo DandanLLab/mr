@@ -467,9 +467,14 @@ class LocalBookService {
     final epubChapter = epubBook.chapters[chapter.index];
 
     // 直接返回导入时预解析好的富 HTML 内容
-    // （包含 EPUB CSS + body HTML + 图片 base64 data URI，由 EpubParser.parseFromBytes 预生成）
+    // richContent 只包含 body HTML（[[EPUB_BODY]]...[[/EPUB_BODY]]），
+    // CSS 由 EpubBook.inlinedCss 书籍级单份存储，返回时拼接避免每章节重复 14MB CSS
     if (epubChapter.richContent != null) {
-      return epubChapter.richContent;
+      // 拼接 CSS + body：CSS 只有一份（含字体 base64），body 每章节独立
+      final cssBlock = epubBook.inlinedCss.isNotEmpty
+          ? '[[EPUB_CSS]]<style>${epubBook.inlinedCss}</style>[[/EPUB_CSS]]'
+          : '';
+      return '$cssBlock${epubChapter.richContent}';
     }
 
     // 后备：richContent 为空（理论上不应发生，parseFromBytes 总会生成）
