@@ -700,6 +700,28 @@ body.reader-scroll #reader-content-b {
   line-height: var(--reader-line-height);
 }
 
+/* 8a. 标题窄宽度兜底：EPUB 原作者常用固定窄宽度做竖排标题（如 width:35px），
+   在 column 分栏里会让文字挤成一团或溢出。这里用 max-width 兜底，
+   让窄宽度标题自动放宽到容器宽度，文字横排显示。
+   通用规则：所有 h1-h6 的 max-width 至少 100%，覆盖 EPUB 的固定窄宽度 */
+#reader-content-a h1,
+#reader-content-a h2,
+#reader-content-a h3 {
+  max-width: 100%;
+}
+
+/* 8b. 视频响应式宽高比：EPUB 原作者常用固定 width×height（如 540×360）
+   做视频尺寸。EpubParser 已把 >300px 宽度改写为 max-width:100%，
+   但 height 仍是固定值，会导致视频变形。这里用 aspect-ratio 保持比例，
+   height:auto 让高度跟随宽度自适应。
+   16:9 是最常见的视频比例，作为兜底默认值 */
+#reader-content-a video {
+  width: 100% !important;
+  height: auto !important;
+  max-height: calc(var(--reader-safe-height) - 2em);
+  object-fit: contain;
+}
+
 /* 9. 引用块 */
 #reader-content-a blockquote {
   margin: 0 0 var(--reader-paragraph-spacing) 0;
