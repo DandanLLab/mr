@@ -557,9 +557,12 @@ class EpubParser {
       // - body 中 <image xlink:href="../Images/xxx.jpg"> → data URI（SVG）
       // - 所有 CSS 合并为一份，所有章节共享（字体和背景图只内嵌一次）
       final rawCss = _collectAllCss(files);
-      // 改写 EPUB CSS 中的 body/html 全局选择器为 #reader-content-a
-      // 避免 body{padding} 等样式破坏 reader 布局（reader body 包含 #reader-root）
-      final epubCss = _rewriteCssSelectorsForReader(rawCss);
+      // 1. 改写 EPUB CSS 中的 body/html 全局选择器为 #reader-content-a
+      //    避免 body{padding} 等样式破坏 reader 布局（reader body 包含 #reader-root）
+      var epubCss = _rewriteCssSelectorsForReader(rawCss);
+      // 2. 通用修正 CSS 属性值：百分比 margin→vh、fixed→scroll、大px宽度→100%
+      //    不依赖具体 class 名，适用于任何 EPUB
+      epubCss = _rewriteCssValuesForReader(epubCss);
       // CSS 资源路径处理：
       // - extractedBasePath 非空（推荐）：url() 转为指向解压目录的绝对路径，
       //   WebView 通过 file:// baseUrl 直接访问原始文件，内存占用极低
@@ -1965,6 +1968,147 @@ class EpubParser {
     // html → #reader-content-a（独立或后代选择器开头）
     s = s.replaceFirst(RegExp(r'^\s*html\b'), '#reader-content-a');
     return s;
+  }
+
+  /// 通用解码 EPUB CSS，适配 reader 的 column 分栏布局。
+  ///
+  /// 每个 EPUB 的 CSS 都不一样，不能硬编码 class 名适配。这里只做**通用
+  /// 属性值改写**，把 EPUB 为单页阅读器设计的 CSS 转换为 column 分栏友好的
+  /// CSS，适用于任何 EPUB 结构。
+  ///
+  /// 修正项（按处理顺序）：
+  ///
+  /// 1. **百分比 margin/padding 垂直间距 → vh**
+  ///    - CSS 规范：百分比 margin-top/bottom 基于容器**宽度**，column 里
+  ///      容器宽度=一栏宽度（窄），导致垂直间距失真
+  ///    - 修正：margin-top/bottom 的 `%` → `vh`（基于视口高度）
+  ///
+  /// 2. **`background-attachment: fixed` → scroll**
+  ///    - column 分栏里 fixed 背景不跟随滚动，行为异常
+  ///
+  /// 3. **大固定 px 宽度 → max-width: 100%**
+  ///    - > 300px 的固定宽度在小屏溢出
+  ///
+  /// 4. **`position: absolute/fixed` → static**
+  ///    - EPUB 用绝对定位放装饰元素（假设单页），column 里会飘到错误栏
+  ///    - 修正：降级为 static，让元素回归文档流
+  ///    - 例外：保留 `position: relative`（图文混排常用，不影响分栏）
+  ///
+  /// 5. **`height: 100%` / `100vh` → auto**
+  ///    - `#reader-content-a` 高度由 column 动态分栏决定，固定 100% 会导致
+  ///      内容被压缩或无法分栏
+  ///    - 修正：height: 100% / 100vh → height: auto
+  ///
+  /// 6. **`float: left/right` → none**
+  ///    - float 在 column 分栏里会跨栏错位
+  ///    - 修正：降级为 none，改用默认块级流（图文混排会丢失环绕效果，
+  ///      但保证可读性）
+  ///
+  /// 7. **`transform: translate()` 精确定位 → 移除**
+  ///    - EPUB 用 translate 做像素级定位，column 里基准改变会错位
+  ///    - 修正：移除 transform 声明
+  ///
+  /// 8. **`@page` 规则 → 移除**
+  ///    - EPUB 打印分页规则，reader 无效
+  ///
+  /// 9. **`overflow: hidden` 在 body/html → 可见**
+  ///    - 已通过选择器改写指向 #reader-content-a，hidden 会裁剪分栏内容
+  ///    - 修正：overflow: hidden → overflow: visible（仅对改写后的容器）
+  static String _rewriteCssValuesForReader(String css) {
+    var result = css;
+
+    // 0. 移除 @page 规则（打印分页，reader 无效）
+    //    @page { margin: 5% } → 整块移除
+    result = result.replaceAll(
+      RegExp(r'@page\s*\{[^}]*\}', dotAll: true),
+      '',
+    );
+
+    // 1. margin-top/bottom 百分比 → vh
+    //    margin: 45% auto → margin: 45vh auto
+    //    margin-top: 30% → margin-top: 30vh
+    result = result.replaceAllMapped(
+      RegExp(r'(margin(?:-top|-bottom)?):\s*(\d+(?:\.\d+)?)\s*%'),
+      (m) => '${m.group(1)}:${m.group(2)}vh',
+    );
+    // margin 简写：margin: 45% auto → margin: 45vh auto
+    // margin: 30% auto 0 auto → margin: 30vh auto 0 auto
+    result = result.replaceAllMapped(
+      RegExp(r'margin:\s*(\d+(?:\.\d+)?)\s*%(\s)'),
+      (m) => 'margin:${m.group(1)}vh${m.group(2)}',
+    );
+
+    // 2. padding-top/bottom 百分比 → vh（同理）
+    result = result.replaceAllMapped(
+      RegExp(r'(padding(?:-top|-bottom)?):\s*(\d+(?:\.\d+)?)\s*%'),
+      (m) => '${m.group(1)}:${m.group(2)}vh',
+    );
+    result = result.replaceAllMapped(
+      RegExp(r'padding:\s*(\d+(?:\.\d+)?)\s*%(\s)'),
+      (m) => 'padding:${m.group(1)}vh${m.group(2)}',
+    );
+
+    // 3. background-attachment: fixed → scroll
+    result = result.replaceAllMapped(
+      RegExp(r'background-attachment:\s*fixed', caseSensitive: false),
+      (_) => 'background-attachment: scroll',
+    );
+
+    // 4. 大固定 px 宽度 → max-width: 100%（> 300px 才处理，避免误改小元素）
+    //    width: 540px → max-width: 100%; width: auto
+    result = result.replaceAllMapped(
+      RegExp(r'width:\s*(\d{4,})px'),
+      (m) {
+        final px = int.tryParse(m.group(1) ?? '0') ?? 0;
+        if (px > 300) {
+          return 'max-width:100%;width:auto';
+        }
+        return m.group(0)!;
+      },
+    );
+
+    // 5. position: absolute/fixed → static（relative 保留）
+    //    absolute/fixed 在 column 分栏里会飘到错误位置
+    result = result.replaceAllMapped(
+      RegExp(r'position:\s*(absolute|fixed)\b', caseSensitive: false),
+      (_) => 'position: static',
+    );
+
+    // 6. height: 100% / 100vh / 100svh / 100dvh → auto
+    //    #reader-content-a 高度由 column 动态分栏，固定高度会破坏分栏
+    result = result.replaceAllMapped(
+      RegExp(r'height:\s*100(?:%|vh|svh|dvh|lvh)\b', caseSensitive: false),
+      (_) => 'height: auto',
+    );
+    // max-height: 100vh 等 → none（同理）
+    result = result.replaceAllMapped(
+      RegExp(r'max-height:\s*100(?:%|vh|svh|dvh|lvh)\b', caseSensitive: false),
+      (_) => 'max-height: none',
+    );
+
+    // 7. float: left/right → none
+    //    float 在 column 分栏里跨栏错位
+    result = result.replaceAllMapped(
+      RegExp(r'float:\s*(left|right)\b', caseSensitive: false),
+      (_) => 'float: none',
+    );
+
+    // 8. transform: translate(...) → 移除整个 transform 声明
+    //    EPUB 用 translate 做像素级定位，column 里基准改变会错位
+    //    保留 scale/rotate（不影响布局定位）
+    result = result.replaceAllMapped(
+      RegExp(r'transform:\s*translate(?:3d|X|Y|Z)?\s*\([^)]*\)\s*;?'),
+      (m) => m.group(0)!.endsWith(';') ? '' : '',
+    );
+
+    // 9. overflow: hidden（针对 #reader-content-a 容器）→ visible
+    //    注意：只改 overflow: hidden，不动 auto/scroll（那些是滚动容器需要的）
+    result = result.replaceAllMapped(
+      RegExp(r'overflow:\s*hidden\b', caseSensitive: false),
+      (_) => 'overflow: visible',
+    );
+
+    return result;
   }
 
 

@@ -588,18 +588,23 @@ body.reader-scroll #reader-content-b {
   ///
   /// EPUB 章节内容直接放入 #reader-content-a，不走 .reader-p 段落包裹，
   /// 所以阅读器针对 .reader-p 的样式（如 .reader-p img）不会作用于 EPUB 内容。
-  /// 此方法提供 HTML5 标签的合理默认渲染：
-  /// - 块级元素留合理间距（p/blockquote/h*/ul/ol/table 等）
-  /// - 图片、SVG、表格不溢出容器
-  /// - sup/sub/ruby 等 HTML5 内联标签保留原生样式
-  /// - 链接颜色与主题协调
+  /// 此方法提供 HTML5 标签的合理默认渲染 + 通用适配规则（不依赖具体 class 名）。
   ///
   /// 兜底 CSS 在 EPUB 自带 CSS 之前，EPUB CSS 可覆盖这些默认值。
   /// WebView user agent 样式表优先级最低，作者 CSS（含本兜底）都会覆盖它。
+  ///
+  /// 设计原则：
+  /// - **通用适配**：所有规则基于 HTML5 标签或通用属性，不硬编码 EPUB class 名
+  /// - **响应式优先**：图片/视频/SVG/表格不溢出容器
+  /// - **分栏友好**：块级容器尽量不分页断开，背景容器填满整页
+  /// - **与 EpubParser._rewriteCssValuesForReader 配合**：
+  ///   EPUB CSS 的 position:absolute→static、float→none、height:100%→auto 等
+  ///   已在解析时改写，这里提供合理的默认布局兜底
   static String _epubRichHtmlFallbackCss() {
     return '''
-/* === EPUB 富 HTML 兜底 CSS === */
-/* 块级容器避免分页断开：尽量在一个页面内完整显示
+/* === EPUB 富 HTML 兜底 CSS（通用，不依赖具体 class 名）=== */
+
+/* 1. 块级容器避免分页断开：尽量在一个页面内完整显示
    - div/figure/blockquote/video/svg/table/pre 等盒子不分页
    - 内容超过一页时浏览器自动降级允许分页（不会卡死）
    - 配合 CSS Multi-column Layout 的 break-inside 实现 */
@@ -613,32 +618,10 @@ body.reader-scroll #reader-content-b {
   break-inside: avoid;
   page-break-inside: avoid;
 }
-/* 滑动看图容器（多看画廊）：作为完整滚动单元，整页显示不分页
-   - max-height 限制在一页内（内容区高度 - 上下 margin）
-   - overflow-y: auto 实现内部滑动看图
-   - break-inside: avoid 防止被分页切断
-   - -webkit-overflow-scrolling: touch iOS 惯性滑动
-   原本是多看阅读的 duokan-image-gallery 横向滑动画廊，
-   标准 EPUB 阅读器无此功能，降级为纵向滚动容器 */
-#reader-content-a .duokan-image-gallery {
-  max-height: calc(var(--reader-safe-height) - 4em);
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  break-inside: avoid;
-  page-break-inside: avoid;
-}
-/* 章节级背景容器（EPUB body class/style 的 wrapper div）：
-   - .epub-chapter-bg 由 EpubParser 标记，表示此 div 承载 body 的背景属性
-   - min-height: 100% 让背景图/背景色填满整页（覆盖整个阅读页面）
-   - box-sizing: border-box 让 EPUB body 的 padding 包含在高度内，不溢出
-   - break-inside: avoid 防止被分页切断（视频页/卷头页/序号页等整页显示）
-   应用于 .video-bg / .volume-bg / .box-bg / foreword / serial-num 等章节背景 */
-#reader-content-a .epub-chapter-bg {
-  min-height: 100%;
-  box-sizing: border-box;
-  break-inside: avoid;
-  page-break-inside: avoid;
-}
+
+/* 2. 所有图片/视频/SVG/canvas 响应式：最大宽度 100%，不溢出
+   覆盖 EPUB 中固定 px 宽度的资源（EpubParser 已把 >300px 固定宽度改写为
+   max-width:100%，这里作为兜底确保万无一失） */
 #reader-content-a img,
 #reader-content-a svg,
 #reader-content-a video,
@@ -646,11 +629,55 @@ body.reader-scroll #reader-content-b {
   max-width: 100%;
   height: auto;
 }
+
+/* 3. SVG 封面图：填满容器（EPUB 常用 SVG 做矢量封面） */
+#reader-content-a svg {
+  width: 100%;
+  max-height: calc(var(--reader-safe-height) - 2em);
+}
+#reader-content-a svg image {
+  width: 100%;
+  height: auto;
+}
+
+/* 4. 章节级背景容器（EPUB body class/style 的 wrapper div，由 EpubParser
+   标记 .epub-chapter-bg）：
+   - min-height: 100% 让背景图/背景色填满整页（覆盖整个阅读页面）
+   - box-sizing: border-box 让 EPUB body 的 padding 包含在高度内，不溢出
+   - break-inside: avoid 防止被分页切断（视频页/卷头页/序号页等整页显示）
+   - background-attachment 的 fixed 已在 EpubParser 通用修正为 scroll
+   应用于任何承载 body 背景属性的章节容器 */
+#reader-content-a .epub-chapter-bg {
+  min-height: 100%;
+  box-sizing: border-box;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* 5. 滑动看图容器（多看画廊 duokan-image-gallery）：
+   作为完整滚动单元，整页显示不分页
+   - max-height 限制在一页内（内容区高度 - 上下 margin）
+   - overflow-y: auto 实现内部滑动看图
+   - break-inside: avoid 防止被分页切断
+   - -webkit-overflow-scrolling: touch iOS 惯性滑动
+   原本是多看阅读的横向滑动画廊，标准 EPUB 阅读器无此功能，
+   降级为纵向滚动容器 */
+#reader-content-a .duokan-image-gallery {
+  max-height: calc(var(--reader-safe-height) - 4em);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* 6. 表格自适应：不溢出 */
 #reader-content-a table {
   max-width: 100%;
   border-collapse: collapse;
   word-break: break-word;
 }
+
+/* 7. 段落默认样式（EPUB 的 <p> 不走 .reader-p，这里兜底） */
 #reader-content-a p {
   margin: 0 0 var(--reader-paragraph-spacing) 0;
   text-align: justify;
@@ -660,6 +687,8 @@ body.reader-scroll #reader-content-b {
   font-weight: var(--reader-text-weight);
 }
 #reader-content-a p:last-child { margin-bottom: 0; }
+
+/* 8. 标题样式 */
 #reader-content-a h1,
 #reader-content-a h2,
 #reader-content-a h3,
@@ -670,30 +699,39 @@ body.reader-scroll #reader-content-b {
   font-weight: bold;
   line-height: var(--reader-line-height);
 }
+
+/* 9. 引用块 */
 #reader-content-a blockquote {
   margin: 0 0 var(--reader-paragraph-spacing) 0;
   padding: 0 1em;
   border-left: 3px solid currentColor;
   opacity: 0.85;
 }
+
+/* 10. 列表 */
 #reader-content-a ul,
 #reader-content-a ol {
   margin: 0 0 var(--reader-paragraph-spacing) 0;
   padding-left: 1.5em;
 }
 #reader-content-a li { margin: 0.2em 0; }
+
+/* 11. 分隔线 */
 #reader-content-a hr {
   border: none;
   border-top: 1px solid currentColor;
   opacity: 0.3;
   margin: 1em 0;
 }
+
+/* 12. 链接：用主题色，不用 EPUB 的红色 */
 #reader-content-a a {
   color: var(--reader-text-color);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-/* sup/sub/ruby 等 HTML5 内联标签：保留原生样式
+
+/* 13. sup/sub/ruby 等 HTML5 内联标签：保留原生样式
    WebView user agent 默认已渲染，此处显式声明避免被重置 */
 #reader-content-a sup {
   vertical-align: super;
@@ -711,6 +749,8 @@ body.reader-scroll #reader-content-b {
   background-color: rgba(255, 235, 59, 0.4);
   color: inherit;
 }
+
+/* 14. 代码块 */
 #reader-content-a code,
 #reader-content-a pre {
   font-family: monospace;
@@ -723,105 +763,6 @@ body.reader-scroll #reader-content-b {
   padding: 0.5em;
   background-color: rgba(128, 128, 128, 0.1);
   border-radius: 4px;
-}
-/* === EPUB 特殊页面适配 === */
-/* 视频响应式：覆盖 EPUB .content-matrix 的固定 540x360，
-   让视频适配阅读器宽度，不溢出 */
-#reader-content-a video.content-matrix,
-#reader-content-a .duokan-video {
-  width: 100% !important;
-  height: auto !important;
-  max-height: calc(var(--reader-safe-height) - 4em);
-  object-fit: contain;
-}
-/* 画廊容器：纵向滚动看图，整页显示不分页 */
-#reader-content-a .duokan-image-gallery {
-  margin: 1em 0 !important;
-  max-height: calc(var(--reader-safe-height) - 6em);
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  break-inside: avoid;
-  page-break-inside: avoid;
-}
-/* 画廊单元格图片：宽度 100%，自适应 */
-#reader-content-a .duokan-image-gallery-cell img,
-#reader-content-a .gallery-pic img {
-  width: 100%;
-  height: auto;
-}
-/* 卷头/序号页大百分比 margin 修正：
-   EPUB 用 margin:45% auto / 30% auto 做垂直居中，
-   百分比 margin 基于容器宽度，在窄屏会过大导致内容溢出分页 */
-#reader-content-a .book-title,
-#reader-content-a .book-author,
-#reader-content-a .volume-first,
-#reader-content-a .intro-box,
-#reader-content-a .volume-title {
-  margin-left: auto !important;
-  margin-right: auto !important;
-}
-#reader-content-a .volume-title {
-  margin-top: 2em !important;
-  width: auto !important;
-  display: inline-block;
-}
-#reader-content-a .video-title {
-  margin-top: 2em !important;
-}
-/* SVG 封面图：填满容器 */
-#reader-content-a svg image {
-  width: 100%;
-  height: auto;
-}
-/* serial-num 页面背景：background-attachment:fixed 在 column 布局中
-   行为异常（背景不跟随滚动），改为 scroll 让背景固定在元素上 */
-#reader-content-a .epub-chapter-bg[style*="background"] {
-  background-attachment: scroll !important;
-  background-size: cover !important;
-  background-position: top center !important;
-}
-/* 章节标题：.chapter-title 用 fzjt 字体，font-size:1.6em 居中显示 */
-#reader-content-a .chapter-title {
-  font-size: 1.4em;
-  text-align: center;
-  margin: 1em 0;
-}
-#reader-content-a .chapter-title b {
-  display: block;
-  font-size: 0.7em;
-  margin-bottom: 0.3em;
-}
-/* 卷头图片：宽度 100%，不溢出 */
-#reader-content-a .volume-pic img,
-#reader-content-a .intro-pic img {
-  width: 100%;
-  height: auto;
-}
-/* 角色表格：自适应宽度 */
-#reader-content-a table.role {
-  width: auto;
-  max-width: 100%;
-}
-#reader-content-a table.role td,
-#reader-content-a td.role {
-  padding: 2px 4px;
-  font-size: 0.85em;
-}
-/* intro-box 序号页说明框：居中显示 */
-#reader-content-a .intro-box {
-  margin-top: 2em !important;
-  margin-bottom: 2em !important;
-}
-/* duokan-footnote 脚注图片 */
-#reader-content-a .duokan-footnote img {
-  width: 1em;
-  height: auto;
-  vertical-align: text-top;
-}
-/* 链接颜色：EPUB 用红色，reader 中用主题色 */
-#reader-content-a .book-link a,
-#reader-content-a a {
-  color: inherit;
 }
 ''';
   }
