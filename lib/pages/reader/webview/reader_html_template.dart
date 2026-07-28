@@ -45,21 +45,31 @@ class ReaderHtmlTemplate {
   }) {
     final css = _generateCss(provider, isScrollMode);
     final js = _readerJs();
-    final titleHtml = buildTitleHtml(title, provider, chapterIndex);
 
     // 富 HTML（EPUB）：解析 [[EPUB_CSS]]/[[EPUB_BODY]] 包裹格式
     // - epubCss: EPUB 自带 CSS（注入到 <style>，让 EPUB 排版生效）
     // - bodyHtml: EPUB 章节正文 HTML（保留 <p>/<h1>/<img>/<blockquote> 等标签）
     // - 不走 buildParagraphsHtml，避免破坏 EPUB 原始标签结构
-    // - 章节标题仍用 buildTitleHtml 生成（保持阅读器标题样式统一）
+    //
+    // EPUB 标题处理：默认隐藏应用自身的 `.reader-title`，保留 EPUB 作者设定的
+    // 标题格式（如 .chapter-title / .other-title / .volume-title 等）。
+    // 但滚动模式下 IntersectionObserver 依赖 [data-chapter-index] 监测章节切换，
+    // 所以在 EPUB body 外包一层不可见的 wrapper div 携带 data-chapter-index。
     final String paragraphsHtml;
     String? epubCss;
+    String titleHtml;
     if (isRichHtml) {
       final parsed = _parseRichHtmlContent(content);
       epubCss = parsed.$1;
-      paragraphsHtml = parsed.$2;
+      // 用不可见 wrapper 携带 data-chapter-index，让 IntersectionObserver 仍能监测
+      // 章节切换（滚动模式下生效；分页模式下无副作用，因为每章独立显示）
+      paragraphsHtml =
+          '<div data-chapter-index="$chapterIndex" style="display:block">${parsed.$2}</div>';
+      // EPUB 模式：不生成应用自身标题，让 EPUB 自带标题（h1.chapter-title 等）展示
+      titleHtml = '';
     } else {
       paragraphsHtml = buildParagraphsHtml(content, provider);
+      titleHtml = buildTitleHtml(title, provider, chapterIndex);
     }
 
     // EPUB CSS 追加到主 CSS 之后（优先级高于阅读器默认样式，
@@ -81,6 +91,8 @@ class ReaderHtmlTemplate {
     // 分页模式：保持原结构（标题在 #reader-root 顶部，#reader-stage 外），
     //   因为 #reader-content-a 是 absolute 定位的 column 容器，标题放进去
     //   会被当成 column 内容影响分页计算
+    // EPUB 模式：titleHtml 为空（不显示应用标题），paragraphsHtml 已含
+    //   data-chapter-index wrapper，章节监测不受影响
     final contentAInner =
         isScrollMode ? '$titleHtml\n        $paragraphsHtml' : paragraphsHtml;
     final rootTitle = isScrollMode ? '' : titleHtml;
@@ -587,6 +599,44 @@ body.reader-scroll #reader-content-b {
   static String _epubRichHtmlFallbackCss() {
     return '''
 /* === EPUB 富 HTML 兜底 CSS === */
+/* 块级容器避免分页断开：尽量在一个页面内完整显示
+   - div/figure/blockquote/video/svg/table/pre 等盒子不分页
+   - 内容超过一页时浏览器自动降级允许分页（不会卡死）
+   - 配合 CSS Multi-column Layout 的 break-inside 实现 */
+#reader-content-a div,
+#reader-content-a figure,
+#reader-content-a blockquote,
+#reader-content-a video,
+#reader-content-a svg,
+#reader-content-a table,
+#reader-content-a pre {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+/* 滑动看图容器（多看画廊）：作为完整滚动单元，整页显示不分页
+   - max-height 限制在一页内（内容区高度 - 上下 margin）
+   - overflow-y: auto 实现内部滑动看图
+   - break-inside: avoid 防止被分页切断
+   - -webkit-overflow-scrolling: touch iOS 惯性滑动
+   原本是多看阅读的 duokan-image-gallery 横向滑动画廊，
+   标准 EPUB 阅读器无此功能，降级为纵向滚动容器 */
+#reader-content-a .duokan-image-gallery {
+  max-height: calc(var(--reader-safe-height) - 4em);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+/* 章节级背景容器（EPUB body class/style 的 wrapper div）：
+   - .epub-chapter-bg 由 EpubParser 标记，表示此 div 承载 body 的背景属性
+   - min-height 让背景图/背景色填满整页（否则背景只覆盖内容高度）
+   - break-inside: avoid 防止被分页切断（视频页/卷头页/序号页等整页显示）
+   应用于 .video-bg / .volume-bg / .box-bg / foreword / serial-num 等章节背景 */
+#reader-content-a .epub-chapter-bg {
+  min-height: calc(var(--reader-safe-height) - 1em);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
 #reader-content-a img,
 #reader-content-a svg,
 #reader-content-a video,
@@ -744,6 +794,21 @@ body.reader-scroll #reader-content-b {
     // 加 data-chapter-index 属性供 IntersectionObserver 监测
     // 滚动模式下用户滚到此标题时 Dart 侧 _onChapterVisible 触发更新 UI
     return '<h1 id="reader-title" class="reader-title" data-chapter-index="$chapterIndex">${_escapeHtml(title)}</h1>';
+  }
+
+  /// 构建 EPUB 富 HTML 段落（滚动模式追加章节用）
+  ///
+  /// 与 [buildParagraphsHtml] 对称，专门用于 EPUB 富 HTML 内容：
+  /// - 解析 `[[EPUB_CSS]]...[[/EPUB_CSS]][[EPUB_BODY]]...[[/EPUB_BODY]]` 包裹格式
+  /// - 在 body 外包一层 `<div data-chapter-index="...">` 供 IntersectionObserver 监测
+  /// - 不生成应用自身标题（EPUB 自带标题由作者设定，应保留）
+  ///
+  /// 滚动模式下用户滚到底部时，[novel_reader_page._appendNextChapter] 调用此方法
+  /// 生成段落 HTML，再通过 [ReaderWebViewController.appendChapter] 追加到 DOM。
+  static String buildEpubParagraphsHtml(String richContent, int chapterIndex) {
+    final parsed = _parseRichHtmlContent(richContent);
+    final bodyHtml = parsed.$2;
+    return '<div data-chapter-index="$chapterIndex" style="display:block">$bodyHtml</div>';
   }
 
   /// 把内容切分成段落

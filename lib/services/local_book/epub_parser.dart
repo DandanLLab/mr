@@ -518,15 +518,33 @@ class EpubParser {
       // - 导入时一次性完成所有重活，阅读时 O(1) 查询
       // - 避免每次翻页都解压 ZIP 和遍历文件
       // - CSS 只合并一次，所有章节共享
+      // 预解析所有章节的富 HTML 内容（导入时一次性完成）
+      //
+      // 把所有资源（字体、CSS 中的 url()、图片、视频、SVG image）转 base64 data URI，
+      // 让 WebView 无需任何资源拦截即可完整渲染 EPUB 排版。
+      //
+      // 关键点：
+      // - CSS 中 @font-face url(../Fonts/xxx.ttf) → data URI（字体生效）
+      // - CSS 中 background-image: url(../Images/xxx.jpg) → data URI（背景图生效）
+      // - body 中 <img src="../Images/xxx.jpg"> → data URI
+      // - body 中 <source src="../Video/xxx.mp4"> → data URI（视频）
+      // - body 中 <image xlink:href="../Images/xxx.jpg"> → data URI（SVG）
+      // - 所有 CSS 合并为一份，所有章节共享（字体和背景图只内嵌一次）
       final epubCss = _collectAllCss(files);
+      // CSS 中所有 url() 引用转 data URI（字体、背景图等）
+      final inlinedCss = _inlineUrlsInCss(epubCss, files, 'OEBPS/Styles/');
+      debugPrint('[EPUB诊断] CSS内嵌后大小: ${inlinedCss.length} 字符');
+
       for (final chapter in chapters) {
         if (chapter.content == null) continue;
         try {
-          // 1. 提取 body HTML（保留所有 HTML5 标签 + fragment 切片）
-          final bodyHtml = extractBodyContent(
+          // 1. 提取 body HTML + body 属性（class/style/bgcolor）
+          //    body 属性包含章节级背景设置（如 .video-bg 背景图、bgcolor 背景色），
+          //    必须保留并应用到 reader 内容容器，否则背景样式丢失
+          final (bodyHtml, bodyAttrs) = extractBodyWithAttrs(
             chapter.content!,
-            startFragmentId: chapter.startFragmentId,
-            endFragmentId: chapter.endFragmentId,
+            chapter.startFragmentId,
+            chapter.endFragmentId,
           );
 
           // 2. 计算章节文件路径（用于解析相对图片路径）
@@ -538,14 +556,43 @@ class EpubParser {
                 chapterPath.substring(0, chapterPath.lastIndexOf('/') + 1);
           }
 
-          // 3. 把 body 中的 <img src="..."> 转成 base64 data URI
-          final richBody = _inlineImagesInHtml(bodyHtml, files, chapterBasePath);
+          // 3. 内嵌 body 中的所有资源引用：
+          // - <img src> → data URI
+          // - <source src> → data URI（视频）
+          // - <video poster> → data URI（视频封面）
+          // - <image xlink:href> → data URI（SVG）
+          // - inline style url() → data URI（如 body style="background:url(...)"）
+          var richBody = _inlineImagesInHtml(bodyHtml, files, chapterBasePath);
+          richBody = _inlineVideoSources(richBody, files, chapterBasePath);
+          richBody = _inlineSvgImages(richBody, files, chapterBasePath);
+          // bodyAttrs 中的 inline style 也需要内嵌 url()（如 serial-num 的背景图）
+          final inlinedBodyAttrs =
+              _inlineStyleUrls(bodyAttrs, files, chapterBasePath);
 
-          // 4. 包裹成特殊格式，由 ReaderHtmlTemplate 解析
-          final cssBlock = epubCss.isNotEmpty
-              ? '[[EPUB_CSS]]<style>$epubCss</style>[[/EPUB_CSS]]'
+          // 4. 用 wrapper div 包裹 body 内容，把 body 的 class/style 应用到 div
+          //    这样 CSS 中 .video-bg / .volume-bg 等选择器才能生效
+          //    加 epub-chapter-bg 标记 class，让 reader 兜底 CSS 能精确匹配
+          //    背景容器，设置 min-height 让背景填满整页
+          //    智能合并 class：若 bodyAttrs 已有 class，追加 epub-chapter-bg；
+          //    否则单独加 class="epub-chapter-bg"
+          final wrapperAttrs = inlinedBodyAttrs.isEmpty
+              ? ''
+              : (inlinedBodyAttrs.contains('class="')
+                  ? inlinedBodyAttrs.replaceAllMapped(
+                      RegExp(r'class="([^"]*)"'),
+                      (m) => 'class="epub-chapter-bg ${m.group(1)}"',
+                    )
+                  : 'class="epub-chapter-bg" $inlinedBodyAttrs');
+          final wrapperStart = '<div $wrapperAttrs>';
+          const wrapperEnd = '</div>';
+          final wrappedBody = '$wrapperStart$richBody$wrapperEnd';
+
+          // 5. 包裹成特殊格式，由 ReaderHtmlTemplate 解析
+          final cssBlock = inlinedCss.isNotEmpty
+              ? '[[EPUB_CSS]]<style>$inlinedCss</style>[[/EPUB_CSS]]'
               : '';
-          chapter.richContent = '$cssBlock[[EPUB_BODY]]$richBody[[/EPUB_BODY]]';
+          chapter.richContent =
+              '$cssBlock[[EPUB_BODY]]$wrappedBody[[/EPUB_BODY]]';
         } catch (e) {
           // 单章节预解析失败：退化为纯文本，不影响其他章节
           debugPrint('[EPUB诊断] 章节${chapter.index}预解析失败: $e');
@@ -1459,6 +1506,185 @@ class EpubParser {
     }
   }
 
+  /// 把 CSS 中所有 `url(...)` 引用替换为 base64 data URI
+  ///
+  /// 处理 @font-face、background-image 等 CSS 资源引用。
+  /// - [css] 原始 CSS 文本（可能来自多个 .css 文件合并）
+  /// - [files] EPUB ZIP 内文件映射
+  /// - [cssBasePath] CSS 文件所在目录（用于解析相对路径，如 'OEBPS/Styles/'）
+  ///
+  /// 注意：CSS 中 url() 路径是相对于 CSS 文件自身的位置，
+  /// 不是相对于引用 CSS 的 xhtml 文件。
+  /// 多个 CSS 文件合并后，统一用第一个 CSS 文件的目录作为基准
+  /// （绝大多数 EPUB 所有 CSS 都在同一目录下）。
+  static String _inlineUrlsInCss(
+    String css,
+    Map<String, List<int>> files,
+    String cssBasePath,
+  ) {
+    return css.replaceAllMapped(
+      RegExp(r'''url\(\s*(['"]?)([^'")]+)\1\s*\)''', caseSensitive: false),
+      (match) {
+        final quote = match.group(1) ?? '';
+        final url = match.group(2) ?? '';
+
+        // 已经是 data URI 或 http(s) 链接：不动
+        if (url.startsWith('data:') || url.startsWith('http')) {
+          return match.group(0)!;
+        }
+
+        // 移除查询字符串和锚点
+        final cleanUrl = url.split('?').first.split('#').first;
+        if (cleanUrl.isEmpty) return match.group(0)!;
+
+        // 解析相对路径到 EPUB ZIP 内的绝对路径
+        final resourcePath = _resolveEpubImagePath(cleanUrl, cssBasePath);
+        final resourceBytes = files[resourcePath];
+        if (resourceBytes == null) {
+          // 找不到资源：保留原 url（避免破坏 CSS 语法）
+          return match.group(0)!;
+        }
+
+        final mediaType = inferMediaType(resourcePath);
+        final dataUri = encodeBytesAsDataUri(
+          Uint8List.fromList(resourceBytes),
+          mediaType,
+        );
+        return 'url($quote$dataUri$quote)';
+      },
+    );
+  }
+
+  /// 把 inline style 属性中的 `url(...)` 引用替换为 base64 data URI
+  ///
+  /// 用于处理 `<body style="background: url(../Images/001.jpg) ...">` 这种
+  /// 章节级 inline 背景图。body 的 style 属性提取后需要单独处理 url()，
+  /// 否则背景图无法在 reader 内显示。
+  ///
+  /// - [attrs] body 的属性字符串（如 `class="x" style="background:url(...)"`）
+  /// - [files] EPUB ZIP 内文件映射
+  /// - [chapterBasePath] 章节文件所在目录（用于解析相对路径）
+  static String _inlineStyleUrls(
+    String attrs,
+    Map<String, List<int>> files,
+    String? chapterBasePath,
+  ) {
+    if (attrs.isEmpty) return attrs;
+    // 仅处理 style="..." 内部的 url()，其他属性不动
+    return attrs.replaceAllMapped(
+      RegExp(r'style="([^"]*)"'),
+      (match) {
+        final style = match.group(1) ?? '';
+        if (!style.toLowerCase().contains('url(')) return match.group(0)!;
+        final inlinedStyle = _inlineUrlsInCss(style, files, chapterBasePath ?? '');
+        return 'style="$inlinedStyle"';
+      },
+    );
+  }
+
+  /// 把 HTML 中视频/音频资源引用替换为 base64 data URI
+  ///
+  /// 处理两种资源：
+  /// - `<source src="...">` 标签（视频/音频源文件，如 mp4/webm/ogg）
+  /// - `<video poster="...">` 属性（视频封面图，EPUB 中常见如 wqx.jpg）
+  ///
+  /// 必须处理 poster 属性，否则 video.xhtml 的封面图会丢失，
+  /// 导致视频区域在加载前显示空白。
+  static String _inlineVideoSources(
+    String html,
+    Map<String, List<int>> files,
+    String? chapterBasePath,
+  ) {
+    // 1. 处理 <source src="...">
+    var result = html.replaceAllMapped(
+      RegExp(r'<source\b([^>]*?)src="([^"]+)"([^>]*)>', caseSensitive: false),
+      (match) {
+        final before = match.group(1) ?? '';
+        final src = match.group(2) ?? '';
+        final after = match.group(3) ?? '';
+
+        if (src.startsWith('data:') || src.startsWith('http')) {
+          return match.group(0)!;
+        }
+
+        final resourcePath = _resolveEpubImagePath(src, chapterBasePath);
+        final resourceBytes = files[resourcePath];
+        if (resourceBytes == null) return match.group(0)!;
+
+        final mediaType = inferMediaType(resourcePath);
+        final dataUri = encodeBytesAsDataUri(
+          Uint8List.fromList(resourceBytes),
+          mediaType,
+        );
+        return '<source$before src="$dataUri"$after>';
+      },
+    );
+
+    // 2. 处理 <video poster="...">
+    result = result.replaceAllMapped(
+      RegExp(r'<video\b([^>]*?)\bposter="([^"]+)"([^>]*)>', caseSensitive: false),
+      (match) {
+        final before = match.group(1) ?? '';
+        final poster = match.group(2) ?? '';
+        final after = match.group(3) ?? '';
+
+        if (poster.startsWith('data:') || poster.startsWith('http')) {
+          return match.group(0)!;
+        }
+
+        final resourcePath = _resolveEpubImagePath(poster, chapterBasePath);
+        final resourceBytes = files[resourcePath];
+        if (resourceBytes == null) return match.group(0)!;
+
+        final mediaType = inferMediaType(resourcePath);
+        final dataUri = encodeBytesAsDataUri(
+          Uint8List.fromList(resourceBytes),
+          mediaType,
+        );
+        return '<video$before poster="$dataUri"$after>';
+      },
+    );
+
+    return result;
+  }
+
+  /// 把 SVG 中 `<image xlink:href="...">` 替换为 base64 data URI
+  ///
+  /// EPUB 封面常用 SVG image 标签引用图片：
+  /// `<image xlink:href="../Images/cover.jpg" .../>`
+  static String _inlineSvgImages(
+    String html,
+    Map<String, List<int>> files,
+    String? chapterBasePath,
+  ) {
+    return html.replaceAllMapped(
+      RegExp(
+        r'<image\b([^>]*?)xlink:href="([^"]+)"([^>]*)>',
+        caseSensitive: false,
+      ),
+      (match) {
+        final before = match.group(1) ?? '';
+        final href = match.group(2) ?? '';
+        final after = match.group(3) ?? '';
+
+        if (href.startsWith('data:') || href.startsWith('http')) {
+          return match.group(0)!;
+        }
+
+        final resourcePath = _resolveEpubImagePath(href, chapterBasePath);
+        final resourceBytes = files[resourcePath];
+        if (resourceBytes == null) return match.group(0)!;
+
+        final mediaType = inferMediaType(resourcePath);
+        final dataUri = encodeBytesAsDataUri(
+          Uint8List.fromList(resourceBytes),
+          mediaType,
+        );
+        return '<image$before xlink:href="$dataUri"$after>';
+      },
+    );
+  }
+
   /// 合并 EPUB 内所有 CSS 文件内容
   ///
   /// 从 ZIP 中查找所有 .css 文件，合并内容返回。
@@ -1501,6 +1727,25 @@ class EpubParser {
     String? startFragmentId,
     String? endFragmentId,
   }) {
+    return extractBodyWithAttrs(html, startFragmentId, endFragmentId).$1;
+  }
+
+  /// 提取 body innerHTML 及 body 的 class/style/bgcolor 属性
+  ///
+  /// EPUB 章节的 `<body>` 常带 class/style/bgcolor 设置章节级背景：
+  /// - `<body class="video-bg">` → CSS 类（.video-bg 设 background-image）
+  /// - `<body class="volume-bg">` → CSS 类（.volume-bg 设 background-color）
+  /// - `<body bgcolor="#000">` → HTML4 背景色属性
+  /// - `<body style="background: url(../Images/001.jpg) ...">` → inline 背景图
+  ///
+  /// 这些属性需要在 reader 内保留，否则章节背景样式会丢失。
+  /// 返回 (innerHtml, bodyAttrs)，bodyAttrs 是合并后的属性字符串（如
+  /// `class="video-bg" style="background-color:#000"`），供外层 wrapper div 使用。
+  static (String, String) extractBodyWithAttrs(
+    String html,
+    String? startFragmentId,
+    String? endFragmentId,
+  ) {
     try {
       final doc = html_parser.parse(html);
       final body = doc.body;
@@ -1509,14 +1754,43 @@ class EpubParser {
       // EPUB 章节内联的 <style> 是本章节排版的一部分，必须保留
       final String content = body != null ? body.innerHtml : html;
 
-      // 应用 fragment 切片（NCX/NAV 的 startFragmentId/endFragmentId）
-      if (startFragmentId != null || endFragmentId != null) {
-        return _sliceByFragment(content, startFragmentId, endFragmentId).trim();
+      // 提取 body 的 class / style / bgcolor 属性
+      String bodyAttrs = '';
+      if (body != null) {
+        final parts = <String>[];
+        final classAttr = body.attributes['class'];
+        if (classAttr != null && classAttr.isNotEmpty) {
+          parts.add('class="$classAttr"');
+        }
+        final styleAttr = body.attributes['style'];
+        if (styleAttr != null && styleAttr.isNotEmpty) {
+          parts.add('style="$styleAttr"');
+        }
+        // bgcolor 是 HTML4 属性，转为 inline style 的 background-color
+        final bgcolorAttr = body.attributes['bgcolor'];
+        if (bgcolorAttr != null && bgcolorAttr.isNotEmpty) {
+          if (styleAttr != null && styleAttr.isNotEmpty) {
+            // 已有 style：追加 background-color（bgcolor 优先级低，放在前面）
+            parts.removeLast();
+            parts.add('style="background-color:$bgcolorAttr;$styleAttr"');
+          } else {
+            parts.add('style="background-color:$bgcolorAttr"');
+          }
+        }
+        bodyAttrs = parts.join(' ');
       }
 
-      return content.trim();
+      // 应用 fragment 切片（NCX/NAV 的 startFragmentId/endFragmentId）
+      final String sliced;
+      if (startFragmentId != null || endFragmentId != null) {
+        sliced = _sliceByFragment(content, startFragmentId, endFragmentId).trim();
+      } else {
+        sliced = content.trim();
+      }
+
+      return (sliced, bodyAttrs);
     } catch (_) {
-      return html;
+      return (html, '');
     }
   }
 

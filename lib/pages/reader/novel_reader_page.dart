@@ -1513,28 +1513,42 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       }
 
       // 4. 简繁转换 + 替换规则
-      final displayContent = ChineseConverter.convert(
-        content,
-        provider.chineseConverterType,
-      );
+      // EPUB 富 HTML：跳过简繁转换，避免破坏 [[EPUB_CSS]]/[[EPUB_BODY]] 包裹格式
+      final isEpubRichHtml = book.originType == BookOriginType.local &&
+          LocalBookService.detectBookType(book.bookUrl) == LocalBookType.epub &&
+          content.contains('[[EPUB_BODY]]');
+      final displayContent = isEpubRichHtml
+          ? content
+          : ChineseConverter.convert(content, provider.chineseConverterType);
       final displayTitle = ChineseConverter.convert(
         chapter.title,
         provider.chineseConverterType,
       );
-      final processedContent = _processedContent(displayContent);
+      final processedContent =
+          isEpubRichHtml ? displayContent : _processedContent(displayContent);
 
-      // 5. 生成段落 HTML（用 ReaderHtmlTemplate 的 public 方法）
-      final paragraphsHtml = ReaderHtmlTemplate.buildParagraphsHtml(
-        processedContent,
-        provider,
-      );
+      // 5. 生成段落 HTML
+      // - EPUB 富 HTML：用 buildEpubParagraphsHtml，保留 EPUB 原始标签结构，
+      //   包一层 <div data-chapter-index> 供 IntersectionObserver 监测
+      // - 纯文本：用 buildParagraphsHtml，按段落切分并应用高亮规则
+      final paragraphsHtml = isEpubRichHtml
+          ? ReaderHtmlTemplate.buildEpubParagraphsHtml(
+              processedContent,
+              chapterIndex,
+            )
+          : ReaderHtmlTemplate.buildParagraphsHtml(
+              processedContent,
+              provider,
+            );
 
       // 6. 调用 JS 追加到 DOM（不触发 reload）
       //    传入 chapterIndex 让 JS 端给 <h1> 加 data-chapter-index 属性，
       //    供 IntersectionObserver 监测当前可见章节
+      //    EPUB 模式下 paragraphsHtml 已含 data-chapter-index wrapper，
+      //    JS 端 appendChapter 仍会创建 .reader-title（但 EPUB 模式下可忽略）
       if (!mounted) return;
       await _readerWebViewController.appendChapter(
-        displayTitle,
+        isEpubRichHtml ? '' : displayTitle,
         paragraphsHtml,
         chapterIndex,
       );
@@ -1660,26 +1674,37 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       }
 
       // 4. 简繁转换 + 替换规则
-      final displayContent = ChineseConverter.convert(
-        content,
-        provider.chineseConverterType,
-      );
+      // EPUB 富 HTML：跳过简繁转换，避免破坏 [[EPUB_CSS]]/[[EPUB_BODY]] 包裹格式
+      final isEpubRichHtml = book.originType == BookOriginType.local &&
+          LocalBookService.detectBookType(book.bookUrl) == LocalBookType.epub &&
+          content.contains('[[EPUB_BODY]]');
+      final displayContent = isEpubRichHtml
+          ? content
+          : ChineseConverter.convert(content, provider.chineseConverterType);
       final displayTitle = ChineseConverter.convert(
         chapter.title,
         provider.chineseConverterType,
       );
-      final processedContent = _processedContent(displayContent);
+      final processedContent =
+          isEpubRichHtml ? displayContent : _processedContent(displayContent);
 
       // 5. 生成段落 HTML
-      final paragraphsHtml = ReaderHtmlTemplate.buildParagraphsHtml(
-        processedContent,
-        provider,
-      );
+      // - EPUB 富 HTML：用 buildEpubParagraphsHtml，保留 EPUB 原始标签结构
+      // - 纯文本：用 buildParagraphsHtml，按段落切分并应用高亮规则
+      final paragraphsHtml = isEpubRichHtml
+          ? ReaderHtmlTemplate.buildEpubParagraphsHtml(
+              processedContent,
+              chapterIndex,
+            )
+          : ReaderHtmlTemplate.buildParagraphsHtml(
+              processedContent,
+              provider,
+            );
 
       // 6. 调用 JS 前置到 DOM 顶部（不触发 reload，JS 同步调整 scrollTop）
       if (!mounted) return;
       await _readerWebViewController.prependChapter(
-        displayTitle,
+        isEpubRichHtml ? '' : displayTitle,
         paragraphsHtml,
         chapterIndex,
       );
