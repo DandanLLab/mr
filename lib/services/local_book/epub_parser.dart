@@ -556,7 +556,10 @@ class EpubParser {
       // - body 中 <source src="../Video/xxx.mp4"> → data URI（视频）
       // - body 中 <image xlink:href="../Images/xxx.jpg"> → data URI（SVG）
       // - 所有 CSS 合并为一份，所有章节共享（字体和背景图只内嵌一次）
-      final epubCss = _collectAllCss(files);
+      final rawCss = _collectAllCss(files);
+      // 改写 EPUB CSS 中的 body/html 全局选择器为 #reader-content-a
+      // 避免 body{padding} 等样式破坏 reader 布局（reader body 包含 #reader-root）
+      final epubCss = _rewriteCssSelectorsForReader(rawCss);
       // CSS 资源路径处理：
       // - extractedBasePath 非空（推荐）：url() 转为指向解压目录的绝对路径，
       //   WebView 通过 file:// baseUrl 直接访问原始文件，内存占用极低
@@ -1869,6 +1872,101 @@ class EpubParser {
     }
     return cssBuffer.toString();
   }
+
+  /// 把 EPUB CSS 中的全局选择器改写为 reader 内容容器选择器
+  ///
+  /// EPUB CSS 中的 `body`/`html` 选择器在 reader 中会作用于整个 `<body>`
+  /// （包含 `#reader-root` 布局容器），破坏阅读器布局。例如：
+  /// - `body { padding: 0.5em }` → 给整个 reader body 加 padding，内容偏移
+  /// - `html { ... }` → 影响 reader html 元素
+  ///
+  /// 改写规则：
+  /// - `body` → `#reader-content-a`（EPUB body 内容实际放入此容器）
+  /// - `html` → `#reader-content-a`（同上，html 级样式降级到容器）
+  /// - `html body` / `body html` → `#reader-content-a`
+  /// - 其他选择器不动
+  ///
+  /// 注意：仅改写顶层选择器（逗号分隔的选择器组中的每一个），不动组合器
+  /// 后代选择器（如 `body p` → `#reader-content-a p`）。
+  static String _rewriteCssSelectorsForReader(String css) {
+    // 按大括号分块处理每条规则
+    final result = StringBuffer();
+    var i = 0;
+    while (i < css.length) {
+      // 找下一个选择器+声明块
+      final braceStart = css.indexOf('{', i);
+      if (braceStart == -1) {
+        result.write(css.substring(i));
+        break;
+      }
+      final braceEnd = css.indexOf('}', braceStart);
+      if (braceEnd == -1) {
+        result.write(css.substring(i));
+        break;
+      }
+
+      // 注释块原样保留
+      final selectorPart = css.substring(i, braceStart);
+      if (selectorPart.contains('/*')) {
+        // 找注释结束
+        final commentEnd = selectorPart.lastIndexOf('*/');
+        if (commentEnd != -1) {
+          result.write(selectorPart.substring(0, commentEnd + 2));
+          // 处理注释后的选择器
+          final afterComment = selectorPart.substring(commentEnd + 2);
+          result.write(_rewriteSelectorGroup(afterComment));
+        } else {
+          // 注释未闭合，原样输出
+          result.write(selectorPart);
+        }
+      } else {
+        result.write(_rewriteSelectorGroup(selectorPart));
+      }
+
+      // 声明块原样输出
+      result.write(css.substring(braceStart, braceEnd + 1));
+      i = braceEnd + 1;
+    }
+    return result.toString();
+  }
+
+  /// 改写选择器组（逗号分隔的多个选择器）
+  static String _rewriteSelectorGroup(String selectorGroup) {
+    // 按逗号分割，但避免匹配属性选择器中的逗号（如 [attr="a,b"]）
+    // 简单处理：EPUB CSS 极少有复杂选择器，按顶层逗号分割即可
+    final selectors = selectorGroup.split(',');
+    final rewritten = <String>[];
+    for (final sel in selectors) {
+      rewritten.add(_rewriteSingleSelector(sel.trim()));
+    }
+    return rewritten.join(', ');
+  }
+
+  /// 改写单个选择器
+  static String _rewriteSingleSelector(String selector) {
+    if (selector.isEmpty) return selector;
+    // 精确匹配 body / html，或以 body/html 开头的后代选择器
+    // body { ... } → #reader-content-a { ... }
+    // body p { ... } → #reader-content-a p { ... }
+    // html body { ... } → #reader-content-a { ... }
+    var s = selector;
+    // html body → #reader-content-a
+    s = s.replaceAllMapped(
+      RegExp(r'^\s*html\s+body\b'),
+      (m) => '#reader-content-a${m.group(0)!.substring(m.group(0)!.indexOf('body') + 4)}',
+    );
+    // body html → #reader-content-a
+    s = s.replaceAllMapped(
+      RegExp(r'^\s*body\s+html\b'),
+      (m) => '#reader-content-a',
+    );
+    // body → #reader-content-a（独立或后代选择器开头）
+    s = s.replaceFirst(RegExp(r'^\s*body\b'), '#reader-content-a');
+    // html → #reader-content-a（独立或后代选择器开头）
+    s = s.replaceFirst(RegExp(r'^\s*html\b'), '#reader-content-a');
+    return s;
+  }
+
 
   /// 从 EPUB 章节 HTML 中提取 body 内部的 HTML（保留所有 HTML5 标签）。
   ///

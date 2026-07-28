@@ -629,11 +629,13 @@ body.reader-scroll #reader-content-b {
 }
 /* 章节级背景容器（EPUB body class/style 的 wrapper div）：
    - .epub-chapter-bg 由 EpubParser 标记，表示此 div 承载 body 的背景属性
-   - min-height 让背景图/背景色填满整页（否则背景只覆盖内容高度）
+   - min-height: 100% 让背景图/背景色填满整页（覆盖整个阅读页面）
+   - box-sizing: border-box 让 EPUB body 的 padding 包含在高度内，不溢出
    - break-inside: avoid 防止被分页切断（视频页/卷头页/序号页等整页显示）
    应用于 .video-bg / .volume-bg / .box-bg / foreword / serial-num 等章节背景 */
 #reader-content-a .epub-chapter-bg {
-  min-height: calc(var(--reader-safe-height) - 1em);
+  min-height: 100%;
+  box-sizing: border-box;
   break-inside: avoid;
   page-break-inside: avoid;
 }
