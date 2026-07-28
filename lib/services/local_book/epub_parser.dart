@@ -5,6 +5,8 @@ import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart' as html_dom;
 import 'package:xml/xml.dart' as xml;
 
+import 'epub_css_processor.dart';
+
 /// EPUB 图片资源（被 LocalBookService 用来把 EPUB 内部图片转 data URI）
 class EpubResource {
   final String path;
@@ -557,12 +559,15 @@ class EpubParser {
       // - body 中 <image xlink:href="../Images/xxx.jpg"> → data URI（SVG）
       // - 所有 CSS 合并为一份，所有章节共享（字体和背景图只内嵌一次）
       final rawCss = _collectAllCss(files);
-      // 1. 改写 EPUB CSS 中的 body/html 全局选择器为 #reader-content-a
-      //    避免 body{padding} 等样式破坏 reader 布局（reader body 包含 #reader-root）
-      var epubCss = _rewriteCssSelectorsForReader(rawCss);
-      // 2. 通用修正 CSS 属性值：百分比 margin→vh、fixed→scroll、大px宽度→100%
-      //    不依赖具体 class 名，适用于任何 EPUB
-      epubCss = _rewriteCssValuesForReader(epubCss);
+      // 1. 结构化 CSS 处理（移植自 JRead/Legado EpubCss.kt）
+      //    - @media/@supports 拍平
+      //    - 选择器净化（剥离 :hover 等不支持伪类，命名空间归一化）
+      //    - shorthand 展开（font/margin/padding/border/background 等）
+      //    - supportedProperties 白名单过滤
+      //    - body/html 选择器改写为 #reader-content-a
+      //    - reader 特有值改写（百分比 margin→calc、固定宽度→响应式等）
+      //    一次性完成，避免旧方案多次正则扫描的遗漏
+      final epubCss = _processEpubCssStructured(rawCss);
       // CSS 资源路径处理：
       // - extractedBasePath 非空（推荐）：url() 转为指向解压目录的绝对路径，
       //   WebView 通过 file:// baseUrl 直接访问原始文件，内存占用极低
@@ -1860,15 +1865,31 @@ class EpubParser {
   /// 不区分 manifest 引用关系，简单合并所有 CSS
   /// （EPUB CSS 通常互相独立，合并不会有副作用）。
   /// 在导入时调用一次，所有章节共享同一份 CSS。
+  /// 收集 EPUB 内所有 CSS 并合并为一份
+  ///
+  /// 移植自 JRead/Legado EpubPublisherStyles.kt 的 @import 递归展开思路：
+  /// - 简单拼接所有 .css 文件会导致 @import 重复加载或失效
+  /// - 本方法对每个 CSS 文件递归展开 @import，把被引用的 CSS 内容内联进来
+  /// - 防环：用 visited Set 跟踪已处理的 CSS 路径
+  /// - 防炸：限制递归深度（MaxImportDepth = 6）
+  ///
+  /// @import 语法支持：
+  /// - `@import url("other.css");`
+  /// - `@import "other.css";`
+  /// - `@import 'other.css';`
   static String _collectAllCss(Map<String, List<int>> files) {
     final cssBuffer = StringBuffer();
+    final processedPaths = <String>{};
+
     for (final entry in files.entries) {
       final path = entry.key;
       if (path.toLowerCase().endsWith('.css')) {
         final content = decodeBytes(entry.value);
         if (content.isNotEmpty) {
           cssBuffer.writeln('/* === $path === */');
-          cssBuffer.writeln(content);
+          // 递归展开 @import（防环、防炸）
+          final expanded = _expandCssImports(content, path, files, processedPaths, 0);
+          cssBuffer.writeln(expanded);
           cssBuffer.writeln();
         }
       }
@@ -1876,326 +1897,316 @@ class EpubParser {
     return cssBuffer.toString();
   }
 
-  /// 把 EPUB CSS 中的全局选择器改写为 reader 内容容器选择器
+  /// 递归展开 CSS 中的 @import 语句
   ///
-  /// EPUB CSS 中的 `body`/`html` 选择器在 reader 中会作用于整个 `<body>`
-  /// （包含 `#reader-root` 布局容器），破坏阅读器布局。例如：
-  /// - `body { padding: 0.5em }` → 给整个 reader body 加 padding，内容偏移
-  /// - `html { ... }` → 影响 reader html 元素
-  ///
-  /// 改写规则：
-  /// - `body` → `#reader-content-a`（EPUB body 内容实际放入此容器）
-  /// - `html` → `#reader-content-a`（同上，html 级样式降级到容器）
-  /// - `html body` / `body html` → `#reader-content-a`
-  /// - 其他选择器不动
-  ///
-  /// 注意：仅改写顶层选择器（逗号分隔的选择器组中的每一个），不动组合器
-  /// 后代选择器（如 `body p` → `#reader-content-a p`）。
-  static String _rewriteCssSelectorsForReader(String css) {
-    // 按大括号分块处理每条规则
-    final result = StringBuffer();
-    var i = 0;
-    while (i < css.length) {
-      // 找下一个选择器+声明块
-      final braceStart = css.indexOf('{', i);
-      if (braceStart == -1) {
-        result.write(css.substring(i));
-        break;
-      }
-      final braceEnd = css.indexOf('}', braceStart);
-      if (braceEnd == -1) {
-        result.write(css.substring(i));
-        break;
-      }
+  /// 移植自 JRead/Legado EpubPublisherStyles.loadCss：
+  /// - 匹配 `@import url("...")` / `@import "..."` / `@import '...'` 三种语法
+  /// - 跳过外部 URL（http/https）和 data: URI
+  /// - 解析相对路径为 EPUB ZIP 内绝对路径
+  /// - 递归展开被引用的 CSS（深度限制 MaxImportDepth = 6）
+  /// - visited Set 防止循环引用
+  /// - 已处理的路径不重复展开（去重）
+  static String _expandCssImports(
+    String css,
+    String cssPath,
+    Map<String, List<int>> files,
+    Set<String> visited,
+    int depth,
+  ) {
+    if (depth > 6) return css; // MaxImportDepth = 6
 
-      // 注释块原样保留
-      final selectorPart = css.substring(i, braceStart);
-      if (selectorPart.contains('/*')) {
-        // 找注释结束
-        final commentEnd = selectorPart.lastIndexOf('*/');
-        if (commentEnd != -1) {
-          result.write(selectorPart.substring(0, commentEnd + 2));
-          // 处理注释后的选择器
-          final afterComment = selectorPart.substring(commentEnd + 2);
-          result.write(_rewriteSelectorGroup(afterComment));
-        } else {
-          // 注释未闭合，原样输出
-          result.write(selectorPart);
-        }
-      } else {
-        result.write(_rewriteSelectorGroup(selectorPart));
-      }
+    final normalizedPath = _normalizeEpubPath(cssPath);
+    if (visited.contains(normalizedPath)) return '';
+    visited.add(normalizedPath);
 
-      // 声明块原样输出
-      result.write(css.substring(braceStart, braceEnd + 1));
-      i = braceEnd + 1;
-    }
-    return result.toString();
-  }
-
-  /// 改写选择器组（逗号分隔的多个选择器）
-  static String _rewriteSelectorGroup(String selectorGroup) {
-    // 按逗号分割，但避免匹配属性选择器中的逗号（如 [attr="a,b"]）
-    // 简单处理：EPUB CSS 极少有复杂选择器，按顶层逗号分割即可
-    final selectors = selectorGroup.split(',');
-    final rewritten = <String>[];
-    for (final sel in selectors) {
-      rewritten.add(_rewriteSingleSelector(sel.trim()));
-    }
-    return rewritten.join(', ');
-  }
-
-  /// 改写单个选择器
-  static String _rewriteSingleSelector(String selector) {
-    if (selector.isEmpty) return selector;
-    // 精确匹配 body / html，或以 body/html 开头的后代选择器
-    // body { ... } → #reader-content-a { ... }
-    // body p { ... } → #reader-content-a p { ... }
-    // html body { ... } → #reader-content-a { ... }
-    var s = selector;
-    // html body → #reader-content-a
-    s = s.replaceAllMapped(
-      RegExp(r'^\s*html\s+body\b'),
-      (m) => '#reader-content-a${m.group(0)!.substring(m.group(0)!.indexOf('body') + 4)}',
+    // 匹配 @import 三种语法：@import url("..."); / @import "..."; / @import '...';
+    final importRegex = RegExp(
+      r"""@import\s+(?:url\(\s*)?["']([^"']+)["']\s*\)?\s*;""",
+      caseSensitive: false,
     );
-    // body html → #reader-content-a
-    s = s.replaceAllMapped(
-      RegExp(r'^\s*body\s+html\b'),
-      (m) => '#reader-content-a',
-    );
-    // body → #reader-content-a（独立或后代选择器开头）
-    s = s.replaceFirst(RegExp(r'^\s*body\b'), '#reader-content-a');
-    // html → #reader-content-a（独立或后代选择器开头）
-    s = s.replaceFirst(RegExp(r'^\s*html\b'), '#reader-content-a');
-    return s;
+
+    return css.replaceAllMapped(importRegex, (match) {
+      final importHref = match.group(1)!.trim();
+      // 跳过外部 URL 和 data: URI
+      if (_isExternalOrDataUrl(importHref)) {
+        return match.group(0)!; // 保留原 @import
+      }
+
+      // 解析相对路径为 EPUB ZIP 内绝对路径
+      final resolvedPath = _resolveEpubCssPath(cssPath, importHref);
+      final normalizedResolved = _normalizeEpubPath(resolvedPath);
+
+      // 查找被引用的 CSS 文件
+      final cssBytes = files[normalizedResolved];
+      if (cssBytes == null) {
+        return ''; // 文件不存在，移除 @import
+      }
+
+      final importedContent = decodeBytes(cssBytes);
+      if (importedContent.isEmpty) {
+        return '';
+      }
+
+      // 递归展开被引用 CSS 中的 @import
+      final recursivelyExpanded = _expandCssImports(
+        importedContent,
+        normalizedResolved,
+        files,
+        visited,
+        depth + 1,
+      );
+
+      return '/* @import $importHref → $normalizedResolved */\n$recursivelyExpanded';
+    });
   }
 
-  /// 通用解码 EPUB CSS，适配 reader 的 column 分栏布局。
-  ///
-  /// 每个 EPUB 的 CSS 都不一样，不能硬编码 class 名适配。这里只做**通用
-  /// 属性值改写**，把 EPUB 为单页阅读器（如多看）设计的 CSS 转换为 column
-  /// 分栏友好的 CSS，适用于任何 EPUB 结构。
-  ///
-  /// ## 核心问题：百分比 margin/padding 的基准
-  ///
-  /// EPUB 原作者假设"一个 xhtml = 一页"，用 `margin: 45% auto` 做垂直居中
-  /// （45% 基于页面高度）。但 CSS 规范规定：**百分比 margin-top/bottom
-  /// 基于容器的宽度**，不是高度。
-  ///
-  /// - 多看阅读器：容器 = 一页，宽度 = 屏幕宽度，45% ≈ 半屏（凑巧能用）
-  /// - reader column：容器 = `#reader-content-a`，宽度 = 一栏宽度（窄），
-  ///   45% 基于窄栏宽度算出来很小，垂直定位完全失效
-  ///
-  /// **修正方案**：把百分比 margin-top/bottom 替换为
-  /// `calc(var(--reader-safe-height) * N / 100)`，让 N% 真正表示
-  /// "占内容区高度的 N%"，还原原作者的垂直定位意图。
-  ///
-  /// ## 修正项（按处理顺序）
-  ///
-  /// 1. **百分比 margin/padding 垂直间距 → calc(safe-height)**
-  ///    - `margin: 45% auto` → `margin: calc(var(--reader-safe-height)*45/100) auto`
-  ///    - `margin-top: 30%` → `margin-top: calc(var(--reader-safe-height)*30/100)`
-  ///
-  /// 2. **`background-attachment: fixed` → scroll**
-  ///    - column 分栏里 fixed 背景不跟随滚动，行为异常
-  ///
-  /// 3. **大固定 px 宽度 → max-width: 100%**
-  ///    - > 300px 的固定宽度在小屏溢出
-  ///
-  /// 4. **`position: absolute/fixed` → static**
-  ///    - EPUB 用绝对定位放装饰元素（假设单页），column 里会飘到错误栏
-  ///    - 例外：保留 `position: relative`（图文混排常用，不影响分栏）
-  ///
-  /// 5. **`height: 100%` / `100vh` → auto**
-  ///    - `#reader-content-a` 高度由 column 动态分栏决定，固定高度会破坏分栏
-  ///
-  /// 6. **`float: left/right` → none**
-  ///    - float 在 column 分栏里会跨栏错位
-  ///
-  /// 7. **`transform: translate()` 精确定位 → 移除**
-  ///    - EPUB 用 translate 做像素级定位，column 里基准改变会错位
-  ///
-  /// 8. **`@page` 规则 → 移除**
-  ///    - EPUB 打印分页规则，reader 无效
-  ///
-  /// 9. **`overflow: hidden` → visible**
-  ///    - hidden 会裁剪分栏溢出内容
-  static String _rewriteCssValuesForReader(String css) {
-    var result = css;
+  /// 判断 URL 是否为外部链接或 data: URI
+  static bool _isExternalOrDataUrl(String url) {
+    final lower = url.toLowerCase();
+    return lower.startsWith('http://') ||
+        lower.startsWith('https://') ||
+        lower.startsWith('//') ||
+        lower.startsWith('data:');
+  }
 
-    // 0. 移除 @page 规则（打印分页，reader 无效）
-    result = result.replaceAll(
+  /// 规范化 EPUB ZIP 内路径（移除 ./ 和 ../，转为绝对路径）
+  static String _normalizeEpubPath(String path) {
+    // 移除 fragment（#xxx）
+    final p = path.split('#').first;
+    // 处理 ./ 和 ../
+    final segments = <String>[];
+    for (final seg in p.split('/')) {
+      if (seg == '.' || seg.isEmpty) continue;
+      if (seg == '..') {
+        if (segments.isNotEmpty) segments.removeLast();
+        continue;
+      }
+      segments.add(seg);
+    }
+    return segments.join('/');
+  }
+
+  /// 解析 EPUB 内 CSS 相对路径（基于当前 CSS 文件路径）
+  ///
+  /// 例：cssPath = "OEBPS/Styles/main.css", relativeHref = "../Fonts/base.css"
+  /// → "OEBPS/Fonts/base.css"
+  ///
+  /// 与 [_resolveEpubPath] 的区别：本方法专为 CSS @import 设计，
+  /// 简单基于目录拼接（CSS 路径都是相对当前文件目录的）。
+  static String _resolveEpubCssPath(String cssPath, String relativeHref) {
+    final baseDir = cssPath.contains('/')
+        ? cssPath.substring(0, cssPath.lastIndexOf('/') + 1)
+        : '';
+    return baseDir + relativeHref;
+  }
+
+  /// 结构化处理 EPUB CSS（移植自 JRead/Legado EpubCss.kt 思路）
+  ///
+  /// 用 [EpubCssProcessor] 做结构化解析，一次性完成：
+  /// 1. 移除注释、@page 规则
+  /// 2. @media/@supports 拍平（嵌套规则展开为顶层）
+  /// 3. 选择器净化（剥离 :hover 等不支持伪类、命名空间 `|` → `\:`）
+  /// 4. shorthand 展开（font/margin/padding/border/background 等七类）
+  /// 5. supportedProperties 白名单过滤
+  /// 6. body/html 选择器改写为 #reader-content-a
+  /// 7. #reader-content-a 布局属性剥离（padding/margin/width/height 等由 reader 框架控制）
+  /// 8. reader 特有值改写（百分比 margin→calc、固定宽度→响应式、fixed→scroll 等）
+  ///
+  /// 与旧正则方案的区别：
+  /// - 旧方案：多次正则扫描，margin: 45% auto 20% auto 只替换第一个百分比
+  /// - 新方案：先展开 shorthand 为 margin-top/right/bottom/left，再逐属性改写，零遗漏
+  static String _processEpubCssStructured(String css) {
+    if (css.trim().isEmpty) return css;
+
+    // 0. 预处理：移除 @page 规则（打印分页，reader 无效）
+    final preprocessed = css.replaceAll(
       RegExp(r'@page\s*\{[^}]*\}', dotAll: true),
       '',
     );
 
-    // 0.5 移除 #reader-content-a 选择器中的布局属性
-    //      body/html 的 padding/margin/width/height/overflow 等布局属性
-    //      会被 _rewriteCssSelectorsForReader 改写为 #reader-content-a 的属性，
-    //      但 #reader-content-a 是 column 分栏容器（position:absolute;
-    //      column-width:safe-width），给它加 padding/margin/width/height
-    //      会导致 column 宽度计算错误、内容溢出、分栏错位。
-    //      这些布局属性由 reader 框架（_generateCss）通过 CSS 变量控制，
-    //      EPUB CSS 不应覆盖。只保留 color/background/font 等非布局属性。
-    //      处理方式：对 #reader-content-a 的声明块，逐条移除布局属性。
-    result = _stripLayoutPropsFromReaderContentA(result);
+    // 1-5. 结构化解析（@media 拍平 + 选择器净化 + shorthand 展开 + 白名单过滤）
+    final rules = EpubCssProcessor.parseRules(preprocessed);
 
-    // 1. margin-top/bottom 百分比 → calc(var(--reader-safe-height) * N / 100)
-    //    还原原作者"占页面高度 N%"的垂直定位意图
-    //    margin-top: 30% → margin-top: calc(var(--reader-safe-height)*30/100)
-    result = result.replaceAllMapped(
-      RegExp(r'(margin-top|margin-bottom):\s*(\d+(?:\.\d+)?)\s*%'),
-      (m) => '${m.group(1)}:calc(var(--reader-safe-height)*${m.group(2)}/100)',
-    );
-    // margin 简写中的百分比（垂直方向，第 1 和第 3 个值）：
-    //   margin: 45% auto → margin: calc(...) auto
-    //   margin: 30% auto 0 auto → margin: calc(...) auto 0 auto
-    //   margin: 45% auto 20% auto → margin: calc(...) auto calc(...) auto
-    //   margin: 90% auto → margin: calc(...) auto
-    // 关键：简写中可能有多个百分比（top 和 bottom），都要替换
-    // 用回调逐个替换 margin: 声明中的百分比值
-    result = result.replaceAllMapped(
-      RegExp(r'margin:\s*([^;]+);'),
-      (m) {
-        var val = m.group(1)!;
-        // 替换 val 中的所有百分比为 calc(...)
-        val = val.replaceAllMapped(
-          RegExp(r'(\d+(?:\.\d+)?)\s*%'),
-          (mm) => 'calc(var(--reader-safe-height)*${mm.group(1)}/100)',
-        );
-        return 'margin:$val;';
-      },
-    );
+    // 6. body/html 选择器改写为 #reader-content-a
+    // 7. #reader-content-a 布局属性剥离
+    // 8. reader 特有值改写
+    final processedRules = <EpubCssRule>[];
+    for (final rule in rules) {
+      final rewrittenSelector = _rewriteSelectorForReader(rule.selector);
+      if (rewrittenSelector == null) continue;
 
-    // padding-top/bottom 百分比 → calc(var(--reader-safe-height) * N / 100)
-    result = result.replaceAllMapped(
-      RegExp(r'(padding-top|padding-bottom):\s*(\d+(?:\.\d+)?)\s*%'),
-      (m) => '${m.group(1)}:calc(var(--reader-safe-height)*${m.group(2)}/100)',
+      final isReaderContentA = rewrittenSelector.trim() == '#reader-content-a' ||
+          rewrittenSelector.trim().startsWith('#reader-content-a ');
+
+      final processedDecls = <EpubCssDeclaration>[];
+      for (final decl in rule.declarations) {
+        // #reader-content-a：剥离布局属性（padding/margin/width/height/overflow 等）
+        // 这些属性由 reader 框架通过 CSS 变量控制，EPUB CSS 不应覆盖
+        if (isReaderContentA && _isLayoutProperty(decl.name)) {
+          continue;
+        }
+
+        // reader 特有值改写
+        final rewrittenValue = _rewriteCssValueForReader(decl.name, decl.value);
+        if (rewrittenValue == null) continue; // null 表示移除该声明
+
+        processedDecls.add(decl.copyWith(value: rewrittenValue));
+      }
+
+      if (processedDecls.isNotEmpty) {
+        processedRules.add(EpubCssRule(
+          selector: rewrittenSelector,
+          declarations: processedDecls,
+          specificity: rule.specificity,
+          order: rule.order,
+        ));
+      }
+    }
+
+    return EpubCssProcessor.serialize(processedRules);
+  }
+
+  /// 改写选择器：body/html → #reader-content-a
+  ///
+  /// 返回 null 表示该选择器应被丢弃（如净化后为空）。
+  /// EpubCssProcessor 已做过伪类剥离和命名空间归一化，这里只做 body/html 替换。
+  static String? _rewriteSelectorForReader(String selector) {
+    var s = selector.trim();
+    if (s.isEmpty) return null;
+
+    // html body → #reader-content-a
+    s = s.replaceAllMapped(
+      RegExp(r'^html\s+body\b'),
+      (m) => '#reader-content-a',
     );
-    // padding 简写同理：替换所有百分比
-    result = result.replaceAllMapped(
-      RegExp(r'padding:\s*([^;]+);'),
-      (m) {
-        var val = m.group(1)!;
-        val = val.replaceAllMapped(
-          RegExp(r'(\d+(?:\.\d+)?)\s*%'),
-          (mm) => 'calc(var(--reader-safe-height)*${mm.group(1)}/100)',
-        );
-        return 'padding:$val;';
-      },
+    // body html → #reader-content-a
+    s = s.replaceAllMapped(
+      RegExp(r'^body\s+html\b'),
+      (m) => '#reader-content-a',
     );
+    // body → #reader-content-a（独立或后代选择器开头）
+    s = s.replaceFirst(RegExp(r'^body\b'), '#reader-content-a');
+    // html → #reader-content-a（独立或后代选择器开头）
+    s = s.replaceFirst(RegExp(r'^html\b'), '#reader-content-a');
+
+    return s.isEmpty ? null : s;
+  }
+
+  /// 判断是否为布局属性（#reader-content-a 需剥离）
+  ///
+  /// 这些属性会破坏 column 分栏布局：
+  /// - padding/margin：让 column 内容区变窄，column-width 与 safe-width 不匹配
+  /// - width/height：覆盖 absolute + top/bottom:0 撑满 stage 的布局
+  /// - overflow：覆盖分栏裁剪逻辑
+  /// - position/top/bottom/left/right：干扰 column 定位
+  /// - float/clear/display：破坏文档流
+  /// - flex/grid/columns：现代布局，与 column 分栏冲突
+  static bool _isLayoutProperty(String name) {
+    const layoutProps = {
+      'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+      'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+      'width', 'height', 'max-width', 'max-height', 'min-width', 'min-height',
+      'overflow', 'overflow-x', 'overflow-y',
+      'position', 'top', 'bottom', 'left', 'right',
+      'float', 'clear', 'display', 'box-sizing',
+      'flex', 'flex-direction', 'flex-wrap', 'flex-grow', 'flex-shrink',
+      'flex-basis', 'justify-content', 'align-items', 'align-content', 'align-self',
+      'grid', 'grid-template', 'grid-template-columns', 'grid-template-rows',
+      'grid-column', 'grid-row', 'gap', 'row-gap', 'column-gap',
+      'column-width', 'column-count', 'column-fill', 'column-rule', 'columns',
+    };
+    return layoutProps.contains(name);
+  }
+
+  /// reader 特有的 CSS 值改写
+  ///
+  /// 对单个声明做值改写，返回 null 表示移除该声明。
+  /// 这些改写是 reader column 分栏布局特有的适配，参考实现里没有。
+  ///
+  /// 改写规则（与旧 _rewriteCssValuesForReader 一致，但作用于结构化后的单条声明）：
+  /// 1. 百分比 margin-top/bottom/padding-top/bottom → calc(var(--reader-safe-height) * N / 100)
+  /// 2. background-attachment: fixed → scroll
+  /// 3. 固定 px 宽度 → 响应式（>200px / <100px 都改为 auto）
+  /// 4. position: absolute/fixed → static（relative 保留）
+  /// 5. height: 100% / 100vh → auto
+  /// 6. float: left/right → none
+  /// 7. transform: translate(...) → 移除（保留 scale/rotate）
+  /// 8. overflow: hidden → visible
+  static String? _rewriteCssValueForReader(String name, String value) {
+    final lowerValue = value.toLowerCase();
+
+    // 1. 百分比 margin-top/bottom/padding-top/bottom → calc(safe-height)
+    //    CSS 规范：百分比 margin-top/bottom 基于容器宽度，不是高度。
+    //    EPUB 原作者假设"一页 = 一屏"，用 45% 做垂直居中（基于页面高度）。
+    //    reader column 容器宽度 = 一栏宽度（窄），45% 算出来很小，垂直定位失效。
+    //    修正：替换为 calc(var(--reader-safe-height) * N / 100)，还原垂直定位意图。
+    if ((name == 'margin-top' || name == 'margin-bottom' ||
+         name == 'padding-top' || name == 'padding-bottom') &&
+        lowerValue.contains('%')) {
+      return value.replaceAllMapped(
+        RegExp(r'(\d+(?:\.\d+)?)\s*%'),
+        (m) => 'calc(var(--reader-safe-height)*${m.group(1)}/100)',
+      );
+    }
 
     // 2. background-attachment: fixed → scroll
-    result = result.replaceAllMapped(
-      RegExp(r'background-attachment:\s*fixed', caseSensitive: false),
-      (_) => 'background-attachment: scroll',
-    );
+    //    column 分栏里 fixed 背景不跟随滚动，行为异常
+    if (name == 'background-attachment' && lowerValue == 'fixed') {
+      return 'scroll';
+    }
 
     // 3. 固定 px 宽度 → 响应式
-    //    - > 200px：大宽度（如 540px 视频），改为 max-width:100%;width:auto
-    //    - < 100px：窄宽度（如 35px 竖排标题），改为 width:auto 让文字横排
-    //    - 100-200px：中等宽度，保留（可能是表格列宽等合理值）
-    //    匹配所有 width:Npx（不再限制位数），用逻辑判断阈值
-    result = result.replaceAllMapped(
-      RegExp(r'width:\s*(\d+(?:\.\d+)?)px'),
-      (m) {
-        final px = double.tryParse(m.group(1) ?? '0') ?? 0;
+    //    - > 200px：大宽度（如 540px 视频），改为 auto（max-width:100% 由 reader 框架默认设置）
+    //    - < 100px：窄宽度（如 35px 竖排标题），改为 auto 让文字横排
+    //    - 100-200px：中等宽度，保留
+    if (name == 'width') {
+      final match = RegExp(r'^(\d+(?:\.\d+)?)px$').firstMatch(value.trim());
+      if (match != null) {
+        final px = double.tryParse(match.group(1) ?? '0') ?? 0;
         if (px > 200) {
-          // 大宽度：响应式，不溢出
-          return 'max-width:100%;width:auto';
+          return 'auto';
         } else if (px < 100 && px > 0) {
-          // 窄宽度：放宽，让内容（标题文字）横排显示
-          return 'width:auto';
+          return 'auto';
         }
-        // 中等宽度：保留原值
-        return m.group(0)!;
-      },
-    );
+      }
+    }
 
     // 4. position: absolute/fixed → static（relative 保留）
-    result = result.replaceAllMapped(
-      RegExp(r'position:\s*(absolute|fixed)\b', caseSensitive: false),
-      (_) => 'position: static',
-    );
+    //    EPUB 用绝对定位放装饰元素（假设单页），column 里会飘到错误栏
+    if (name == 'position' && (lowerValue == 'absolute' || lowerValue == 'fixed')) {
+      return 'static';
+    }
 
-    // 5. height: 100% / 100vh / 100svh / 100dvh → auto
+    // 5. height: 100% / 100vh / 100svh / 100dvh / 100lvh → auto
     //    #reader-content-a 高度由 column 动态分栏，固定高度会破坏分栏
-    result = result.replaceAllMapped(
-      RegExp(r'height:\s*100(?:%|vh|svh|dvh|lvh)\b', caseSensitive: false),
-      (_) => 'height: auto',
-    );
-    result = result.replaceAllMapped(
-      RegExp(r'max-height:\s*100(?:%|vh|svh|dvh|lvh)\b', caseSensitive: false),
-      (_) => 'max-height: none',
-    );
+    if ((name == 'height' || name == 'max-height') &&
+        RegExp(r'^100(%|vh|svh|dvh|lvh)$', caseSensitive: false).hasMatch(value.trim())) {
+      return name == 'height' ? 'auto' : 'none';
+    }
 
     // 6. float: left/right → none
-    result = result.replaceAllMapped(
-      RegExp(r'float:\s*(left|right)\b', caseSensitive: false),
-      (_) => 'float: none',
-    );
+    //    float 在 column 分栏里会跨栏错位
+    if (name == 'float' && (lowerValue == 'left' || lowerValue == 'right')) {
+      return 'none';
+    }
 
-    // 7. transform: translate(...) → 移除整个 transform 声明
+    // 7. transform: translate(...) → 移除整个 transform
     //    保留 scale/rotate（不影响布局定位）
-    result = result.replaceAllMapped(
-      RegExp(r'transform:\s*translate(?:3d|X|Y|Z)?\s*\([^)]*\)\s*;?'),
-      (m) => m.group(0)!.endsWith(';') ? '' : '',
-    );
+    if (name == 'transform' &&
+        RegExp(r'^translate', caseSensitive: false).hasMatch(value.trim())) {
+      return null; // 返回 null 移除该声明
+    }
 
     // 8. overflow: hidden → visible（防裁剪分栏内容）
-    result = result.replaceAllMapped(
-      RegExp(r'overflow:\s*hidden\b', caseSensitive: false),
-      (_) => 'overflow: visible',
-    );
+    if ((name == 'overflow' || name == 'overflow-x' || name == 'overflow-y') &&
+        lowerValue == 'hidden') {
+      return 'visible';
+    }
 
-    return result;
+    return value;
   }
 
-  /// 从 #reader-content-a 选择器的声明块中移除布局属性
-  ///
-  /// `_rewriteCssSelectorsForReader` 把 `body`/`html` 选择器改写为
-  /// `#reader-content-a`，但 body/html 的 padding/margin/width/height
-  /// 等布局属性会破坏 column 分栏布局：
-  /// - `padding` 让 column 内容区变窄，column-width 与 safe-width 不匹配
-  /// - `width`/`height` 覆盖 absolute + top/bottom:0 撑满 stage 的布局
-  /// - `margin` 让容器偏移
-  /// - `overflow` 覆盖分栏裁剪逻辑
-  ///
-  /// 这些属性由 reader 框架通过 CSS 变量控制，EPUB CSS 不应覆盖。
-  /// 只保留 color/background/font/text 等非布局属性。
-  ///
-  /// 处理方式：用正则匹配 `#reader-content-a { ... }` 声明块，
-  /// 逐条移除布局属性声明。
-  static String _stripLayoutPropsFromReaderContentA(String css) {
-    // 匹配 #reader-content-a 后跟 { ... } 声明块
-    // 选择器可能带空格、逗号分隔等，但这里只处理以 #reader-content-a
-    // 开头的规则（body/html 改写后都是这个形式）
-    return css.replaceAllMapped(
-      RegExp(r'(#reader-content-a\s*\{)([^}]*)(\})'),
-      (m) {
-        final selectorAndOpenBrace = m.group(1)!;
-        final declarations = m.group(2)!;
-        final closeBrace = m.group(3)!;
-
-        // 要移除的布局属性（精确匹配属性名，不误删 background-color 等）
-        // padding / margin / width / height / max-width / max-height
-        // overflow / position / top / bottom / left / right
-        // float / clear / display / box-sizing
-        final layoutPropPattern = RegExp(
-          r'(?:padding|margin|width|height|max-width|max-height|'
-          r'overflow|overflow-x|overflow-y|position|top|bottom|left|right|'
-          r'float|clear|display|box-sizing|flex|flex-direction|flex-wrap|'
-          r'justify-content|align-items|align-content|align-self|'
-          r'grid|grid-template|grid-column|grid-row|gap|column-width|'
-          r'column-gap|column-count|column-fill|column-rule|columns)'
-          r'\s*:\s*[^;]+;?',
-        );
-
-        final stripped = declarations.replaceAll(layoutPropPattern, '');
-        return '$selectorAndOpenBrace$stripped$closeBrace';
-      },
-    );
-  }
+  /// 提取 body innerHTML
   ///
   /// 用于富 HTML 渲染：完整保留 EPUB 章节的 HTML5 结构，包括
   /// `<p>/<h1>/<img>/<blockquote>/<ul>/<table>/<svg>/<section>/<article>` 等
