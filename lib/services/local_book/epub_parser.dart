@@ -2036,14 +2036,24 @@ class EpubParser {
       RegExp(r'(margin-top|margin-bottom):\s*(\d+(?:\.\d+)?)\s*%'),
       (m) => '${m.group(1)}:calc(var(--reader-safe-height)*${m.group(2)}/100)',
     );
-    // margin 简写中的百分比（垂直方向）：
+    // margin 简写中的百分比（垂直方向，第 1 和第 3 个值）：
     //   margin: 45% auto → margin: calc(...) auto
     //   margin: 30% auto 0 auto → margin: calc(...) auto 0 auto
+    //   margin: 45% auto 20% auto → margin: calc(...) auto calc(...) auto
     //   margin: 90% auto → margin: calc(...) auto
-    // 正则匹配 margin: 后第一个百分比值（垂直 margin），替换为 calc
+    // 关键：简写中可能有多个百分比（top 和 bottom），都要替换
+    // 用回调逐个替换 margin: 声明中的百分比值
     result = result.replaceAllMapped(
-      RegExp(r'margin:\s*(\d+(?:\.\d+)?)\s*%'),
-      (m) => 'margin:calc(var(--reader-safe-height)*${m.group(1)}/100)',
+      RegExp(r'margin:\s*([^;]+);'),
+      (m) {
+        var val = m.group(1)!;
+        // 替换 val 中的所有百分比为 calc(...)
+        val = val.replaceAllMapped(
+          RegExp(r'(\d+(?:\.\d+)?)\s*%'),
+          (mm) => 'calc(var(--reader-safe-height)*${mm.group(1)}/100)',
+        );
+        return 'margin:$val;';
+      },
     );
 
     // padding-top/bottom 百分比 → calc(var(--reader-safe-height) * N / 100)
@@ -2051,9 +2061,17 @@ class EpubParser {
       RegExp(r'(padding-top|padding-bottom):\s*(\d+(?:\.\d+)?)\s*%'),
       (m) => '${m.group(1)}:calc(var(--reader-safe-height)*${m.group(2)}/100)',
     );
+    // padding 简写同理：替换所有百分比
     result = result.replaceAllMapped(
-      RegExp(r'padding:\s*(\d+(?:\.\d+)?)\s*%'),
-      (m) => 'padding:calc(var(--reader-safe-height)*${m.group(1)}/100)',
+      RegExp(r'padding:\s*([^;]+);'),
+      (m) {
+        var val = m.group(1)!;
+        val = val.replaceAllMapped(
+          RegExp(r'(\d+(?:\.\d+)?)\s*%'),
+          (mm) => 'calc(var(--reader-safe-height)*${mm.group(1)}/100)',
+        );
+        return 'padding:$val;';
+      },
     );
 
     // 2. background-attachment: fixed → scroll
@@ -2062,15 +2080,23 @@ class EpubParser {
       (_) => 'background-attachment: scroll',
     );
 
-    // 3. 大固定 px 宽度 → max-width: 100%（> 300px 才处理，避免误改小元素）
-    //    width: 540px → max-width:100%;width:auto
+    // 3. 固定 px 宽度 → 响应式
+    //    - > 200px：大宽度（如 540px 视频），改为 max-width:100%;width:auto
+    //    - < 100px：窄宽度（如 35px 竖排标题），改为 width:auto 让文字横排
+    //    - 100-200px：中等宽度，保留（可能是表格列宽等合理值）
+    //    匹配所有 width:Npx（不再限制位数），用逻辑判断阈值
     result = result.replaceAllMapped(
-      RegExp(r'width:\s*(\d{4,})px'),
+      RegExp(r'width:\s*(\d+(?:\.\d+)?)px'),
       (m) {
-        final px = int.tryParse(m.group(1) ?? '0') ?? 0;
-        if (px > 300) {
+        final px = double.tryParse(m.group(1) ?? '0') ?? 0;
+        if (px > 200) {
+          // 大宽度：响应式，不溢出
           return 'max-width:100%;width:auto';
+        } else if (px < 100 && px > 0) {
+          // 窄宽度：放宽，让内容（标题文字）横排显示
+          return 'width:auto';
         }
+        // 中等宽度：保留原值
         return m.group(0)!;
       },
     );
