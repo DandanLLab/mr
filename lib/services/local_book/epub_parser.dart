@@ -2029,6 +2029,17 @@ class EpubParser {
       '',
     );
 
+    // 0.5 移除 #reader-content-a 选择器中的布局属性
+    //      body/html 的 padding/margin/width/height/overflow 等布局属性
+    //      会被 _rewriteCssSelectorsForReader 改写为 #reader-content-a 的属性，
+    //      但 #reader-content-a 是 column 分栏容器（position:absolute;
+    //      column-width:safe-width），给它加 padding/margin/width/height
+    //      会导致 column 宽度计算错误、内容溢出、分栏错位。
+    //      这些布局属性由 reader 框架（_generateCss）通过 CSS 变量控制，
+    //      EPUB CSS 不应覆盖。只保留 color/background/font 等非布局属性。
+    //      处理方式：对 #reader-content-a 的声明块，逐条移除布局属性。
+    result = _stripLayoutPropsFromReaderContentA(result);
+
     // 1. margin-top/bottom 百分比 → calc(var(--reader-safe-height) * N / 100)
     //    还原原作者"占页面高度 N%"的垂直定位意图
     //    margin-top: 30% → margin-top: calc(var(--reader-safe-height)*30/100)
@@ -2140,8 +2151,51 @@ class EpubParser {
     return result;
   }
 
+  /// 从 #reader-content-a 选择器的声明块中移除布局属性
+  ///
+  /// `_rewriteCssSelectorsForReader` 把 `body`/`html` 选择器改写为
+  /// `#reader-content-a`，但 body/html 的 padding/margin/width/height
+  /// 等布局属性会破坏 column 分栏布局：
+  /// - `padding` 让 column 内容区变窄，column-width 与 safe-width 不匹配
+  /// - `width`/`height` 覆盖 absolute + top/bottom:0 撑满 stage 的布局
+  /// - `margin` 让容器偏移
+  /// - `overflow` 覆盖分栏裁剪逻辑
+  ///
+  /// 这些属性由 reader 框架通过 CSS 变量控制，EPUB CSS 不应覆盖。
+  /// 只保留 color/background/font/text 等非布局属性。
+  ///
+  /// 处理方式：用正则匹配 `#reader-content-a { ... }` 声明块，
+  /// 逐条移除布局属性声明。
+  static String _stripLayoutPropsFromReaderContentA(String css) {
+    // 匹配 #reader-content-a 后跟 { ... } 声明块
+    // 选择器可能带空格、逗号分隔等，但这里只处理以 #reader-content-a
+    // 开头的规则（body/html 改写后都是这个形式）
+    return css.replaceAllMapped(
+      RegExp(r'(#reader-content-a\s*\{)([^}]*)(\})'),
+      (m) {
+        final selectorAndOpenBrace = m.group(1)!;
+        final declarations = m.group(2)!;
+        final closeBrace = m.group(3)!;
 
-  /// 从 EPUB 章节 HTML 中提取 body 内部的 HTML（保留所有 HTML5 标签）。
+        // 要移除的布局属性（精确匹配属性名，不误删 background-color 等）
+        // padding / margin / width / height / max-width / max-height
+        // overflow / position / top / bottom / left / right
+        // float / clear / display / box-sizing
+        final layoutPropPattern = RegExp(
+          r'(?:padding|margin|width|height|max-width|max-height|'
+          r'overflow|overflow-x|overflow-y|position|top|bottom|left|right|'
+          r'float|clear|display|box-sizing|flex|flex-direction|flex-wrap|'
+          r'justify-content|align-items|align-content|align-self|'
+          r'grid|grid-template|grid-column|grid-row|gap|column-width|'
+          r'column-gap|column-count|column-fill|column-rule|columns)'
+          r'\s*:\s*[^;]+;?',
+        );
+
+        final stripped = declarations.replaceAll(layoutPropPattern, '');
+        return '$selectorAndOpenBrace$stripped$closeBrace';
+      },
+    );
+  }
   ///
   /// 用于富 HTML 渲染：完整保留 EPUB 章节的 HTML5 结构，包括
   /// `<p>/<h1>/<img>/<blockquote>/<ul>/<table>/<svg>/<section>/<article>` 等
