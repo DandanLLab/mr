@@ -724,6 +724,105 @@ body.reader-scroll #reader-content-b {
   background-color: rgba(128, 128, 128, 0.1);
   border-radius: 4px;
 }
+/* === EPUB 特殊页面适配 === */
+/* 视频响应式：覆盖 EPUB .content-matrix 的固定 540x360，
+   让视频适配阅读器宽度，不溢出 */
+#reader-content-a video.content-matrix,
+#reader-content-a .duokan-video {
+  width: 100% !important;
+  height: auto !important;
+  max-height: calc(var(--reader-safe-height) - 4em);
+  object-fit: contain;
+}
+/* 画廊容器：纵向滚动看图，整页显示不分页 */
+#reader-content-a .duokan-image-gallery {
+  margin: 1em 0 !important;
+  max-height: calc(var(--reader-safe-height) - 6em);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+/* 画廊单元格图片：宽度 100%，自适应 */
+#reader-content-a .duokan-image-gallery-cell img,
+#reader-content-a .gallery-pic img {
+  width: 100%;
+  height: auto;
+}
+/* 卷头/序号页大百分比 margin 修正：
+   EPUB 用 margin:45% auto / 30% auto 做垂直居中，
+   百分比 margin 基于容器宽度，在窄屏会过大导致内容溢出分页 */
+#reader-content-a .book-title,
+#reader-content-a .book-author,
+#reader-content-a .volume-first,
+#reader-content-a .intro-box,
+#reader-content-a .volume-title {
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+#reader-content-a .volume-title {
+  margin-top: 2em !important;
+  width: auto !important;
+  display: inline-block;
+}
+#reader-content-a .video-title {
+  margin-top: 2em !important;
+}
+/* SVG 封面图：填满容器 */
+#reader-content-a svg image {
+  width: 100%;
+  height: auto;
+}
+/* serial-num 页面背景：background-attachment:fixed 在 column 布局中
+   行为异常（背景不跟随滚动），改为 scroll 让背景固定在元素上 */
+#reader-content-a .epub-chapter-bg[style*="background"] {
+  background-attachment: scroll !important;
+  background-size: cover !important;
+  background-position: top center !important;
+}
+/* 章节标题：.chapter-title 用 fzjt 字体，font-size:1.6em 居中显示 */
+#reader-content-a .chapter-title {
+  font-size: 1.4em;
+  text-align: center;
+  margin: 1em 0;
+}
+#reader-content-a .chapter-title b {
+  display: block;
+  font-size: 0.7em;
+  margin-bottom: 0.3em;
+}
+/* 卷头图片：宽度 100%，不溢出 */
+#reader-content-a .volume-pic img,
+#reader-content-a .intro-pic img {
+  width: 100%;
+  height: auto;
+}
+/* 角色表格：自适应宽度 */
+#reader-content-a table.role {
+  width: auto;
+  max-width: 100%;
+}
+#reader-content-a table.role td,
+#reader-content-a td.role {
+  padding: 2px 4px;
+  font-size: 0.85em;
+}
+/* intro-box 序号页说明框：居中显示 */
+#reader-content-a .intro-box {
+  margin-top: 2em !important;
+  margin-bottom: 2em !important;
+}
+/* duokan-footnote 脚注图片 */
+#reader-content-a .duokan-footnote img {
+  width: 1em;
+  height: auto;
+  vertical-align: text-top;
+}
+/* 链接颜色：EPUB 用红色，reader 中用主题色 */
+#reader-content-a .book-link a,
+#reader-content-a a {
+  color: inherit;
+}
 ''';
   }
 
