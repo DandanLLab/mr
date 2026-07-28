@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
+import 'package:path_provider/path_provider.dart';
 import '../../models/book.dart';
 import '../../models/chapter.dart';
 import '../../services/storage_service.dart';
@@ -165,7 +166,11 @@ class LocalBookService {
       if (bookType == LocalBookType.epub) {
         _log(controller, '解析 EPUB 结构...');
         _epubBytesCache[filePath] = bytes;
-        final epubBook = _parseEpubData(bytes);
+        // 解压 EPUB 到本地目录，让 WebView 通过 file:// 直接访问原始资源
+        // 避免对 64MB 视频、10.8MB 字体做 base64 编码导致 OOM
+        _log(controller, '解压 EPUB 资源...');
+        final extractedBasePath = await _extractEpubToCache(filePath, bytes);
+        final epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
         if (epubBook == null) {
           _log(controller, 'EPUB 解析失败', level: ImportLogLevel.error);
           return null;
@@ -415,7 +420,8 @@ class LocalBookService {
 
         final bytes = await file.readAsBytes();
         _epubBytesCache[book.bookUrl] = bytes;
-        epubBook = _parseEpubData(bytes);
+        final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
+        epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -452,7 +458,8 @@ class LocalBookService {
 
         final bytes = await file.readAsBytes();
         _epubBytesCache[book.bookUrl] = bytes;
-        epubBook = _parseEpubData(bytes);
+        final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
+        epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -496,7 +503,8 @@ class LocalBookService {
 
         final bytes = await file.readAsBytes();
         _epubBytesCache[book.bookUrl] = bytes;
-        epubBook = _parseEpubData(bytes);
+        final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
+        epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -521,7 +529,8 @@ class LocalBookService {
 
     // Fallback: ensure epub data is loaded
     if (epubBook == null) {
-      epubBook = _parseEpubData(bytes);
+      final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
+      epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
       if (epubBook != null) {
         _epubCache[book.bookUrl] = epubBook;
       }
@@ -723,7 +732,8 @@ class LocalBookService {
 
       // Also parse and cache the EpubBook if not already cached
       if (!_epubCache.containsKey(book.bookUrl)) {
-        final epubBook = _parseEpubData(bytes);
+        final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
+        final epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -762,7 +772,8 @@ class LocalBookService {
 
         final bytes = await file.readAsBytes();
         _epubBytesCache[book.bookUrl] = bytes;
-        epubBook = _parseEpubData(bytes);
+        final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
+        epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -783,9 +794,12 @@ class LocalBookService {
     }
   }
 
-  EpubBook? _parseEpubData(Uint8List bytes) {
+  EpubBook? _parseEpubData(Uint8List bytes, {String extractedBasePath = ''}) {
     try {
-      final epubBook = EpubParser.parseFromBytes(bytes);
+      final epubBook = EpubParser.parseFromBytes(
+        bytes,
+        extractedBasePath: extractedBasePath,
+      );
       if (epubBook.title != '未知书名' || epubBook.chapters.isNotEmpty) {
         return epubBook;
       }
@@ -796,6 +810,63 @@ class LocalBookService {
       debugPrint('[EPUB导入] 异常堆栈: $st');
       return null;
     }
+  }
+
+  /// 解压 EPUB ZIP 到应用文档目录下的 epub_extract 子目录
+  ///
+  /// 返回解压根目录的绝对路径（如 `/data/.../epub_extract/<hash>/`）。
+  /// 已解压过的 EPUB 会复用现有目录（按文件路径 hash 去重），避免重复解压。
+  ///
+  /// WebView 通过 `file://` baseUrl + 解压根目录，可直接访问其中的图片、
+  /// 字体、视频等原始资源文件，无需 base64 编码，内存占用极低。
+  Future<String> _extractEpubToCache(String epubFilePath, Uint8List bytes) async {
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      // 用 EPUB 文件路径的 hash 作为子目录名，避免不同 EPUB 冲突
+      final hash = epubFilePath.hashCode.toRadixString(16).replaceAll('-', 'n');
+      final extractDir = Directory('${appDir.path}/epub_extract/$hash');
+      final indexFile = File('${extractDir.path}/.extracted');
+
+      // 已解压过：直接返回路径（幂等）
+      if (await indexFile.exists()) {
+        return extractDir.path;
+      }
+
+      // 清理可能存在的残留目录（上次解压中断）
+      if (await extractDir.exists()) {
+        await extractDir.delete(recursive: true);
+      }
+      await extractDir.create(recursive: true);
+
+      // 解压 ZIP
+      final archive = ZipDecoder().decodeBytes(bytes);
+      for (final file in archive) {
+        if (!file.isFile) continue;
+        final filePath = '${extractDir.path}/${file.name.replaceAll('\\', '/')}';
+        final outFile = File(filePath);
+        await outFile.parent.create(recursive: true);
+        await outFile.writeAsBytes(file.content is List<int>
+            ? List<int>.from(file.content as List)
+            : <int>[]);
+      }
+
+      // 写入标记文件，标识解压完成
+      await indexFile.writeAsString(DateTime.now().toIso8601String());
+
+      debugPrint('[EPUB导入] 解压完成: ${extractDir.path}');
+      return extractDir.path;
+    } catch (e, st) {
+      debugPrint('[EPUB导入] 解压失败: $e\n$st');
+      return '';
+    }
+  }
+
+  /// 异步确保 EPUB 已解压，并返回解压根目录路径
+  ///
+  /// 用于 fallback 解析场景（书架打开已导入 EPUB 时 _epubCache 丢失）。
+  /// 幂等：已解压过则直接返回路径，未解压则现场解压。
+  Future<String> _ensureEpubExtracted(String bookUrl, Uint8List bytes) async {
+    return _extractEpubToCache(bookUrl, bytes);
   }
 
   void cacheEpubData(String bookUrl, EpubBook data) {
@@ -815,6 +886,14 @@ class LocalBookService {
   int getEpubSpineCount(Book book) {
     final epubBook = _epubCache[book.bookUrl];
     return epubBook?.spineCount ?? 0;
+  }
+
+  /// 获取 EPUB 解压根目录路径（用于 WebView file:// baseUrl）
+  ///
+  /// 返回空字符串表示非 EPUB 或未解压（WebView 回退到 about:blank）。
+  String getEpubExtractedBasePath(Book book) {
+    final epubBook = _epubCache[book.bookUrl];
+    return epubBook?.extractedBasePath ?? '';
   }
 
   void clearCache({String? bookUrl}) {

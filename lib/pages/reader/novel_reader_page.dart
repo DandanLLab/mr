@@ -2472,6 +2472,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                 provider: provider,
                 isScrollMode: isScrollMode,
                 isRichHtml: isRichHtml,
+                extractedBasePath: _book != null
+                    ? LocalBookService.instance.getEpubExtractedBasePath(_book!)
+                    : '',
                 controller: _readerWebViewController,
                 callbacks: ReaderWebViewCallbacks(
                   onInitialized: _onWebviewInitialized,

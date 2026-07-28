@@ -157,14 +157,23 @@ class EpubBook {
 
   final String? language;
 
-  /// 内嵌了所有资源（字体 base64、背景图 base64）的 EPUB CSS
+  /// EPUB 解压到本地的根目录路径（绝对路径）
   ///
-  /// 在 `EpubParser.parseFromBytes` 时一次性生成，只存储一份。
-  /// 阅读器加载章节时由 `LocalBookService._getEpubContent` 拼接到
-  /// `richContent` 前面，避免每个章节都复制一份 CSS（含字体 base64 可达 14MB）。
+  /// 导入时由 LocalBookService 把 EPUB ZIP 解压到应用文档目录，
+  /// 此字段存储解压根目录（如 `/data/.../epub_extract/<bookId>/`）。
+  /// 预解析时把 CSS/HTML 中的相对资源路径转为指向此目录的绝对路径，
+  /// WebView 通过 `file://` baseUrl 直接访问原始资源文件，无需 base64 编码。
   ///
-  /// 之前每个 `EpubChapter.richContent` 都包含完整 CSS（`[[EPUB_CSS]]...[[/EPUB_CSS]]`），
-  /// 1486 章 × 14MB = 20GB 导致 OOM 崩溃。改为书籍级单份存储后仅 14MB。
+  /// 优势：
+  /// - 内存占用极低（不内嵌 64MB 视频 / 10.8MB 字体 base64）
+  /// - 资源按需加载（WebView 懒加载图片/字体）
+  /// - 系统磁盘缓存复用
+  final String extractedBasePath;
+
+  /// EPUB 合并后的 CSS（资源路径已转为 file:// 绝对路径）
+  ///
+  /// 在 `EpubParser.parseFromBytes` 时一次性生成，所有章节共享。
+  /// 由 `LocalBookService._getEpubContent` 拼接到 `richContent` 前面。
   final String inlinedCss;
 
   const EpubBook({
@@ -176,6 +185,7 @@ class EpubBook {
     this.tocTree = const [],
     this.spineCount = 0,
     this.language,
+    this.extractedBasePath = '',
     this.inlinedCss = '',
   });
 }
@@ -196,7 +206,12 @@ class ManifestItem {
 
 class EpubParser {
   /// 从原始字节解析EPUB文件，提取所有元数据和章节内容
-  static EpubBook parseFromBytes(Uint8List bytes) {
+  ///
+  /// [extractedBasePath] EPUB 解压到本地的根目录绝对路径。
+  /// 提供此参数后，CSS/HTML 中的相对资源路径会转为指向此目录的绝对路径，
+  /// WebView 通过 `file://` baseUrl 直接访问原始文件，无需 base64 编码。
+  /// 若为空字符串，则回退到 base64 内嵌模式（用于测试或无解压场景）。
+  static EpubBook parseFromBytes(Uint8List bytes, {String extractedBasePath = ''}) {
     try {
       // 1. 解码ZIP
       final archive = ZipDecoder().decodeBytes(bytes);
@@ -542,11 +557,15 @@ class EpubParser {
       // - body 中 <image xlink:href="../Images/xxx.jpg"> → data URI（SVG）
       // - 所有 CSS 合并为一份，所有章节共享（字体和背景图只内嵌一次）
       final epubCss = _collectAllCss(files);
-      // CSS 中所有 url() 引用转 data URI（字体、背景图等）
-      // CSS 只内嵌一次，存储到 EpubBook.inlinedCss（书籍级单份）
-      // 之前每个章节 richContent 都包含完整 CSS，1486 × 14MB = 20GB 导致 OOM
-      final inlinedCss = _inlineUrlsInCss(epubCss, files, 'OEBPS/Styles/');
-      debugPrint('[EPUB诊断] CSS内嵌后大小: ${inlinedCss.length} 字符');
+      // CSS 资源路径处理：
+      // - extractedBasePath 非空（推荐）：url() 转为指向解压目录的绝对路径，
+      //   WebView 通过 file:// baseUrl 直接访问原始文件，内存占用极低
+      // - extractedBasePath 为空（回退）：url() 转 base64 data URI，内存占用高
+      final inlinedCss = extractedBasePath.isNotEmpty
+          ? _rewriteCssUrlsToPath(epubCss, extractedBasePath, 'OEBPS/Styles/')
+          : _inlineUrlsInCss(epubCss, files, 'OEBPS/Styles/');
+      debugPrint('[EPUB诊断] CSS处理完成，大小: ${inlinedCss.length} 字符 '
+          '(模式: ${extractedBasePath.isNotEmpty ? "路径转换" : "base64内嵌"})');
 
       for (final chapter in chapters) {
         if (chapter.content == null) continue;
@@ -569,18 +588,26 @@ class EpubParser {
                 chapterPath.substring(0, chapterPath.lastIndexOf('/') + 1);
           }
 
-          // 3. 内嵌 body 中的所有资源引用：
-          // - <img src> → data URI
-          // - <source src> → data URI（视频）
-          // - <video poster> → data URI（视频封面）
-          // - <image xlink:href> → data URI（SVG）
-          // - inline style url() → data URI（如 body style="background:url(...)"）
-          var richBody = _inlineImagesInHtml(bodyHtml, files, chapterBasePath);
-          richBody = _inlineVideoSources(richBody, files, chapterBasePath);
-          richBody = _inlineSvgImages(richBody, files, chapterBasePath);
-          // bodyAttrs 中的 inline style 也需要内嵌 url()（如 serial-num 的背景图）
-          final inlinedBodyAttrs =
-              _inlineStyleUrls(bodyAttrs, files, chapterBasePath);
+          // 3. 处理 body 中的所有资源引用：
+          // - extractedBasePath 非空：转绝对路径（推荐，内存低）
+          // - extractedBasePath 为空：转 base64 data URI（回退）
+          final String richBody;
+          final String inlinedBodyAttrs;
+          if (extractedBasePath.isNotEmpty) {
+            richBody = _rewriteHtmlResourcesToPath(
+              bodyHtml, extractedBasePath, chapterBasePath,
+            );
+            inlinedBodyAttrs = _rewriteStyleUrlsToPath(
+              bodyAttrs, extractedBasePath, chapterBasePath,
+            );
+          } else {
+            var rb = _inlineImagesInHtml(bodyHtml, files, chapterBasePath);
+            rb = _inlineVideoSources(rb, files, chapterBasePath);
+            rb = _inlineSvgImages(rb, files, chapterBasePath);
+            richBody = rb;
+            inlinedBodyAttrs =
+                _inlineStyleUrls(bodyAttrs, files, chapterBasePath);
+          }
 
           // 4. 用 wrapper div 包裹 body 内容，把 body 的 class/style 应用到 div
           //    这样 CSS 中 .video-bg / .volume-bg 等选择器才能生效
@@ -602,7 +629,7 @@ class EpubParser {
 
           // 5. richContent 只包含 body HTML（不含 CSS）
           //    CSS 由 LocalBookService._getEpubContent 在返回时拼接，
-          //    避免每个章节都复制一份 14MB CSS
+          //    避免每个章节都复制一份大 CSS
           chapter.richContent = '[[EPUB_BODY]]$wrappedBody[[/EPUB_BODY]]';
         } catch (e) {
           // 单章节预解析失败：退化为纯文本，不影响其他章节
@@ -631,6 +658,7 @@ class EpubParser {
         tocTree: tocTree,
         spineCount: spine.length,
         language: language,
+        extractedBasePath: extractedBasePath,
         inlinedCss: inlinedCss,
       );
     } catch (e, st) {
@@ -1565,6 +1593,118 @@ class EpubParser {
         return 'url($quote$dataUri$quote)';
       },
     );
+  }
+
+  /// 把 CSS 中所有 `url(...)` 引用替换为 file:// 绝对路径
+  ///
+  /// 与 `_inlineUrlsInCss` 对应，但不做 base64 编码，只把相对路径转为
+  /// 指向解压目录的绝对路径，WebView 通过 file:// baseUrl 直接访问原始文件。
+  ///
+  /// - [css] 原始 CSS 文本
+  /// - [extractedBasePath] EPUB 解压根目录绝对路径
+  /// - [cssBasePath] CSS 文件在 EPUB 内的目录（如 'OEBPS/Styles/'）
+  static String _rewriteCssUrlsToPath(
+    String css,
+    String extractedBasePath,
+    String cssBasePath,
+  ) {
+    if (extractedBasePath.isEmpty) return css;
+    return css.replaceAllMapped(
+      RegExp(r'''url\(\s*(['"]?)([^'")]+)\1\s*\)''', caseSensitive: false),
+      (match) {
+        final quote = match.group(1) ?? '';
+        final url = match.group(2) ?? '';
+
+        if (url.startsWith('data:') || url.startsWith('http') ||
+            url.startsWith('file://')) {
+          return match.group(0)!;
+        }
+
+        final cleanUrl = url.split('?').first.split('#').first;
+        if (cleanUrl.isEmpty) return match.group(0)!;
+
+        // 解析 EPUB 内绝对路径 → 本地文件系统绝对路径
+        final epubPath = _resolveEpubImagePath(cleanUrl, cssBasePath);
+        final localPath = _joinPath(extractedBasePath, epubPath);
+        return 'url($quote$localPath$quote)';
+      },
+    );
+  }
+
+  /// 把 inline style 属性中的 `url(...)` 替换为 file:// 绝对路径
+  static String _rewriteStyleUrlsToPath(
+    String attrs,
+    String extractedBasePath,
+    String? chapterBasePath,
+  ) {
+    if (attrs.isEmpty || extractedBasePath.isEmpty) return attrs;
+    return attrs.replaceAllMapped(
+      RegExp(r'style="([^"]*)"'),
+      (match) {
+        final style = match.group(1) ?? '';
+        if (!style.toLowerCase().contains('url(')) return match.group(0)!;
+        final rewritten = _rewriteCssUrlsToPath(
+          style,
+          extractedBasePath,
+          chapterBasePath ?? '',
+        );
+        return 'style="$rewritten"';
+      },
+    );
+  }
+
+  /// 把 HTML 中 `<img src>` / `<source src>` / `<video poster>` /
+  /// `<image xlink:href>` 替换为指向解压目录的绝对路径
+  static String _rewriteHtmlResourcesToPath(
+    String html,
+    String extractedBasePath,
+    String? chapterBasePath,
+  ) {
+    if (extractedBasePath.isEmpty) return html;
+
+    String rewriteSrc(String src) {
+      if (src.startsWith('data:') || src.startsWith('http') ||
+          src.startsWith('file://')) {
+        return src;
+      }
+      final clean = src.split('?').first.split('#').first;
+      if (clean.isEmpty) return src;
+      final epubPath = _resolveEpubImagePath(clean, chapterBasePath);
+      return _joinPath(extractedBasePath, epubPath);
+    }
+
+    // <img src>
+    var result = html.replaceAllMapped(
+      RegExp(r'<img\b([^>]*?)src="([^"]+)"([^>]*)>', caseSensitive: false),
+      (m) => '<img${m.group(1)}src="${rewriteSrc(m.group(2) ?? "")}"${m.group(3)}>',
+    );
+    // <source src>
+    result = result.replaceAllMapped(
+      RegExp(r'<source\b([^>]*?)src="([^"]+)"([^>]*)>', caseSensitive: false),
+      (m) => '<source${m.group(1)}src="${rewriteSrc(m.group(2) ?? "")}"${m.group(3)}>',
+    );
+    // <video poster>
+    result = result.replaceAllMapped(
+      RegExp(r'<video\b([^>]*?)\bposter="([^"]+)"([^>]*)>', caseSensitive: false),
+      (m) => '<video${m.group(1)}poster="${rewriteSrc(m.group(2) ?? "")}"${m.group(3)}>',
+    );
+    // <image xlink:href>
+    result = result.replaceAllMapped(
+      RegExp(r'<image\b([^>]*?)xlink:href="([^"]+)"([^>]*)>', caseSensitive: false),
+      (m) => '<image${m.group(1)}xlink:href="${rewriteSrc(m.group(2) ?? "")}"${m.group(3)}>',
+    );
+    return result;
+  }
+
+  /// 拼接解压根目录和 EPUB 内路径，生成 WebView 可访问的绝对路径
+  ///
+  /// 返回 Unix 风格路径（正斜杠），因为 HTML/CSS 中的 URL 始终用正斜杠。
+  /// WebView 会通过 baseUrl 解析相对路径，所以这里返回不带 file:// 前缀的
+  /// 绝对路径即可（baseUrl 为 file:// 时，相对/绝对路径都会按文件系统解析）。
+  static String _joinPath(String base, String relative) {
+    final cleanBase = base.replaceAll('\\', '/').replaceAll(RegExp(r'/+$'), '');
+    final cleanRelative = relative.replaceAll('\\', '/').replaceAll(RegExp(r'^/+'), '');
+    return '$cleanBase/$cleanRelative';
   }
 
   /// 把 inline style 属性中的 `url(...)` 引用替换为 base64 data URI

@@ -49,6 +49,14 @@ class ReaderWebView extends StatefulWidget {
   /// false（默认）：content 视为纯文本，按段落切分。
   final bool isRichHtml;
 
+  /// EPUB 解压根目录的绝对路径（用于 WebView file:// baseUrl）
+  ///
+  /// 非空时，WebView 以 `file://<extractedBasePath>/` 为 baseUrl 加载 HTML，
+  /// HTML/CSS 中的相对资源路径会按此目录解析，直接访问本地解压的原始文件
+  /// （图片、字体、视频），无需 base64 编码。
+  /// 为空时 baseUrl 为 about:blank（纯文本模式或无 EPUB 资源场景）。
+  final String extractedBasePath;
+
   /// 控制器
   final ReaderWebViewController controller;
 
@@ -65,6 +73,7 @@ class ReaderWebView extends StatefulWidget {
     required this.controller,
     required this.callbacks,
     this.isRichHtml = false,
+    this.extractedBasePath = '',
   });
 
   @override
@@ -172,6 +181,15 @@ class _ReaderWebViewState extends State<ReaderWebView> {
   /// 用于 _generateHtml 取 WebView 实际可用尺寸
   BoxConstraints _lastConstraints = const BoxConstraints();
 
+  /// 获取 WebView 加载用的 baseUrl
+  ///
+  /// EPUB 富 HTML 模式且有解压根目录时，用 `file://<extractedBasePath>/` 作为
+  /// baseUrl，让 HTML/CSS 中的相对资源路径解析到本地解压目录，直接访问原始文件。
+  /// 其他场景用 about:blank。
+  WebUri get _baseUrl => (widget.isRichHtml && widget.extractedBasePath.isNotEmpty)
+      ? WebUri('file://${widget.extractedBasePath.replaceAll('\\', '/')}/')
+      : WebUri('about:blank');
+
   /// 重新加载 HTML
   Future<void> _reloadHtml() async {
     if (_webviewController == null) return;
@@ -180,7 +198,7 @@ class _ReaderWebViewState extends State<ReaderWebView> {
       data: _currentHtml,
       mimeType: 'text/html',
       encoding: 'utf-8',
-      baseUrl: WebUri('about:blank'),
+      baseUrl: _baseUrl,
     );
   }
 
@@ -218,7 +236,7 @@ class _ReaderWebViewState extends State<ReaderWebView> {
             data: _currentHtml,
             mimeType: 'text/html',
             encoding: 'utf-8',
-            baseUrl: WebUri('about:blank'),
+            baseUrl: _baseUrl,
           ),
           initialSettings: InAppWebViewSettings(
             transparentBackground: true,
