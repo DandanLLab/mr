@@ -32,76 +32,35 @@ class _DiscoveryPageState extends State<DiscoveryPage>
   bool get wantKeepAlive => true;
 
   final TextEditingController _searchController = TextEditingController();
-  final ScrollController _sourceTagController = ScrollController();
-  final ScrollController _categoryTagController = ScrollController();
 
   String _searchQuery = '';
-  int _selectedSourceIndex = -1;
-  int _selectedCategoryIndex = -1;
   String _sortMode = 'manual'; // manual / name / url / time / respond
+  bool _sortAscending = true;
+  // 当前选中的分组（参考 legado_max ExploreViewModel: searchView query "group:xxx"）
+  String? _selectedGroup;
+
+  // 当前展开的书源 URL（参考 legado_max ExploreAdapter.expandedSourceUrl）
+  String? _expandedSourceUrl;
 
   // 性能优化：缓存过滤结果和分类解析结果
   List<BookSource> _cachedFilteredSources = [];
   List<BookSource> _lastBookSources = [];
   String _lastSearchQuery = '';
   String _lastSortMode = 'manual';
-  final Map<int, List<ExploreCategory>> _cachedCategories = {};
+  bool _lastSortAscending = true;
+  String? _lastSelectedGroup;
+  final Map<String, List<ExploreCategory>> _cachedCategories = {};
 
   @override
   void dispose() {
     _searchController.dispose();
-    _sourceTagController.dispose();
-    _categoryTagController.dispose();
     super.dispose();
-  }
-
-  /// 标签选中后自动居中
-  void _scrollTagToCenter(ScrollController controller, int index) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!controller.hasClients) return;
-      const itemWidth = DesignTokens.tagItemMaxWidth;
-      final offset = index * itemWidth -
-          controller.position.viewportDimension / 2 +
-          itemWidth / 2;
-      controller.animateTo(
-        offset.clamp(0.0, controller.position.maxScrollExtent),
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-      );
-    });
-  }
-
-  void _selectSource(int index) {
-    setState(() {
-      _selectedSourceIndex = index;
-      _selectedCategoryIndex = -1;
-    });
-    _scrollTagToCenter(_sourceTagController, index);
-  }
-
-  void _selectCategory(int index) {
-    setState(() {
-      _selectedCategoryIndex = index;
-    });
-    _scrollTagToCenter(_categoryTagController, index);
-
-    final provider = context.read<DiscoveryProvider>();
-    final sources = _getFilteredSources(provider.bookSources);
-    if (_selectedSourceIndex < 0 ||
-        _selectedSourceIndex >= sources.length) {
-      return;
-    }
-    final source = sources[_selectedSourceIndex];
-    final categories = _getCategories(_selectedSourceIndex, source);
-    if (index < 0 || index >= categories.length) return;
-    _openExplore(source, categories[index]);
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    // 参考 legado-rimchars: ExploreFragment 现代模式
-    // 顶栏使用 surface 背景，搜索框使用圆角胶囊样式
+    // 参考 legado_max: ExploreFragment 现代模式
     final colorScheme = Theme.of(context).colorScheme;
     final onSurfaceColor = colorScheme.onSurface;
     final secondaryTextColor = colorScheme.onSurface.withValues(alpha: 0.6);
@@ -109,13 +68,9 @@ class _DiscoveryPageState extends State<DiscoveryPage>
     return Scaffold(
       body: Column(
         children: [
-          // 现代浮动顶栏（参考 MainTopBarView）
+          // 顶栏（参考 legado_max fragment_explore.xml: TitleBar 标题"发现" + 搜索框 + 排序/分组菜单）
           _buildTopBar(colorScheme, onSurfaceColor, secondaryTextColor),
-          // 一级标签栏（书源选择器）
-          _buildPrimaryTagBar(colorScheme),
-          // 二级标签栏（分类选择器）
-          if (_selectedSourceIndex >= 0) _buildSecondaryTagBar(colorScheme),
-          // 内容区
+          // 内容区：可展开的书源列表（参考 legado_max item_find_book）
           Expanded(
             child: _buildContentArea(colorScheme),
           ),
@@ -124,6 +79,7 @@ class _DiscoveryPageState extends State<DiscoveryPage>
     );
   }
 
+  /// 顶栏（参考 legado_max TitleBar: 标题"发现" + 搜索框 + 排序菜单 + 分组菜单）
   Widget _buildTopBar(
     ColorScheme colorScheme,
     Color onSurfaceColor,
@@ -141,112 +97,121 @@ class _DiscoveryPageState extends State<DiscoveryPage>
         height: DesignTokens.tagBarHeight,
         child: Row(
           children: [
-            // 搜索框（参考 RoundedTagBarView 样式）
+            // 标题"发现"（参考 legado_max fragment_explore.xml app:title="@string/discovery"）
+            Text(
+              '发现',
+              style: TextStyle(
+                fontSize: DesignTokens.fontTitle,
+                fontWeight: FontWeight.w600,
+                color: onSurfaceColor,
+              ),
+            ),
+            const SizedBox(width: DesignTokens.spacingMd),
+            // 搜索框（参考 legado_max view_search.xml）
             Expanded(
-              child: Container(
-                height: DesignTokens.tagBarHeight,
-                decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainerHighest,
-                  borderRadius:
-                      BorderRadius.circular(DesignTokens.panelRadius),
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 3.0),
-                child: TextField(
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    hintText: '搜索书源',
-                    hintStyle: TextStyle(
-                        fontSize: DesignTokens.fontSummary,
-                        color: secondaryTextColor),
-                    prefixIcon: Icon(Icons.search,
-                        size: 18, color: secondaryTextColor),
-                    suffixIcon: _searchQuery.isNotEmpty
-                        ? IconButton(
-                            icon: Icon(Icons.clear,
-                                size: 16, color: secondaryTextColor),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            onPressed: () {
-                              _searchController.clear();
-                              setState(() {
-                                _searchQuery = '';
-                                _selectedSourceIndex = -1;
-                                _selectedCategoryIndex = -1;
-                              });
-                            },
-                          )
-                        : null,
-                    border: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: DesignTokens.spacingSm, vertical: 0),
-                    isDense: true,
+              child: Center(
+                child: Container(
+                  // 搜索框高度 30（参考 legado_max view_search.xml layout_height=30dp）
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: colorScheme.surfaceContainerHighest,
+                    borderRadius:
+                        BorderRadius.circular(DesignTokens.panelRadius),
+                    boxShadow: [
+                      BoxShadow(
+                        color: colorScheme.shadow.withValues(alpha: 0.10),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
-                  style: TextStyle(
-                      fontSize: DesignTokens.fontSummary,
-                      color: onSurfaceColor),
-                  onChanged: (value) {
-                    setState(() {
-                      _searchQuery = value;
-                      _selectedSourceIndex = -1;
-                      _selectedCategoryIndex = -1;
-                    });
-                  },
+                  padding: const EdgeInsets.symmetric(horizontal: 3.0),
+                  child: TextField(
+                    controller: _searchController,
+                    textAlignVertical: TextAlignVertical.center,
+                    decoration: InputDecoration(
+                      hintText: '筛选发现书源',
+                      hintStyle: TextStyle(
+                          fontSize: DesignTokens.fontSummary,
+                          color: secondaryTextColor),
+                      prefixIcon: Icon(Icons.search,
+                          size: 18, color: secondaryTextColor),
+                      prefixIconConstraints: const BoxConstraints(
+                          minWidth: 28, minHeight: 28),
+                      suffixIcon: _searchQuery.isNotEmpty
+                          ? IconButton(
+                              icon: Icon(Icons.clear,
+                                  size: 16, color: secondaryTextColor),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() {
+                                  _searchQuery = '';
+                                  _expandedSourceUrl = null;
+                                });
+                              },
+                            )
+                          : null,
+                      border: InputBorder.none,
+                      isCollapsed: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    style: TextStyle(
+                        fontSize: DesignTokens.fontSummary,
+                        color: onSurfaceColor),
+                    onChanged: (value) {
+                      setState(() {
+                        _searchQuery = value;
+                      });
+                    },
+                  ),
                 ),
               ),
             ),
             const SizedBox(width: DesignTokens.spacingXs),
-            // 收藏分组
-            IconButton(
-              icon: Icon(Icons.folder_outlined,
-                  size: 20, color: onSurfaceColor),
-              tooltip: '收藏分组',
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('收藏分组功能开发中'),
-                    duration: Duration(seconds: 1),
-                  ),
-                );
-              },
-            ),
-            // 排序按钮
+            // 分组菜单（参考 legado_max main_explore.xml menu_group 子菜单）
+            _buildGroupMenu(colorScheme, onSurfaceColor),
+            // 排序按钮（参考 legado_max main_explore.xml action_sort 子菜单）
             PopupMenuButton<String>(
               icon: Icon(Icons.sort, size: 20, color: onSurfaceColor),
               tooltip: '排序',
               offset: const Offset(0, DesignTokens.topBarHeight),
               onSelected: (value) {
                 setState(() {
-                  _sortMode = value;
-                  _selectedSourceIndex = -1;
-                  _selectedCategoryIndex = -1;
+                  if (value == 'desc') {
+                    _sortAscending = !_sortAscending;
+                  } else {
+                    _sortMode = value;
+                    _sortAscending = true;
+                  }
+                  _expandedSourceUrl = null;
                 });
               },
               itemBuilder: (context) => [
                 PopupMenuItem(
-                  value: 'manual',
-                  child: Text('手动排序',
-                      style: TextStyle(color: onSurfaceColor)),
+                  value: 'desc',
+                  child: Row(
+                    children: [
+                      Icon(
+                        _sortAscending
+                            ? Icons.arrow_upward
+                            : Icons.arrow_downward,
+                        size: 18,
+                        color: onSurfaceColor,
+                      ),
+                      const SizedBox(width: DesignTokens.spacingSm),
+                      Text(_sortAscending ? '升序' : '降序',
+                          style: TextStyle(color: onSurfaceColor)),
+                    ],
+                  ),
                 ),
-                PopupMenuItem(
-                  value: 'name',
-                  child: Text('按名称',
-                      style: TextStyle(color: onSurfaceColor)),
-                ),
-                PopupMenuItem(
-                  value: 'url',
-                  child: Text('按URL',
-                      style: TextStyle(color: onSurfaceColor)),
-                ),
-                PopupMenuItem(
-                  value: 'time',
-                  child: Text('按更新时间',
-                      style: TextStyle(color: onSurfaceColor)),
-                ),
-                PopupMenuItem(
-                  value: 'respond',
-                  child: Text('按响应时间',
-                      style: TextStyle(color: onSurfaceColor)),
-                ),
+                const PopupMenuDivider(),
+                _sortMenuItem('manual', '手动排序', onSurfaceColor),
+                _sortMenuItem('name', '按名称', onSurfaceColor),
+                _sortMenuItem('url', '按 URL', onSurfaceColor),
+                _sortMenuItem('time', '按更新时间', onSurfaceColor),
+                _sortMenuItem('respond', '按响应时间', onSurfaceColor),
               ],
             ),
           ],
@@ -255,150 +220,104 @@ class _DiscoveryPageState extends State<DiscoveryPage>
     );
   }
 
-  /// 一级标签栏（书源选择器）- RoundedTagBarView 风格
-  Widget _buildPrimaryTagBar(ColorScheme colorScheme) {
+  /// 分组菜单（参考 legado_max ExploreFragment: groupsMenu 动态书源分组）
+  Widget _buildGroupMenu(ColorScheme colorScheme, Color onSurfaceColor) {
     return Consumer<DiscoveryProvider>(
       builder: (context, provider, child) {
-        if (provider.isLoading) {
-          return const SizedBox.shrink();
-        }
-        final sources = _getFilteredSources(provider.bookSources);
-        if (sources.isEmpty) return const SizedBox.shrink();
-
-        return Container(
-          height: DesignTokens.tagBarHeight,
-          margin: const EdgeInsets.fromLTRB(
-            DesignTokens.spacingLg,
-            DesignTokens.spacingSm,
-            DesignTokens.spacingLg,
-            0,
-          ),
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
-          ),
-          child: ListView.builder(
-            controller: _sourceTagController,
-            scrollDirection: Axis.horizontal,
-            itemExtent: DesignTokens.tagItemMaxWidth,
-            padding: const EdgeInsets.symmetric(
-              vertical: (DesignTokens.tagBarHeight - DesignTokens.tagHeight) / 2,
-            ),
-            itemCount: sources.length,
-            itemBuilder: (context, index) {
-              final isSelected = index == _selectedSourceIndex;
-              return _buildTagItem(
-                sources[index].bookSourceName,
-                isSelected,
-                colorScheme,
-                onTap: () => _selectSource(index),
-                onLongPress: () => _showSourceOptions(sources[index]),
-              );
-            },
-          ),
-        );
-      },
-    );
-  }
-
-  /// 二级标签栏（分类选择器）
-  Widget _buildSecondaryTagBar(ColorScheme colorScheme) {
-    return Consumer<DiscoveryProvider>(
-      builder: (context, provider, child) {
-        if (provider.isLoading) {
-          return const SizedBox.shrink();
-        }
-        final sources = _getFilteredSources(provider.bookSources);
-        if (_selectedSourceIndex < 0 ||
-            _selectedSourceIndex >= sources.length) {
-          return const SizedBox.shrink();
-        }
-        final source = sources[_selectedSourceIndex];
-        final categories = _getCategories(_selectedSourceIndex, source);
-        if (categories.isEmpty) return const SizedBox.shrink();
-
-        return Container(
-          height: DesignTokens.tagBarHeight,
-          margin: const EdgeInsets.fromLTRB(
-            DesignTokens.spacingLg,
-            DesignTokens.spacingSm,
-            DesignTokens.spacingLg,
-            0,
-          ),
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
-          ),
-          child: ListView.builder(
-            controller: _categoryTagController,
-            scrollDirection: Axis.horizontal,
-            itemExtent: DesignTokens.tagItemMaxWidth,
-            padding: const EdgeInsets.symmetric(
-              vertical: (DesignTokens.tagBarHeight - DesignTokens.tagHeight) / 2,
-            ),
-            itemCount: categories.length,
-            itemBuilder: (context, index) {
-              final isSelected = index == _selectedCategoryIndex;
-              return _buildTagItem(
-                categories[index].title,
-                isSelected,
-                colorScheme,
-                onTap: () => _selectCategory(index),
-              );
-            },
-          ),
-        );
-      },
-    );
-  }
-
-  /// 标签项构建（RoundedTagBarView 风格）
-  Widget _buildTagItem(
-    String label,
-    bool isSelected,
-    ColorScheme colorScheme, {
-    required VoidCallback onTap,
-    VoidCallback? onLongPress,
-  }) {
-    return Container(
-      height: DesignTokens.tagHeight,
-      margin: const EdgeInsets.symmetric(horizontal: 2.0),
-      constraints: const BoxConstraints(
-        minWidth: DesignTokens.tagItemMinWidth,
-        maxWidth: DesignTokens.tagItemMaxWidth,
-      ),
-      child: Material(
-        color: isSelected ? colorScheme.surface : Colors.transparent,
-        borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
-        child: InkWell(
-          onTap: onTap,
-          onLongPress: onLongPress,
-          borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
-          child: Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: DesignTokens.tagItemPaddingHorizontal,
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: DesignTokens.fontBody,
-                fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
-                color: isSelected
-                    ? colorScheme.secondary
-                    : colorScheme.onSurface.withValues(alpha: 0.7),
+        final groups = _extractGroups(provider.bookSources);
+        return PopupMenuButton<String>(
+          icon: Icon(Icons.category_outlined, size: 20, color: onSurfaceColor),
+          tooltip: '分组',
+          offset: const Offset(0, DesignTokens.topBarHeight),
+          onSelected: (value) {
+            setState(() {
+              _selectedGroup = value == '__all__' ? null : value;
+              _expandedSourceUrl = null;
+            });
+          },
+          itemBuilder: (context) {
+            final items = <PopupMenuEntry<String>>[
+              PopupMenuItem(
+                value: '__all__',
+                child: Row(
+                  children: [
+                    Icon(
+                      _selectedGroup == null
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_off,
+                      size: 18,
+                      color: onSurfaceColor,
+                    ),
+                    const SizedBox(width: DesignTokens.spacingSm),
+                    Text('全部',
+                        style: TextStyle(color: onSurfaceColor)),
+                  ],
+                ),
               ),
-            ),
+              const PopupMenuDivider(),
+            ];
+            for (final group in groups) {
+              items.add(PopupMenuItem(
+                value: group,
+                child: Row(
+                  children: [
+                    Icon(
+                      _selectedGroup == group
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_off,
+                      size: 18,
+                      color: onSurfaceColor,
+                    ),
+                    const SizedBox(width: DesignTokens.spacingSm),
+                    Text(group, style: TextStyle(color: onSurfaceColor)),
+                  ],
+                ),
+              ));
+            }
+            return items;
+          },
+        );
+      },
+    );
+  }
+
+  /// 从书源列表提取分组（参考 legado_max BookSourceDao.dealGroups: 拆分逗号分隔的分组）
+  List<String> _extractGroups(List<BookSource> sources) {
+    final groupSet = <String>{};
+    for (final source in sources) {
+      final group = source.bookSourceGroup;
+      if (group == null || group.trim().isEmpty) continue;
+      for (final part in group.split(RegExp(r'[;；,，]'))) {
+        final trimmed = part.trim();
+        if (trimmed.isNotEmpty) groupSet.add(trimmed);
+      }
+    }
+    return groupSet.toList()..sort();
+  }
+
+  PopupMenuItem<String> _sortMenuItem(
+    String value,
+    String label,
+    Color onSurfaceColor,
+  ) {
+    final isSelected = _sortMode == value;
+    return PopupMenuItem(
+      value: value,
+      child: Row(
+        children: [
+          Icon(
+            isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+            size: 18,
+            color: onSurfaceColor,
           ),
-        ),
+          const SizedBox(width: DesignTokens.spacingSm),
+          Text(label, style: TextStyle(color: onSurfaceColor)),
+        ],
       ),
     );
   }
 
-  /// 内容区
+  /// 内容区：可展开的书源列表（参考 legado_max ExploreAdapter）
   Widget _buildContentArea(ColorScheme colorScheme) {
     return Consumer<DiscoveryProvider>(
       builder: (context, provider, child) {
@@ -420,29 +339,152 @@ class _DiscoveryPageState extends State<DiscoveryPage>
           );
         }
 
-        if (_selectedSourceIndex < 0 ||
-            _selectedSourceIndex >= sources.length) {
-          return _buildEmptyState(
-            icon: Icons.touch_app_outlined,
-            message: '选择书源开始发现',
-            colorScheme: colorScheme,
-          );
-        }
-
-        final source = sources[_selectedSourceIndex];
-        final categories = _getCategories(_selectedSourceIndex, source);
-
-        if (categories.isEmpty) {
-          return _buildEmptyState(
-            icon: Icons.category_outlined,
-            message: '该书源暂无分类',
-            colorScheme: colorScheme,
-          );
-        }
-
-        // 已选中书源，显示所有分类卡片（Wrap 布局）
-        return _buildCategoryCards(source, categories, colorScheme);
+        return ListView.builder(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).padding.bottom + DesignTokens.spacingLg,
+          ),
+          itemCount: sources.length,
+          itemBuilder: (context, index) {
+            final source = sources[index];
+            final isExpanded = _expandedSourceUrl == source.bookSourceUrl;
+            return _buildSourceItem(source, isExpanded, colorScheme);
+          },
+        );
       },
+    );
+  }
+
+  /// 书源项（参考 legado_max item_find_book.xml: 标题行 + 可展开分类区）
+  Widget _buildSourceItem(
+    BookSource source,
+    bool isExpanded,
+    ColorScheme colorScheme,
+  ) {
+    final categories = _getCategories(source);
+    return Column(
+      children: [
+        // 标题行
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () {
+              setState(() {
+                _expandedSourceUrl =
+                    isExpanded ? null : source.bookSourceUrl;
+              });
+            },
+            onLongPress: () => _showSourceOptions(source),
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: DesignTokens.spacingLg,
+                vertical: DesignTokens.spacingMd,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      source.bookSourceName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: DesignTokens.fontBody,
+                        fontWeight: FontWeight.w500,
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                  ),
+                  // 展开/折叠箭头（参考 legado_max iv_status）
+                  Icon(
+                    isExpanded
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_right,
+                    size: 20,
+                    color: colorScheme.onSurface.withValues(alpha: 0.5),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        // 展开时显示分类标签（参考 legado_max flexbox）
+        if (isExpanded)
+          _buildCategoryWrap(source, categories, colorScheme),
+        // 分隔线
+        Divider(
+          height: 1,
+          thickness: DesignTokens.dividerHeight,
+          color: DesignTokens.dividerColor(context),
+        ),
+      ],
+    );
+  }
+
+  /// 分类标签区（参考 legado_max FlexboxLayout: Wrap 布局）
+  Widget _buildCategoryWrap(
+    BookSource source,
+    List<ExploreCategory> categories,
+    ColorScheme colorScheme,
+  ) {
+    if (categories.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(
+          DesignTokens.spacingLg,
+          DesignTokens.spacingSm,
+          DesignTokens.spacingLg,
+          DesignTokens.spacingMd,
+        ),
+        child: Text(
+          '该书源暂无分类',
+          style: TextStyle(
+            fontSize: DesignTokens.fontSummary,
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        DesignTokens.spacingLg,
+        DesignTokens.spacingSm,
+        DesignTokens.spacingLg,
+        DesignTokens.spacingMd,
+      ),
+      child: Wrap(
+        spacing: DesignTokens.spacingSm,
+        runSpacing: DesignTokens.spacingSm,
+        children: categories.map((category) {
+          return _buildCategoryChip(source, category, colorScheme);
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildCategoryChip(
+    BookSource source,
+    ExploreCategory category,
+    ColorScheme colorScheme,
+  ) {
+    return Material(
+      color: colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
+      child: InkWell(
+        onTap: () => _openExplore(source, category),
+        borderRadius: BorderRadius.circular(DesignTokens.actionRadius),
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: DesignTokens.tagItemPaddingHorizontal,
+            vertical: DesignTokens.spacingXs,
+          ),
+          child: Text(
+            category.title,
+            style: TextStyle(
+              fontSize: DesignTokens.fontBody,
+              color: colorScheme.onSurface,
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -479,96 +521,49 @@ class _DiscoveryPageState extends State<DiscoveryPage>
     );
   }
 
-  /// 分类卡片（Wrap 布局）
-  Widget _buildCategoryCards(
-    BookSource source,
-    List<ExploreCategory> categories,
-    ColorScheme colorScheme,
-  ) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(DesignTokens.spacingLg),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '${source.bookSourceName} 的分类',
-            style: TextStyle(
-              fontSize: DesignTokens.fontSubtitle,
-              fontWeight: FontWeight.w600,
-              color: colorScheme.onSurface,
-            ),
-          ),
-          const SizedBox(height: DesignTokens.spacingLg),
-          Wrap(
-            spacing: DesignTokens.spacingSm,
-            runSpacing: DesignTokens.spacingSm,
-            children: categories.map((category) {
-              return _buildCategoryCard(source, category, colorScheme);
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCategoryCard(
-    BookSource source,
-    ExploreCategory category,
-    ColorScheme colorScheme,
-  ) {
-    return Material(
-      color: colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
-      child: InkWell(
-        onTap: () => _openExplore(source, category),
-        borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
-        child: Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 14,
-            vertical: DesignTokens.spacingSm,
-          ),
-          child: Text(
-            category.title,
-            style: TextStyle(
-              fontSize: DesignTokens.fontBody,
-              color: colorScheme.onSurface,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   /// 获取过滤后的书源列表（带缓存，避免每次 build 重复计算）
   List<BookSource> _getFilteredSources(List<BookSource> sources) {
     if (_searchQuery == _lastSearchQuery &&
         _sortMode == _lastSortMode &&
+        _sortAscending == _lastSortAscending &&
+        _selectedGroup == _lastSelectedGroup &&
         identical(sources, _lastBookSources)) {
       return _cachedFilteredSources;
     }
     _lastSearchQuery = _searchQuery;
     _lastSortMode = _sortMode;
+    _lastSortAscending = _sortAscending;
+    _lastSelectedGroup = _selectedGroup;
     _lastBookSources = sources;
     _cachedFilteredSources = _filterSources(sources);
     _cachedCategories.clear();
     return _cachedFilteredSources;
   }
 
-  /// 获取分类列表（带缓存，按书源索引缓存）
-  List<ExploreCategory> _getCategories(
-    int sourceIndex,
-    BookSource source,
-  ) {
-    if (_cachedCategories.containsKey(sourceIndex)) {
-      return _cachedCategories[sourceIndex]!;
+  /// 获取分类列表（带缓存，按书源 URL 缓存）
+  List<ExploreCategory> _getCategories(BookSource source) {
+    final key = source.bookSourceUrl;
+    if (_cachedCategories.containsKey(key)) {
+      return _cachedCategories[key]!;
     }
     final categories = _parseExploreKinds(source.exploreUrl);
-    _cachedCategories[sourceIndex] = categories;
+    _cachedCategories[key] = categories;
     return categories;
   }
 
   List<BookSource> _filterSources(List<BookSource> sources) {
     var filtered = sources;
+    // 分组过滤（参考 legado_max flowGroupExplore: bookSourceGroup 包含分组名）
+    if (_selectedGroup != null) {
+      final group = _selectedGroup!;
+      filtered = filtered.where((s) {
+        final g = s.bookSourceGroup;
+        if (g == null || g.trim().isEmpty) return false;
+        return g.split(RegExp(r'[;；,，]'))
+            .map((e) => e.trim())
+            .contains(group);
+      }).toList();
+    }
     if (_searchQuery.isNotEmpty) {
       final query = _searchQuery.toLowerCase();
       filtered = filtered.where((s) {
@@ -577,22 +572,33 @@ class _DiscoveryPageState extends State<DiscoveryPage>
       }).toList();
     }
     final sorted = List<BookSource>.of(filtered);
-    switch (_sortMode) {
-      case 'name':
-        sorted.sort((a, b) =>
-            a.bookSourceName.compareTo(b.bookSourceName));
-      case 'url':
-        sorted.sort((a, b) =>
-            a.bookSourceUrl.compareTo(b.bookSourceUrl));
-      case 'time':
-        sorted.sort((a, b) =>
-            b.lastUpdateTime.compareTo(a.lastUpdateTime));
-      case 'respond':
-        sorted.sort((a, b) =>
-            a.respondTime.compareTo(b.respondTime));
-      case 'manual':
-      default:
-        break;
+    int compare(BookSource a, BookSource b) {
+      switch (_sortMode) {
+        case 'name':
+          return a.bookSourceName.compareTo(b.bookSourceName);
+        case 'url':
+          return a.bookSourceUrl.compareTo(b.bookSourceUrl);
+        case 'time':
+          return b.lastUpdateTime.compareTo(a.lastUpdateTime);
+        case 'respond':
+          return a.respondTime.compareTo(b.respondTime);
+        case 'manual':
+        default:
+          return 0;
+      }
+    }
+
+    if (_sortMode == 'manual') {
+      // 手动排序按 customOrder，升序时正常顺序，降序时反转
+      if (!_sortAscending) {
+        return sorted.reversed.toList();
+      }
+      return sorted;
+    }
+
+    sorted.sort(compare);
+    if (!_sortAscending) {
+      return sorted.reversed.toList();
     }
     return sorted;
   }
@@ -700,7 +706,11 @@ class _DiscoveryPageState extends State<DiscoveryPage>
     );
   }
 
+  /// 书源长按操作菜单（参考 legado_max explore_item.xml）
+  /// 菜单项：编辑、置顶、登录(条件)、搜索、刷新、删除
   void _showSourceOptions(BookSource source) {
+    final hasLoginUrl =
+        source.loginUrl != null && source.loginUrl!.isNotEmpty;
     showModalBottomSheet(
       context: context,
       builder: (context) {
@@ -708,6 +718,46 @@ class _DiscoveryPageState extends State<DiscoveryPage>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // 编辑书源
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('编辑书源'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.pushNamed(
+                    context,
+                    AppRoutes.bookSourceEdit,
+                    arguments: {'sourceUrl': source.bookSourceUrl},
+                  );
+                },
+              ),
+              // 置顶
+              ListTile(
+                leading: const Icon(Icons.vertical_align_top),
+                title: const Text('置顶'),
+                onTap: () {
+                  Navigator.pop(context);
+                  context
+                      .read<DiscoveryProvider>()
+                      .pinSource(source.bookSourceUrl);
+                },
+              ),
+              // 登录（仅当书源配置了 loginUrl 时显示，参考 legado_max menu_login）
+              if (hasLoginUrl)
+                ListTile(
+                  leading: const Icon(Icons.login),
+                  title: const Text('登录'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('登录功能开发中'),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                  },
+                ),
+              // 搜索书籍
               ListTile(
                 leading: const Icon(Icons.search),
                 title: const Text('搜索书籍'),
@@ -720,31 +770,21 @@ class _DiscoveryPageState extends State<DiscoveryPage>
                   );
                 },
               ),
+              // 刷新发现分类（参考 legado_max menu_refresh: 清除缓存重新加载）
               ListTile(
-                leading: const Icon(Icons.edit),
-                title: const Text('编辑书源'),
+                leading: const Icon(Icons.refresh),
+                title: const Text('刷新分类'),
                 onTap: () {
                   Navigator.pop(context);
-                  Navigator.pushNamed(
-                    context,
-                    AppRoutes.bookSourceEdit,
-                    arguments: {'sourceUrl': source.bookSourceUrl},
-                  );
+                  setState(() {
+                    _cachedCategories.remove(source.bookSourceUrl);
+                  });
                 },
               ),
-              ListTile(
-                leading: const Icon(Icons.push_pin),
-                title: const Text('置顶'),
-                onTap: () {
-                  Navigator.pop(context);
-                  context
-                      .read<DiscoveryProvider>()
-                      .pinSource(source.bookSourceUrl);
-                },
-              ),
+              // 删除
               ListTile(
                 leading: Icon(
-                  Icons.delete,
+                  Icons.delete_outline,
                   color: Theme.of(context).colorScheme.error,
                 ),
                 title: Text(
