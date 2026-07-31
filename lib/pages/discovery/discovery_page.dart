@@ -64,12 +64,18 @@ class _DiscoveryPageState extends State<DiscoveryPage>
     final colorScheme = Theme.of(context).colorScheme;
     final onSurfaceColor = colorScheme.onSurface;
     final secondaryTextColor = colorScheme.onSurface.withValues(alpha: 0.6);
+    // 参考订阅页：顶栏使用 primary 背景，按明暗自适应前景色
+    final primaryColor = colorScheme.primary;
+    final appBarForeground =
+        ThemeData.estimateBrightnessForColor(primaryColor) == Brightness.dark
+            ? Colors.white
+            : Colors.black;
 
     return Scaffold(
       body: Column(
         children: [
           // 顶栏（参考 legado_max fragment_explore.xml: TitleBar 标题"发现" + 搜索框 + 排序/分组菜单）
-          _buildTopBar(colorScheme, onSurfaceColor, secondaryTextColor),
+          _buildTopBar(colorScheme, onSurfaceColor, secondaryTextColor, primaryColor, appBarForeground),
           // 内容区：可展开的书源列表（参考 legado_max item_find_book）
           Expanded(
             child: _buildContentArea(colorScheme),
@@ -84,6 +90,8 @@ class _DiscoveryPageState extends State<DiscoveryPage>
     ColorScheme colorScheme,
     Color onSurfaceColor,
     Color secondaryTextColor,
+    Color primaryColor,
+    Color appBarForeground,
   ) {
     return Container(
       padding: EdgeInsets.only(
@@ -92,7 +100,7 @@ class _DiscoveryPageState extends State<DiscoveryPage>
         right: DesignTokens.spacingSm,
         bottom: DesignTokens.spacingSm,
       ),
-      color: colorScheme.surface,
+      color: primaryColor,
       child: SizedBox(
         height: DesignTokens.tagBarHeight,
         child: Row(
@@ -103,7 +111,7 @@ class _DiscoveryPageState extends State<DiscoveryPage>
               style: TextStyle(
                 fontSize: DesignTokens.fontTitle,
                 fontWeight: FontWeight.w600,
-                color: onSurfaceColor,
+                color: appBarForeground,
               ),
             ),
             const SizedBox(width: DesignTokens.spacingMd),
@@ -114,16 +122,9 @@ class _DiscoveryPageState extends State<DiscoveryPage>
                   // 搜索框高度 30（参考 legado_max view_search.xml layout_height=30dp）
                   height: 30,
                   decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainerHighest,
+                    color: appBarForeground.withValues(alpha: 0.15),
                     borderRadius:
                         BorderRadius.circular(DesignTokens.panelRadius),
-                    boxShadow: [
-                      BoxShadow(
-                        color: colorScheme.shadow.withValues(alpha: 0.10),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
                   ),
                   padding: const EdgeInsets.symmetric(horizontal: 3.0),
                   child: TextField(
@@ -133,15 +134,15 @@ class _DiscoveryPageState extends State<DiscoveryPage>
                       hintText: '筛选发现书源',
                       hintStyle: TextStyle(
                           fontSize: DesignTokens.fontSummary,
-                          color: secondaryTextColor),
+                          color: appBarForeground.withValues(alpha: 0.7)),
                       prefixIcon: Icon(Icons.search,
-                          size: 18, color: secondaryTextColor),
+                          size: 18, color: appBarForeground.withValues(alpha: 0.7)),
                       prefixIconConstraints: const BoxConstraints(
                           minWidth: 28, minHeight: 28),
                       suffixIcon: _searchQuery.isNotEmpty
                           ? IconButton(
                               icon: Icon(Icons.clear,
-                                  size: 16, color: secondaryTextColor),
+                                  size: 16, color: appBarForeground.withValues(alpha: 0.7)),
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(),
                               onPressed: () {
@@ -159,7 +160,7 @@ class _DiscoveryPageState extends State<DiscoveryPage>
                     ),
                     style: TextStyle(
                         fontSize: DesignTokens.fontSummary,
-                        color: onSurfaceColor),
+                        color: appBarForeground),
                     onChanged: (value) {
                       setState(() {
                         _searchQuery = value;
@@ -171,10 +172,10 @@ class _DiscoveryPageState extends State<DiscoveryPage>
             ),
             const SizedBox(width: DesignTokens.spacingXs),
             // 分组菜单（参考 legado_max main_explore.xml menu_group 子菜单）
-            _buildGroupMenu(colorScheme, onSurfaceColor),
+            _buildGroupMenu(colorScheme, onSurfaceColor, appBarForeground),
             // 排序按钮（参考 legado_max main_explore.xml action_sort 子菜单）
             PopupMenuButton<String>(
-              icon: Icon(Icons.sort, size: 20, color: onSurfaceColor),
+              icon: Icon(Icons.sort, size: 20, color: appBarForeground),
               tooltip: '排序',
               offset: const Offset(0, DesignTokens.topBarHeight),
               onSelected: (value) {
@@ -221,12 +222,12 @@ class _DiscoveryPageState extends State<DiscoveryPage>
   }
 
   /// 分组菜单（参考 legado_max ExploreFragment: groupsMenu 动态书源分组）
-  Widget _buildGroupMenu(ColorScheme colorScheme, Color onSurfaceColor) {
+  Widget _buildGroupMenu(ColorScheme colorScheme, Color onSurfaceColor, Color triggerColor) {
     return Consumer<DiscoveryProvider>(
       builder: (context, provider, child) {
         final groups = _extractGroups(provider.bookSources);
         return PopupMenuButton<String>(
-          icon: Icon(Icons.category_outlined, size: 20, color: onSurfaceColor),
+          icon: Icon(Icons.category_outlined, size: 20, color: triggerColor),
           tooltip: '分组',
           offset: const Offset(0, DesignTokens.topBarHeight),
           onSelected: (value) {

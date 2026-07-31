@@ -49,41 +49,48 @@ class _MiniprogramPageState extends State<MiniprogramPage>
                   child: Row(
                     children: [
                       const SizedBox(width: DesignTokens.spacingSm),
-                      // 搜索框（参考原版：高度30dp）
+                      // 搜索框（参考发现页：半透明填充胶囊样式）
                       Expanded(
-                        child: SizedBox(
-                          height: 32,
-                          child: TextField(
-                            controller: _searchController,
-                            decoration: InputDecoration(
-                              hintText: '搜索订阅',
-                              hintStyle: TextStyle(fontSize: DesignTokens.fontSummary, color: appBarForeground.withValues(alpha: 0.7)),
-                              prefixIcon: Icon(Icons.search, size: 16, color: appBarForeground.withValues(alpha: 0.7)),
-                              suffixIcon: _searchQuery.isNotEmpty
-                                  ? IconButton(
-                                      icon: Icon(Icons.clear, size: 16, color: appBarForeground.withValues(alpha: 0.7)),
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(),
-                                      onPressed: () {
-                                        _searchController.clear();
-                                        setState(() {
-                                          _searchQuery = '';
-                                        });
-                                      },
-                                    )
-                                  : null,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(DesignTokens.searchRadius),
-                              ),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingSm, vertical: 0),
-                              isDense: true,
+                        child: Center(
+                          child: Container(
+                            height: 30,
+                            decoration: BoxDecoration(
+                              color: appBarForeground.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(DesignTokens.panelRadius),
                             ),
-                            style: TextStyle(fontSize: DesignTokens.fontSummary, color: appBarForeground),
-                            onChanged: (value) {
-                              setState(() {
-                                _searchQuery = value;
-                              });
-                            },
+                            padding: const EdgeInsets.symmetric(horizontal: 3.0),
+                            child: TextField(
+                              controller: _searchController,
+                              textAlignVertical: TextAlignVertical.center,
+                              decoration: InputDecoration(
+                                hintText: '搜索订阅',
+                                hintStyle: TextStyle(fontSize: DesignTokens.fontSummary, color: appBarForeground.withValues(alpha: 0.7)),
+                                prefixIcon: Icon(Icons.search, size: 18, color: appBarForeground.withValues(alpha: 0.7)),
+                                prefixIconConstraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                suffixIcon: _searchQuery.isNotEmpty
+                                    ? IconButton(
+                                        icon: Icon(Icons.clear, size: 16, color: appBarForeground.withValues(alpha: 0.7)),
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(),
+                                        onPressed: () {
+                                          _searchController.clear();
+                                          setState(() {
+                                            _searchQuery = '';
+                                          });
+                                        },
+                                      )
+                                    : null,
+                                border: InputBorder.none,
+                                isCollapsed: true,
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                              style: TextStyle(fontSize: DesignTokens.fontSummary, color: appBarForeground),
+                              onChanged: (value) {
+                                setState(() {
+                                  _searchQuery = value;
+                                });
+                              },
+                            ),
                           ),
                         ),
                       ),
