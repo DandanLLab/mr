@@ -131,7 +131,10 @@ class ReaderHtmlTemplate {
         viewWidth: ${viewWidth.floor()},
         viewHeight: ${viewHeight.floor()},
         isScrollMode: $isScrollMode,
-        columnGap: 0,
+        /* 借鉴 lumina：固定 128px 列间距，与 CSS column-gap 保持一致。
+           原值 0 会导致 getPageCount 算不准（scrollWidth 无 gap 时亚像素误差大），
+           翻页 step 也算不准（step=columnWidth+gap=columnWidth，多列时偏移不足）。 */
+        columnGap: 128,
         pageAnimDurationMs: $pageAnimDurationMs,
         pageModeIndex: $pageModeIndex
       });
@@ -483,7 +486,11 @@ body.reader-paged .reader-content {
   bottom: 0;
   left: 0;
   column-width: var(--reader-safe-width);
-  column-gap: 0;
+  /* 借鉴 lumina：固定 128px 列间距。
+     原值 0 会让列与列紧贴，浏览器亚像素误差导致 scrollWidth 算不准，
+     分页数计算错误（多/少算一页）。128px 是 lumina 验证过的稳定值，
+     列间隙被 #reader-stage overflow:hidden 裁剪，用户不可见。 */
+  column-gap: 128px;
   column-fill: auto;
   will-change: transform;
   backface-visibility: hidden;
@@ -492,6 +499,33 @@ body.reader-paged .reader-content {
   /* preserve-3d：让自身 rotateY 不被压平成 2D（C3 修复，配合父元素 perspective）
      仅 simulation 模式用到 rotateY，其他模式 transform 是 2D 不受影响 */
   transform-style: preserve-3d;
+}
+
+/* 借鉴 lumina kPaginationCss：图片/视频/SVG 不被栏截断 + 不超高
+   原代码无此规则，导致大图被 column 布局切成两半，排版混乱 */
+body.reader-paged .reader-content img,
+body.reader-paged .reader-content svg,
+body.reader-paged .reader-content video {
+  object-fit: contain;
+  height: auto !important;
+  max-height: var(--reader-safe-height) !important;
+  break-inside: avoid;
+  page-break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+}
+
+body.reader-paged .reader-content figure {
+  margin: 0;
+  padding: 0;
+  break-inside: avoid;
+}
+
+/* 防孤行 + 强制换行（借鉴 lumina body * 规则） */
+body.reader-paged .reader-content * {
+  orphans: 1;
+  widows: 1;
+  word-break: break-word !important;
+  overflow-wrap: break-word !important;
 }
 
 /* a 层显式启用交互，确保点击穿透 b 后能命中 a */
@@ -1773,10 +1807,10 @@ window.readerApi = (function() {
     var gap = config.columnGap || 0;
     var scrollWidth = contentA.scrollWidth;
     if (columnWidth + gap <= 0) return 1;
-    // 用 ceil：内容哪怕只溢出第 2 列一点点，也是 2 页
-    // 减 1px 容差：避免浮点误差导致多算一个空白页
-    var pageCount = Math.ceil((scrollWidth - 1) / (columnWidth + gap));
-    return Math.max(1, pageCount);
+    // 借鉴 lumina calculatePageCount：Math.round((scrollWidth + gap) / (columnWidth + gap))
+    // 原用 Math.ceil((scrollWidth - 1) / (columnWidth + gap))，浮点误差时易多算一页空白。
+    // lumina 用 round + (scrollWidth + gap) 抵消首列无前 gap 的偏差，更稳定。
+    return Math.max(1, Math.round((scrollWidth + gap) / (columnWidth + gap)));
   }
 
   function getCurrentPage() {
