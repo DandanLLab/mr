@@ -42,6 +42,9 @@ class ReaderHtmlTemplate {
     required int pageModeIndex,
     required int chapterIndex,
     bool isRichHtml = false,
+    // isSinglePage：保留参数定义以兼容调用方，当前忽略（渲染统一走 column 分页，
+    // 不再做单页模式切分）。后续若需要可在此分支处理。
+    bool isSinglePage = false,
   }) {
     final css = _generateCss(provider, isScrollMode);
     final js = _readerJs();

@@ -64,13 +64,15 @@ class ChapterPrefetchService {
     List<Chapter>? allChapters,
     int concurrency = _defaultConcurrency,
   }) async {
-    if (chapters.isEmpty || book.bookUrl == null) return;
+    if (chapters.isEmpty) return;
 
-    final bookUrl = book.bookUrl!;
+    final bookUrl = book.bookUrl;
     final toFetch = <Chapter>[];
     for (final ch in chapters) {
       if (ch.url == null || ch.isVolume) continue;
-      final k = _key(bookUrl, ch.url!);
+      final chUrl = ch.url;
+      if (chUrl == null) continue;
+      final k = _key(bookUrl, chUrl);
       if (_memoryCache.containsKey(k) || _prefetching.contains(k)) continue;
       toFetch.add(ch);
     }
@@ -81,7 +83,9 @@ class ChapterPrefetchService {
       final batch = toFetch.skip(i).take(concurrency).toList();
       final futures = <Future<void>>[];
       for (final chapter in batch) {
-        final k = _key(bookUrl, chapter.url!);
+        final chUrl = chapter.url;
+        if (chUrl == null) continue;
+        final k = _key(bookUrl, chUrl);
         _prefetching.add(k);
         futures.add(_fetchAndCache(
           book: book,
@@ -106,11 +110,12 @@ class ChapterPrefetchService {
   }) async {
     if (chapter.url == null) return null;
     final bookUrl = book.bookUrl;
-    if (bookUrl == null) return null;
-    final k = _key(bookUrl, chapter.url!);
+    final chUrl = chapter.url;
+    if (chUrl == null) return null;
+    final k = _key(bookUrl, chUrl);
 
     // 1. 内存缓存
-    final cached = getCachedContent(bookUrl, chapter.url!);
+    final cached = getCachedContent(bookUrl, chUrl);
     if (cached != null && cached.isNotEmpty) return cached;
 
     // 2. 文件缓存
@@ -149,7 +154,10 @@ class ChapterPrefetchService {
       final content = await provider.getContent(book, chapter,
           allChapters: allChapters);
       if (content != null && content.isNotEmpty) {
-        final k = _key(book.bookUrl!, chapter.url!);
+        final bookUrl = book.bookUrl;
+        final chUrl = chapter.url;
+        if (bookUrl == null || chUrl == null) return;
+        final k = _key(bookUrl, chUrl);
         _putMemoryCache(k, content);
         // 异步写回文件缓存
         if (book.originType == BookOriginType.online) {

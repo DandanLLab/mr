@@ -1851,7 +1851,7 @@ class AnalyzeRule {
           'return result;}))})();';
 
       // [性能优化] 走轻量路径 batchEvaluate，跳过 processJsRule 重路径
-      // 不执行 _preCacheBridgeCalls（6个正则扫描几十KB）、不构建 4KB+ wrappedScript、
+      // 不执行桥接调用预缓存扫描、不构建 4KB+ wrappedScript、
       // 不执行 JsTracer、正常路径零日志——只做一次 evaluate
       final result = await JsEngine.instance.batchEvaluate(batchCode);
 

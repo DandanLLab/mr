@@ -622,7 +622,7 @@ class _ComicReaderPageState extends State<ComicReaderPage> {
     }
     // 第二遍：提取图片 URL，add() 会自动过滤 data-parts 里的配对切片
     for (final image in document.querySelectorAll('img, image')) {
-      final addedUrl = add(
+      add(
         image.attributes['src'] ??
             image.attributes['data-src'] ??
             image.attributes['data-original'] ??
