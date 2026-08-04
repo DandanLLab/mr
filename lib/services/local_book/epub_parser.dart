@@ -618,6 +618,9 @@ class EpubParser {
         }
       }
 
+      // 对齐 lumina：href 为空字符串 = placeholder（卷标题/分隔符，无独立资源）
+      // - 非空 href：查 spineOrder 得 hrefOrder；查不到但属图片封面 → 0；否则 null
+      // - 空 href：hrefOrder = null，placement 取 childFirstOrder
       final href = item.href.trim();
       final cleanHref = href.isNotEmpty
           ? epub_core.EpubPath.stripFragment(href)
@@ -628,13 +631,10 @@ class EpubParser {
       final placement = hrefOrder ?? childFirstOrder;
 
       if (placement != null && item.title.isNotEmpty) {
-        // lumina 去重：parent href == first child href → 标记为 skip:（卷标题无独立内容）
-        final hasChildWithSameHref = item.children.any(
-            (c) => epub_core.EpubPath.stripFragment(c.href) == cleanHref && cleanHref.isNotEmpty);
-
         EpubChapter chapter;
-        if (hrefOrder != null && !hasChildWithSameHref) {
-          // 真实章节：有独立 spine 资源
+        if (hrefOrder != null) {
+          // 真实章节：有独立 spine 资源（href 非空且在 spine 中）
+          // isVolume：有子节点 → 卷首章节（卷一正文），否则普通章节
           chapter = EpubChapter(
             index: -1,
             title: item.title,
@@ -649,7 +649,9 @@ class EpubParser {
             contentMode: spineContentModes[hrefOrder],
           );
         } else {
-          // 卷标题：无独立资源（skip:）或与子项共享 href
+          // 卷标题：href 为空（placeholder，lumina 父子去重或 NAV span）
+          // 或 href 不在 spine 中但有子项在 spine 中（placement 来自 childFirstOrder）
+          // 用 skip: 前缀标记，_normalizeChapters 会跳过其 contentMode/url 处理
           chapter = EpubChapter(
             index: -1,
             title: item.title,
