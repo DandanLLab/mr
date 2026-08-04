@@ -9,17 +9,16 @@ import '../../../providers/reader_provider.dart';
 /// - 使用 CSS 变量驱动样式，无需重新加载即可更新
 /// - 使用 JavaScript 计算页数、处理翻页、检测交互
 ///
-/// 翻页动画：单层容器方案（对齐 JRead/Legado 魔改阅读项目）
-/// - 仅 #reader-content-a 作为唯一的 column 容器
-/// - 翻页时直接对 #reader-content-a 做 translate3d + CSS transition 动画
-/// - 翻页结束后清除 transition（避免后续无动画翻页时残留）
-/// - 全程文字选择可用（动画期间也不拦截点击，过渡很快用户感知不到）
+/// 翻页动画：双层容器方案
+/// - #reader-content-a：主层，静态时显示当前页，可交互（选文字、点链接）
+/// - #reader-content-b：动画层，默认 visibility:hidden，翻页时显示并做动画
+/// - 动画结束后 a 跳到目标页（无动画），b 隐藏
+/// - 全程文字选择可用（动画期间 b 拦截点击，但动画很快用户感知不到）
 ///
-/// 单页模式（对齐 JRead EpubWebContentMode.fixedLayout / mediaPage）：
-/// - [isSinglePage]=true 时章节不切分，整页显示一张图/SVG/画册
-/// - CSS 改用 body.reader-single-page：column-width:auto + flex 居中
-/// - JS getPageCount 固定返回 1，jumpToPage no-op
-/// - 翻页手势由 ReaderPageView/NovelReaderPage 走「切下一章」逻辑
+/// 三种翻页模式：
+/// - slide：a/b 同时平移（a 滑出，b 滑入）
+/// - cover：a 不动，b 从侧边滑入覆盖
+/// - simulation：b 带 3D rotateY 翻折从侧边滑入
 class ReaderHtmlTemplate {
   ReaderHtmlTemplate._();
 
@@ -32,11 +31,6 @@ class ReaderHtmlTemplate {
   ///   解析后 EPUB CSS 注入到 <style>，body HTML 直接放入 #reader-content-a
   ///   （不走 buildParagraphsHtml 段落包裹，保留 EPUB 原始标签结构）。
   /// - false（默认）：content 视为纯文本，按行切分成 <p class="reader-p">。
-  ///
-  /// [isSinglePage]：是否为单页模式（fixedLayout/mediaPage）。
-  /// - true：不切分，整页显示（画册/漫画/SVG/纯图片章节）
-  /// - false（默认）：reflowable 流式布局，column-width 分栏翻页
-  /// 滚动模式优先级高于单页模式（滚动模式永远不分页）。
   static String generate({
     required String content,
     required String title,
@@ -121,6 +115,9 @@ class ReaderHtmlTemplate {
     <div id="reader-stage">
       <div id="reader-content-a" class="reader-content">
         $contentAInner
+      </div>
+      <div id="reader-content-b" class="reader-content">
+        $paragraphsHtml
       </div>
     </div>
   </div>
@@ -218,14 +215,10 @@ class ReaderHtmlTemplate {
   /// - 用 min() 限制 padding 不超过 viewport - 100px
   /// - 保证内容区最小 100px，padding 之和永不超 viewport
   ///
-  /// 单层容器：
-  /// - #reader-stage: relative + overflow:hidden，作为 content-a 的定位容器
-  /// - .reader-content: absolute + column 布局
-  /// - 翻页时由 JS 设置 transition 触发 translate3d 过渡动画
-  ///
-  /// [isSinglePage]：单页模式（fixedLayout/mediaPage）切换为
-  /// body.reader-single-page + flex 居中，column-width:auto 不切分。
-  /// 滚动模式优先级更高（isScrollMode=true 时忽略 isSinglePage）。
+  /// 双层容器：
+  /// - #reader-stage: relative + overflow:hidden，作为 a/b 的定位容器
+  /// - .reader-content: absolute + column 布局，a/b 重叠在同一位置
+  /// - #reader-content-b: 默认 visibility:hidden + pointer-events:none
   static String _generateCss(ReaderProvider provider, bool isScrollMode, bool isSinglePage) {
     final textColor = _colorToHex(provider.textColor);
     final bgColor = _colorToHex(provider.backgroundColor);
@@ -445,9 +438,9 @@ ${generateHighlightCss(provider)}
 
 /* ============ 分页模式 ============ */
 /* #reader-root 是 flex 纵向容器：标题占自然高度，#reader-stage flex:1
-   撑满剩余空间。#reader-stage 是 #reader-content-a 的定位容器
-   （position:relative + overflow:hidden）。这样标题和正文不会重叠
-   （之前 absolute top:0 会覆盖标题）。 */
+   撑满剩余空间。#reader-stage 是 a/b 的定位容器（position:relative +
+   overflow:hidden）。这样标题和正文不会重叠（之前 a/b absolute top:0
+   会覆盖标题）。 */
 body.reader-paged {
   position: relative;
   overflow: hidden;
@@ -479,10 +472,9 @@ body.reader-paged #reader-stage {
   perspective-origin: center center;
 }
 
-/* 唯一的 column 容器样式：absolute 定位在 #reader-stage 内
+/* a/b 共用样式：absolute 重叠在 #reader-stage 内，column 分栏
    关键：不设 width，让 column 布局自动扩展到内容总宽度，
-   这样 scrollWidth / getClientRects 才能返回所有列的总宽度
-   （= pageCount * columnWidth）。
+   这样 scrollWidth 才能返回所有列的总宽度（= pageCount * columnWidth）。
    高度用 top:0 + bottom:0 撑满 stage，避免 height:100% 在 flex 父容器
    内的高度计算不稳定（部分 Android WebView 上 flex 子项 absolute 子元素
    的 height:100% 会算成 0，导致 column 布局坍缩成 1 列）。
@@ -504,99 +496,26 @@ body.reader-paged .reader-content {
   transform-style: preserve-3d;
 }
 
-/* #reader-content-a：唯一容器，显式启用交互
-   transition 由 JS 在 jumpToPage 中动态设置（duration 是运行时参数），CSS 中不写 */
+/* a 层显式启用交互，确保点击穿透 b 后能命中 a */
 body.reader-paged #reader-content-a {
   pointer-events: auto;
 }
 
-/* ============ 单页模式（fixedLayout / mediaPage，对齐 JRead）============
- * 适用：画册、漫画、SVG 矢量封面、纯图片章节
- * - 不切分：column-width:auto，内容整页显示
- * - flex 居中：图片/SVG 在内容区内居中，避免左上角对齐显得突兀
- * - 满屏覆盖：#reader-content-a 撑满 #reader-stage，无 translate 翻页
- * - 翻页手势由上层（ReaderPageView/NovelReaderPage）走「切下一章」逻辑
- * 与 body.reader-paged 互斥；滚动模式优先级更高（isScrollMode=true 时不应用此 class）
- */
-body.reader-single-page {
-  position: relative;
-  overflow: hidden;
+/* b 层默认隐藏（visibility:hidden + opacity:0 双重保险，避免某些
+   Android WebView 上单 visibility:hidden 对 absolute 元素仍渲染
+   导致与 a 层视觉重叠） */
+body.reader-paged #reader-content-b {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(0, 0, 0);
 }
 
-/* 单页模式：html 清零全局 padding，让 #reader-root 满屏覆盖整个阅读器
- * 对齐 JRead FixedLayout：html margin:0, padding:0, min-width:100%, min-height:100%
- * 画册/漫画/纯图片章节应满屏显示，不受用户正文 padding 影响
- *
- * 实现方式：body 是 html 的子元素，无法用 CSS 选择器从 body 改 html 的 padding，
- * 所以在 JS init 中同步给 html 加 `reader-single-page-root` class，这里用
- * html.reader-single-page-root 覆盖全局 html padding
- */
-html.reader-single-page-root {
-  padding: 0 !important;
-}
-
-body.reader-single-page #reader-root {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-}
-
-body.reader-single-page #reader-stage {
-  position: relative;
-  flex: 1 1 0;
-  width: 100%;
-  min-height: 0;
-  overflow: hidden;
-  /* flex 居中容器：让 #reader-content-a 内的图片/SVG 居中显示 */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-body.reader-single-page .reader-content {
-  /* 关键：不切分。column-width:auto 让浏览器按内容自然布局，
-     不强制分栏。配合 width:100% + height:100% 让单元素整页显示。 */
-  column-width: auto;
-  column-gap: 0;
-  column-fill: auto;
-  position: relative;
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  /* 不需要 transform 翻页，清除 will-change 避免合成层浪费 */
-  will-change: auto;
-  transform: none !important;
-}
-
-body.reader-single-page #reader-content-a {
+/* b 层动画进行中：显示并暂时拦截事件（避免动画期间误触） */
+body.reader-paged #reader-content-b.animating {
+  visibility: visible;
+  opacity: 1;
   pointer-events: auto;
-  /* 满屏容器：让内部的图片/SVG/画册撑满内容区 */
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* 单页模式下图片/SVG/video 填满内容区但不溢出（对齐 JRead mediaPage 规则）
- * - max-width/max-height:100% 保证不溢出
- * - width/height:auto 保持原始宽高比
- * - object-fit:contain 等比缩放
- */
-body.reader-single-page #reader-content-a img,
-body.reader-single-page #reader-content-a svg,
-body.reader-single-page #reader-content-a video,
-body.reader-single-page #reader-content-a canvas {
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
-  height: auto;
-  object-fit: contain;
 }
 
 /* ============ 滚动模式 ============ */
@@ -643,6 +562,90 @@ body.reader-scroll .reader-content {
   height: auto;
   width: 100%;
   transform: none !important;
+}
+
+/* 滚动模式隐藏 b 层（不需要翻页动画） */
+body.reader-scroll #reader-content-b {
+  display: none;
+}
+
+/* ============ 单页模式（fixedLayout / mediaPage，对齐 JRead）============
+ * 适用：画册、漫画、SVG 矢量封面、纯图片章节
+ * - 不切分：column-width:auto，内容整页显示
+ * - flex 居中：图片/SVG 在内容区内居中
+ * - 满屏覆盖：html padding 清零，#reader-root 撑满整个阅读器
+ * - 翻页手势由上层（ReaderPageView/NovelReaderPage）走「切下一章」逻辑
+ * 与 body.reader-paged 互斥；滚动模式优先级更高（isScrollMode=true 时不应用此 class）
+ *
+ * html padding 清零：body 是 html 子元素无法用 CSS 选择器改 html padding，
+ * 所以在 JS init 中同步给 html 加 `reader-single-page-root` class
+ */
+html.reader-single-page-root {
+  padding: 0 !important;
+}
+
+body.reader-single-page {
+  position: relative;
+  overflow: hidden;
+}
+
+body.reader-single-page #reader-root {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body.reader-single-page #reader-stage {
+  position: relative;
+  flex: 1 1 0;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+body.reader-single-page .reader-content {
+  column-width: auto;
+  column-gap: 0;
+  column-fill: auto;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  will-change: auto;
+  transform: none !important;
+}
+
+body.reader-single-page #reader-content-a {
+  pointer-events: auto;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+body.reader-single-page #reader-content-b {
+  display: none;
+}
+
+/* 单页模式下图片/SVG/video 填满内容区但不溢出（对齐 JRead mediaPage 规则） */
+body.reader-single-page #reader-content-a img,
+body.reader-single-page #reader-content-a svg,
+body.reader-single-page #reader-content-a video,
+body.reader-single-page #reader-content-a canvas {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
 }
 
 /* 图片样式 */
@@ -996,15 +999,18 @@ body.reader-scroll .reader-content {
     return '#${argb.toRadixString(16).padLeft(8, '0').substring(2)}';
   }
 
-  /// JavaScript 脚本：分页计算 + 单层翻页动画 + 交互检测
+  /// JavaScript 脚本：分页计算 + 双层翻页动画 + 交互检测
   ///
-  /// 单层翻页流程（从第 N 页 → 第 M 页）：
-  /// 1. 给 #reader-content-a 设置 transition（duration 由 pageAnimDurationMs 决定）
-  /// 2. 下一帧设置终点 transform: translate3d(-M*step, 0, 0)，触发过渡
-  /// 3. transitionend 回调：清除 transition（避免后续无动画翻页残留）
+  /// 双层翻页流程（从第 N 页 → 第 M 页）：
+  /// 1. b 跳到目标页 M（无动画），显示 b
+  /// 2. 根据 mode 和方向设置 a/b 的 transform 起止值
+  /// 3. 启动 transition 动画
+  /// 4. transitionend 回调：a 跳到 M（无动画），b 隐藏
   ///
   /// mode 行为：
-  /// - 任意带动画模式：a 单层 translate3d + transition 平移
+  /// - slide(1): a/b 同时平移（a 滑出，b 滑入）
+  /// - cover(2): a 不动，b 从侧边滑入覆盖
+  /// - simulation(3): b 带 3D rotateY 翻折滑入
   /// - none(4): 无动画，a 直接跳到目标页
   static String _readerJs() {
     return r'''
@@ -1035,7 +1041,8 @@ body.reader-scroll .reader-content {
 window.readerApi = (function() {
   var config = { viewWidth: 0, viewHeight: 0, isScrollMode: false, isSinglePage: false, columnGap: 0, pageAnimDurationMs: 0, pageModeIndex: 4 };
   var body = document.body;
-  var contentA = null;  // 唯一的 column 容器
+  var contentA = null;  // 主层（静态可交互）
+  var contentB = null;  // 动画层（默认隐藏）
   var animEnabled = true;     // 全局动画开关
   var isAnimating = false;    // 当前是否在动画中
   var currentPage = 0;        // 当前页码（a 显示的页）
@@ -1057,13 +1064,10 @@ window.readerApi = (function() {
     config = cfg;
     animEnabled = (config.pageAnimDurationMs || 0) > 0 && (config.pageModeIndex !== 4);
     contentA = document.getElementById('reader-content-a');
-    // body class 三态互斥：
-    // - reader-scroll：滚动模式（优先级最高，永远不分页）
-    // - reader-single-page：单页模式（fixedLayout/mediaPage，不切分）
-    // - reader-paged：分页模式（reflowable，column-width 分栏翻页）
+    contentB = document.getElementById('reader-content-b');
+    // body class 三态互斥：reader-scroll / reader-single-page / reader-paged
+    // 单页模式时同步给 html 加 reader-single-page-root 清零全局 padding
     body.classList.remove('reader-scroll', 'reader-single-page', 'reader-paged');
-    // html class 同步：单页模式时加 reader-single-page-root 清零全局 padding
-    // （画册/漫画满屏显示，不受用户正文 padding 影响）
     document.documentElement.classList.remove('reader-single-page-root');
     if (config.isScrollMode) {
       body.classList.add('reader-scroll');
@@ -1104,7 +1108,7 @@ window.readerApi = (function() {
 
     console.log('[reader] init', JSON.stringify(config), 'animEnabled=' + animEnabled,
       'vw=' + window.innerWidth, 'vh=' + window.innerHeight,
-      'contentA=' + !!contentA);
+      'contentA=' + !!contentA, 'contentB=' + !!contentB);
 
     // 绑定 click 监听器
     document.addEventListener('click', function(e) {
@@ -1180,10 +1184,10 @@ window.readerApi = (function() {
       }, { passive: true });
     }
 
-    // content-a transitionend 监听（动画结束清理）
-    if (contentA) {
-      contentA.addEventListener('transitionend', function(e) {
-        if (e.target !== contentA) return;
+    // b 层 transitionend 监听（动画结束清理）
+    if (contentB) {
+      contentB.addEventListener('transitionend', function(e) {
+        if (e.target !== contentB) return;
         if (e.propertyName !== 'transform') return;
         onAnimEnd();
       });
@@ -1861,28 +1865,11 @@ window.readerApi = (function() {
     if (!contentA) return 1;
     var columnWidth = getColumnWidth();
     var gap = config.columnGap || 0;
+    var scrollWidth = contentA.scrollWidth;
     if (columnWidth + gap <= 0) return 1;
-
-    // 对齐魔改版：遍历所有块级/媒体元素取最右边界
-    // - 比 scrollWidth 更精确，避免 column 布局尾部空白列被算成多一页
-    // - getClientRects 返回每个元素所有断行后的矩形（跨列元素会返回多个 rect）
-    var maxEnd = 0;
-    var nodes = contentA.querySelectorAll('p, div, img, svg, image, span, h1, h2, h3, h4, h5, h6, blockquote, pre, table, li, figure, figcaption');
-    for (var i = 0; i < nodes.length; i++) {
-      var rects = nodes[i].getClientRects();
-      for (var j = 0; j < rects.length; j++) {
-        var end = rects[j].right;
-        if (end > maxEnd) maxEnd = end;
-      }
-    }
-    // 兜底：如果没有匹配元素（理论上不会发生），用 scrollWidth
-    if (maxEnd === 0) {
-      var scrollWidth = contentA.scrollWidth;
-      var pageCountFallback = Math.ceil((scrollWidth - 1) / (columnWidth + gap));
-      return Math.max(1, pageCountFallback);
-    }
     // 用 ceil：内容哪怕只溢出第 2 列一点点，也是 2 页
-    var pageCount = Math.ceil(maxEnd / (columnWidth + gap));
+    // 减 1px 容差：避免浮点误差导致多算一个空白页
+    var pageCount = Math.ceil((scrollWidth - 1) / (columnWidth + gap));
     return Math.max(1, pageCount);
   }
 
@@ -1894,7 +1881,6 @@ window.readerApi = (function() {
 
   // ============ 翻页核心 ============
   // animate: true=带动画（用户翻页）, false=无动画（进度恢复/初始化）
-  // 单层方案：直接对 #reader-content-a 做 translate3d + transition 过渡
   function jumpToPage(pageIndex, animate) {
     // 单页模式：永远在第 0 页，不做任何 transform 翻页
     // 翻页手势由上层 ReaderPageView/NovelReaderPage 走「切下一章」逻辑
@@ -1903,8 +1889,8 @@ window.readerApi = (function() {
       return;
     }
     if (config.isScrollMode) return;
-    if (!contentA) {
-      console.log('[reader] jumpToPage skipped: contentA not ready');
+    if (!contentA || !contentB) {
+      console.log('[reader] jumpToPage skipped: contentA/B not ready');
       return;
     }
 
@@ -1916,7 +1902,7 @@ window.readerApi = (function() {
     console.log('[reader] jumpToPage', pageIndex, 'animate=' + animate, 'useAnim=' + useAnim, 'currentPage=' + currentPage, 'pageCount=' + pageCount);
 
     if (!useAnim) {
-      // 无动画：a 直接跳到目标页
+      // 无动画：a 直接跳到目标页，b 隐藏重置
       // 清除动画状态（防止上次动画残留的 isAnimating/animEndTimer 干扰）
       if (animEndTimer) {
         clearTimeout(animEndTimer);
@@ -1924,38 +1910,119 @@ window.readerApi = (function() {
       }
       isAnimating = false;
       jumpA(pageIndex, false);
+      hideB();
       currentPage = pageIndex;
       notifyPageChanged(pageIndex);
       return;
     }
 
-    // 有动画：a 单层 translate3d + transition
+    // 有动画：用 b 做过渡
+    var isForward = pageIndex > currentPage;
     var columnWidth = getColumnWidth();
     var gap = config.columnGap || 0;
     var step = columnWidth + gap;
+    var mode = config.pageModeIndex;
     var duration = config.pageAnimDurationMs;
 
+    // 用 try-finally 保护 isAnimating，防止异常导致卡死
     try {
-      isAnimating = true;
-      // 设置 transition（duration 是运行时参数，所以由 JS 动态写入 CSS）
-      contentA.style.transition = 'transform ' + duration + 'ms ease-out';
-      // 强制 reflow 让起点 transform 生效，避免上一帧的 transform 被合并
+      // 1. 显式重置 a 起点到当前页（无动画），防止上次动画残留
+      contentA.style.transition = 'none';
+      contentA.style.transform = 'translate3d(' + (-currentPage * step) + 'px, 0, 0)';
       void contentA.offsetHeight;
-      // 下一帧设置终点 transform，触发 transition
-      requestAnimationFrame(function() {
+
+      // 2. b 跳到动画起点（无动画），具体位置由 mode 决定
+      contentB.style.transition = 'none';
+      contentB.style.transformStyle = 'preserve-3d';
+      if (isForward) {
+        contentB.style.transform = 'translate3d(' + (-(pageIndex - 1) * step) + 'px, 0, 0)';
+      } else {
+        contentB.style.transform = 'translate3d(' + (-(pageIndex + 1) * step) + 'px, 0, 0)';
+      }
+      void contentB.offsetHeight;
+
+      // 3. 显示 b 并标记动画中
+      contentB.classList.add('animating');
+      isAnimating = true;
+
+      // 4. 设置 transition 和终点 transform
+      var aTiming = 'ease-out';
+      var bTiming = 'ease-out';
+      if (mode === 2) {
+        aTiming = 'none';
+        bTiming = 'cubic-bezier(0.4, 0, 1, 1)';
+      } else if (mode === 3) {
+        aTiming = 'none';
+        bTiming = 'cubic-bezier(0.25, 0.1, 0.25, 1)';
+      }
+
+      if (aTiming === 'none') {
+        contentA.style.transition = 'none';
+      } else {
+        contentA.style.transition = 'transform ' + duration + 'ms ' + aTiming;
+        void contentA.offsetHeight;
         contentA.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
-      });
+      }
+
+      if (mode === 3) {
+        // simulation 模式：b 像书页一样从侧边翻入盖到当前页
+        //
+        // 关键修复（C2 + C3）：
+        // 1. transformOrigin 必须用具体像素值（目标页的边缘），不能用
+        //    'right center'/'left center'——那是 b 容器整体最右/左边缘
+        //    （scrollWidth 可达几千 px，远在视口外），旋转中心错位
+        // 2. b 全程 translate3d 不变（在目标页位置），只 rotateY 变化，
+        //    实现"翻入"效果（原代码起点终点 translate3d 不同，变成滑动+翻转混合）
+        // 3. 起点 transform 包含 rotateY，必须先关 transition + reflow + 再开
+        //    transition，否则从上面设置的 slide/cover 起点 transform 跑到
+        //    simulation 起点 transform 会触发一次多余 transition
+        // 4. 父元素 #reader-stage 需要 perspective（CSS 中已加），否则
+        //    rotateY 是正交投影无立体感
+        contentB.style.transition = 'none';
+        if (isForward) {
+          // 翻向下一页：b 从右边翻入
+          // transformOrigin = 目标页右边缘 = (pageIndex+1) * step
+          // （b 容器原始坐标系，第 pageIndex 列的右边缘；
+          //  应用 translate3d(-pageIndex*step) 后正好位于视口右边缘）
+          contentB.style.transformOrigin = ((pageIndex + 1) * step) + 'px 50%';
+          // 起点：b 在目标页位置，立着朝右
+          // rotateY(90deg) 绕右边旋转：右边不动、左边远离观察者
+          // → b 正面朝向视口右侧，从视口看不见正面
+          contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(90deg)';
+        } else {
+          // 翻向上一页：b 从左边翻入
+          // transformOrigin = 目标页左边缘 = pageIndex * step
+          contentB.style.transformOrigin = (pageIndex * step) + 'px 50%';
+          // 起点：b 在目标页位置，立着朝左
+          // rotateY(-90deg) 绕左边旋转：左边不动、右边远离观察者
+          // → b 正面朝向视口左侧，从视口看不见正面
+          contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(-90deg)';
+        }
+        void contentB.offsetHeight; // 强制 reflow 让起点 transform 生效
+        // 再开启 transition
+        contentB.style.transition = 'transform ' + duration + 'ms ' + bTiming;
+        // 下一帧设终点（平躺、正面朝向观察者），触发 transition
+        requestAnimationFrame(function() {
+          contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0) rotateY(0deg)';
+        });
+      } else {
+        // slide/cover 模式：b 平移到目标页位置
+        contentB.style.transition = 'transform ' + duration + 'ms ' + bTiming;
+        void contentB.offsetHeight;
+        contentB.style.transform = 'translate3d(' + (-pageIndex * step) + 'px, 0, 0)';
+      }
     } catch (err) {
       // 异常时立即清理动画状态，防止 isAnimating 卡死导致后续点击全被吞
       console.error('[reader] jumpToPage animation error:', err);
       isAnimating = false;
+      hideB();
       jumpA(pageIndex, false);
       currentPage = pageIndex;
       notifyPageChanged(pageIndex);
       return;
     }
 
-    // 兜底超时（防止 transitionend 不触发）
+    // 5. 兜底超时（防止 transitionend 不触发）
     if (animEndTimer) clearTimeout(animEndTimer);
     animEndTimer = setTimeout(function() {
       onAnimEnd();
@@ -1980,8 +2047,19 @@ window.readerApi = (function() {
     }
   }
 
+  // 隐藏并重置 b 层
+  function hideB() {
+    if (!contentB) return;
+    contentB.classList.remove('animating');
+    contentB.style.transition = 'none';
+    contentB.style.transform = 'translate3d(0, 0, 0)';
+    contentB.style.transformOrigin = '';
+    contentB.style.transformStyle = '';
+    void contentB.offsetHeight;
+    contentB.style.transition = '';
+  }
+
   // 动画结束回调
-  // 单层方案：清除 transition（避免后续无动画翻页时残留），通知 Dart 侧页码变更
   function onAnimEnd() {
     if (!isAnimating) return;
     if (animEndTimer) {
@@ -1989,8 +2067,10 @@ window.readerApi = (function() {
       animEndTimer = null;
     }
     isAnimating = false;
-    // 清除 transition（避免后续无动画翻页时残留）
-    contentA.style.transition = 'none';
+    // a 跳到当前页（无动画）
+    jumpA(currentPage, false);
+    // b 隐藏重置
+    hideB();
     // 通知 Dart 侧页码变更
     notifyPageChanged(currentPage);
   }
