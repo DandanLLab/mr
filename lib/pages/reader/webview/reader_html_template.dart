@@ -133,7 +133,7 @@ class ReaderHtmlTemplate {
         viewHeight: ${viewHeight.floor()},
         isScrollMode: $isScrollMode,
         isSinglePage: $isSinglePage,
-        columnGap: 0,
+        columnGap: ${provider.paddingLeft + provider.paddingRight},
         pageAnimDurationMs: $pageAnimDurationMs,
         pageModeIndex: $pageModeIndex
       });
@@ -349,6 +349,44 @@ html {
   margin-bottom: 0;
 }
 
+/* ============ 行高强制覆盖（对齐 JRead）============
+ * JRead 用 body :where(p, li, blockquote, div, section, h1-h6, span, a, em, strong...)
+ * { line-height: ... !important; } 强制覆盖 publisher CSS 的行高声明
+ * 当前实现只在 body 上设 line-height，publisher CSS 会通过 p/div 等选择器覆盖
+ * 导致 EPUB 自带 CSS 的行高优先级高于 body，阅读体验不一致
+ * :where() 选择器优先级=0，!important 确保阅读器行高统一生效 */
+body :where(
+  p, li, blockquote, div, section, article, main, header, footer, aside, nav,
+  h1, h2, h3, h4, h5, h6, dd, dt, figcaption, td, th, pre,
+  span, a, em, strong, b, i, u, small, mark, cite, q, code
+) {
+  line-height: var(--reader-line-height) !important;
+}
+
+/* ============ 块级元素溢出处理 + 两端对齐（对齐 JRead）============
+ * JRead 用 :where(p, li, blockquote, div) { overflow-wrap: break-word; }
+ * 防止长单词/URL 溢出 column 边界 */
+body :where(p, li, blockquote, div) {
+  overflow-wrap: break-word;
+}
+
+/* ============ 表格/代码/iframe 溢出处理（对齐 JRead）============ */
+body :where(table) {
+  max-width: 100% !important;
+}
+body :where(th, td) {
+  max-width: var(--reader-safe-width) !important;
+  overflow-wrap: anywhere;
+}
+body :where(pre, code) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+body :where(iframe, object, embed) {
+  max-width: 100% !important;
+  max-height: var(--reader-safe-height) !important;
+}
+
 /* 高亮规则 CSS */
 ${generateHighlightCss(provider)}
 
@@ -478,14 +516,16 @@ body.reader-paged #reader-stage {
    高度用 top:0 + bottom:0 撑满 stage，避免 height:100% 在 flex 父容器
    内的高度计算不稳定（部分 Android WebView 上 flex 子项 absolute 子元素
    的 height:100% 会算成 0，导致 column 布局坍缩成 1 列）。
-   裁剪由 #reader-stage 的 overflow:hidden 负责。 */
+   裁剪由 #reader-stage 的 overflow:hidden 负责。
+   对齐 JRead：column-gap = padLeft + padRight，让两栏间隔等于左右 padding 之和，
+   配合 body 不设 padding（padding 在 html 上），栏间不留白边。 */
 body.reader-paged .reader-content {
   position: absolute;
   top: 0;
   bottom: 0;
   left: 0;
   column-width: var(--reader-safe-width);
-  column-gap: 0;
+  column-gap: calc(var(--reader-padding-left) + var(--reader-padding-right));
   column-fill: auto;
   will-change: transform;
   backface-visibility: hidden;
@@ -702,13 +742,32 @@ body.reader-single-page #reader-content-a canvas {
 
 /* 2. 所有图片/视频/SVG/canvas 响应式：最大宽度 100%，不溢出
    覆盖 EPUB 中固定 px 宽度的资源（EpubParser 已把 >300px 固定宽度改写为
-   max-width:100%，这里作为兜底确保万无一失） */
+   max-width:100%，这里作为兜底确保万无一失）
+   对齐 JRead：max-height = 内容区高度，object-fit:contain，break-inside:avoid
+   防止大图跨页显示（一页显示完整图片，下一页继续正文） */
 #reader-content-a img,
 #reader-content-a svg,
 #reader-content-a video,
 #reader-content-a canvas {
-  max-width: 100%;
-  height: auto;
+  max-width: 100% !important;
+  max-height: var(--reader-safe-height) !important;
+  height: auto !important;
+  object-fit: contain !important;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* 2a. figure/picture 容器：对齐 JRead，break-inside:avoid 防分页切断 */
+#reader-content-a figure,
+#reader-content-a picture {
+  max-width: 100% !important;
+  height: auto !important;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+#reader-content-a figure {
+  margin-left: auto;
+  margin-right: auto;
 }
 
 /* 3. SVG 封面图：填满容器（EPUB 常用 SVG 做矢量封面） */
@@ -1863,14 +1922,83 @@ window.readerApi = (function() {
     if (config.isSinglePage) return 1;
     if (config.isScrollMode) return 1;
     if (!contentA) return 1;
+
+    // 对齐 JRead pageCount() 算法：用 TreeWalker 遍历所有文本节点 + img/svg/table，
+    // 用 Range.getClientRects() 收集每个 rect 的右端，计算 maxPage。
+    // 比 scrollWidth/columnWidth 更精确：浮动元素/absolute 元素/padding 溢出
+    // 不会误算页数（scrollWidth 会被这些元素撑大导致多算空白页）。
     var columnWidth = getColumnWidth();
     var gap = config.columnGap || 0;
+    var step = columnWidth + gap;
+    if (step <= 0) return 1;
+
+    // contentA 的 left 基准（column 容器左边缘）
+    var rootBounds = contentA.getBoundingClientRect();
+    var rootLeft = rootBounds.left;
+    var maxPage = -1;
+
+    // 辅助：检查元素是否可见（非 display:none / visibility:hidden）
+    function visibleStyle(el) {
+      if (!el || el.nodeType !== 1) return false;
+      var s = window.getComputedStyle(el);
+      if (!s || s.display === 'none' || s.visibility === 'hidden') return false;
+      return true;
+    }
+
+    // 辅助：把 rect 归入对应页号（按右端位置）
+    function includeRect(rect) {
+      if (!rect || rect.width <= 0 || rect.height <= 0) return;
+      var right = rect.right - rootLeft;
+      // 减去当前 transform 偏移（翻页时 contentA 有 translate3d）
+      var transform = window.getComputedStyle(contentA).transform;
+      if (transform && transform !== 'none') {
+        try {
+          var m = new DOMMatrixReadOnly(transform);
+          right -= m.m41 || 0;
+        } catch (_) {}
+      }
+      var page = Math.max(0, Math.ceil(right / step) - 1);
+      if (page > maxPage) maxPage = page;
+    }
+
+    // 1. 遍历所有文本节点，用 Range.getClientRects() 收集 rect
+    var walker = document.createTreeWalker(contentA, NodeFilter.SHOW_TEXT);
+    var node;
+    while ((node = walker.nextNode())) {
+      if (!String(node.nodeValue || '').trim()) continue;
+      if (!visibleStyle(node.parentElement)) continue;
+      try {
+        var range = document.createRange();
+        range.selectNodeContents(node);
+        Array.prototype.forEach.call(range.getClientRects(), includeRect);
+      } catch (_) {}
+    }
+
+    // 2. 遍历 img/svg/image/video/canvas/table 元素
+    Array.prototype.forEach.call(
+      contentA.querySelectorAll('img,svg,image,video,canvas,table'),
+      function(el) {
+        if (visibleStyle(el)) includeRect(el.getBoundingClientRect());
+      }
+    );
+
+    // 3. 遍历有 background-image 的元素
+    Array.prototype.forEach.call(
+      contentA.querySelectorAll('*'),
+      function(el) {
+        if (!visibleStyle(el)) return;
+        var s = window.getComputedStyle(el);
+        if (s.backgroundImage && s.backgroundImage !== 'none') {
+          includeRect(el.getBoundingClientRect());
+        }
+      }
+    );
+
+    if (maxPage >= 0) return maxPage + 1;
+
+    // 兜底：用 scrollWidth / step（JRead 也有此兜底）
     var scrollWidth = contentA.scrollWidth;
-    if (columnWidth + gap <= 0) return 1;
-    // 用 ceil：内容哪怕只溢出第 2 列一点点，也是 2 页
-    // 减 1px 容差：避免浮点误差导致多算一个空白页
-    var pageCount = Math.ceil((scrollWidth - 1) / (columnWidth + gap));
-    return Math.max(1, pageCount);
+    return Math.max(1, Math.ceil((scrollWidth - 1) / step));
   }
 
   function getCurrentPage() {
