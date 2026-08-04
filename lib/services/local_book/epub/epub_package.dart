@@ -132,3 +132,18 @@ enum EpubRenditionSpread { auto, none, both, portrait, landscape }
 
 /// 页面展开方向
 enum EpubPageSpread { auto, left, right, center }
+
+/// 章节内容模式（对齐 JRead EpubWebContentMode）
+///
+/// 决定阅读器如何渲染章节：
+/// - [reflowable]：流式布局，用 column-width 分栏翻页（多数文字小说）
+/// - [fixedLayout]：固定布局，单页不切分（画册、漫画、SVG 矢量图）
+/// - [mediaPage]：纯媒体页，单页不切分（纯图片章节）
+enum EpubContentMode {
+  reflowable,
+  fixedLayout,
+  mediaPage;
+
+  /// 是否为单页模式（不切分）
+  bool get isSinglePage => this != reflowable;
+}

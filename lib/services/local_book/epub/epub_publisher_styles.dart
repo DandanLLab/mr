@@ -4,7 +4,7 @@
 ///
 /// 把章节 HTML 中 <link rel="stylesheet"> 引用的 CSS 内联到 <style> 标签：
 /// 1. 递归展开 @import（防环、防炸）
-/// 2. 重写 url() 为 https://epub.local/{path} 虚拟 host
+/// 2. 通过 [EpubUrlRewriter] 回调重写 url()（由调用方决定路径模式或 base64）
 /// 3. 翻译多看扩展（duokan-text-indent → text-indent, duokan-bleed → margin）
 ///
 /// 解决 WebView 在链接 CSS 就绪前就完成加载的时序问题。
@@ -12,6 +12,13 @@ library;
 
 import 'epub_package_parser.dart';
 import 'epub_path.dart';
+
+/// url 重写回调
+///
+/// [cssHref] 当前 CSS 文件的 EPUB 内绝对路径（用于解析相对 url）
+/// [url] 原始 url() 中的值
+/// 返回重写后的 url（如本地文件路径或 base64 data URI）
+typedef EpubUrlRewriter = String Function(String cssHref, String url);
 
 /// EPUB 出版商样式内联器
 class EpubPublisherStyles {
@@ -60,12 +67,14 @@ class EpubPublisherStyles {
   /// [archive] EPUB 归档读取器
   /// [chapterHref] 当前章节的 EPUB 内部路径
   /// [html] 章节原始 HTML
+  /// [urlRewriter] 可选的 url() 重写回调（如为 null 则保留原始 url）
   /// 返回内联了 CSS 的 HTML
   static String inline(
     EpubArchiveReader archive,
     String chapterHref,
-    String html,
-  ) {
+    String html, {
+    EpubUrlRewriter? urlRewriter,
+  }) {
     if (html.trim().isEmpty) return html;
 
     var totalBytes = 0;
@@ -87,6 +96,7 @@ class EpubPublisherStyles {
         cssHref: cssHref,
         depth: 0,
         visited: visited,
+        urlRewriter: urlRewriter,
         consume: (bytes) {
           if (sheetCount >= _maxStyleSheets ||
               totalBytes + bytes > _maxTotalCssBytes) {
@@ -116,6 +126,7 @@ class EpubPublisherStyles {
     required String cssHref,
     required int depth,
     required Set<String> visited,
+    required EpubUrlRewriter? urlRewriter,
     required bool Function(int bytes) consume,
   }) {
     final normalized = EpubPath.normalize(cssHref);
@@ -151,32 +162,36 @@ class EpubPublisherStyles {
         cssHref: resolved,
         depth: depth + 1,
         visited: visited,
+        urlRewriter: urlRewriter,
         consume: consume,
       );
       if (imported == null) return '';
       return '/* EPUB @import $resolved */\n$imported';
     });
 
-    return _rewriteDuokanExtensions(_rewriteResourceUrls(normalized, css));
+    // url 重写（如果提供了 urlRewriter）
+    if (urlRewriter != null) {
+      css = _rewriteUrls(normalized, css, urlRewriter);
+    }
+    return _rewriteDuokanExtensions(css);
   }
 
-  /// 重写 url() 为 https://epub.local/{path}
-  static String _rewriteResourceUrls(String cssHref, String css) {
+  /// 用回调重写 url()
+  ///
+  /// 每个 url() 基于当前 CSS 文件路径（cssHref）解析相对路径，
+  /// 然后交给 [rewriter] 回调决定最终形态（本地路径 / base64 / 其他）
+  static String _rewriteUrls(
+    String cssHref,
+    String css,
+    EpubUrlRewriter rewriter,
+  ) {
     return css.replaceAllMapped(_urlRegex, (match) {
       final raw = (match.group(2) ?? '').trim();
       if (raw.isEmpty || raw.startsWith('#') || _isExternalOrData(raw)) {
         return match.group(0)!;
       }
-      final resolved = EpubPath.resolve(cssHref, raw);
-      final path = EpubPath.stripFragment(resolved);
-      final frag = EpubPath.fragment(resolved);
-      final absolute = StringBuffer('https://epub.local/')
-        ..write(_encodeArchivePath(path));
-      if (frag != null && frag.isNotEmpty) {
-        absolute.write('#');
-        absolute.write(_encodeFragment(frag));
-      }
-      return 'url("$absolute")';
+      final rewritten = rewriter(cssHref, raw);
+      return 'url("$rewritten")';
     });
   }
 
@@ -245,17 +260,5 @@ class EpubPublisherStyles {
         .replaceAll('"', '&quot;')
         .replaceAll('<', '&lt;')
         .replaceAll('>', '&gt;');
-  }
-
-  /// 编码归档路径为 URL path
-  static String _encodeArchivePath(String value) {
-    // 简单编码：空格 → %20，其他保持原样
-    // URI 类会处理大部分编码，但这里保持与 Kotlin 版一致
-    return value.replaceAll(' ', '%20');
-  }
-
-  /// 编码 fragment
-  static String _encodeFragment(String value) {
-    return value.replaceAll(' ', '%20');
   }
 }

@@ -36,6 +36,15 @@ class ReaderPageView extends StatefulWidget {
   /// 0=scroll, 1=slide, 2=cover, 3=simulation, 4=none
   final int pageModeIndex;
 
+  /// 是否为单页模式（fixedLayout / mediaPage，对齐 JRead）
+  ///
+  /// true：章节不切分，整页显示（画册/漫画/SVG/纯图片章节）
+  /// - 翻页 = 切章，直接走 NoAnim 路径（不截图不显示覆盖层）
+  /// - onPerformPageTurn 内部会返回 false 触发切章
+  /// - 避免非 NoAnim 模式下截图 + 覆盖层的短暂闪烁
+  /// false（默认）：reflowable 流式布局，正常翻页动画
+  final bool isSinglePage;
+
   /// 执行翻页（外部切换 WebView 内容到下一页/上一页）
   ///
   /// 参数 direction 表示翻页方向：
@@ -65,6 +74,7 @@ class ReaderPageView extends StatefulWidget {
     required this.onPerformPageTurn,
     this.onPageTurnCompleted,
     this.onPageTurnCancelled,
+    this.isSinglePage = false,
   });
 
   @override
@@ -342,8 +352,10 @@ class ReaderPageViewState extends State<ReaderPageView>
       pointer: 0,
     ));
 
-    // NoAnimPageDelegate 不需要截图覆盖层 —— 松手时直接跳页
-    if (_delegate is NoAnimPageDelegate) return;
+    // NoAnimPageDelegate / 单页模式不需要截图覆盖层 —— 松手时直接跳页
+    // 单页模式（fixedLayout/mediaPage）：整章不切分，翻页 = 切章，
+    // 截图覆盖层只会造成短暂闪烁，无实际用途
+    if (_delegate is NoAnimPageDelegate || widget.isSinglePage) return;
 
     // 用户已滑动一定距离且未启动截图 → 启动截图序列（异步）
     // 必须加 !_isTurning 检查：截图期间 _isTurning=true 但 _showAnimationLayer=false，
@@ -487,9 +499,11 @@ class ReaderPageViewState extends State<ReaderPageView>
       return;
     }
 
-    // NoAnimPageDelegate：fire-and-forget 跳页，立即销毁
+    // NoAnimPageDelegate / 单页模式：fire-and-forget 跳页，立即销毁
     // 原本 await onPerformPageTurn 会让用户感觉"卡住"，与 NonNoAnim 分支同理
-    if (_delegate is NoAnimPageDelegate) {
+    // 单页模式（fixedLayout/mediaPage）：翻页 = 切章，onPerformPageTurn 返回 false
+    // 不会有截图覆盖层（_startTurnSequence 被单页模式检查拦截），直接走此分支
+    if (_delegate is NoAnimPageDelegate || widget.isSinglePage) {
       final direction = _delegate.direction;
       bool syncOk = true;
       try {
@@ -643,8 +657,10 @@ class ReaderPageViewState extends State<ReaderPageView>
       _forceFinishCurrentTurn();
     }
 
-    // NoAnim：直接跳页，无截图无覆盖层
-    if (_delegate is NoAnimPageDelegate) {
+    // NoAnim / 单页模式：直接跳页，无截图无覆盖层
+    // 单页模式（fixedLayout/mediaPage）：整章不切分，翻页 = 切章，
+    // onPerformPageTurn 会返回 false 触发切章，不需要截图动画
+    if (_delegate is NoAnimPageDelegate || widget.isSinglePage) {
       try {
         final ok = await widget.onPerformPageTurn(direction);
         if (!mounted) return;

@@ -29,5 +29,9 @@ reference/
 .reference/
 .trae/
 
+# 临时目录与快捷方式（不提交）
+.tmp/
+*.lnk
+
 # 测试书源文件（不提交）
 test_sources/

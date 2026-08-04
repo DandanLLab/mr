@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../models/book.dart';
 import '../../models/chapter.dart';
 import '../../services/storage_service.dart';
+import 'epub/epub.dart' as epub_core;
 import 'epub_parser.dart';
 import 'txt_parser.dart';
 
@@ -474,14 +475,9 @@ class LocalBookService {
     final epubChapter = epubBook.chapters[chapter.index];
 
     // 直接返回导入时预解析好的富 HTML 内容
-    // richContent 只包含 body HTML（[[EPUB_BODY]]...[[/EPUB_BODY]]），
-    // CSS 由 EpubBook.inlinedCss 书籍级单份存储，返回时拼接避免每章节重复 14MB CSS
+    // richContent 已包含 CSS + body（每章节独立内联 CSS，对齐 JRead 渲染方式）
     if (epubChapter.richContent != null) {
-      // 拼接 CSS + body：CSS 只有一份（含字体 base64），body 每章节独立
-      final cssBlock = epubBook.inlinedCss.isNotEmpty
-          ? '[[EPUB_CSS]]<style>${epubBook.inlinedCss}</style>[[/EPUB_CSS]]'
-          : '';
-      return '$cssBlock${epubChapter.richContent}';
+      return epubChapter.richContent;
     }
 
     // 后备：richContent 为空（理论上不应发生，parseFromBytes 总会生成）
@@ -894,6 +890,32 @@ class LocalBookService {
   String getEpubExtractedBasePath(Book book) {
     final epubBook = _epubCache[book.bookUrl];
     return epubBook?.extractedBasePath ?? '';
+  }
+
+  /// 查询 EPUB 指定章节是否为单页模式（fixedLayout / mediaPage）
+  ///
+  /// 对齐 JRead EpubWebContentMode：
+  /// - true：章节不切分，整页显示（画册/漫画/SVG/纯图片章节）
+  ///   - ReaderWebView 切换为 body.reader-single-page（column-width:auto + flex 居中）
+  ///   - JS getPageCount 固定返回 1，jumpToPage no-op
+  ///   - 翻页手势由上层走「切下一章」逻辑
+  /// - false（默认）：reflowable 流式布局，column-width 分栏翻页
+  ///
+  /// 调用时机：novel_reader_page 在构造 ReaderWebView 前调用。
+  /// 此时 _epubCache 已由 getChapterList → _getEpubChapterList 填充，
+  /// 不会为空（除非章节列表加载失败，此时返回 false 兜底）。
+  ///
+  /// 非 EPUB 书籍始终返回 false。
+  bool isEpubChapterSinglePage(Book book, int chapterIndex) {
+    final epubBook = _epubCache[book.bookUrl];
+    if (epubBook == null) return false;
+    if (chapterIndex < 0 || chapterIndex >= epubBook.chapters.length) {
+      return false;
+    }
+    final mode = epubBook.chapters[chapterIndex].contentMode;
+    // EpubContentMode.fixedLayout / mediaPage 都视为单页模式
+    // 引用 epub_core 前缀避免上层文件 import epub_package
+    return mode != epub_core.EpubContentMode.reflowable;
   }
 
   void clearCache({String? bookUrl}) {

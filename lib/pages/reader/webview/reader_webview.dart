@@ -57,6 +57,16 @@ class ReaderWebView extends StatefulWidget {
   /// 为空时 baseUrl 为 about:blank（纯文本模式或无 EPUB 资源场景）。
   final String extractedBasePath;
 
+  /// 是否为单页模式（对齐 JRead EpubWebContentMode.fixedLayout / mediaPage）
+  ///
+  /// true：章节不切分，整页显示一张图/SVG/画册/纯图片章节
+  /// - HTML 模板切换为 body.reader-single-page（column-width:auto + flex 居中）
+  /// - JS getPageCount 固定返回 1，jumpToPage no-op
+  /// - 翻页手势由上层走「切下一章」逻辑
+  /// false（默认）：reflowable 流式布局，column-width 分栏翻页
+  /// 滚动模式优先级更高（isScrollMode=true 时忽略此参数）。
+  final bool isSinglePage;
+
   /// 控制器
   final ReaderWebViewController controller;
 
@@ -74,6 +84,7 @@ class ReaderWebView extends StatefulWidget {
     required this.callbacks,
     this.isRichHtml = false,
     this.extractedBasePath = '',
+    this.isSinglePage = false,
   });
 
   @override
@@ -122,6 +133,7 @@ class _ReaderWebViewState extends State<ReaderWebView> {
     if (oldWidget.content != widget.content ||
         oldWidget.isScrollMode != widget.isScrollMode ||
         oldWidget.isRichHtml != widget.isRichHtml ||
+        oldWidget.isSinglePage != widget.isSinglePage ||
         (!widget.isScrollMode && oldWidget.title != widget.title)) {
       _styleReloadDebounce?.cancel();
       _currentHtml = _generateHtml();
@@ -174,6 +186,7 @@ class _ReaderWebViewState extends State<ReaderWebView> {
       pageModeIndex: widget.provider.pageMode.index,
       chapterIndex: widget.chapterIndex,
       isRichHtml: widget.isRichHtml,
+      isSinglePage: widget.isSinglePage,
     );
   }
 

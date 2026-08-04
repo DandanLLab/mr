@@ -2451,6 +2451,17 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final isRichHtml = _book?.originType == BookOriginType.local &&
         LocalBookService.detectBookType(_book!.bookUrl) == LocalBookType.epub &&
         _content.contains('[[EPUB_BODY]]');
+    // 单页模式（对齐 JRead EpubWebContentMode.fixedLayout / mediaPage）：
+    // - 仅本地 EPUB 的画册/漫画/SVG/纯图片章节启用
+    // - 启用后 ReaderHtmlTemplate 切换为 body.reader-single-page
+    //   （column-width:auto + flex 居中，不切分）
+    // - JS getPageCount 固定返回 1，jumpToPage no-op
+    // - 翻页手势由 _onPerformPageTurn 直接走「切下一章」逻辑
+    // - 滚动模式优先级更高（isScrollMode=true 时忽略此参数）
+    final isSinglePage = isRichHtml &&
+        _book != null &&
+        LocalBookService.instance
+            .isEpubChapterSinglePage(_book!, _currentChapterIndex);
 
     return SafeArea(
       child: Column(
@@ -2462,6 +2473,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               key: _readerPageViewKey,
               isScrollMode: isScrollMode,
               pageModeIndex: pageModeIndex,
+              isSinglePage: isSinglePage,
               onPerformPageTurn: _onPerformPageTurn,
               onPageTurnCompleted: _onPageTurnCompleted,
               onPageTurnCancelled: _onPageTurnCancelled,
@@ -2472,6 +2484,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                 provider: provider,
                 isScrollMode: isScrollMode,
                 isRichHtml: isRichHtml,
+                isSinglePage: isSinglePage,
                 extractedBasePath: _book != null
                     ? LocalBookService.instance.getEpubExtractedBasePath(_book!)
                     : '',
@@ -2523,6 +2536,21 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final provider = context.read<ReaderProvider>();
     final isScrollMode = _isScrollLikeMode(provider);
     if (isScrollMode) return false;
+
+    // 单页模式（fixedLayout / mediaPage）：整章不切分，翻页 = 切章
+    // - JS getPageCount 固定返回 1，currentPage 永远为 0
+    // - 下一页 → 下一章，上一页 → 上一章
+    // - 返回 false 让 ReaderPageView 取消翻页动画（直接切章，无截图覆盖层）
+    if (_book != null &&
+        LocalBookService.instance
+            .isEpubChapterSinglePage(_book!, _currentChapterIndex)) {
+      if (direction == PageDirection.next) {
+        _nextChapter();
+      } else {
+        _previousChapter();
+      }
+      return false;
+    }
 
     final targetPage = direction == PageDirection.next
         ? _webviewCurrentPage + 1

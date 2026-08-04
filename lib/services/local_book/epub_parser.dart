@@ -6,6 +6,20 @@ import 'package:html/parser.dart' as html_parser;
 import 'epub/epub.dart' as epub_core;
 import 'epub_css_processor.dart';
 
+/// TOC 条目到章节的映射中间结构（对齐 JRead TocChapterEntry）
+class _TocChapterEntry {
+  final int spineOrder;
+  final int tocOrder;
+  final String? cleanHref;
+  final EpubChapter chapter;
+  const _TocChapterEntry({
+    required this.spineOrder,
+    required this.tocOrder,
+    this.cleanHref,
+    required this.chapter,
+  });
+}
+
 /// EPUB 图片资源（被 LocalBookService 用来把 EPUB 内部图片转 data URI）
 class EpubResource {
   final String path;
@@ -78,6 +92,17 @@ class EpubChapter {
   /// 扁平 chapters 中此字段为空，仅 tocTree 中的节点有 children
   final List<EpubChapter> children;
 
+  /// 章节内容模式（对齐 JRead EpubWebContentMode）
+  ///
+  /// 决定阅读器渲染方式：
+  /// - [epub_core.EpubContentMode.reflowable]：流式布局，column-width 分栏翻页
+  /// - [epub_core.EpubContentMode.fixedLayout]：固定布局，单页不切分（画册/漫画/SVG）
+  /// - [epub_core.EpubContentMode.mediaPage]：纯媒体页，单页不切分（纯图片章节）
+  ///
+  /// 在 `_buildChapters` 时基于 spine rendition + manifest mediaType 初步识别，
+  /// 读取章节 HTML 后用 `EpubViewportParser.looksLikeFixedLayout` 兜底升级。
+  epub_core.EpubContentMode contentMode;
+
   EpubChapter({
     required this.index,
     required this.title,
@@ -93,6 +118,7 @@ class EpubChapter {
     this.depth = 0,
     this.parentId = -1,
     this.children = const [],
+    this.contentMode = epub_core.EpubContentMode.reflowable,
   });
 
   /// 把树状目录扁平化为列表（DFS 遍历顺序）
@@ -125,6 +151,7 @@ class EpubChapter {
         depth: node.depth,
         parentId: parentId,
         children: node.children,
+        contentMode: node.contentMode,
       );
       result.add(newNode);
       for (final child in node.children) {
@@ -251,145 +278,95 @@ class EpubParser {
       // OPF 内封面路径（EpubPackageParser 已综合 EPUB3 properties=cover-image
       // 和 EPUB2 <meta name="cover"> 两种来源）
       final coverPath = pkg.coverHref;
-      // OPF 基础目录（保留供旧有 _collectAllCss 等逻辑使用，EpubPackageParser
-      // 内部已用 EpubPath.resolve 把 manifest href 解析为绝对路径）
-      final opfBasePath = pkg.opfPath.contains('/')
-          ? pkg.opfPath.substring(0, pkg.opfPath.lastIndexOf('/'))
-          : '';
 
-      // 4. 构建 spineIndexByHref 映射：EPUB 绝对路径 → spine 顺序索引
+      // 4. 构建章节列表（对齐 lumina + JRead buildChapters）
       //
-      // EpubPackage.spine 中每个 EpubSpineItem.href 已是 EPUB 绝对路径
-      // （EpubPackageParser 解析时用 EpubPath.resolve(opfPath, item.href) 得到），
-      // 可直接建立 href → index 映射，供后续 EpubChapter.spineIndex 反查。
-      final spineIndexByHref = <String, int>{};
-      for (int i = 0; i < pkg.spine.length; i++) {
-        final href = pkg.spine[i].href;
-        if (href.isNotEmpty) {
-          spineIndexByHref[href] = i;
-        }
-      }
+      // lumina 对齐点：
+      // - spineIndexMap（path → spine index）用于 TocItem → spine 映射
+      // - 去重：parent href == first child href → parent 标记为卷标题（无独立内容）
+      //
+      // JRead buildChapters 对齐点：
+      // - isReadableHref：排除 nav/ncx/toc 等非内容文件
+      // - readableSpine：只保留 linear 且 readable 的 spine 项
+      // - skip: 前缀：卷标题无独立资源时用 skip: 标记（翻页时跳到下一真实章节）
+      // - normalizeChapters：设置 index/endFragmentId/nextUrl 链
+      // - 封面自动生成：coverHref 是图片时自动加封面章节
+      final chapters = _buildChapters(archiveReader, pkg);
 
       debugPrint('[EPUB诊断-OPF] manifest解析: ${pkg.manifest.length} 项');
       debugPrint('[EPUB诊断-OPF] spine解析: ${pkg.spine.length} 项');
-      debugPrint('[EPUB诊断] opfBasePath=$opfBasePath');
-      debugPrint(
-          '[EPUB诊断] spine数量=${pkg.spine.length} '
-          'items=${pkg.spine.map((s) => s.idRef).join(",")}');
-      debugPrint('[EPUB诊断] manifest数量=${pkg.manifest.length}');
-      debugPrint('[EPUB诊断] spineIndexByHref=$spineIndexByHref');
-      debugPrint('[EPUB诊断] files路径列表=${files.keys.toList()}');
-      debugPrint('[EPUB诊断] 最终ncxHref=${pkg.ncxHref} navHref=${pkg.navHref}');
-
-      // 5. 解析目录（用 EpubTocParser 替换旧的手动 NAV/NCX 解析）
-      //
-      // EpubTocParser 三级回退：
-      // 1) EPUB3 nav（pkg.navHref）
-      // 2) EPUB2 NCX（pkg.ncxHref）
-      // 3) spine 占位
-      //
-      // 返回 List<TocItem> 树状结构，转换为 EpubChapter 树后扁平化得到 chapters。
-      final tocItems = epub_core.EpubTocParser.parse(archiveReader, pkg);
-      final tocTree = _convertTocItemsToChapters(tocItems, spineIndexByHref);
-
-      List<EpubChapter> chapters;
-      if (tocTree.isNotEmpty) {
-        // NCX/NAV 解析成功：扁平化得到 chapters
-        chapters = EpubChapter.flatten(tocTree);
-        debugPrint('[EPUB诊断] flatten后chapters数量=${chapters.length}');
-        if (chapters.isNotEmpty) {
-          debugPrint('[EPUB诊断] 第1章: title=${chapters[0].title} href=${chapters[0].href} spineIndex=${chapters[0].spineIndex} depth=${chapters[0].depth}');
-        }
-      } else {
-        // 后备：使用 spine 条目直接构造扁平 chapters（无嵌套）
-        debugPrint('[EPUB诊断] NCX/NAV都失败，用spine兜底');
-        chapters = [];
-        for (final spineItem in pkg.spine) {
-          final href = spineItem.href;
-          if (href.isEmpty) continue;
-          // 跳过非内容条目（toc/nav 文件）
-          final lowerHref = href.toLowerCase();
-          if (lowerHref.contains('toc') || lowerHref.contains('nav')) {
-            continue;
-          }
-          final index = chapters.length;
-          final spineIdx = spineIndexByHref[href] ?? -1;
-          chapters.add(EpubChapter(
-            index: index,
-            title: index == 0 ? '封面' : '第$index章',
-            href: href,
-            spineIndex: spineIdx,
-          ));
-        }
-        debugPrint('[EPUB诊断] spine兜底chapters数量=${chapters.length}');
+      debugPrint('[EPUB诊断] chapters数量=${chapters.length}');
+      if (chapters.isNotEmpty) {
+        debugPrint('[EPUB诊断] 第1章: title=${chapters[0].title} href=${chapters[0].href} isVolume=${chapters[0].isVolume}');
       }
 
-      // 9. 从 ZIP 中读取章节内容
+      // 9. 从 ZIP 中读取章节内容 + 兜底识别 fixed-layout
       for (final chapter in chapters) {
-        if (chapter.href != null) {
+        if (chapter.href != null && !chapter.href!.startsWith('skip:')) {
           final contentPath = chapter.href!.split('#').first;
           final contentData = files[contentPath];
           if (contentData != null) {
             chapter.content = decodeBytes(contentData);
+
+            // 兜底识别 fixed-layout（对齐 JRead EpubViewportParser.looksLikeFixedLayout）
+            // 只对 reflowable 章节做升级（mediaPage/fixedLayout 已确定不切分）
+            if (chapter.contentMode == epub_core.EpubContentMode.reflowable &&
+                chapter.content != null) {
+              final viewport = epub_core.EpubViewportParser.parse(
+                chapter.content!,
+                fallbackWidth: pkg.rendition.viewportWidth,
+                fallbackHeight: pkg.rendition.viewportHeight,
+              );
+              if (epub_core.EpubViewportParser.looksLikeFixedLayout(
+                  chapter.content!, viewport)) {
+                chapter.contentMode = epub_core.EpubContentMode.fixedLayout;
+              }
+            }
           }
         }
       }
 
       // 9.5 预解析所有章节的富 HTML 内容（导入时一次性完成）
       //
-      // 把图片转 base64 data URI、合并所有 CSS、包裹成
-      // [[EPUB_CSS]]...[[/EPUB_CSS]][[EPUB_BODY]]...[[/EPUB_BODY]] 格式。
-      // 阅读时 _getEpubContent 直接返回 richContent，无需现场解压 ZIP。
+      // 对齐 JRead EpubPublisherStyles.inline()：每章节独立内联 CSS
+      // - 解析章节 HTML 中的 <link rel="stylesheet">
+      // - 递归展开 @import（防环、防炸）
+      // - url() 由 urlRewriter 重写为本地路径或 base64
+      // - 结构化 CSS 处理（@media 拍平 + shorthand 展开 + selector 净化等）
       //
-      // 优势：
-      // - 导入时一次性完成所有重活，阅读时 O(1) 查询
-      // - 避免每次翻页都解压 ZIP 和遍历文件
-      // - CSS 只合并一次，所有章节共享
-      // 预解析所有章节的富 HTML 内容（导入时一次性完成）
-      //
-      // 把所有资源（字体、CSS 中的 url()、图片、视频、SVG image）转 base64 data URI，
-      // 让 WebView 无需任何资源拦截即可完整渲染 EPUB 排版。
-      //
-      // 关键点：
-      // - CSS 中 @font-face url(../Fonts/xxx.ttf) → data URI（字体生效）
-      // - CSS 中 background-image: url(../Images/xxx.jpg) → data URI（背景图生效）
-      // - body 中 <img src="../Images/xxx.jpg"> → data URI
-      // - body 中 <source src="../Video/xxx.mp4"> → data URI（视频）
-      // - body 中 <image xlink:href="../Images/xxx.jpg"> → data URI（SVG）
-      // - 所有 CSS 合并为一份，所有章节共享（字体和背景图只内嵌一次）
-      final rawCss = _collectAllCss(files);
-      // 1. 结构化 CSS 处理（移植自 JRead/Legado EpubCss.kt）
-      //    - @media/@supports 拍平
-      //    - 选择器净化（剥离 :hover 等不支持伪类，命名空间归一化）
-      //    - shorthand 展开（font/margin/padding/border/background 等）
-      //    - supportedProperties 白名单过滤
-      //    - body/html 选择器改写为 #reader-content-a
-      //    - reader 特有值改写（百分比 margin→calc、固定宽度→响应式等）
-      //    一次性完成，避免旧方案多次正则扫描的遗漏
-      final epubCss = _processEpubCssStructured(rawCss);
-      // CSS 资源路径处理：
-      // - extractedBasePath 非空（推荐）：url() 转为指向解压目录的绝对路径，
-      //   WebView 通过 file:// baseUrl 直接访问原始文件，内存占用极低
-      // - extractedBasePath 为空（回退）：url() 转 base64 data URI，内存占用高
-      final inlinedCss = extractedBasePath.isNotEmpty
-          ? _rewriteCssUrlsToPath(epubCss, extractedBasePath, 'OEBPS/Styles/')
-          : _inlineUrlsInCss(epubCss, files, 'OEBPS/Styles/');
-      debugPrint('[EPUB诊断] CSS处理完成，大小: ${inlinedCss.length} 字符 '
-          '(模式: ${extractedBasePath.isNotEmpty ? "路径转换" : "base64内嵌"})');
+      // 与旧方案（全局合并 CSS）的区别：
+      // - 旧方案：所有章节共享一份 CSS，不同章节用不同 CSS 时会冲突
+      // - 新方案：每章节只内联自己引用的 CSS，精准匹配原始排版
+      final epub_core.EpubUrlRewriter urlRewriter = extractedBasePath.isNotEmpty
+          ? (String cssHref, String url) {
+              // 路径模式：url → 本地文件系统绝对路径
+              final resolved = epub_core.EpubPath.resolve(cssHref, url);
+              final epubPath = epub_core.EpubPath.stripFragment(resolved);
+              return _joinPath(extractedBasePath, epubPath);
+            }
+          : (String cssHref, String url) {
+              // base64 模式：url → data URI
+              final resolved = epub_core.EpubPath.resolve(cssHref, url);
+              final epubPath = epub_core.EpubPath.stripFragment(resolved);
+              final resourceBytes = files[epubPath];
+              if (resourceBytes == null) return url;
+              final mediaType = inferMediaType(epubPath);
+              return encodeBytesAsDataUri(
+                Uint8List.fromList(resourceBytes),
+                mediaType,
+              );
+            };
+
+      // <style> 提取正则（含原有 <style> 和 EpubPublisherStyles 内联的 <style>）
+      final styleRegex = RegExp(
+        r'<style\b[^>]*>([\s\S]*?)</style>',
+        caseSensitive: false,
+      );
 
       for (final chapter in chapters) {
         if (chapter.content == null) continue;
         try {
-          // 1. 提取 body HTML + body 属性（class/style/bgcolor）
-          //    body 属性包含章节级背景设置（如 .video-bg 背景图、bgcolor 背景色），
-          //    必须保留并应用到 reader 内容容器，否则背景样式丢失
-          final (bodyHtml, bodyAttrs) = extractBodyWithAttrs(
-            chapter.content!,
-            chapter.startFragmentId,
-            chapter.endFragmentId,
-          );
-
-          // 2. 计算章节文件路径（用于解析相对图片路径）
+          // 1. 计算章节文件路径（EpubPublisherStyles 和 body 资源处理都需要）
           final chapterHref = chapter.href ?? '';
           final chapterPath = chapterHref.split('#').first;
           String? chapterBasePath;
@@ -398,7 +375,35 @@ class EpubParser {
                 chapterPath.substring(0, chapterPath.lastIndexOf('/') + 1);
           }
 
-          // 3. 处理 body 中的所有资源引用：
+          // 2. 内联出版商 CSS（对齐 JRead EpubPublisherStyles.inline）
+          //    把 <link rel="stylesheet"> 替换为 <style>，递归展开 @import
+          //    url() 由 urlRewriter 重写为本地路径或 base64
+          final inlinedHtml = epub_core.EpubPublisherStyles.inline(
+            archiveReader,
+            chapterPath,
+            chapter.content!,
+            urlRewriter: urlRewriter,
+          );
+
+          // 3. 提取所有 <style> 内容并做结构化处理
+          //    含原有 <style> 和 EpubPublisherStyles 内联的 <style>
+          //    结构化处理：@media 拍平 + shorthand 展开 + selector 净化等
+          final rawCss = styleRegex
+              .allMatches(inlinedHtml)
+              .map((m) => m.group(1) ?? '')
+              .join('\n');
+          final chapterCss = _processEpubCssStructured(rawCss);
+
+          // 4. 提取 body HTML + body 属性（class/style/bgcolor）
+          //    body 属性包含章节级背景设置（如 .video-bg 背景图、bgcolor 背景色），
+          //    必须保留并应用到 reader 内容容器，否则背景样式丢失
+          final (bodyHtml, bodyAttrs) = extractBodyWithAttrs(
+            chapter.content!,
+            chapter.startFragmentId,
+            chapter.endFragmentId,
+          );
+
+          // 5. 处理 body 中的所有资源引用：
           // - extractedBasePath 非空：转绝对路径（推荐，内存低）
           // - extractedBasePath 为空：转 base64 data URI（回退）
           final String richBody;
@@ -419,7 +424,7 @@ class EpubParser {
                 _inlineStyleUrls(bodyAttrs, files, chapterBasePath);
           }
 
-          // 4. 用 wrapper div 包裹 body 内容，把 body 的 class/style 应用到 div
+          // 7. 用 wrapper div 包裹 body 内容，把 body 的 class/style 应用到 div
           //    这样 CSS 中 .video-bg / .volume-bg 等选择器才能生效
           //    加 epub-chapter-bg 标记 class，让 reader 兜底 CSS 能精确匹配
           //    背景容器，设置 min-height 让背景填满整页
@@ -437,10 +442,12 @@ class EpubParser {
           const wrapperEnd = '</div>';
           final wrappedBody = '$wrapperStart$richBody$wrapperEnd';
 
-          // 5. richContent 只包含 body HTML（不含 CSS）
-          //    CSS 由 LocalBookService._getEpubContent 在返回时拼接，
-          //    避免每个章节都复制一份大 CSS
-          chapter.richContent = '[[EPUB_BODY]]$wrappedBody[[/EPUB_BODY]]';
+          // 8. 生成 richContent（CSS + body）
+          //    每章节独立内联 CSS，对齐 JRead 渲染方式
+          final cssBlock = chapterCss.isNotEmpty
+              ? '[[EPUB_CSS]]<style>$chapterCss</style>[[/EPUB_CSS]]'
+              : '';
+          chapter.richContent = '$cssBlock[[EPUB_BODY]]$wrappedBody[[/EPUB_BODY]]';
         } catch (e) {
           // 单章节预解析失败：退化为纯文本，不影响其他章节
           debugPrint('[EPUB诊断] 章节${chapter.index}预解析失败: $e');
@@ -465,11 +472,11 @@ class EpubParser {
         description: description,
         coverPath: coverPath,
         chapters: chapters,
-        tocTree: tocTree,
+        tocTree: const [], // 当前 _buildChapters 返回扁平列表，树状目录待后续构建
         spineCount: pkg.spine.length,
         language: language,
         extractedBasePath: extractedBasePath,
-        inlinedCss: inlinedCss,
+        inlinedCss: '', // CSS 已内联到每章节 richContent 中
       );
     } catch (e, st) {
       debugPrint('[EPUB诊断] parseFromBytes异常: $e');
@@ -514,55 +521,303 @@ class EpubParser {
     }
   }
 
-  /// 把 [epub_core.TocItem] 树转换为 [EpubChapter] 树
+  /// 构建章节列表（对齐 JRead buildChapters + lumina 去重）
   ///
-  /// 递归遍历 TocItem 列表，对每个节点：
-  /// - 从 href 中剥离 fragment 作为 EpubChapter.href（spineIndexByHref 的 key
-  ///   是不含 fragment 的 EPUB 绝对路径）
-  /// - fragment 作为 anchor/startFragmentId
-  /// - 通过 spineIndexByHref 反查 OPF spine 顺序索引填充 spineIndex
-  /// - depth 记录嵌套层级（0=顶层）
-  /// - isVolume：顶层且有子节点（卷头标记）
-  /// - index/parentId 保持 -1，由 [EpubChapter.flatten] 填充
-  ///
-  /// 注意：TocItem.href 是 EpubPath.resolve 后的路径，含 fragment，
-  /// 必须用 [epub_core.EpubPath.stripFragment] 剥离后再赋给 EpubChapter.href。
-  static List<EpubChapter> _convertTocItemsToChapters(
-    List<epub_core.TocItem> items,
-    Map<String, int> spineIndexByHref, {
-    int depth = 0,
-  }) {
-    final result = <EpubChapter>[];
-    for (final item in items) {
-      // TocItem.href 可能含 fragment，剥离后用于 spineIndex 查找和 EpubChapter.href
-      final hrefNoFrag = item.href.isEmpty
-          ? null
-          : epub_core.EpubPath.stripFragment(item.href);
-      final anchor = item.fragment;
-      final spineIdx = hrefNoFrag != null && hrefNoFrag.isNotEmpty
-          ? (spineIndexByHref[hrefNoFrag] ?? -1)
-          : -1;
+  /// 核心流程：
+  /// 1. 解析 TOC（EpubTocParser 三级回退：nav → NCX → spine）
+  /// 2. 构建 spineOrder 映射（cleanHref → 顺序索引）
+  /// 3. 递归遍历 TOC 树，每项映射到 spine 位置：
+  ///    - href 在 spine 中 → 真实章节
+  ///    - href 不在 spine 中但有子项在 → skip: 卷标题（lumina 去重：parent href == first child href 也标记为 skip:）
+  ///    - 都不在 → 丢弃
+  /// 4. 按 spine 顺序排序，spine 中无 TOC 覆盖的项补 "Chapter N" 占位
+  /// 5. 封面自动生成（coverHref 是图片时）
+  /// 6. normalizeChapters：设置 index/endFragmentId/nextUrl 链
+  static List<EpubChapter> _buildChapters(
+    epub_core.EpubArchiveReader archiveReader,
+    epub_core.EpubPackage pkg,
+  ) {
+    final tocItems = epub_core.EpubTocParser.parse(archiveReader, pkg);
 
-      final children = _convertTocItemsToChapters(
-        item.children,
-        spineIndexByHref,
-        depth: depth + 1,
-      );
+    // 预计算辅助值
+    final navHref = pkg.navHref != null
+        ? epub_core.EpubPath.stripFragment(pkg.navHref!)
+        : null;
+    final ncxHref = pkg.ncxHref != null
+        ? epub_core.EpubPath.stripFragment(pkg.ncxHref!)
+        : null;
+    final coverHref = pkg.coverHref != null
+        ? epub_core.EpubPath.stripFragment(pkg.coverHref!)
+        : null;
+    const coverDocumentNames = {'cover.xhtml', 'cover.html', 'cover.htm'};
 
-      result.add(EpubChapter(
+    // 判断 href 是否为图片类型的封面资源
+    bool isDirectCoverResource(String href) {
+      final clean = epub_core.EpubPath.stripFragment(href);
+      if (clean != coverHref) return false;
+      return pkg.manifest.values.any((item) =>
+          epub_core.EpubPath.stripFragment(item.href) == clean &&
+          item.mediaType.toLowerCase().startsWith('image/'));
+    }
+
+    // 判断 href 是否为可读内容（排除 nav/ncx/toc 等导航文件）
+    bool isReadableHref(String href) {
+      final clean = epub_core.EpubPath.stripFragment(href);
+      if (clean.isEmpty) return false;
+      if (clean == navHref || clean == ncxHref) return false;
+      final fileName = clean.substring(clean.lastIndexOf('/') + 1).toLowerCase();
+      if (const {'nav.xhtml', 'nav.html', 'nav.htm',
+                 'toc.xhtml', 'toc.html', 'toc.htm'}.contains(fileName)) {
+        return false;
+      }
+      return true;
+    }
+
+    // 构建 readableSpine + spineOrder 映射
+    final readableSpine = pkg.spine
+        .where((s) => s.linear && isReadableHref(s.href))
+        .toList();
+    final spineOrder = <String, int>{};
+    for (var i = 0; i < readableSpine.length; i++) {
+      spineOrder[epub_core.EpubPath.stripFragment(readableSpine[i].href)] = i;
+    }
+
+    // 识别每个 spine item 的内容模式（对齐 JRead resolveContentProfile）
+    // - MediaPage：manifest mediaType 是 image/* → 纯图片章节
+    // - FixedLayout：spine rendition.layout == prePaginated → 画册/漫画
+    // - Reflowable：默认流式布局（兜底启发式识别在读取 HTML 后做）
+    epub_core.EpubContentMode resolveContentMode(
+        epub_core.EpubSpineItem spineItem) {
+      final manifestItem = pkg.manifest[spineItem.idRef];
+      if (manifestItem != null) {
+        final mediaType = manifestItem.mediaType.toLowerCase();
+        if (mediaType.startsWith('image/')) {
+          return epub_core.EpubContentMode.mediaPage;
+        }
+      }
+      if (spineItem.rendition.layout ==
+          epub_core.EpubRenditionLayout.prePaginated) {
+        return epub_core.EpubContentMode.fixedLayout;
+      }
+      return epub_core.EpubContentMode.reflowable;
+    }
+
+    final spineContentModes = readableSpine.map(resolveContentMode).toList();
+
+    // 递归遍历 TOC 树，收集 (spineOrder, tocOrder, chapter) 三元组
+    final tocEntries = <_TocChapterEntry>[];
+    var tocOrder = 0;
+
+    int? visitToc(epub_core.TocItem item, int depth) {
+      final order = tocOrder++;
+      int? childFirstOrder;
+      for (final child in item.children) {
+        final childOrder = visitToc(child, depth + 1);
+        if (childOrder != null && (childFirstOrder == null || childOrder < childFirstOrder)) {
+          childFirstOrder = childOrder;
+        }
+      }
+
+      final href = item.href.trim();
+      final cleanHref = href.isNotEmpty
+          ? epub_core.EpubPath.stripFragment(href)
+          : '';
+      final hrefOrder = href.isNotEmpty && isReadableHref(href)
+          ? (spineOrder[cleanHref] ?? (isDirectCoverResource(href) ? 0 : null))
+          : null;
+      final placement = hrefOrder ?? childFirstOrder;
+
+      if (placement != null && item.title.isNotEmpty) {
+        // lumina 去重：parent href == first child href → 标记为 skip:（卷标题无独立内容）
+        final hasChildWithSameHref = item.children.any(
+            (c) => epub_core.EpubPath.stripFragment(c.href) == cleanHref && cleanHref.isNotEmpty);
+
+        EpubChapter chapter;
+        if (hrefOrder != null && !hasChildWithSameHref) {
+          // 真实章节：有独立 spine 资源
+          chapter = EpubChapter(
+            index: -1,
+            title: item.title,
+            href: cleanHref,
+            anchor: item.fragment,
+            startFragmentId: item.fragment,
+            isVolume: item.children.isNotEmpty,
+            spineIndex: hrefOrder,
+            depth: depth,
+            parentId: -1,
+            children: const [],
+            contentMode: spineContentModes[hrefOrder],
+          );
+        } else {
+          // 卷标题：无独立资源（skip:）或与子项共享 href
+          chapter = EpubChapter(
+            index: -1,
+            title: item.title,
+            href: 'skip:$order:${cleanHref.isNotEmpty ? cleanHref : item.title}',
+            anchor: null,
+            startFragmentId: null,
+            isVolume: true,
+            spineIndex: placement,
+            depth: depth,
+            parentId: -1,
+            children: const [],
+          );
+        }
+        tocEntries.add(_TocChapterEntry(
+          spineOrder: placement,
+          tocOrder: order,
+          cleanHref: hrefOrder != null ? cleanHref : null,
+          chapter: chapter,
+        ));
+      }
+      return placement;
+    }
+
+    for (final item in tocItems) {
+      visitToc(item, 0);
+    }
+
+    // 按 spineOrder, tocOrder 排序，分组
+    tocEntries.sort((a, b) {
+      final cmp = a.spineOrder.compareTo(b.spineOrder);
+      return cmp != 0 ? cmp : a.tocOrder.compareTo(b.tocOrder);
+    });
+    final entriesBySpineOrder = <int, List<_TocChapterEntry>>{};
+    for (final entry in tocEntries) {
+      entriesBySpineOrder.putIfAbsent(entry.spineOrder, () => []).add(entry);
+    }
+
+    // 构建最终章节列表
+    final chapters = <EpubChapter>[];
+    final addedUrls = <String>{};
+    void addChapter(EpubChapter chapter) {
+      if (!addedUrls.add(chapter.href ?? '')) return;
+      chapters.add(chapter);
+    }
+
+    // 封面自动生成
+    final hasCoverDocument = readableSpine.any((s) {
+      final name = epub_core.EpubPath.stripFragment(s.href)
+          .substring(epub_core.EpubPath.stripFragment(s.href).lastIndexOf('/') + 1)
+          .toLowerCase();
+      return coverDocumentNames.contains(name);
+    });
+    if (coverHref != null && isDirectCoverResource(coverHref) && !hasCoverDocument) {
+      addChapter(EpubChapter(
         index: -1,
-        title: item.title,
-        href: hrefNoFrag,
-        anchor: anchor,
-        startFragmentId: anchor,
-        isVolume: depth == 0 && children.isNotEmpty,
-        spineIndex: spineIdx,
-        depth: depth,
-        parentId: -1,
-        children: children,
+        title: '封面',
+        href: coverHref,
+        spineIndex: 0,
+        contentMode: epub_core.EpubContentMode.mediaPage,
       ));
     }
-    return result;
+
+    if (readableSpine.isNotEmpty) {
+      for (var order = 0; order < readableSpine.length; order++) {
+        final spineItem = readableSpine[order];
+        final cleanHref = epub_core.EpubPath.stripFragment(spineItem.href);
+        final entries = entriesBySpineOrder[order] ?? [];
+        for (final entry in entries) {
+          addChapter(entry.chapter);
+        }
+        // spine 项没有 TOC 覆盖 → 补占位章节
+        final hasSpineContent = entries.any((e) => e.cleanHref == cleanHref);
+        if (!hasSpineContent) {
+          addChapter(EpubChapter(
+            index: -1,
+            title: 'Chapter ${spineItem.index + 1}',
+            href: spineItem.href,
+            spineIndex: order,
+            contentMode: spineContentModes[order],
+          ));
+        }
+      }
+    } else {
+      // readableSpine 为空：用 flatToc 兜底
+      final flatToc = <epub_core.TocItem>[];
+      void flatten(epub_core.TocItem item) {
+        flatToc.add(item);
+        for (final child in item.children) {
+          flatten(child);
+        }
+      }
+      for (final item in tocItems) {
+        flatten(item);
+      }
+      for (final item in flatToc) {
+        if (item.href.isNotEmpty && isReadableHref(item.href)) {
+          final idx = spineOrder[epub_core.EpubPath.stripFragment(item.href)] ?? -1;
+          addChapter(EpubChapter(
+            index: -1,
+            title: item.title.isNotEmpty ? item.title : 'Chapter',
+            href: epub_core.EpubPath.stripFragment(item.href),
+            anchor: item.fragment,
+            startFragmentId: item.fragment,
+            isVolume: item.children.isNotEmpty,
+            spineIndex: idx,
+            contentMode: idx >= 0 ? spineContentModes[idx] : epub_core.EpubContentMode.reflowable,
+          ));
+        } else if (item.title.isNotEmpty) {
+          addChapter(EpubChapter(
+            index: -1,
+            title: item.title,
+            href: 'skip:0:${item.title}',
+            isVolume: true,
+          ));
+        }
+      }
+    }
+
+    return _normalizeChapters(chapters);
+  }
+
+  /// 规范化章节列表（对齐 JRead normalizeChapters）
+  ///
+  /// - 填充 index（顺序号）
+  /// - 设置 endFragmentId = 下一章节的 startFragmentId
+  /// - 设置 nextUrl = 下一章节的 href
+  /// - 卷标题（skip:）的 endFragmentId/startFragmentId 置空
+  /// - 如果卷标题和下一章节指向同一文件，卷标题 url 也改为 skip: 前缀
+  static List<EpubChapter> _normalizeChapters(List<EpubChapter> chapters) {
+    return chapters.asMap().entries.map((entry) {
+      final index = entry.key;
+      final chapter = entry.value;
+      final next = chapters
+          .skip(index + 1)
+          .firstWhere((c) => !(c.href ?? '').startsWith('skip:'),
+              orElse: () => chapter);
+
+      final isSkip = (chapter.href ?? '').startsWith('skip:');
+      final sameAsNext = !isSkip &&
+          next != chapter &&
+          (next.href ?? '').isNotEmpty &&
+          !(next.href ?? '').startsWith('skip:') &&
+          epub_core.EpubPath.stripFragment(chapter.href ?? '') ==
+              epub_core.EpubPath.stripFragment(next.href ?? '');
+
+      final normalizedUrl = sameAsNext && chapter.isVolume
+          ? 'skip:$index:${chapter.href}'
+          : chapter.href;
+      final isSkipUrl = normalizedUrl != null && normalizedUrl.startsWith('skip:');
+
+      return EpubChapter(
+        index: index,
+        title: chapter.title,
+        href: normalizedUrl,
+        content: chapter.content,
+        richContent: chapter.richContent,
+        anchor: chapter.anchor,
+        startFragmentId: isSkipUrl ? null : chapter.startFragmentId,
+        endFragmentId: next != chapter ? next.startFragmentId : null,
+        nextUrl: next != chapter && !(next.href ?? '').startsWith('skip:') ? next.href : null,
+        isVolume: chapter.isVolume || isSkipUrl,
+        spineIndex: chapter.spineIndex,
+        depth: chapter.depth,
+        parentId: chapter.parentId,
+        children: chapter.children,
+        contentMode: chapter.contentMode,
+      );
+    }).toList();
   }
 
   /// 解析 EPUB 内部相对路径
@@ -1359,147 +1614,6 @@ class EpubParser {
         return '<image$before xlink:href="$dataUri"$after>';
       },
     );
-  }
-
-  /// 合并 EPUB 内所有 CSS 文件内容
-  ///
-  /// 从 ZIP 中查找所有 .css 文件，合并内容返回。
-  /// 不区分 manifest 引用关系，简单合并所有 CSS
-  /// （EPUB CSS 通常互相独立，合并不会有副作用）。
-  /// 在导入时调用一次，所有章节共享同一份 CSS。
-  /// 收集 EPUB 内所有 CSS 并合并为一份
-  ///
-  /// 移植自 JRead/Legado EpubPublisherStyles.kt 的 @import 递归展开思路：
-  /// - 简单拼接所有 .css 文件会导致 @import 重复加载或失效
-  /// - 本方法对每个 CSS 文件递归展开 @import，把被引用的 CSS 内容内联进来
-  /// - 防环：用 visited Set 跟踪已处理的 CSS 路径
-  /// - 防炸：限制递归深度（MaxImportDepth = 6）
-  ///
-  /// @import 语法支持：
-  /// - `@import url("other.css");`
-  /// - `@import "other.css";`
-  /// - `@import 'other.css';`
-  static String _collectAllCss(Map<String, List<int>> files) {
-    final cssBuffer = StringBuffer();
-    final processedPaths = <String>{};
-
-    for (final entry in files.entries) {
-      final path = entry.key;
-      if (path.toLowerCase().endsWith('.css')) {
-        final content = decodeBytes(entry.value);
-        if (content.isNotEmpty) {
-          cssBuffer.writeln('/* === $path === */');
-          // 递归展开 @import（防环、防炸）
-          final expanded = _expandCssImports(content, path, files, processedPaths, 0);
-          cssBuffer.writeln(expanded);
-          cssBuffer.writeln();
-        }
-      }
-    }
-    return cssBuffer.toString();
-  }
-
-  /// 递归展开 CSS 中的 @import 语句
-  ///
-  /// 移植自 JRead/Legado EpubPublisherStyles.loadCss：
-  /// - 匹配 `@import url("...")` / `@import "..."` / `@import '...'` 三种语法
-  /// - 跳过外部 URL（http/https）和 data: URI
-  /// - 解析相对路径为 EPUB ZIP 内绝对路径
-  /// - 递归展开被引用的 CSS（深度限制 MaxImportDepth = 6）
-  /// - visited Set 防止循环引用
-  /// - 已处理的路径不重复展开（去重）
-  static String _expandCssImports(
-    String css,
-    String cssPath,
-    Map<String, List<int>> files,
-    Set<String> visited,
-    int depth,
-  ) {
-    if (depth > 6) return css; // MaxImportDepth = 6
-
-    final normalizedPath = _normalizeEpubPath(cssPath);
-    if (visited.contains(normalizedPath)) return '';
-    visited.add(normalizedPath);
-
-    // 匹配 @import 三种语法：@import url("..."); / @import "..."; / @import '...';
-    final importRegex = RegExp(
-      r"""@import\s+(?:url\(\s*)?["']([^"']+)["']\s*\)?\s*;""",
-      caseSensitive: false,
-    );
-
-    return css.replaceAllMapped(importRegex, (match) {
-      final importHref = match.group(1)!.trim();
-      // 跳过外部 URL 和 data: URI
-      if (_isExternalOrDataUrl(importHref)) {
-        return match.group(0)!; // 保留原 @import
-      }
-
-      // 解析相对路径为 EPUB ZIP 内绝对路径
-      final resolvedPath = _resolveEpubCssPath(cssPath, importHref);
-      final normalizedResolved = _normalizeEpubPath(resolvedPath);
-
-      // 查找被引用的 CSS 文件
-      final cssBytes = files[normalizedResolved];
-      if (cssBytes == null) {
-        return ''; // 文件不存在，移除 @import
-      }
-
-      final importedContent = decodeBytes(cssBytes);
-      if (importedContent.isEmpty) {
-        return '';
-      }
-
-      // 递归展开被引用 CSS 中的 @import
-      final recursivelyExpanded = _expandCssImports(
-        importedContent,
-        normalizedResolved,
-        files,
-        visited,
-        depth + 1,
-      );
-
-      return '/* @import $importHref → $normalizedResolved */\n$recursivelyExpanded';
-    });
-  }
-
-  /// 判断 URL 是否为外部链接或 data: URI
-  static bool _isExternalOrDataUrl(String url) {
-    final lower = url.toLowerCase();
-    return lower.startsWith('http://') ||
-        lower.startsWith('https://') ||
-        lower.startsWith('//') ||
-        lower.startsWith('data:');
-  }
-
-  /// 规范化 EPUB ZIP 内路径（移除 ./ 和 ../，转为绝对路径）
-  static String _normalizeEpubPath(String path) {
-    // 移除 fragment（#xxx）
-    final p = path.split('#').first;
-    // 处理 ./ 和 ../
-    final segments = <String>[];
-    for (final seg in p.split('/')) {
-      if (seg == '.' || seg.isEmpty) continue;
-      if (seg == '..') {
-        if (segments.isNotEmpty) segments.removeLast();
-        continue;
-      }
-      segments.add(seg);
-    }
-    return segments.join('/');
-  }
-
-  /// 解析 EPUB 内 CSS 相对路径（基于当前 CSS 文件路径）
-  ///
-  /// 例：cssPath = "OEBPS/Styles/main.css", relativeHref = "../Fonts/base.css"
-  /// → "OEBPS/Fonts/base.css"
-  ///
-  /// 与 [_resolveEpubPath] 的区别：本方法专为 CSS @import 设计，
-  /// 简单基于目录拼接（CSS 路径都是相对当前文件目录的）。
-  static String _resolveEpubCssPath(String cssPath, String relativeHref) {
-    final baseDir = cssPath.contains('/')
-        ? cssPath.substring(0, cssPath.lastIndexOf('/') + 1)
-        : '';
-    return baseDir + relativeHref;
   }
 
   /// 结构化处理 EPUB CSS（移植自 JRead/Legado EpubCss.kt 思路）
