@@ -2,9 +2,8 @@ import 'dart:convert';
 import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
-import 'package:html/dom.dart' as html_dom;
-import 'package:xml/xml.dart' as xml;
 
+import 'epub/epub.dart' as epub_core;
 import 'epub_css_processor.dart';
 
 /// EPUB 图片资源（被 LocalBookService 用来把 EPUB 内部图片转 data URI）
@@ -230,268 +229,70 @@ class EpubParser {
         }
       }
 
-      // 2. 读取 container.xml 找到 OPF 路径
-      final containerData = files['META-INF/container.xml'];
-      if (containerData == null) {
+      // 2. 用 EpubPackageParser 解析 OPF（一次性获取 metadata/manifest/spine/rendition/navHref/ncxHref/coverHref）
+      //
+      // 替换旧的手动 container.xml → OPF → metadata/manifest/spine 解析逻辑。
+      // EpubPackageParser 内部用 xml 包正确处理 XML 自闭合标签和命名空间，
+      // 避免 html_parser 把 <itemref .../> 当作开始标签导致只解析出 1 项的问题。
+      final archiveReader = _MapArchiveReader(files);
+      final epub_core.EpubPackage pkg;
+      try {
+        pkg = epub_core.EpubPackageParser.parse(archiveReader);
+      } catch (e) {
+        debugPrint('[EPUB诊断-OPF] EpubPackageParser 解析失败: $e');
         return const EpubBook(title: '未知书名');
       }
 
-      final containerDoc =
-          html_parser.parse(decodeBytes(containerData));
-      String? opfPath;
-      final rootfileElements = containerDoc.querySelectorAll('rootfile');
-      for (final el in rootfileElements) {
-        final mediaType = el.attributes['media-type'];
-        if (mediaType == null ||
-            mediaType == 'application/oebps-package+xml') {
-          opfPath = el.attributes['full-path'];
-          break;
-        }
-      }
-
-      if (opfPath == null || opfPath.isEmpty) {
-        return const EpubBook(title: '未知书名');
-      }
-
-      // 3. 读取 OPF 文件
-      final opfData = files[opfPath];
-      if (opfData == null) {
-        return const EpubBook(title: '未知书名');
-      }
-
-      final opfDoc = html_parser.parse(decodeBytes(opfData));
-
-      // OPF 基础目录，用于解析相对路径
-      final opfBasePath = opfPath.contains('/')
-          ? opfPath.substring(0, opfPath.lastIndexOf('/'))
+      // 3. 提取元数据（title/author/description/language 来自 EpubPackage.metadata）
+      final title = pkg.metadata.title ?? '未知书名';
+      final author = pkg.metadata.creator;
+      final description = pkg.metadata.description;
+      final language = pkg.metadata.language;
+      // OPF 内封面路径（EpubPackageParser 已综合 EPUB3 properties=cover-image
+      // 和 EPUB2 <meta name="cover"> 两种来源）
+      final coverPath = pkg.coverHref;
+      // OPF 基础目录（保留供旧有 _collectAllCss 等逻辑使用，EpubPackageParser
+      // 内部已用 EpubPath.resolve 把 manifest href 解析为绝对路径）
+      final opfBasePath = pkg.opfPath.contains('/')
+          ? pkg.opfPath.substring(0, pkg.opfPath.lastIndexOf('/'))
           : '';
 
-      // 4. 解析 metadata
-      final metadataElement = opfDoc.querySelector('metadata');
-
-      String title = '未知书名';
-      String? author;
-      String? description;
-      String? language;
-      String? coverId;
-
-      if (metadataElement != null) {
-        title = _getDcText(metadataElement, 'title') ?? '未知书名';
-        author = _getDcText(metadataElement, 'creator');
-        description = _getDcText(metadataElement, 'description');
-        language = _getDcText(metadataElement, 'language');
-
-        // 查找 cover meta
-        for (final child in metadataElement.children) {
-          if (_localName(child) == 'meta' && child.attributes['name'] == 'cover') {
-            coverId = child.attributes['content'];
-            break;
-          }
-        }
-      }
-
-      // 5-6. 用 xml 包解析 manifest 和 spine
+      // 4. 构建 spineIndexByHref 映射：EPUB 绝对路径 → spine 顺序索引
       //
-      // 注意：必须用 xml 包解析 OPF，不能用 html_parser。
-      // OPF 是 XML 文件，<item .../> 和 <itemref .../> 是自闭合标签。
-      // html_parser 是 HTML5 解析器，不认识 XML 自闭合写法
-      // （HTML5 中只有 void 元素如 <img/> 才自闭合），
-      // 会把 <itemref idref="ch1"/> 当作 <itemref idref="ch1"> 开始标签，
-      // 后续 <itemref> 会被嵌套在第一个 itemref 内部，导致只解析出 1 项。
-      // xml 包能正确解析 XML 自闭合标签。
-      final manifest = <String, ManifestItem>{};
-      final spine = <String>[];
-      String? tocId;
-
-      try {
-        final xmlDoc = xml.XmlDocument.parse(decodeBytes(opfData));
-
-        // 5. 解析 manifest
-        xml.XmlElement? xmlManifest;
-        for (final el in xmlDoc.findAllElements('manifest')) {
-          xmlManifest = el;
-          break;
-        }
-        if (xmlManifest != null) {
-          for (final child in xmlManifest.findElements('item')) {
-            final id = child.getAttribute('id') ?? '';
-            final href = child.getAttribute('href') ?? '';
-            final mediaType = child.getAttribute('media-type') ?? '';
-            final properties = child.getAttribute('properties');
-            if (id.isNotEmpty && href.isNotEmpty) {
-              manifest[id] = ManifestItem(
-                id: id,
-                href: href,
-                mediaType: mediaType,
-                properties: properties,
-              );
-            }
-          }
-        }
-        debugPrint('[EPUB诊断-OPF] manifest解析: ${manifest.length} 项');
-
-        // 6. 解析 spine
-        xml.XmlElement? xmlSpine;
-        for (final el in xmlDoc.findAllElements('spine')) {
-          xmlSpine = el;
-          break;
-        }
-        if (xmlSpine != null) {
-          tocId = xmlSpine.getAttribute('toc');
-          for (final child in xmlSpine.findElements('itemref')) {
-            final idref = child.getAttribute('idref');
-            if (idref != null) {
-              spine.add(idref);
-            }
-          }
-        }
-        debugPrint('[EPUB诊断-OPF] spine解析: ${spine.length} 项, tocId=$tocId');
-      } catch (e) {
-        debugPrint('[EPUB诊断-OPF] xml包解析异常: $e');
-      }
-
-      // 7. 查找封面路径
-      String? coverPath;
-      if (coverId != null && manifest.containsKey(coverId)) {
-        coverPath = _resolveEpubPath(opfBasePath, manifest[coverId]!.href);
-      }
-      // 后备：通过 properties 或 id 查找封面
-      if (coverPath == null) {
-        for (final item in manifest.values) {
-          if (item.mediaType.startsWith('image/') &&
-              (_containsWholeWord(item.properties, 'cover-image') ||
-                  item.id.toLowerCase().contains('cover'))) {
-            coverPath = _resolveEpubPath(opfBasePath, item.href);
-            break;
-          }
-        }
-      }
-
-      // 8. 解析目录
-      //
-      // 整体流程：
-      // 1) 构建 spineIndexByHref 映射：EPUB 绝对路径 → spine 顺序索引
-      //    用于后续给 EpubChapter.spineIndex 字段填充
-      // 2) 优先尝试 NCX（EPUB 2）→ 失败则尝试 NAV（EPUB 3）→ 失败用 spine 兜底
-      // 3) NCX/NAV 返回的是树状结构（tocTree），通过 EpubChapter.flatten 扁平化为 chapters
-      // 4) spine 兜底直接构造扁平 chapters（无嵌套，tocTree 为空）
-
-      // 8.1 构建 spineIndexByHref 映射
+      // EpubPackage.spine 中每个 EpubSpineItem.href 已是 EPUB 绝对路径
+      // （EpubPackageParser 解析时用 EpubPath.resolve(opfPath, item.href) 得到），
+      // 可直接建立 href → index 映射，供后续 EpubChapter.spineIndex 反查。
       final spineIndexByHref = <String, int>{};
-      for (int i = 0; i < spine.length; i++) {
-        final idref = spine[i];
-        if (manifest.containsKey(idref)) {
-          final item = manifest[idref]!;
-          final resolvedHref = _resolveEpubPath(opfBasePath, item.href);
-          spineIndexByHref[resolvedHref] = i;
+      for (int i = 0; i < pkg.spine.length; i++) {
+        final href = pkg.spine[i].href;
+        if (href.isNotEmpty) {
+          spineIndexByHref[href] = i;
         }
       }
+
+      debugPrint('[EPUB诊断-OPF] manifest解析: ${pkg.manifest.length} 项');
+      debugPrint('[EPUB诊断-OPF] spine解析: ${pkg.spine.length} 项');
       debugPrint('[EPUB诊断] opfBasePath=$opfBasePath');
-      debugPrint('[EPUB诊断] spine数量=${spine.length} items=${spine.join(",")}');
-      debugPrint('[EPUB诊断] manifest数量=${manifest.length}');
+      debugPrint(
+          '[EPUB诊断] spine数量=${pkg.spine.length} '
+          'items=${pkg.spine.map((s) => s.idRef).join(",")}');
+      debugPrint('[EPUB诊断] manifest数量=${pkg.manifest.length}');
       debugPrint('[EPUB诊断] spineIndexByHref=$spineIndexByHref');
       debugPrint('[EPUB诊断] files路径列表=${files.keys.toList()}');
+      debugPrint('[EPUB诊断] 最终ncxHref=${pkg.ncxHref} navHref=${pkg.navHref}');
 
-      // 8.2 查找 NAV 目录（EPUB 3，properties='nav' 优先，参考 legado findTableOfContentsResource）
-      String? navHref;
-      String? ncxHref;
-      // 优先：manifest 中 properties 整词匹配 'nav' 的项（EPUB 3 标准）
-      // 用整词匹配避免误判 'nav-map'/'nav-reference' 等含 nav 子串的属性
-      // 参考 lumina `_containsWholeWord(properties, 'nav')`
-      for (final item in manifest.values) {
-        if (_containsWholeWord(item.properties, 'nav') &&
-            item.mediaType == 'application/xhtml+xml') {
-          navHref = item.href;
-          debugPrint('[EPUB诊断] properties=nav 找到NAV: id=${item.id} href=$navHref');
-          break;
-        }
-      }
-      // 8.3 查找 NCX 目录（EPUB 2）
-      if (tocId != null && manifest.containsKey(tocId)) {
-        final tocItem = manifest[tocId]!;
-        debugPrint('[EPUB诊断] spine.toc指向 tocId=$tocId href=${tocItem.href} mediaType=${tocItem.mediaType}');
-        if (tocItem.mediaType.contains('ncx') ||
-            tocItem.href.endsWith('.ncx')) {
-          ncxHref = tocItem.href;
-        } else if (navHref == null &&
-            (tocItem.mediaType == 'application/xhtml+xml' ||
-                tocItem.href.endsWith('.xhtml') ||
-                tocItem.href.endsWith('.html'))) {
-          // spine.toc 指向 xhtml 但不是 .ncx：可能是 EPUB 3 的 nav
-          navHref = tocItem.href;
-          debugPrint('[EPUB诊断] spine.toc指向xhtml，作为NAV: $navHref');
-        }
-      }
-      if (ncxHref == null) {
-        for (final item in manifest.values) {
-          if (item.mediaType == 'application/x-dtbncx+xml' ||
-              item.href.endsWith('.ncx')) {
-            ncxHref = item.href;
-            debugPrint('[EPUB诊断] 全量扫描找到NCX: $ncxHref');
-            break;
-          }
-        }
-      }
-      // NAV 兜底：通过 id/href 名字含 nav 查找
-      if (navHref == null) {
-        for (final item in manifest.values) {
-          if (item.mediaType == 'application/xhtml+xml' &&
-              (item.id.toLowerCase().contains('nav') ||
-                  item.href.toLowerCase().contains('nav'))) {
-            navHref = item.href;
-            debugPrint('[EPUB诊断] 名字兜底找到NAV: id=${item.id} href=$navHref');
-            break;
-          }
-        }
-      }
-      debugPrint('[EPUB诊断] 最终ncxHref=$ncxHref navHref=$navHref');
+      // 5. 解析目录（用 EpubTocParser 替换旧的手动 NAV/NCX 解析）
+      //
+      // EpubTocParser 三级回退：
+      // 1) EPUB3 nav（pkg.navHref）
+      // 2) EPUB2 NCX（pkg.ncxHref）
+      // 3) spine 占位
+      //
+      // 返回 List<TocItem> 树状结构，转换为 EpubChapter 树后扁平化得到 chapters。
+      final tocItems = epub_core.EpubTocParser.parse(archiveReader, pkg);
+      final tocTree = _convertTocItemsToChapters(tocItems, spineIndexByHref);
 
-      // 8.4 优先尝试 NAV（EPUB 3）→ NCX（EPUB 2）→ spine 兜底
-      // 参考 legado：EPUB 3 优先用 nav，EPUB 2 用 ncx
-      List<EpubChapter> tocTree = [];
       List<EpubChapter> chapters;
-
-      if (navHref != null) {
-        final navPath = _resolveEpubPath(opfBasePath, navHref);
-        final navData = files[navPath];
-        debugPrint('[EPUB诊断] NAV解析: navPath=$navPath 数据存在=${navData != null}');
-        if (navData != null) {
-          // 关键：baseDir 用 NAV 文件自身所在目录，而非 OPF 目录
-          // NAV 文件可能在子目录（如 OEBPS/nav.xhtml），其内部相对路径
-          // 是相对 NAV 文件目录解析的，用 OPF 目录会解析错误
-          // 参考 lumina `navDir`
-          final navDir = navPath.contains('/')
-              ? navPath.substring(0, navPath.lastIndexOf('/'))
-              : '';
-          tocTree = _parseNavToc(
-            decodeBytes(navData),
-            navDir,
-            spineIndexByHref,
-          );
-          debugPrint('[EPUB诊断] NAV解析结果: tocTree节点数=${tocTree.length}');
-        }
-      }
-
-      if (tocTree.isEmpty && ncxHref != null) {
-        final ncxPath = _resolveEpubPath(opfBasePath, ncxHref);
-        final ncxData = files[ncxPath];
-        debugPrint('[EPUB诊断] NCX解析: ncxPath=$ncxPath 数据存在=${ncxData != null}');
-        if (ncxData != null) {
-          // 关键：baseDir 用 NCX 文件自身所在目录，而非 OPF 目录
-          // 同 NAV，NCX 文件可能在子目录，其 src 是相对 NCX 文件目录解析的
-          // 参考 lumina `ncxDir`
-          final ncxDir = ncxPath.contains('/')
-              ? ncxPath.substring(0, ncxPath.lastIndexOf('/'))
-              : '';
-          tocTree = _parseNcxToc(
-            decodeBytes(ncxData),
-            ncxDir,
-            spineIndexByHref,
-          );
-          debugPrint('[EPUB诊断] NCX解析结果: tocTree节点数=${tocTree.length}');
-        }
-      }
-
       if (tocTree.isNotEmpty) {
         // NCX/NAV 解析成功：扁平化得到 chapters
         chapters = EpubChapter.flatten(tocTree);
@@ -503,24 +304,22 @@ class EpubParser {
         // 后备：使用 spine 条目直接构造扁平 chapters（无嵌套）
         debugPrint('[EPUB诊断] NCX/NAV都失败，用spine兜底');
         chapters = [];
-        for (final idref in spine) {
-          if (manifest.containsKey(idref)) {
-            final item = manifest[idref]!;
-            // 跳过非内容条目
-            if (item.href.toLowerCase().contains('toc') ||
-                item.href.toLowerCase().contains('nav')) {
-              continue;
-            }
-            final href = _resolveEpubPath(opfBasePath, item.href);
-            final index = chapters.length;
-            final spineIdx = spineIndexByHref[href] ?? -1;
-            chapters.add(EpubChapter(
-              index: index,
-              title: index == 0 ? '封面' : '第$index章',
-              href: href,
-              spineIndex: spineIdx,
-            ));
+        for (final spineItem in pkg.spine) {
+          final href = spineItem.href;
+          if (href.isEmpty) continue;
+          // 跳过非内容条目（toc/nav 文件）
+          final lowerHref = href.toLowerCase();
+          if (lowerHref.contains('toc') || lowerHref.contains('nav')) {
+            continue;
           }
+          final index = chapters.length;
+          final spineIdx = spineIndexByHref[href] ?? -1;
+          chapters.add(EpubChapter(
+            index: index,
+            title: index == 0 ? '封面' : '第$index章',
+            href: href,
+            spineIndex: spineIdx,
+          ));
         }
         debugPrint('[EPUB诊断] spine兜底chapters数量=${chapters.length}');
       }
@@ -667,7 +466,7 @@ class EpubParser {
         coverPath: coverPath,
         chapters: chapters,
         tocTree: tocTree,
-        spineCount: spine.length,
+        spineCount: pkg.spine.length,
         language: language,
         extractedBasePath: extractedBasePath,
         inlinedCss: inlinedCss,
@@ -680,6 +479,9 @@ class EpubParser {
   }
 
   /// 从EPUB文件中获取封面图片字节
+  ///
+  /// 用 EpubPackageParser 解析 OPF 获取 coverHref（已综合 EPUB3 properties=cover-image
+  /// 和 EPUB2 <meta name="cover"> 两种来源），再从 ZIP 中读取对应文件字节。
   static Uint8List? getCoverImage(Uint8List bytes) {
     try {
       final archive = ZipDecoder().decodeBytes(bytes);
@@ -694,130 +496,85 @@ class EpubParser {
         }
       }
 
-      // 查找 OPF 路径
-      final containerData = files['META-INF/container.xml'];
-      if (containerData == null) return null;
-
-      final containerDoc =
-          html_parser.parse(decodeBytes(containerData));
-      String? opfPath;
-      final rootfileElements = containerDoc.querySelectorAll('rootfile');
-      for (final el in rootfileElements) {
-        final mediaType = el.attributes['media-type'];
-        if (mediaType == null ||
-            mediaType == 'application/oebps-package+xml') {
-          opfPath = el.attributes['full-path'];
-          break;
-        }
-      }
-      if (opfPath == null) return null;
-
-      final opfData = files[opfPath];
-      if (opfData == null) return null;
-
-      final opfDoc = html_parser.parse(decodeBytes(opfData));
-      final opfBasePath = opfPath.contains('/')
-          ? opfPath.substring(0, opfPath.lastIndexOf('/'))
-          : '';
-
-      // 从 metadata 中查找 cover ID
-      final metadataElement = opfDoc.querySelector('metadata');
-      if (metadataElement == null) return null;
-
-      String? coverId;
-      for (final child in metadataElement.children) {
-        if (_localName(child) == 'meta' &&
-            child.attributes['name'] == 'cover') {
-          coverId = child.attributes['content'];
-          break;
-        }
+      final archiveReader = _MapArchiveReader(files);
+      final epub_core.EpubPackage pkg;
+      try {
+        pkg = epub_core.EpubPackageParser.parse(archiveReader);
+      } catch (_) {
+        return null;
       }
 
-      // 从 manifest 中查找封面路径
-      String? coverHref;
-      final manifestElement = opfDoc.querySelector('manifest');
-      if (manifestElement != null) {
-        // 优先通过 cover ID 查找
-        if (coverId != null) {
-          for (final child in manifestElement.children) {
-            if (_localName(child) == 'item' &&
-                child.attributes['id'] == coverId) {
-              coverHref = child.attributes['href'];
-              break;
-            }
-          }
-        }
+      final coverHref = pkg.coverHref;
+      if (coverHref == null || coverHref.isEmpty) return null;
 
-        // 后备：通过 properties 或 id 名称查找
-        if (coverHref == null) {
-          for (final child in manifestElement.children) {
-            if (_localName(child) == 'item') {
-              final id = child.attributes['id']?.toLowerCase() ?? '';
-              final properties = child.attributes['properties'] ?? '';
-              final mediaType = child.attributes['media-type'] ?? '';
-              if (mediaType.startsWith('image/') &&
-                  (id.contains('cover') ||
-                      properties.contains('cover-image'))) {
-                coverHref = child.attributes['href'];
-                break;
-              }
-            }
-          }
-        }
-      }
-
-      if (coverHref == null) return null;
-
-      final coverPath = _resolveEpubPath(opfBasePath, coverHref);
-      final coverData = files[coverPath];
-      if (coverData == null) return null;
-
+      final coverData = archiveReader.readBytes(coverHref);
       return Uint8List.fromList(coverData);
     } catch (e) {
       return null;
     }
   }
 
-  /// 从 metadata 元素中获取 DC 命名空间的文本内容
-  static String? _getDcText(html_dom.Element metadata, String tagName) {
-    for (final child in metadata.children) {
-      final local = _localName(child);
-      // 兼容 <dc:title> 和 <title> 两种形式
-      if (local == tagName || local == 'dc:$tagName') {
-        final text = child.text.trim();
-        if (text.isNotEmpty) return text;
-      }
-    }
-    return null;
-  }
+  /// 把 [epub_core.TocItem] 树转换为 [EpubChapter] 树
+  ///
+  /// 递归遍历 TocItem 列表，对每个节点：
+  /// - 从 href 中剥离 fragment 作为 EpubChapter.href（spineIndexByHref 的 key
+  ///   是不含 fragment 的 EPUB 绝对路径）
+  /// - fragment 作为 anchor/startFragmentId
+  /// - 通过 spineIndexByHref 反查 OPF spine 顺序索引填充 spineIndex
+  /// - depth 记录嵌套层级（0=顶层）
+  /// - isVolume：顶层且有子节点（卷头标记）
+  /// - index/parentId 保持 -1，由 [EpubChapter.flatten] 填充
+  ///
+  /// 注意：TocItem.href 是 EpubPath.resolve 后的路径，含 fragment，
+  /// 必须用 [epub_core.EpubPath.stripFragment] 剥离后再赋给 EpubChapter.href。
+  static List<EpubChapter> _convertTocItemsToChapters(
+    List<epub_core.TocItem> items,
+    Map<String, int> spineIndexByHref, {
+    int depth = 0,
+  }) {
+    final result = <EpubChapter>[];
+    for (final item in items) {
+      // TocItem.href 可能含 fragment，剥离后用于 spineIndex 查找和 EpubChapter.href
+      final hrefNoFrag = item.href.isEmpty
+          ? null
+          : epub_core.EpubPath.stripFragment(item.href);
+      final anchor = item.fragment;
+      final spineIdx = hrefNoFrag != null && hrefNoFrag.isNotEmpty
+          ? (spineIndexByHref[hrefNoFrag] ?? -1)
+          : -1;
 
-  /// 获取元素的 localName（小写，空安全）
-  static String _localName(html_dom.Element element) {
-    return (element.localName ?? '').toLowerCase();
+      final children = _convertTocItemsToChapters(
+        item.children,
+        spineIndexByHref,
+        depth: depth + 1,
+      );
+
+      result.add(EpubChapter(
+        index: -1,
+        title: item.title,
+        href: hrefNoFrag,
+        anchor: anchor,
+        startFragmentId: anchor,
+        isVolume: depth == 0 && children.isNotEmpty,
+        spineIndex: spineIdx,
+        depth: depth,
+        parentId: -1,
+        children: children,
+      ));
+    }
+    return result;
   }
 
   /// 解析 EPUB 内部相对路径
+  ///
+  /// 仅供 [getAllCss]/[getAllFonts] 等保留的旧 API 使用：basePath 是 OPF
+  /// 所在目录（不带文件名），relativePath 是 manifest 中的相对 href。
+  /// 新代码请用 `epub_core.EpubPath.resolve`（basePath 是文件完整路径）。
   static String _resolveEpubPath(String basePath, String relativePath) {
     if (relativePath.startsWith('/')) return relativePath.substring(1);
     if (basePath.isEmpty) return relativePath;
     final base = Uri.parse('$basePath/');
     return base.resolve(relativePath).toString();
-  }
-
-  /// 整词匹配 properties 中的某个属性值
-  ///
-  /// EPUB 3 的 manifest item properties 是空格分隔的属性列表，
-  /// 例如 "nav cover-image" 或 "svg remote-resources"。
-  /// 用 `contains('nav')` 会误判 `nav-map` 等含 nav 子串的属性，
-  /// 必须用 `\bnav\b` 整词匹配。
-  /// 参考 lumina `_containsWholeWord`。
-  static bool _containsWholeWord(String? value, String word) {
-    if (value == null || value.trim().isEmpty) return false;
-    final pattern = RegExp(
-      '\\b${RegExp.escape(word)}\\b',
-      caseSensitive: false,
-    );
-    return pattern.hasMatch(value);
   }
 
   /// 解码字节为字符串（优先 UTF-8，后备 Latin-1）
@@ -826,261 +583,6 @@ class EpubParser {
       return utf8.decode(data);
     } catch (_) {
       return String.fromCharCodes(data);
-    }
-  }
-
-  /// 解析 NCX 格式目录为树状结构
-  ///
-  /// NCX 的 navMap > navPoint 是天然树状嵌套结构：
-  /// ```
-  /// <navMap>
-  ///   <navPoint>
-  ///     <navLabel><text>卷一</text></navLabel>
-  ///     <content src="chapter1.xhtml"/>
-  ///     <navPoint>  <!-- 嵌套子节点 -->
-  ///       <navLabel><text>第一章</text></navLabel>
-  ///       <content src="chapter1.xhtml#section1"/>
-  ///     </navPoint>
-  ///   </navPoint>
-  /// </navMap>
-  /// ```
-  ///
-  /// 返回 [List<EpubChapter>] 树状结构（顶层节点列表）。
-  /// - [depth]：嵌套层级，0=顶层
-  /// - [anchor]：从 href 中分离的 # 后部分
-  /// - [spineIndex]：通过 [spineIndexByHref] 反查 OPF spine 顺序索引
-  /// - [index]/[parentId]：保持 -1，由 [EpubChapter.flatten] 填充
-  /// - [isVolume]：顶层且有子节点时为 true（卷头标记）
-  ///
-  /// [spineIndexByHref]：EPUB 绝对路径 → spine 索引的映射，
-  /// 由 [parseFromBytes] 通过 OPF spine + manifest 预先构建。
-  ///
-  /// [baseDir]：NCX 文件自身所在目录（EPUB ZIP 内绝对路径的目录部分），
-  /// 用于解析 NCX 内 `content src` 的相对路径。
-  /// 注意不是 OPF 目录——NCX 文件可能在子目录（如 `OEBPS/toc/toc.ncx`），
-  /// 其 src 是相对 NCX 文件目录解析的。参考 lumina `ncxDir`。
-  static List<EpubChapter> _parseNcxToc(
-    String ncxXml,
-    String baseDir,
-    Map<String, int> spineIndexByHref,
-  ) {
-    try {
-      // NCX 是 XML 文档（带命名空间 http://www.daisy.org/z3986/2005/ncx/），
-      // 必须用 xml 包解析（html_parser 对 XML 声明+DOCTYPE+命名空间支持差）
-      final doc = xml.XmlDocument.parse(ncxXml);
-      // 查找 navMap（NCX 根元素下的目录容器）
-      // 用 findAllElements 忽略命名空间前缀，按 localName 查找
-      xml.XmlElement? navMap;
-      for (final el in doc.findAllElements('navMap')) {
-        navMap = el;
-        break;
-      }
-      debugPrint('[EPUB诊断-NCX] navMap存在=${navMap != null} baseDir=$baseDir');
-      if (navMap == null) {
-        final preview = ncxXml.length > 500 ? ncxXml.substring(0, 500) : ncxXml;
-        debugPrint('[EPUB诊断-NCX] navMap=null, NCX原文预览: $preview');
-        return [];
-      }
-
-      EpubChapter parseNavPoint(xml.XmlElement navPoint, int depth) {
-        // navLabel > text
-        String title = '未命名章节';
-        for (final labelEl in navPoint.findElements('navLabel')) {
-          for (final textEl in labelEl.findElements('text')) {
-            final t = textEl.innerText.trim();
-            if (t.isNotEmpty) {
-              title = t;
-              break;
-            }
-          }
-          break;
-        }
-
-        // content src
-        String src = '';
-        for (final contentEl in navPoint.findElements('content')) {
-          src = contentEl.getAttribute('src') ?? '';
-          break;
-        }
-        final rawHref = src.split('#').first;
-        final href = rawHref.isEmpty ? null : _resolveEpubPath(baseDir, rawHref);
-        final anchor = _extractFragmentId(src);
-
-        // 递归子 navPoint
-        final children = <EpubChapter>[];
-        for (final child in navPoint.findElements('navPoint')) {
-          children.add(parseNavPoint(child, depth + 1));
-        }
-
-        final spineIdx = href != null && href.isNotEmpty
-            ? (spineIndexByHref[href] ?? -1)
-            : -1;
-
-        return EpubChapter(
-          index: -1,
-          title: title,
-          href: href,
-          anchor: anchor,
-          startFragmentId: anchor,
-          isVolume: depth == 0 && children.isNotEmpty,
-          spineIndex: spineIdx,
-          depth: depth,
-          parentId: -1,
-          children: children,
-        );
-      }
-
-      final tree = <EpubChapter>[];
-      final topNavPoints = navMap.findElements('navPoint').toList();
-      debugPrint('[EPUB诊断-NCX] 顶层navPoint数量=${topNavPoints.length}');
-      for (final navPoint in topNavPoints) {
-        tree.add(parseNavPoint(navPoint, 0));
-      }
-      debugPrint('[EPUB诊断-NCX] 解析完成tree节点数=${tree.length}');
-      return tree;
-    } catch (e, st) {
-      debugPrint('[EPUB诊断-NCX] 解析异常: $e');
-      debugPrint('[EPUB诊断-NCX] 异常堆栈: $st');
-      return [];
-    }
-  }
-
-  /// 解析 NAV 格式目录为树状结构
-  ///
-  /// EPUB 3 的 NAV 目录是 HTML5 的 <nav epub:type="toc"> + 嵌套 <ol>/<li>：
-  /// ```
-  /// <nav epub:type="toc">
-  ///   <ol>
-  ///     <li>
-  ///       <a href="chapter1.xhtml">卷一</a>
-  ///       <ol>  <!-- 嵌套子列表 -->
-  ///         <li><a href="chapter1.xhtml#sec1">第一章</a></li>
-  ///       </ol>
-  ///     </li>
-  ///   </ol>
-  /// </nav>
-  /// ```
-  ///
-  /// 返回 [List<EpubChapter>] 树状结构（顶层节点列表）。
-  /// 字段填充逻辑与 [_parseNcxToc] 一致：
-  /// - [depth]：嵌套层级，0=顶层
-  /// - [anchor]：从 href 中分离的 # 后部分
-  /// - [spineIndex]：通过 [spineIndexByHref] 反查 OPF spine 顺序索引
-  /// - [index]/[parentId]：保持 -1，由 [EpubChapter.flatten] 填充
-  /// - [isVolume]：顶层且有子节点时为 true（卷头标记）
-  ///
-  /// [baseDir]：NAV 文件自身所在目录（EPUB ZIP 内绝对路径的目录部分），
-  /// 用于解析 NAV 内 `<a href>` 的相对路径。
-  /// 注意不是 OPF 目录——NAV 文件可能在子目录（如 `OEBPS/nav.xhtml`），
-  /// 其 href 是相对 NAV 文件目录解析的。参考 lumina `navDir`。
-  static List<EpubChapter> _parseNavToc(
-    String navXml,
-    String baseDir,
-    Map<String, int> spineIndexByHref,
-  ) {
-    try {
-      // NAV 是 XHTML（EPUB 3），用 xml 包解析以保留命名空间属性 epub:type
-      final doc = xml.XmlDocument.parse(navXml);
-
-      // 查找 TOC nav 元素
-      // epub:type 是 EPUB 3 的命名空间属性（namespace: http://www.idpf.org/2007/ops）
-      // 三层 fallback 顺序参考 lumina：
-      //   1. 命名空间属性 type（XML 解析后 epub:type 会变成带 namespace 的 type）
-      //   2. 普通属性 epub:type（部分文档未声明命名空间时的兜底）
-      //   3. 普通属性 type（极少见兜底）
-      // 然后用整词匹配 'toc'，避免误判 'toc-brief'/'toc-full' 等含 toc 子串的类型
-      xml.XmlElement? tocNav;
-      final allNavs = doc.findAllElements('nav').toList();
-      debugPrint('[EPUB诊断-NAV] 文档中nav数量=${allNavs.length} baseDir=$baseDir');
-      for (final nav in allNavs) {
-        final epubType = nav.getAttribute(
-              'type',
-              namespaceUri: 'http://www.idpf.org/2007/ops',
-            ) ??
-            nav.getAttribute('epub:type') ??
-            nav.getAttribute('type') ??
-            '';
-        debugPrint('[EPUB诊断-NAV] nav: epub:type=$epubType');
-        if (_containsWholeWord(epubType, 'toc')) {
-          tocNav = nav;
-          break;
-        }
-      }
-      // 兜底：取第一个 nav
-      if (tocNav == null && allNavs.isNotEmpty) {
-        tocNav = allNavs.first;
-        debugPrint('[EPUB诊断-NAV] 无epub:type=toc，兜底用第一个nav');
-      }
-      debugPrint('[EPUB诊断-NAV] tocNav存在=${tocNav != null}');
-
-      if (tocNav == null) {
-        final preview = navXml.length > 500 ? navXml.substring(0, 500) : navXml;
-        debugPrint('[EPUB诊断-NAV] 无nav，原文预览: $preview');
-        return [];
-      }
-
-      EpubChapter parseLi(xml.XmlElement li, int depth) {
-        // 查找直接子元素 <a>
-        String title = '未命名章节';
-        String? href;
-        String? anchor;
-        for (final a in li.findElements('a')) {
-          final t = a.innerText.trim();
-          if (t.isNotEmpty) title = t;
-          final rawHref = a.getAttribute('href') ?? '';
-          final rawPath = rawHref.split('#').first;
-          href = rawPath.isEmpty ? null : _resolveEpubPath(baseDir, rawPath);
-          anchor = _extractFragmentId(rawHref);
-          break;
-        }
-
-        // 嵌套 <ol>（li > ol > li*）
-        final children = <EpubChapter>[];
-        for (final nestedOl in li.findElements('ol')) {
-          for (final childLi in nestedOl.findElements('li')) {
-            children.add(parseLi(childLi, depth + 1));
-          }
-        }
-
-        final spineIdx = href != null && href.isNotEmpty
-            ? (spineIndexByHref[href] ?? -1)
-            : -1;
-
-        return EpubChapter(
-          index: -1,
-          title: title,
-          href: href,
-          anchor: anchor,
-          startFragmentId: anchor,
-          isVolume: depth == 0 && children.isNotEmpty,
-          spineIndex: spineIdx,
-          depth: depth,
-          parentId: -1,
-          children: children,
-        );
-      }
-
-      final tree = <EpubChapter>[];
-      // 找 tocNav 下的第一个 ol
-      xml.XmlElement? ol;
-      for (final olEl in tocNav.findElements('ol')) {
-        ol = olEl;
-        break;
-      }
-      debugPrint('[EPUB诊断-NAV] 顶层ol存在=${ol != null}');
-      if (ol != null) {
-        final liList = ol.findElements('li').toList();
-        debugPrint('[EPUB诊断-NAV] 顶层li数量=${liList.length}');
-        for (final li in liList) {
-          tree.add(parseLi(li, 0));
-        }
-      }
-      debugPrint('[EPUB诊断-NAV] 解析完成tree节点数=${tree.length}');
-      return tree;
-    } catch (e, st) {
-      debugPrint('[EPUB诊断-NAV] 解析异常: $e');
-      debugPrint('[EPUB诊断-NAV] 异常堆栈: $st');
-      return [];
     }
   }
 
@@ -2458,5 +1960,48 @@ class EpubParser {
       },
     );
     return text;
+  }
+}
+
+/// 把 `Map<String, List<int>>`（ZIP 解压后的文件映射）适配为 [epub_core.EpubArchiveReader]
+///
+/// EpubPackageParser/EpubTocParser/EpubPublisherStyles 等新模块都基于
+/// EpubArchiveReader 抽象接口工作，本适配器让旧的 Map 数据结构无需改造即可接入。
+///
+/// 路径匹配策略：先精确匹配，再大小写不敏感匹配。
+/// EPUB 内文件路径大小写敏感性因生产工具而异（Windows 工具常忽略大小写，
+/// macOS/Linux 工具严格区分），双策略兼顾两种情况。
+class _MapArchiveReader implements epub_core.EpubArchiveReader {
+  final Map<String, List<int>> _files;
+
+  _MapArchiveReader(this._files);
+
+  @override
+  bool exists(String path) {
+    if (_files.containsKey(path)) return true;
+    final lower = path.toLowerCase();
+    return _files.keys.any((k) => k.toLowerCase() == lower);
+  }
+
+  @override
+  List<String> list() => _files.keys.toList();
+
+  @override
+  List<int> readBytes(String path) {
+    // 先精确匹配
+    final data = _files[path];
+    if (data != null) return data;
+    // 大小写不敏感匹配
+    final lower = path.toLowerCase();
+    for (final entry in _files.entries) {
+      if (entry.key.toLowerCase() == lower) return entry.value;
+    }
+    throw StateError('File not found: $path');
+  }
+
+  @override
+  String readText(String path) {
+    final bytes = readBytes(path);
+    return EpubParser.decodeBytes(bytes);
   }
 }
