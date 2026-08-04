@@ -2080,4 +2080,5 @@ return __returnValue;
   //  _fileCallPattern / _archiveCallPattern / _urlLaunchPattern）
   // 该预缓存机制未在生产路径调用，analyze 报 unused_element。
   // 如需恢复，查 git 历史中此 commit 之前的版本。
+}
 
