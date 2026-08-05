@@ -1217,6 +1217,18 @@ window.readerApi = (function() {
   // 滚动模式向上衔接：向前插入的章节数
   var prependedChapterCount = 0;
 
+  // === 建议4：菜单召唤 touchstart 预判 ===
+  // 记录单指 touchstart 的位置和时间戳，touchend 时判定是否为 tap
+  // - 主路径：touchend 判定为 tap → 立即 notifyTap（比 click 快 ~100ms）
+  // - 防冲突：touchend 触发 tap 后设置标志位，click handler 跳过避免双触发
+  // - 排除长按选文字：touchend 时检查 window.getSelection()，有选区则不触发 tap
+  // - 排除滑动翻页：移动距离 > 10px 时不触发 tap
+  var touchStartX = 0;
+  var touchStartY = 0;
+  var touchStartTime = 0;
+  var touchStartActive = false;  // 是否有未决的 touchstart（单指）
+  var lastTapFromTouchEnd = false;  // touchend 已触发 tap，click 跳过
+
   function init(cfg) {
     config = cfg;
     animEnabled = (config.pageAnimDurationMs || 0) > 0 && (config.pageModeIndex !== 4);
@@ -1256,7 +1268,9 @@ window.readerApi = (function() {
       'vw=' + window.innerWidth, 'vh=' + window.innerHeight,
       'contentA=' + !!contentA, 'contentB=' + !!contentB);
 
-    // 绑定 click 监听器
+    // 绑定 click 监听器（兜底：touchend 已触发 tap 时跳过，避免重复）
+    // - 主路径走 touchend 预判（见下方 touchstart/touchend），比 click 快 ~100ms
+    // - click 仅在 touchend 未触发时兜底（如鼠标点击、辅助功能点击）
     document.addEventListener('click', function(e) {
       if (isAnimating) {
         console.log('[reader] click ignored (animating)');
@@ -1264,6 +1278,11 @@ window.readerApi = (function() {
       }
       if (e.target && e.target.tagName === 'IMG') {
         notifyImageTap(e.target.src, e.target.getBoundingClientRect());
+        return;
+      }
+      // touchend 已触发过 tap → 跳过（避免双触发）
+      if (lastTapFromTouchEnd) {
+        lastTapFromTouchEnd = false;
         return;
       }
       console.log('[reader] click at', e.clientX, e.clientY, 'target:', e.target.tagName);
@@ -2170,9 +2189,21 @@ window.readerApi = (function() {
 
     // 通用: touchstart 阶段检测多指，立即 preventDefault 阻止 WebView 进入缩放模式
     // （touchstart 不阻塞滚动，可以放心用 passive:false）
+    // 同时记录单指 touchstart 位置和时间戳，供 touchend 判定 tap
     document.addEventListener('touchstart', function(e) {
       if (e.touches.length > 1) {
         e.preventDefault();
+        // 多指触摸 → 取消 tap 预判（避免双指操作误触发菜单）
+        touchStartActive = false;
+        return;
+      }
+      // 单指 touchstart → 记录位置和时间，供 touchend 判定 tap
+      var t = e.changedTouches[0];
+      if (t) {
+        touchStartX = t.clientX;
+        touchStartY = t.clientY;
+        touchStartTime = Date.now();
+        touchStartActive = true;
       }
     }, { passive: false });
 
@@ -2181,22 +2212,89 @@ window.readerApi = (function() {
     // 会阻塞主线程的滚动响应，导致滚动模式严重卡顿（passive:false 是滚动卡顿元凶）
     // supportZoom:false + viewport user-scalable=no 已禁用缩放，多指时即便不
     // preventDefault 也不会触发缩放
+    // 同时：
+    // - touchmove 超过阈值 → 取消 tap 预判（识别为滑动翻页/滚动）
+    // - 用户主动滚动 → 取消进行中的平滑滚动动画（让用户立即接管）
     document.addEventListener('touchmove', function(e) {
       if (e.touches.length > 1) {
         e.preventDefault();
+        touchStartActive = false;
+        cancelSmoothScroll();
+        return;
+      }
+      // 移动距离 > 10px → 取消 tap 预判（滑动翻页或滚动）
+      if (touchStartActive) {
+        var t = e.changedTouches[0];
+        if (t) {
+          var dx = t.clientX - touchStartX;
+          var dy = t.clientY - touchStartY;
+          if (dx * dx + dy * dy > 100) {  // 10^2 = 100
+            touchStartActive = false;
+            // 用户开始主动滚动 → 取消平滑滚动动画
+            cancelSmoothScroll();
+          }
+        }
       }
     }, { passive: true });
 
-    // 双击检测：仅记录时间戳，不 preventDefault（双击放大已由 supportZoom:false 禁用）
-    // touchend passive:true 让浏览器滚动结束时不受 JS 阻塞
+    // 鼠标滚轮：用户主动滚动 → 取消平滑滚动动画
+    document.addEventListener('wheel', function(e) {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        return;
+      }
+      // 非缩放滚轮 → 用户主动滚动，取消动画
+      cancelSmoothScroll();
+    }, { passive: false });
+
+    // 双击检测 + tap 预判 + onTouchEnd 通知
+    // - tap 预判：单指 + 未移动 + 时间 < 500ms + 无选区 → notifyTap
+    // - 双击检测：仅记录时间戳，不 preventDefault
+    // - onTouchEnd：通知 Dart 即时销毁翻页动画覆盖层
     var lastTouchEnd = 0;
-    document.addEventListener('touchend', function() {
+    document.addEventListener('touchend', function(e) {
       var now = Date.now();
       if (now - lastTouchEnd <= 300) {
         // 双击：不阻止默认行为（缩放已禁），仅日志
         console.log('[reader] double tap detected');
+        // 双击 → 取消 tap 预判
+        touchStartActive = false;
       }
       lastTouchEnd = now;
+
+      // 建议4：tap 预判
+      // - 仅在 touchStartActive（单指 + 未移动）时触发
+      // - 时间 < 500ms（长按选文字不算 tap）
+      // - 无活动选区（避免与长按选文字冲突）
+      // - 非动画中
+      // 满足条件 → 立即 notifyTap，并设置标志位让 click handler 跳过
+      if (touchStartActive && !isAnimating) {
+        var elapsed = now - touchStartTime;
+        var hasSelection = window.getSelection && window.getSelection().toString().length > 0;
+        if (elapsed < 500 && !hasSelection) {
+          var t = e.changedTouches[0];
+          var tapX = t ? t.clientX : touchStartX;
+          var tapY = t ? t.clientY : touchStartY;
+          // 检查点击目标是否为图片（图片走 onImageTap，不走 tap）
+          var root = document.getElementById('reader-root');
+          var rect = root ? root.getBoundingClientRect() : null;
+          if (rect) {
+            var localX = tapX - rect.left;
+            var localY = tapY - rect.top;
+            var el = document.elementFromPoint(localX, localY);
+            if (el && el.tagName === 'IMG') {
+              notifyImageTap(el.src, el.getBoundingClientRect());
+            } else {
+              notifyTap(tapX, tapY);
+            }
+          } else {
+            notifyTap(tapX, tapY);
+          }
+          lastTapFromTouchEnd = true;
+        }
+      }
+      touchStartActive = false;
+
       // 通知 Dart 端用户手指已离开 WebView
       // InAppWebView 是 PlatformView，会吞掉 Flutter 的 PointerUpEvent，
       // 导致 ReaderPageView._onPointerUp 不被调用，翻页动画覆盖层无法及时
@@ -2488,6 +2586,88 @@ window.readerApi = (function() {
     body.scrollTop = Math.max(0, px);
   }
 
+  // 滚动模式平滑滚动动画状态
+  // - 同一时刻只允许一个滚动动画，新滚动请求会取消旧动画
+  // - 用户主动滚动（touchmove/wheel）时也会取消动画（见 touchmove handler）
+  var smoothScrollRafId = 0;
+  var smoothScrollStartTime = 0;
+  var smoothScrollFrom = 0;
+  var smoothScrollTo = 0;
+  var smoothScrollDuration = 300;  // ms，与翻页动画时长对齐
+  var smoothScrollOnDone = null;
+
+  // easeInOutQuad 缓动函数：起步慢、中间快、结束慢，适合阅读器翻页
+  function easeInOutQuad(t) {
+    return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+  }
+
+  // requestAnimationFrame 驱动的平滑滚动
+  // - 取消进行中的动画，避免冲突
+  // - 边界（0/maxScroll）立即跳转，不做动画
+  // - 完成后回调 onDone（用于 Dart 侧进度回调）
+  function smoothScrollTo(target, onDone) {
+    if (!config.isScrollMode) {
+      if (onDone) onDone();
+      return;
+    }
+    var viewport = body.clientHeight;
+    var maxScroll = body.scrollHeight - viewport;
+    if (maxScroll <= 0) {
+      if (onDone) onDone();
+      return;
+    }
+    // clamp target
+    if (target <= 0) target = 0;
+    if (target >= maxScroll) target = maxScroll;
+
+    // 取消进行中的动画
+    if (smoothScrollRafId) {
+      cancelAnimationFrame(smoothScrollRafId);
+      smoothScrollRafId = 0;
+    }
+
+    var from = body.scrollTop || 0;
+    // 距离很小或已在目标位置 → 立即跳转
+    if (Math.abs(target - from) < 2) {
+      body.scrollTop = target;
+      if (onDone) onDone();
+      return;
+    }
+
+    smoothScrollFrom = from;
+    smoothScrollTo = target;
+    smoothScrollStartTime = Date.now();
+    smoothScrollOnDone = onDone;
+
+    function step() {
+      var now = Date.now();
+      var elapsed = now - smoothScrollStartTime;
+      var t = Math.min(1, elapsed / smoothScrollDuration);
+      var eased = easeInOutQuad(t);
+      var next = smoothScrollFrom + (smoothScrollTo - smoothScrollFrom) * eased;
+      body.scrollTop = next;
+      if (t < 1) {
+        smoothScrollRafId = requestAnimationFrame(step);
+      } else {
+        smoothScrollRafId = 0;
+        body.scrollTop = smoothScrollTo;  // 确保精确到目标
+        var cb = smoothScrollOnDone;
+        smoothScrollOnDone = null;
+        if (cb) cb();
+      }
+    }
+    smoothScrollRafId = requestAnimationFrame(step);
+  }
+
+  // 取消进行中的平滑滚动（用户主动滚动时调用）
+  function cancelSmoothScroll() {
+    if (smoothScrollRafId) {
+      cancelAnimationFrame(smoothScrollRafId);
+      smoothScrollRafId = 0;
+      smoothScrollOnDone = null;
+    }
+  }
+
   function scrollByViewport(direction) {
     if (!config.isScrollMode) return -1;
     // 用 body.clientHeight 而非 window.innerHeight（同 getScrollProgress）
@@ -2496,16 +2676,11 @@ window.readerApi = (function() {
     if (maxScroll <= 0) return -1;
     var current = body.scrollTop || 0;
     var target = current + direction * viewport * 0.9;
-    if (target <= 0) {
-      body.scrollTop = 0;
-      return -1;
-    }
-    if (target >= maxScroll) {
-      body.scrollTop = maxScroll;
-      return -1;
-    }
-    body.scrollTop = target;
-    return target / maxScroll;
+    var clamped = Math.max(0, Math.min(maxScroll, target));
+    // 平滑滚动到目标位置，完成后返回进度比例
+    // 边界（0/maxScroll）也走动画，让用户感知到「滚到头了」
+    smoothScrollTo(clamped, null);
+    return clamped / maxScroll;
   }
 
   function checkTap(x, y) {

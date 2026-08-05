@@ -2465,12 +2465,95 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       );
     }
 
+    // 建议5：章节加载失败时显示重试 UI
+    // - 检测 _content 是否为已知的错误前缀（_loadChapterContent 的 catch 块设置）
+    // - 提供重试按钮重新触发 _loadChapterContent
+    if (_isChapterLoadError) {
+      return _buildChapterErrorWidget(provider);
+    }
+
     // 统一走 WebView 渲染：
     // - 滚动模式（scroll/none）：WebView 内部 body.reader-scroll + overflow-y:auto
     // - 分页模式（slide/cover/simulation）：WebView 内部 body.reader-paged + CSS column 分栏
     // 翻页交互由 _onPointerUp/_onPointerDown + _executeTapAction 处理，
     // 通过 _readerWebViewController.jumpToPage() 调用 JS 翻页
     return _buildWebViewContent(provider);
+  }
+
+  /// 章节加载失败检测
+  ///
+  /// _loadChapterContent 在以下情况设置错误内容：
+  /// - '加载失败：$e'（网络/解析异常）
+  /// - '内容加载失败'（getContent 返回 null）
+  /// - '章节不存在'（chapter 为 null 或 isVolume）
+  /// - '无法加载内容'（book/dataProvider/chapters 未就绪）
+  bool get _isChapterLoadError {
+    return _content.startsWith('加载失败') ||
+        _content == '内容加载失败' ||
+        _content == '章节不存在' ||
+        _content == '无法加载内容';
+  }
+
+  /// 章节加载错误 UI（含重试按钮）
+  ///
+  /// - 居中显示错误信息
+  /// - 重试按钮调用 _loadChapterContent 重新加载当前章节
+  /// - 章节不存在时不显示重试（重试也无意义）
+  Widget _buildChapterErrorWidget(ReaderProvider provider) {
+    final isChapterNotExist = _content == '章节不存在';
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isChapterNotExist
+                  ? Icons.book_outlined
+                  : Icons.cloud_off_outlined,
+              size: 56,
+              color: provider.textColor.withValues(alpha: 0.5),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _content,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: provider.textColor.withValues(alpha: 0.7),
+                fontSize: 15,
+                height: 1.5,
+              ),
+            ),
+            if (!isChapterNotExist) ...[
+              const SizedBox(height: 24),
+              FilledButton.tonalIcon(
+                onPressed: () {
+                  // 清除该章节的文件缓存（可能是缓存损坏导致失败）
+                  final book = _book;
+                  final chapter = book != null &&
+                          _currentChapterIndex < _chapters.length
+                      ? _chapters[_currentChapterIndex]
+                      : null;
+                  if (book != null &&
+                      chapter != null &&
+                      chapter.url != null &&
+                      book.originType == BookOriginType.online) {
+                    unawaited(
+                      ChapterCacheService.instance
+                          .deleteChapterCache(book, chapter),
+                    );
+                  }
+                  _loadChapterContent();
+                },
+                icon: const Icon(Icons.refresh),
+                label: const Text('重试'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   // ==================== WebView Content ====================
