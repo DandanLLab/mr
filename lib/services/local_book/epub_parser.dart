@@ -1672,17 +1672,17 @@ class EpubParser {
 
     // 3. 固定 px 宽度 → 响应式
     //    - > 200px：大宽度（如 540px 视频），改为 auto（max-width:100% 由 reader 框架默认设置）
-    //    - < 100px：窄宽度（如 35px 竖排标题），改为 auto 让文字横排
-    //    - 100-200px：中等宽度，保留
+    //    - <= 200px：保留原作者意图（如 35px 竖排标题装饰、100-200px 中等宽度）
+    //      之前把 <100px 也改成 auto 是错的：破坏了原作者的窄宽度装饰意图
+    //      （如 .volume-title width:35px 是故意做窄宽度竖排标题，改成 auto 后文字横排，装饰丢失）
     if (name == 'width') {
       final match = RegExp(r'^(\d+(?:\.\d+)?)px$').firstMatch(value.trim());
       if (match != null) {
         final px = double.tryParse(match.group(1) ?? '0') ?? 0;
         if (px > 200) {
           return 'auto';
-        } else if (px < 100 && px > 0) {
-          return 'auto';
         }
+        // <= 200px 保留原作者意图（窄宽度装饰、中等宽度）
       }
       // 3b. width: 100vw / 100% → auto
       //     100vw 在 InAppWebView 中 = 设备屏幕宽度（非 widget 宽度），可能 > column 宽度

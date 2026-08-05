@@ -953,11 +953,14 @@ body.reader-scroll #reader-content-b {
 .epub-chapter-bg p:last-child { margin-bottom: 0; }
 
 /* 8. 标题样式：只提供 font-weight:bold（兜底，EPUB 原作者一般也会设 bold），
-   不覆盖 margin/font-family/font-size/color 等，
+   不覆盖 margin/font-family/font-size/color/line-height 等，
    让 EPUB 原作者 h3.chapter-title { margin:1em 0 2.5em; font-family:"fzjt";
-   font-size:1.6em; color:#272729 } 正常生效。
+   font-size:1.6em; color:#272729; line-height:1.2em } 正常生效。
    用 .epub-chapter-bg（class 选择器）而非 #reader-content-a（ID 选择器），
-   避免 ID 选择器优先级过高覆盖 EPUB CSS。 */
+   避免 ID 选择器优先级过高覆盖 EPUB CSS。
+   关键修复：移除 line-height:var(--reader-line-height)，
+   之前会覆盖原作者的 line-height（如 .volume-title 的 1.2em），
+   破坏原作者的排版意图 */
 .epub-chapter-bg h1,
 .epub-chapter-bg h2,
 .epub-chapter-bg h3,
@@ -965,13 +968,15 @@ body.reader-scroll #reader-content-b {
 .epub-chapter-bg h5,
 .epub-chapter-bg h6 {
   font-weight: bold;
-  line-height: var(--reader-line-height);
+  /* 不设 line-height，让 EPUB 原作者的 line-height 生效 */
 }
 
-/* 8a. 标题窄宽度兜底：EPUB 原作者常用固定窄宽度做竖排标题（如 width:35px），
-   在 column 分栏里会让文字挤成一团或溢出。这里用 max-width 兜底，
-   让窄宽度标题自动放宽到容器宽度，文字横排显示。
-   通用规则：所有 h1-h6 的 max-width 至少 100%，覆盖 EPUB 的固定窄宽度 */
+/* 8a. 标题 max-width 兜底：防止 EPUB 原作者的固定宽度标题溢出 column
+   - max-width:100% 只限制最大宽度，不改变 width
+   - 原作者的 width:35px（窄宽度竖排标题）仍生效，max-width:100% 不影响
+   - 原作者的 width:540px（已被 EpubParser 改为 auto）由 max-width:100% 兜底
+   - 之前注释说"让窄宽度标题自动放宽到容器宽度"是错的：
+     max-width:100% 不会把 35px 变成 100%，只会限制最大不超过 100% */
 #reader-content-a h1,
 #reader-content-a h2,
 #reader-content-a h3 {
