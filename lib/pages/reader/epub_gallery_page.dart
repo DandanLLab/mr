@@ -102,18 +102,24 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
 
   /// 点击图片弹出全屏预览
   ///
+  /// 进入动画：ScaleTransition(0.85→1.0) + FadeTransition，配合 Hero 图片过渡，
+  /// 让图片从画廊小图平滑放大到全屏大图。
+  ///
   /// 全屏预览支持：
-  /// - PageView 横向滑动切换图片
+  /// - PageView 横向滑动切换图片（预加载相邻图片避免白屏）
   /// - InteractiveViewer 双指缩放（1-4x）+ 拖动查看细节
-  /// - 右下角信息面板（AnimatedSwitcher 淡入淡出）
+  /// - 右下角信息面板（AnimatedSwitcher 淡入淡出 + 上滑动画）
   /// - 双击切换缩放（1.0 ↔ 2.5）
-  /// - 点击空白关闭
+  /// - Hero 动画：图片从小图放大到全屏的平滑过渡
   void _showFullScreenPreview(int initialIndex) {
     Navigator.of(context).push(
       PageRouteBuilder<void>(
         opaque: false,
-        barrierColor: Colors.black87,
-        transitionDuration: const Duration(milliseconds: 200),
+        barrierColor: Colors.black,
+        // 进入 300ms（比默认 200ms 稍慢，让 Hero + Scale 动画更丝滑）
+        // 退出 250ms（退出稍快，避免拖沓）
+        transitionDuration: const Duration(milliseconds: 300),
+        reverseTransitionDuration: const Duration(milliseconds: 250),
         pageBuilder: (context, animation, secondaryAnimation) {
           return _GalleryFullScreenViewer(
             images: widget.images,
@@ -121,7 +127,23 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
           );
         },
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(opacity: animation, child: child);
+          // Scale + Fade 组合：图片从 0.92 缩放到 1.0，同时淡入
+          // 配合 Hero 动画，视觉上是"图片从小变大展开"的效果
+          final scaleAnimation = Tween<double>(
+            begin: 0.92,
+            end: 1.0,
+          ).animate(CurvedAnimation(
+            parent: animation,
+            // easeOutCubic：开始快、结束慢，符合自然减速感
+            curve: Curves.easeOutCubic,
+          ));
+          return FadeTransition(
+            opacity: animation,
+            child: ScaleTransition(
+              scale: scaleAnimation,
+              child: child,
+            ),
+          );
         },
       ),
     );
@@ -224,6 +246,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
           final image = widget.images[index];
           return _GalleryImageItem(
             image: image,
+            index: index,
             textColor: widget.textColor,
             onTap: () => _showFullScreenPreview(index),
           );
@@ -234,13 +257,22 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
 }
 
 /// 单张画廊图片 item
+///
+/// 非全屏模式下的画廊图片展示。标题样式对齐原作者 CSS：
+/// - maintitle: 黑体风格、90% 字号、#1F4150 色、居中、margin-top 1em
+/// - subtitle: 细黑体风格、70% 字号、#3A3348 色、居中、margin-top 1em
+///
+/// 图片用 Hero 包裹（tag: gallery_image_$index），与全屏预览的 Hero 配对，
+/// 实现点击图片时从小图平滑放大到全屏大图的过渡动画。
 class _GalleryImageItem extends StatelessWidget {
   final EpubGalleryImage image;
+  final int index;
   final Color textColor;
   final VoidCallback onTap;
 
   const _GalleryImageItem({
     required this.image,
+    required this.index,
     required this.textColor,
     required this.onTap,
   });
@@ -266,23 +298,25 @@ class _GalleryImageItem extends StatelessWidget {
                     if (image.maintitle.isNotEmpty)
                       Text(
                         image.maintitle,
-                        style: TextStyle(
-                          color: textColor,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
+                        // 使用从 EPUB CSS 提取的原作者样式，
+                        // 缺失时用兜底样式（黑体风格、居中）
+                        style: _buildMaintitleStyle(),
+                        textAlign: _resolveTextAlign(
+                          image.maintitleStyle?.textAlign,
+                          TextAlign.center,
                         ),
-                        textAlign: TextAlign.center,
                       ),
                     if (image.subtitle.isNotEmpty) ...[
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 6),
                       Text(
                         image.subtitle,
-                        style: TextStyle(
-                          color: textColor.withValues(alpha: 0.7),
-                          fontSize: 12,
-                          height: 1.4,
+                        // 使用从 EPUB CSS 提取的原作者样式，
+                        // 缺失时用兜底样式（细黑体风格、居中）
+                        style: _buildSubtitleStyle(),
+                        textAlign: _resolveTextAlign(
+                          image.subtitleStyle?.textAlign,
+                          TextAlign.center,
                         ),
-                        textAlign: TextAlign.center,
                       ),
                     ],
                   ],
@@ -294,12 +328,97 @@ class _GalleryImageItem extends StatelessWidget {
     );
   }
 
-  /// 根据图片 src 类型选择渲染方式
+  /// 构建 maintitle 的 TextStyle
   ///
-  /// - data: URI → Image.memory（base64 解码）
-  /// - 本地路径 → Image.file
-  /// - 其他（http/file://）→ Image.network 兜底
+  /// 优先使用从 EPUB CSS 提取的原作者样式（字号/颜色/字重/行高），
+  /// 缺失的属性用兜底值。字号 em 乘以基础字号 16px 得到实际 px。
+  TextStyle _buildMaintitleStyle() {
+    final style = image.maintitleStyle;
+    // 基础字号 16px（与 EPUB 根字号一致）
+    const baseFontSize = 16.0;
+    // 兜底：0.9em（对齐多看 .duokan-image-maintitle 默认字号）
+    final fontSizeEm = style?.fontSizeEm ?? 0.9;
+    // 兜底：深色背景用阅读器 textColor，浅色背景用 #1F4150
+    final color = style?.color != null
+        ? Color(style!.color!)
+        : (_isLightBg(textColor)
+            ? const Color(0xFF1F4150)
+            : textColor);
+    // 兜底：w600（对齐黑体风格）
+    final fontWeight = style?.fontWeight != null
+        ? FontWeight.values[(style!.fontWeight! / 100).round().clamp(0, 8)]
+        : FontWeight.w600;
+    // 兜底：1.25
+    final height = style?.lineHeight ?? 1.25;
+
+    return TextStyle(
+      color: color,
+      fontSize: fontSizeEm * baseFontSize,
+      fontWeight: fontWeight,
+      height: height,
+    );
+  }
+
+  /// 构建 subtitle 的 TextStyle
+  TextStyle _buildSubtitleStyle() {
+    final style = image.subtitleStyle;
+    const baseFontSize = 16.0;
+    // 兜底：0.7em（对齐多看 .duokan-image-subtitle 默认字号）
+    final fontSizeEm = style?.fontSizeEm ?? 0.7;
+    final color = style?.color != null
+        ? Color(style!.color!)
+        : (_isLightBg(textColor)
+            ? const Color(0xFF3A3348)
+            : textColor.withValues(alpha: 0.7));
+    // 兜底：w400
+    final fontWeight = style?.fontWeight != null
+        ? FontWeight.values[(style!.fontWeight! / 100).round().clamp(0, 8)]
+        : FontWeight.w400;
+    // 兜底：1.5
+    final height = style?.lineHeight ?? 1.5;
+
+    return TextStyle(
+      color: color,
+      fontSize: fontSizeEm * baseFontSize,
+      fontWeight: fontWeight,
+      height: height,
+    );
+  }
+
+  /// 将 CSS text-align 值转为 Flutter TextAlign
+  TextAlign _resolveTextAlign(String? cssAlign, TextAlign fallback) {
+    switch (cssAlign) {
+      case 'left':
+        return TextAlign.left;
+      case 'right':
+        return TextAlign.right;
+      case 'justify':
+        return TextAlign.justify;
+      case 'center':
+        return TextAlign.center;
+      default:
+        return fallback;
+    }
+  }
+
+  /// 判断当前背景是否为浅色（用于决定兜底文字色）
+  bool _isLightBg(Color textColor) {
+    // textColor 是阅读器的文字色，浅色背景 → 深色文字 → luminance 低
+    // 深色背景 → 浅色文字 → luminance 高
+    // 所以 textColor luminance 低 = 浅色背景 = 用原作者深色
+    return textColor.computeLuminance() < 0.5;
+  }
+
+  /// 构建图片，用 Hero 包裹实现全屏过渡动画
   Widget _buildImage() {
+    return Hero(
+      tag: 'gallery_image_$index',
+      child: _buildRawImage(),
+    );
+  }
+
+  /// 根据图片 src 类型选择渲染方式
+  Widget _buildRawImage() {
     final src = image.src;
     if (src.startsWith('data:')) {
       final bytes = _decodeDataUri(src);
@@ -312,7 +431,6 @@ class _GalleryImageItem extends StatelessWidget {
       }
       return _buildError();
     }
-    // 本地绝对路径（解压模式）或 file:// URI
     final filePath = src.startsWith('file://') ? src.substring(7) : src;
     if (filePath.contains('/') || filePath.contains('\\')) {
       return Image.file(
@@ -322,7 +440,6 @@ class _GalleryImageItem extends StatelessWidget {
         errorBuilder: (_, __, ___) => _buildError(),
       );
     }
-    // 兜底：当作 URL
     return Image.network(
       src,
       fit: BoxFit.contain,
@@ -331,10 +448,8 @@ class _GalleryImageItem extends StatelessWidget {
     );
   }
 
-  /// 解析 data: URI 为字节
   Uint8List? _decodeDataUri(String dataUri) {
     try {
-      // data:image/jpeg;base64,<...>
       final commaIdx = dataUri.indexOf(',');
       if (commaIdx < 0) return null;
       final base64Data = dataUri.substring(commaIdx + 1);
@@ -362,13 +477,18 @@ class _GalleryImageItem extends StatelessWidget {
 ///
 /// 交互设计：
 /// - PageView 横向滑动切换图片（scale == 1.0 时启用）
+///   - BouncingScrollPhysics：iOS 风格弹性滑动，更顺滑
+///   - 预加载相邻图片：initState 中 precacheImage 前后图片
+///   - KeepAlive：子页面保持状态，避免重建和重新解码
 /// - InteractiveViewer 双指缩放（1-4x）+ 拖动查看细节（scale > 1.0 时）
 /// - 双击切换缩放（1.0 ↔ 2.5x），缩放后双击复位
+/// - Hero 动画：当前页图片用 Hero 包裹，与画廊页 Hero 配对
+///   - 只有当前页有 Hero，避免与画廊页多个 Hero tag 冲突
 /// - 右下角信息面板（AnimatedSwitcher 淡入淡出 + 上滑动画）
+///   - easeInOutCubicEmphasized：更柔和的动画曲线
 ///   - 大标题：18px FontWeight.w600
 ///   - 副标题：13px FontWeight.w400 半透明
 /// - 顶部页码指示器 + 关闭按钮
-/// - 点击关闭按钮关闭
 class _GalleryFullScreenViewer extends StatefulWidget {
   final List<EpubGalleryImage> images;
   final int initialIndex;
@@ -395,6 +515,8 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: _currentIndex);
     _transformCtrl = TransformationController();
+    // 预加载相邻图片，避免滑动时白屏等待
+    _precacheAdjacentImages(_currentIndex);
   }
 
   @override
@@ -402,6 +524,47 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
     _pageController.dispose();
     _transformCtrl.dispose();
     super.dispose();
+  }
+
+  /// 预加载相邻图片（前一张和后一张）
+  ///
+  /// 在切换页面前预先解码图片，滑动时直接显示已缓存的图片，
+  /// 避免白屏等待。使用 WidgetsBinding.instance.addPostFrameCallback
+  /// 确保在帧绘制后执行，不阻塞当前帧。
+  void _precacheAdjacentImages(int index) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final context = this.context;
+      // 前一张
+      if (index > 0) {
+        final provider = _getImageProvider(widget.images[index - 1]);
+        if (provider != null) {
+          precacheImage(provider, context);
+        }
+      }
+      // 后一张
+      if (index < widget.images.length - 1) {
+        final provider = _getImageProvider(widget.images[index + 1]);
+        if (provider != null) {
+          precacheImage(provider, context);
+        }
+      }
+    });
+  }
+
+  /// 根据图片 src 获取 ImageProvider（用于 precacheImage）
+  ImageProvider? _getImageProvider(EpubGalleryImage image) {
+    final src = image.src;
+    if (src.startsWith('data:')) {
+      final bytes = _decodeDataUri(src);
+      if (bytes != null) return MemoryImage(bytes);
+      return null;
+    }
+    final filePath = src.startsWith('file://') ? src.substring(7) : src;
+    if (filePath.contains('/') || filePath.contains('\\')) {
+      return FileImage(File(filePath));
+    }
+    return NetworkImage(src);
   }
 
   /// 重置缩放到 1.0
@@ -426,6 +589,8 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
     // 切换页时重置缩放，避免上一页的缩放状态影响下一页
     _resetZoom();
     setState(() => _currentIndex = index);
+    // 预加载新的相邻图片
+    _precacheAdjacentImages(index);
   }
 
   @override
@@ -441,11 +606,12 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
             onPageChanged: _onPageChanged,
             // scale > 1.0 时禁用 PageView 滑动，让 InteractiveViewer 处理拖动
             // scale == 1.0 时启用 PageView 滑动切换图片
+            // PageScrollPhysics：保持分页吸附效果，滑动结束自动对齐到页边界
             physics: _currentScale > 1.05
                 ? const NeverScrollableScrollPhysics()
                 : const PageScrollPhysics(),
             itemBuilder: (context, index) {
-              return _buildZoomableImage(widget.images[index]);
+              return _buildZoomableImage(widget.images[index], index);
             },
           ),
           // 顶部：页码指示器 + 关闭按钮
@@ -459,25 +625,36 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
 
   /// 构建可缩放的单张图片
   ///
-  /// GestureDetector 检测双击缩放，InteractiveViewer 处理双指缩放和拖动。
-  /// HitTestBehavior.opaque 让图片区域吸收点击，防止穿透到下层。
-  Widget _buildZoomableImage(EpubGalleryImage image) {
-    return GestureDetector(
-      onDoubleTap: _onDoubleTap,
-      behavior: HitTestBehavior.opaque,
-      child: Center(
-        child: InteractiveViewer(
-          transformationController: _transformCtrl,
-          minScale: 1.0,
-          maxScale: 4.0,
-          boundaryMargin: const EdgeInsets.all(double.infinity),
-          onInteractionEnd: (_) {
-            final scale = _transformCtrl.value.getMaxScaleOnAxis();
-            if ((scale - _currentScale).abs() > 0.01) {
-              setState(() => _currentScale = scale);
-            }
-          },
-          child: _buildImage(image),
+  /// - AutomaticKeepAliveClientMixin：保持页面状态，避免滑出视图后被销毁
+  /// - GestureDetector 检测双击缩放
+  /// - InteractiveViewer 处理双指缩放和拖动
+  /// - Hero 包裹当前页图片（tag: gallery_image_$index），与画廊页 Hero 配对
+  ///   只有当前显示的页面才有 Hero，避免与画廊页多个 Hero tag 冲突
+  Widget _buildZoomableImage(EpubGalleryImage image, int index) {
+    return _KeepAliveImage(
+      child: GestureDetector(
+        onDoubleTap: _onDoubleTap,
+        behavior: HitTestBehavior.opaque,
+        child: Center(
+          child: InteractiveViewer(
+            transformationController: _transformCtrl,
+            minScale: 1.0,
+            maxScale: 4.0,
+            boundaryMargin: const EdgeInsets.all(double.infinity),
+            onInteractionEnd: (_) {
+              final scale = _transformCtrl.value.getMaxScaleOnAxis();
+              if ((scale - _currentScale).abs() > 0.01) {
+                setState(() => _currentScale = scale);
+              }
+            },
+            // 只有当前页用 Hero 包裹，避免多 Hero tag 冲突
+            child: index == _currentIndex
+                ? Hero(
+                    tag: 'gallery_image_$index',
+                    child: _buildImage(image),
+                  )
+                : _buildImage(image),
+          ),
         ),
       ),
     );
@@ -544,6 +721,7 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
   /// 右下角信息面板
   ///
   /// 使用 AnimatedSwitcher 在切换图片时实现淡入淡出 + 上滑动画。
+  /// easeInOutCubicEmphasized：比 easeOutCubic 更柔和，有"弹性"感。
   /// 大标题用大字号粗体，副标题用小字号常规。
   Widget _buildInfoPanel() {
     final image = widget.images[_currentIndex];
@@ -571,15 +749,16 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
             ),
           ),
           child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 300),
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeInCubic,
+            duration: const Duration(milliseconds: 350),
+            // easeInOutCubicEmphasized：Material 3 推荐曲线，比 easeOutCubic 更柔和
+            switchInCurve: Curves.easeInOutCubicEmphasized,
+            switchOutCurve: Curves.easeInOutCubicEmphasized.flipped,
             transitionBuilder: (child, animation) {
               return FadeTransition(
                 opacity: animation,
                 child: SlideTransition(
                   position: Tween<Offset>(
-                    begin: const Offset(0, 0.4),
+                    begin: const Offset(0, 0.3),
                     end: Offset.zero,
                   ).animate(animation),
                   child: child,
@@ -594,25 +773,22 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
                 if (image.maintitle.isNotEmpty)
                   Text(
                     image.maintitle,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      height: 1.3,
+                    // 全屏预览用白色系（黑底），但保留原作者字号/字重/行高
+                    style: _buildFullScreenMaintitleStyle(image.maintitleStyle),
+                    textAlign: _resolveTextAlign(
+                      image.maintitleStyle?.textAlign,
+                      TextAlign.right,
                     ),
-                    textAlign: TextAlign.right,
                   ),
                 if (image.subtitle.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Text(
                     image.subtitle,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.85),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w400,
-                      height: 1.5,
+                    style: _buildFullScreenSubtitleStyle(image.subtitleStyle),
+                    textAlign: _resolveTextAlign(
+                      image.subtitleStyle?.textAlign,
+                      TextAlign.right,
                     ),
-                    textAlign: TextAlign.right,
                   ),
                 ],
               ],
@@ -664,5 +840,85 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
     } catch (_) {
       return null;
     }
+  }
+
+  /// 全屏预览的 maintitle 样式
+  ///
+  /// 黑底白字，但保留原作者的字号/字重/行高。
+  /// 字号放大 1.2 倍（全屏预览比画廊小图更大），上限 24px。
+  TextStyle _buildFullScreenMaintitleStyle(EpubGalleryTextStyle? style) {
+    const baseFontSize = 16.0;
+    final fontSizeEm = style?.fontSizeEm ?? 0.9;
+    // 全屏放大 1.2 倍，上限 24px
+    final fontSize = (fontSizeEm * baseFontSize * 1.2).clamp(14.0, 24.0);
+    final fontWeight = style?.fontWeight != null
+        ? FontWeight.values[(style!.fontWeight! / 100).round().clamp(0, 8)]
+        : FontWeight.w600;
+    final height = style?.lineHeight ?? 1.3;
+    return TextStyle(
+      color: Colors.white,
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      height: height,
+    );
+  }
+
+  /// 全屏预览的 subtitle 样式
+  TextStyle _buildFullScreenSubtitleStyle(EpubGalleryTextStyle? style) {
+    const baseFontSize = 16.0;
+    final fontSizeEm = style?.fontSizeEm ?? 0.7;
+    // 全屏放大 1.2 倍，上限 18px
+    final fontSize = (fontSizeEm * baseFontSize * 1.2).clamp(11.0, 18.0);
+    final fontWeight = style?.fontWeight != null
+        ? FontWeight.values[(style!.fontWeight! / 100).round().clamp(0, 8)]
+        : FontWeight.w400;
+    final height = style?.lineHeight ?? 1.5;
+    return TextStyle(
+      color: Colors.white.withValues(alpha: 0.85),
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      height: height,
+    );
+  }
+
+  /// 将 CSS text-align 值转为 Flutter TextAlign
+  TextAlign _resolveTextAlign(String? cssAlign, TextAlign fallback) {
+    switch (cssAlign) {
+      case 'left':
+        return TextAlign.left;
+      case 'right':
+        return TextAlign.right;
+      case 'justify':
+        return TextAlign.justify;
+      case 'center':
+        return TextAlign.center;
+      default:
+        return fallback;
+    }
+  }
+}
+
+/// 保持 PageView 子页面状态的包装组件
+///
+/// AutomaticKeepAliveClientMixin 让 PageView 子页面在滑出视图后不被销毁，
+/// 避免重新构建和重新解码图片。这对大图画廊尤为重要，能显著提升滑动流畅度。
+class _KeepAliveImage extends StatefulWidget {
+  final Widget child;
+
+  const _KeepAliveImage({required this.child});
+
+  @override
+  State<_KeepAliveImage> createState() => _KeepAliveImageState();
+}
+
+class _KeepAliveImageState extends State<_KeepAliveImage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }

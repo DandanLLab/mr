@@ -160,6 +160,10 @@ class EpubChapter {
 /// 对应 `.duokan-image-gallery-cell` 内的一张图片及其标题/副标题。
 /// 由 [EpubParser.parseFromBytes] 在解析时提取，阅读时传给
 /// [EpubGalleryPage] 渲染。
+///
+/// 标题样式由 [EpubGalleryTextStyle] 承载，从 EPUB 自带 CSS 中提取
+/// `.duokan-image-maintitle` / `.duokan-image-subtitle` 的样式规则。
+/// 不同作者可能用不同字号/颜色/字体，这里保留原作样式而非硬编码。
 class EpubGalleryImage {
   /// 图片 src（已解析为本地绝对路径或 data: URI）
   /// - 解压模式：`<extractedBasePath>/OEBPS/Images/01.jpg`
@@ -172,10 +176,48 @@ class EpubGalleryImage {
   /// 副标题（`p.duokan-image-subtitle` 文本，可能为空）
   final String subtitle;
 
+  /// 主标题样式（从 EPUB CSS 提取，null 时用兜底样式）
+  final EpubGalleryTextStyle? maintitleStyle;
+
+  /// 副标题样式（从 EPUB CSS 提取，null 时用兜底样式）
+  final EpubGalleryTextStyle? subtitleStyle;
+
   const EpubGalleryImage({
     required this.src,
     this.maintitle = '',
     this.subtitle = '',
+    this.maintitleStyle,
+    this.subtitleStyle,
+  });
+}
+
+/// 画廊标题样式（从 EPUB CSS 提取）
+///
+/// 不同 EPUB 作者对 `.duokan-image-maintitle` / `.duokan-image-subtitle`
+/// 可能用不同字号、颜色、字体、对齐方式。这里保留原作样式规则，
+/// 让 Flutter 端渲染时尽量贴近原作者排版意图。
+class EpubGalleryTextStyle {
+  /// 字号（em，相对单位，需乘以阅读器基础字号）
+  final double? fontSizeEm;
+
+  /// 字体颜色（ARGB int，如 0xFF336633）
+  final int? color;
+
+  /// 字重（CSS font-weight：100-900，常见 400=regular/700=bold）
+  final int? fontWeight;
+
+  /// 文字对齐（left/center/right/justify）
+  final String? textAlign;
+
+  /// 行高（em）
+  final double? lineHeight;
+
+  const EpubGalleryTextStyle({
+    this.fontSizeEm,
+    this.color,
+    this.fontWeight,
+    this.textAlign,
+    this.lineHeight,
   });
 }
 
@@ -486,9 +528,11 @@ class EpubParser {
           //    画廊章节含横向滑动图片列表，WebView 的 column 分页无法正确处理，
           //    改由 Flutter PageView 接管渲染。这里在解析时提取每个 cell 的
           //    图片 src、主标题、副标题，阅读时直接传给 EpubGalleryPage。
+          //    同时从 EPUB CSS 提取 .duokan-image-maintitle/.duokan-image-subtitle
+          //    的样式规则，让 Flutter 端渲染时贴近原作者排版（不同作者样式不同）。
           //    识别后仍保留 richContent（兜底，便于调试或未来回退方案）。
           final galleryImages = _extractGalleryImages(
-            richBody, extractedBasePath, chapterBasePath,
+            richBody, extractedBasePath, chapterBasePath, epubCss,
           );
           if (galleryImages.isNotEmpty) {
             chapter.isGallery = true;
@@ -1278,15 +1322,28 @@ class EpubParser {
   /// [extractedBasePath] 解压模式时为根目录，内嵌模式时为空字符串
   /// [chapterBasePath] 章节文件所在目录（用于解析相对路径，带末尾 `/`）
   ///
+  /// [epubCss] 为 EPUB 自带 CSS（已结构化处理），用于提取
+  /// `.duokan-image-maintitle` / `.duokan-image-subtitle` 的样式规则，
+  /// 让 Flutter 端渲染时贴近原作者排版（不同作者样式不同）。
+  ///
   /// 返回空列表表示该章节不是画廊页（无 cell 或 cell 数量 < 2）
   static List<EpubGalleryImage> _extractGalleryImages(
     String richBody,
     String extractedBasePath,
     String? chapterBasePath,
+    String epubCss,
   ) {
     try {
       final doc = html_parser.parse(richBody);
       final cells = doc.querySelectorAll('.duokan-image-gallery-cell');
+
+      // 从 EPUB CSS 提取标题样式（所有 cell 共享同一套类样式）
+      final maintitleStyle = _extractGalleryTextStyle(
+        epubCss, '.duokan-image-maintitle',
+      );
+      final subtitleStyle = _extractGalleryTextStyle(
+        epubCss, '.duokan-image-subtitle',
+      );
 
       // 标准 multi-cell 画廊：每个 cell 含一张 img + 可选标题
       // 单图不算画廊（按魔改阅读 markEpubGalleryPage 的 images.size < 2 判断）
@@ -1337,6 +1394,8 @@ class EpubParser {
           src: src,
           maintitle: maintitle,
           subtitle: subtitle,
+          maintitleStyle: maintitleStyle,
+          subtitleStyle: subtitleStyle,
         ));
       }
       return result.length >= 2 ? result : const [];
@@ -1344,6 +1403,153 @@ class EpubParser {
       debugPrint('[EPUB诊断] 画廊图片提取失败: $e');
       return const [];
     }
+  }
+
+  /// 从 EPUB CSS 中提取指定选择器的文字样式
+  ///
+  /// 解析 `.duokan-image-maintitle` / `.duokan-image-subtitle` 等类选择器
+  /// 的 font-size / color / font-weight / text-align / line-height 规则，
+  /// 用于 Flutter 端 Text 渲染。
+  ///
+  /// 示例 CSS：
+  /// ```
+  /// .duokan-image-maintitle {
+  ///   margin: 1em auto -0.5em auto;
+  ///   font-family: "DK-HEITI","ht",sans-serif;
+  ///   font-size: 0.9em;
+  ///   color: #336633;
+  ///   text-align: center;
+  /// }
+  /// ```
+  ///
+  /// 返回 null 表示未找到该选择器或解析失败，调用方用兜底样式。
+  static EpubGalleryTextStyle? _extractGalleryTextStyle(
+    String css, String selector,
+  ) {
+    try {
+      // 匹配 selector { ... } 块（支持选择器后有空格/换行）
+      final blockPattern = RegExp(
+        RegExp.escape(selector) + r'\s*\{([^}]*)\}',
+      );
+      final match = blockPattern.firstMatch(css);
+      if (match == null) return null;
+      final body = match.group(1) ?? '';
+
+      double? fontSizeEm;
+      int? color;
+      int? fontWeight;
+      String? textAlign;
+      double? lineHeight;
+
+      // font-size: 0.9em / 14px / 90% → 统一转 em
+      final fsMatch = RegExp(r'font-size\s*:\s*([\d.]+)(em|px|%)').firstMatch(body);
+      if (fsMatch != null) {
+        final value = double.tryParse(fsMatch.group(1) ?? '');
+        final unit = fsMatch.group(2);
+        if (value != null && unit != null) {
+          if (unit == 'em') {
+            fontSizeEm = value;
+          } else if (unit == 'px') {
+            // 16px ≈ 1em（假设根字号 16px）
+            fontSizeEm = value / 16;
+          } else if (unit == '%') {
+            fontSizeEm = value / 100;
+          }
+        }
+      }
+
+      // color: #336633 / #336 / rgb(51,102,51) / red
+      final colorMatch = RegExp(r'color\s*:\s*(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|[a-zA-Z]+)').firstMatch(body);
+      if (colorMatch != null) {
+        color = _parseCssColor(colorMatch.group(1) ?? '');
+      }
+
+      // font-weight: bold / 400 / 700
+      final fwMatch = RegExp(r'font-weight\s*:\s*(bold|normal|\d{3})').firstMatch(body);
+      if (fwMatch != null) {
+        final fw = fwMatch.group(1);
+        if (fw == 'bold') {
+          fontWeight = 700;
+        } else if (fw == 'normal') {
+          fontWeight = 400;
+        } else {
+          fontWeight = int.tryParse(fw ?? '');
+        }
+      }
+
+      // text-align: center / left / right / justify
+      final taMatch = RegExp(r'text-align\s*:\s*(left|center|right|justify)').firstMatch(body);
+      if (taMatch != null) {
+        textAlign = taMatch.group(1);
+      }
+
+      // line-height: 1.35em / 1.5 / 24px
+      final lhMatch = RegExp(r'line-height\s*:\s*([\d.]+)(em|px)?').firstMatch(body);
+      if (lhMatch != null) {
+        final value = double.tryParse(lhMatch.group(1) ?? '');
+        if (value != null) {
+          // 无单位或 em 都按 em 处理（无单位时值本身就是倍数）
+          lineHeight = value;
+        }
+      }
+
+      // 至少有一个属性才返回，否则 null（用兜底）
+      if (fontSizeEm == null &&
+          color == null &&
+          fontWeight == null &&
+          textAlign == null &&
+          lineHeight == null) {
+        return null;
+      }
+      return EpubGalleryTextStyle(
+        fontSizeEm: fontSizeEm,
+        color: color,
+        fontWeight: fontWeight,
+        textAlign: textAlign,
+        lineHeight: lineHeight,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 解析 CSS 颜色值为 ARGB int
+  ///
+  /// 支持：#RGB / #RRGGBB / #RRGGBBAA / rgb(r,g,b) / 常见颜色名
+  static int? _parseCssColor(String value) {
+    final v = value.trim();
+    if (v.startsWith('#')) {
+      final hex = v.substring(1);
+      if (hex.length == 3) {
+        // #RGB → #RRGGBB
+        final r = hex[0];
+        final g = hex[1];
+        final b = hex[2];
+        final expanded = '$r$r$g$g$b$b';
+        return 0xFF000000 | int.parse(expanded, radix: 16);
+      } else if (hex.length == 6) {
+        return 0xFF000000 | int.parse(hex, radix: 16);
+      } else if (hex.length == 8) {
+        return int.parse(hex, radix: 16);
+      }
+    } else if (v.startsWith('rgb(')) {
+      final nums = RegExp(r'(\d+)').allMatches(v).map((m) => int.parse(m.group(1)!)).toList();
+      if (nums.length >= 3) {
+        return 0xFF000000 | (nums[0] << 16) | (nums[1] << 8) | nums[2];
+      }
+    }
+    // 常见颜色名
+    const named = <String, int>{
+      'black': 0xFF000000,
+      'white': 0xFFFFFFFF,
+      'red': 0xFFFF0000,
+      'green': 0xFF008000,
+      'blue': 0xFF0000FF,
+      'yellow': 0xFFFFFF00,
+      'gray': 0xFF808080,
+      'grey': 0xFF808080,
+    };
+    return named[v.toLowerCase()];
   }
 
   /// 解析画廊图片 src 到可访问形式
