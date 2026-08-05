@@ -688,6 +688,27 @@ body.reader-scroll #reader-content-b {
    - break-inside: avoid 防止被分页切断（视频页/卷头页/序号页等整页显示）
    - background-attachment 的 fixed 已在 EpubParser 通用修正为 scroll
    关键：column-break-inside:avoid 防止容器被 column 布局切分到多列（多页） */
+
+/* 4-0. 关键修复：EPUB 模式下 HTML 结构是
+   #reader-content-a (column 容器)
+     └ div[data-chapter-index] (column 直接子元素 ← 这里！)
+         └ div.epub-chapter-bg (孙子元素)
+
+   CSS 的 break-inside / column-break-inside / min-height 只对 column
+   **直接子元素**生效。.epub-chapter-bg 是孙子元素，4a 设的 break-inside
+   和 min-height 对它无效——背景容器会被 column 布局切分，背景铺不满！
+
+   修复：给 column 直接子元素 div[data-chapter-index] 也加同样的
+   min-height + break-inside:avoid，让它成为不可切分的整页单元。
+   非 EPUB 模式下没有 [data-chapter-index] 包裹（段落直接是 column 子元素），
+   此选择器不匹配，无副作用。 */
+#reader-content-a > [data-chapter-index] {
+  min-height: var(--reader-safe-height);
+  break-inside: avoid;
+  column-break-inside: avoid;
+  page-break-inside: avoid;
+}
+
 #reader-content-a .epub-chapter-bg {
   min-height: var(--reader-safe-height);
   box-sizing: border-box;
