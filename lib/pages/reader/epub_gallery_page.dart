@@ -27,6 +27,11 @@ class EpubGalleryPage extends StatefulWidget {
   final Color backgroundColor;
   final Color textColor;
 
+  /// 阅读器基础字号（px），作为 EPUB CSS em 值的基准
+  /// 原作者 CSS 用 em 单位（如 font-size: 1.5em），em 相对当前字号，
+  /// 这里传入阅读器的 provider.fontSize 让 em 计算与阅读器一致
+  final double baseFontSize;
+
   /// 画廊章节级样式（背景图、gallery-title、cell 边框阴影、gallery-txt 等）
   /// 从 EPUB CSS 提取，null 时用兜底样式（白底 + 无标题）
   final EpubGalleryChapterStyle? chapterStyle;
@@ -46,6 +51,7 @@ class EpubGalleryPage extends StatefulWidget {
     required this.chapterTitle,
     required this.backgroundColor,
     required this.textColor,
+    this.baseFontSize = 18.0,
     this.chapterStyle,
     this.initialPageToEnd = false,
     required this.onPreviousChapter,
@@ -272,7 +278,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   /// text-align center, text-shadow 0 1 1px #fff, margin 2em auto
   Widget _buildGalleryTitle() {
     final style = widget.chapterStyle?.galleryTitleStyle;
-    const baseFontSize = 16.0;
+    final baseFontSize = widget.baseFontSize;
     final fontSizeEm = style?.fontSizeEm ?? 1.5;
     // 浅色背景用深色文字，深色背景用浅色文字（兜底）
     final isLightBg = _isLightBg(widget.textColor);
@@ -283,11 +289,13 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
         ? FontWeight.values[(style!.fontWeight! / 100).round().clamp(0, 8)]
         : FontWeight.bold;
     final height = style?.lineHeight ?? 1.2;
+    // margin: 2em auto → 上下各 2em（相对 baseFontSize）
+    const marginEm = 2.0;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(
+      padding: EdgeInsets.symmetric(
         horizontal: DesignTokens.spacingMd,
-        vertical: DesignTokens.spacingSm,
+        vertical: marginEm * baseFontSize,
       ),
       child: Text(
         widget.chapterStyle!.galleryTitle!,
@@ -315,10 +323,10 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
 
   /// 构建 gallery-txt：还原作者 <p class="gallery-txt"> 样式
   /// 原作者 CSS：font-family ht, font-size 0.7em, text-align center,
-  /// text-indent 0, text-shadow 0 1 1px #fff
+  /// text-indent 0, text-shadow 0 1 1px #fff, margin 1em auto
   Widget _buildGalleryTxt() {
     final style = widget.chapterStyle?.galleryTxtStyle;
-    const baseFontSize = 16.0;
+    final baseFontSize = widget.baseFontSize;
     final fontSizeEm = style?.fontSizeEm ?? 0.7;
     final isLightBg = _isLightBg(widget.textColor);
     final color = style?.color != null
@@ -328,11 +336,13 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
         ? FontWeight.values[(style!.fontWeight! / 100).round().clamp(0, 8)]
         : FontWeight.w400;
     final height = style?.lineHeight ?? 1.5;
+    // margin: 1em auto → 上下各 1em（相对 baseFontSize）
+    const marginEm = 1.0;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(
+      padding: EdgeInsets.symmetric(
         horizontal: DesignTokens.spacingMd,
-        vertical: DesignTokens.spacingXs,
+        vertical: marginEm * baseFontSize,
       ),
       child: Text(
         widget.chapterStyle!.galleryTxt!,
@@ -350,19 +360,51 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     );
   }
 
-  /// 页码指示器（保留应用自身功能，原作者无此元素）
+  /// 页码指示器：点点点（N 张图 N 个点，当前页高亮）
+  ///
+  /// 横向排列 N 个圆点，当前页用深色高亮，其他页用浅色半透明。
+  /// 点点宽度 6px、间距 6px，紧凑不占太多底部空间。
+  /// 配合 gallery-txt 的 text-shadow 风格（0 1 1px #fff）让点在背景图上清晰可见。
   Widget _buildPageIndicator() {
+    const dotSize = 6.0;
+    const dotSpacing = 6.0;
+    final isLightBg = _isLightBg(widget.textColor);
+    final activeColor = isLightBg
+        ? const Color(0xFF1A1A1A)
+        : widget.textColor.withValues(alpha: 0.9);
+    final inactiveColor = widget.textColor.withValues(alpha: 0.3);
+
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: DesignTokens.spacingMd,
         vertical: DesignTokens.spacingXs,
       ),
-      child: Text(
-        '${_currentIndex + 1} / ${widget.images.length}',
-        style: TextStyle(
-          color: widget.textColor.withValues(alpha: 0.7),
-          fontSize: 12,
-        ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: List.generate(widget.images.length, (i) {
+          final isActive = i == _currentIndex;
+          return Container(
+            margin: EdgeInsets.symmetric(
+              horizontal: i == 0 || i == widget.images.length - 1
+                  ? 0
+                  : dotSpacing / 2,
+            ),
+            width: dotSize,
+            height: dotSize,
+            decoration: BoxDecoration(
+              color: isActive ? activeColor : inactiveColor,
+              shape: BoxShape.circle,
+              boxShadow: const [
+                BoxShadow(
+                  offset: Offset(0, 1),
+                  blurRadius: 1,
+                  color: Colors.white54,
+                ),
+              ],
+            ),
+          );
+        }),
       ),
     );
   }
@@ -415,6 +457,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
             image: image,
             index: index,
             textColor: widget.textColor,
+            baseFontSize: widget.baseFontSize,
             chapterStyle: widget.chapterStyle,
             onTap: () => _showFullScreenPreview(index),
           );
@@ -486,6 +529,9 @@ class _GalleryImageItem extends StatelessWidget {
   final Color textColor;
   final VoidCallback onTap;
 
+  /// 阅读器基础字号（px），作为 EPUB CSS em 值的基准
+  final double baseFontSize;
+
   /// 画廊章节级样式（用于 cell 边框/阴影/margin 装饰）
   final EpubGalleryChapterStyle? chapterStyle;
 
@@ -494,6 +540,7 @@ class _GalleryImageItem extends StatelessWidget {
     required this.index,
     required this.textColor,
     required this.onTap,
+    this.baseFontSize = 18.0,
     this.chapterStyle,
   });
 
@@ -643,8 +690,7 @@ class _GalleryImageItem extends StatelessWidget {
   /// 缺失的属性用兜底值。字号 em 乘以基础字号 16px 得到实际 px。
   TextStyle _buildMaintitleStyle() {
     final style = image.maintitleStyle;
-    // 基础字号 16px（与 EPUB 根字号一致）
-    const baseFontSize = 16.0;
+    final baseFontSize = this.baseFontSize;
     // 兜底：0.9em（对齐多看 .duokan-image-maintitle 默认字号）
     final fontSizeEm = style?.fontSizeEm ?? 0.9;
     // 兜底：深色背景用阅读器 textColor，浅色背景用 #1F4150
@@ -671,7 +717,7 @@ class _GalleryImageItem extends StatelessWidget {
   /// 构建 subtitle 的 TextStyle
   TextStyle _buildSubtitleStyle() {
     final style = image.subtitleStyle;
-    const baseFontSize = 16.0;
+    final baseFontSize = this.baseFontSize;
     // 兜底：0.7em（对齐多看 .duokan-image-subtitle 默认字号）
     final fontSizeEm = style?.fontSizeEm ?? 0.7;
     final color = style?.color != null
