@@ -685,32 +685,37 @@ body.reader-scroll #reader-content-b {
    .volume-first { margin: 90% auto }
    .intro-box { margin: 45% auto }
    .video-title { margin: 50% 0 1em 0 }
-   .box { margin: 0em 50% 0em 0em }（右半屏占位）
-   在分栏布局下，百分比 margin-top/bottom 相对 column width（=页面宽度），
-   会导致内容被推到下方几十页空白。
-   精确匹配这些 class，用 !important 覆盖百分比 margin。
-   在 4c 的 flex 容器内，margin:auto 让元素垂直居中。
-   不影响 .book-creator(负margin)/.duokan-footnote-content(固定margin) 等元素。 */
-#reader-content-a .epub-chapter-bg .book-title,
-#reader-content-a .epub-chapter-bg .book-author,
-#reader-content-a .epub-chapter-bg .book-line,
-#reader-content-a .epub-chapter-bg .volume-title,
-#reader-content-a .epub-chapter-bg .volume-first,
-#reader-content-a .epub-chapter-bg .intro-box,
-#reader-content-a .epub-chapter-bg .video-title {
-  margin-top: auto !important;
-  margin-bottom: auto !important;
-  margin-left: auto !important;
-  margin-right: auto !important;
+   在分栏布局下，百分比 margin-top/bottom 相对的是 column width（=页面宽度），
+   会被放大几十倍，导致内容被推到下方几十页空白。
+   1:1 还原方案：把百分比 margin-top/bottom 从 % 转成 vh（相对 viewport height），
+   这样原作者的 45% margin 在分栏下就是 45vh margin，内容精确推到页面 45% 位置。
+   左右 margin 保留 auto（居中），不转 vh。
+   .box { margin: 0em 50% 0em 0em } 的 50% 是左右 margin，相对 width 是正确的，保留。 */
+#reader-content-a .epub-chapter-bg .book-title {
+  margin: 45vh auto !important;
 }
-/* .box 原作者用 margin: 0em 50% 0em 0em 做右半屏占位，分栏下会溢出，
-   重置为 auto 居中 */
-#reader-content-a .epub-chapter-bg .box {
-  margin: auto !important;
+#reader-content-a .epub-chapter-bg .book-author {
+  margin: 45vh auto 20vh auto !important;
+}
+#reader-content-a .epub-chapter-bg .book-line {
+  margin-bottom: 6vh !important;
+}
+#reader-content-a .epub-chapter-bg .volume-title {
+  margin: 30vh auto 0 auto !important;
+}
+#reader-content-a .epub-chapter-bg .volume-first {
+  margin: 90vh auto !important;
+}
+#reader-content-a .epub-chapter-bg .intro-box {
+  margin: 45vh auto !important;
+}
+#reader-content-a .epub-chapter-bg .video-title {
+  margin: 50vh 0 1em 0 !important;
 }
 
-/* 4c. 针对 EPUB 常见的卷首图/序号表/版权页等特殊容器进一步优化：
-   flex 居中让内容垂直水平居中，整页显示。
+/* 4c. EPUB 章节背景容器：min-height:100% 让背景色/背景图填满整页。
+   不用 flex 居中（会覆盖 4b 的 vh margin），保留正常文档流让内容按
+   原作者的 margin 值精确定位。
    匹配规则：
    - .volume-bg/.box-bg/.video-bg：原作者 class 标记的背景容器
    - [style*="background"]：EpubParser 把 body bgcolor/style 转成 inline style，
@@ -720,10 +725,6 @@ body.reader-scroll #reader-content-b {
 #reader-content-a .epub-chapter-bg.box-bg,
 #reader-content-a .epub-chapter-bg.video-bg,
 #reader-content-a .epub-chapter-bg[style*="background"] {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
   min-height: 100%;
 }
 
