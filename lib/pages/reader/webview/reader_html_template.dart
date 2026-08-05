@@ -828,12 +828,14 @@ body.reader-scroll #reader-content-b {
    A. illustration(.box-bg)：.box { margin: 0em 50% 0em 0em; padding: 3px }
       原作者 margin-right:50% 是让盒子只占左半屏（多看特殊处理）。
       修复：用 width:fit-content 让盒子宽度由内容决定，margin:0 auto 居中。
+      加 min-width:280px 确保盒子不会太小（box-txt 文本需要足够宽度换行）。
       padding 还原原作者 3px（1:1 还原）。
 
    B. serial-num(.intro-box)：.intro-box { margin: 45% auto; padding: 8px }
       原作者 .intro-box 是块级元素默认 width:100%（填满），但多看渲染时
       会 shrink-to-fit 让宽度由内容（table.role）决定。
       修复：用 width:fit-content 让盒子宽度由 table 决定，配合 margin auto 居中。
+      加 min-width:280px 确保盒子不会太小（table 内容短时盒子太窄）。
       padding 还原原作者 8px。
 
    C. volume-bg：volume-pic img width:100% 高度可能很大
@@ -848,12 +850,14 @@ body.reader-scroll #reader-content-b {
   margin: calc(var(--reader-safe-height) * 0.1) auto !important;
   padding: 3px !important;
   width: fit-content !important;
+  min-width: 280px !important;
   max-width: 90% !important;
 }
 #reader-content-a .epub-chapter-bg .intro-box {
   margin: calc(var(--reader-safe-height) * 0.1) auto !important;
   padding: 8px !important;
   width: fit-content !important;
+  min-width: 280px !important;
   max-width: 90% !important;
 }
 #reader-content-a .epub-chapter-bg .volume-pic img {

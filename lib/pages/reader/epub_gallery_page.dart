@@ -567,7 +567,9 @@ class _GalleryImageItem extends StatelessWidget {
   /// 原作者 CSS：.duokan-image-gallery-cell {
   ///   margin: 10px 0; border: solid 1px; box-shadow: 5px 5px 5px #888 }
   /// .duokan-image-gallery { text-align: center } → cell 水平居中
-  /// 这里用 Container + BoxDecoration 还原边框和阴影，加 alignment 确保图片居中
+  ///
+  /// 自适应方案：用 IntrinsicWidth 让 cell 宽度紧贴图片实际渲染宽度，
+  /// 而不是撑满父容器宽度。这样边框和阴影紧贴图片，1:1 还原作者 cell 装饰。
   Widget _buildCellWithDecoration() {
     final cs = chapterStyle;
     // 没有任何装饰配置时直接返回居中图片
@@ -579,37 +581,43 @@ class _GalleryImageItem extends StatelessWidget {
     final hasBorder = cs.cellBorderWidth != null && cs.cellBorderWidth! > 0;
     final hasShadow = cs.cellShadowColor != null;
 
-    // cell 宽度由图片内容决定（不撑满屏宽），水平居中对齐原作者 text-align:center
+    // IntrinsicWidth 让 cell 宽度跟随图片实际渲染宽度（contain 后的宽度）
+    // 配合外层 ConstrainedBox(maxHeight) 约束图片高度，图片宽度按比例自适应
     return Center(
-      child: Container(
-        // alignment 让图片在 cell 内居中
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          border: hasBorder
-              ? Border.all(
-                  color: Color(cs.cellBorderColor ?? 0xFF888888),
-                  width: cs.cellBorderWidth!,
-                  style: _resolveBorderStyle(cs.cellBorderStyle),
-                )
-              : null,
-          borderRadius: cs.cellBorderRadius != null && cs.cellBorderRadius! > 0
-              ? BorderRadius.circular(cs.cellBorderRadius!)
-              : null,
-          boxShadow: hasShadow
-              ? [
-                  BoxShadow(
-                    color: Color(cs.cellShadowColor!).withValues(alpha: 0.5),
-                    offset: Offset(cs.cellShadowDx ?? 5, cs.cellShadowDy ?? 5),
-                    blurRadius: cs.cellShadowBlur ?? 5,
-                  ),
-                ]
-              : null,
-        ),
-        child: ClipRRect(
-          borderRadius: cs.cellBorderRadius != null && cs.cellBorderRadius! > 0
-              ? BorderRadius.circular(cs.cellBorderRadius!)
-              : BorderRadius.zero,
-          child: _buildImage(),
+      child: IntrinsicWidth(
+        child: Container(
+          // alignment 让图片在 cell 内居中
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            border: hasBorder
+                ? Border.all(
+                    color: Color(cs.cellBorderColor ?? 0xFF888888),
+                    width: cs.cellBorderWidth!,
+                    style: _resolveBorderStyle(cs.cellBorderStyle),
+                  )
+                : null,
+            borderRadius:
+                cs.cellBorderRadius != null && cs.cellBorderRadius! > 0
+                    ? BorderRadius.circular(cs.cellBorderRadius!)
+                    : null,
+            boxShadow: hasShadow
+                ? [
+                    BoxShadow(
+                      color: Color(cs.cellShadowColor!).withValues(alpha: 0.5),
+                      offset:
+                          Offset(cs.cellShadowDx ?? 5, cs.cellShadowDy ?? 5),
+                      blurRadius: cs.cellShadowBlur ?? 5,
+                    ),
+                  ]
+                : null,
+          ),
+          child: ClipRRect(
+            borderRadius:
+                cs.cellBorderRadius != null && cs.cellBorderRadius! > 0
+                    ? BorderRadius.circular(cs.cellBorderRadius!)
+                    : BorderRadius.zero,
+            child: _buildImage(),
+          ),
         ),
       ),
     );
