@@ -91,6 +91,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   // EPUB 画廊章节：非空时由 EpubGalleryPage 接管渲染，不走 WebView
   // 章节切换时清空（_loadChapterContent 入口处重置）
   List<EpubGalleryImage> _galleryImages = const [];
+  // 画廊章节级样式（背景图、gallery-title、cell 边框阴影、gallery-txt）
+  // 从 EPUB CSS 提取，让 EpubGalleryPage 1:1 还原原作者排版
+  EpubGalleryChapterStyle? _galleryChapterStyle;
   // 画廊章节初始页是否定位到末尾（从下一章往前翻到本章最后一页时为 true）
   // 由 _loadChapterContent 设置，_buildGalleryContent 读取后清空
   bool _galleryInitialPageToEnd = false;
@@ -888,12 +891,20 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     // EPUB 画廊章节：直接加载图片列表，由 EpubGalleryPage 渲染，不走 WebView
     // 章节切换时先清空旧画廊数据，避免上一章画廊闪现
     _galleryImages = const [];
+    _galleryChapterStyle = null;
     _galleryInitialPageToEnd = false;
     if (chapter.isGallery &&
         _book!.originType == BookOriginType.local &&
         LocalBookService.detectBookType(_book!.bookUrl) == LocalBookType.epub) {
       try {
         final images = await LocalBookService.instance.getEpubGalleryImages(
+          _book!,
+          chapter,
+        );
+        // 同步获取画廊章节级样式（背景图、gallery-title、cell 边框阴影、gallery-txt）
+        // 让 EpubGalleryPage 1:1 还原原作者排版
+        final chapterStyle =
+            await LocalBookService.instance.getEpubGalleryChapterStyle(
           _book!,
           chapter,
         );
@@ -904,6 +915,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
             _chapterTitle = chapter.title;
             _chapterUrl = chapter.url?.split(',{').first.trim();
             _galleryImages = images;
+            _galleryChapterStyle = chapterStyle;
             _galleryInitialPageToEnd = pendingToLast && images.length > 1;
             _content = ''; // 画廊章节无文本内容
             _isLoading = false;
@@ -2540,16 +2552,17 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   Widget _buildGalleryContent(ReaderProvider provider) {
     final initialPageToEnd = _galleryInitialPageToEnd;
     _galleryInitialPageToEnd = false; // 读取后清空，避免重复定位
-    return SafeArea(
-      child: EpubGalleryPage(
-        images: _galleryImages,
-        chapterTitle: _chapterTitle,
-        backgroundColor: provider.backgroundColor,
-        textColor: provider.textColor,
-        initialPageToEnd: initialPageToEnd,
-        onPreviousChapter: () => _previousChapter(),
-        onNextChapter: () => _nextChapter(),
-      ),
+    // 不包 SafeArea：EpubGalleryPage 内部已用 SafeArea 保护内容区，
+    // 外层去掉 SafeArea 让 .video-bg 背景图铺满全屏（含状态栏区域），还原原作者排版
+    return EpubGalleryPage(
+      images: _galleryImages,
+      chapterTitle: _chapterTitle,
+      backgroundColor: provider.backgroundColor,
+      textColor: provider.textColor,
+      chapterStyle: _galleryChapterStyle,
+      initialPageToEnd: initialPageToEnd,
+      onPreviousChapter: () => _previousChapter(),
+      onNextChapter: () => _nextChapter(),
     );
   }
 

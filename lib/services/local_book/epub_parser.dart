@@ -90,6 +90,10 @@ class EpubChapter {
   /// 仅当 [isGallery] 为 true 时填充
   List<EpubGalleryImage> galleryImages;
 
+  /// 画廊章节级样式（背景图、gallery-title、cell 边框阴影、gallery-txt 等）
+  /// 仅当 [isGallery] 为 true 时填充，让 Flutter EpubGalleryPage 还原原作者排版
+  EpubGalleryChapterStyle? galleryChapterStyle;
+
   EpubChapter({
     required this.index,
     required this.title,
@@ -107,6 +111,7 @@ class EpubChapter {
     this.children = const [],
     this.isGallery = false,
     this.galleryImages = const [],
+    this.galleryChapterStyle,
   });
 
   /// 把树状目录扁平化为列表（DFS 遍历顺序）
@@ -141,6 +146,7 @@ class EpubChapter {
         children: node.children,
         isGallery: node.isGallery,
         galleryImages: node.galleryImages,
+        galleryChapterStyle: node.galleryChapterStyle,
       );
       result.add(newNode);
       for (final child in node.children) {
@@ -218,6 +224,94 @@ class EpubGalleryTextStyle {
     this.fontWeight,
     this.textAlign,
     this.lineHeight,
+  });
+}
+
+/// 画廊章节级样式（从 EPUB CSS + body 提取）
+///
+/// 承载 .video-bg 背景图、.gallery-title、.duokan-image-gallery-cell 边框阴影、
+/// .gallery-txt 等章节级样式，让 Flutter EpubGalleryPage 还原原作者排版。
+///
+/// 不同 EPUB 作者可能用不同背景图、cell 装饰、标题字体，这里保留原作样式
+/// 而非硬编码，确保 1:1 还原原作者排版意图。
+class EpubGalleryChapterStyle {
+  /// 背景图 src（已解析为本地绝对路径或 data URI）
+  /// 从 .video-bg / .box-bg / .volume-bg 等的 background-image: url(...) 提取
+  /// null 表示无背景图（纯色背景或无背景）
+  final String? backgroundImageSrc;
+
+  /// 背景色（ARGB int，如 0xFFFFFFFF）
+  /// 从 .video-bg { background-color: #fff } 或 body bgcolor 提取
+  /// null 表示未指定，用阅读器背景色兜底
+  final int? backgroundColor;
+
+  /// 背景图是否重复（no-repeat / repeat / repeat-x / repeat-y）
+  /// 默认 no-repeat
+  final String? backgroundRepeat;
+
+  /// 背景图尺寸（cover / contain / auto）
+  /// 默认 cover（铺满整屏）
+  final String? backgroundSize;
+
+  /// 章节标题文本（如 "画廊图"），从 .gallery-title 标签的文本内容提取
+  /// null 表示无章节标题
+  final String? galleryTitle;
+
+  /// 章节标题样式（从 .gallery-title CSS 提取）
+  final EpubGalleryTextStyle? galleryTitleStyle;
+
+  /// cell 边框宽度（px），null 表示无边框
+  final double? cellBorderWidth;
+
+  /// cell 边框颜色（ARGB int），null 表示无边框
+  final int? cellBorderColor;
+
+  /// cell 边框样式（solid / dashed / dotted），默认 solid
+  final String? cellBorderStyle;
+
+  /// cell 圆角半径（px），默认 0
+  final double? cellBorderRadius;
+
+  /// cell 外边距（px，上下左右相同），默认 10
+  final double? cellMargin;
+
+  /// cell 阴影颜色（ARGB int），null 表示无阴影
+  final int? cellShadowColor;
+
+  /// cell 阴影水平偏移（px），默认 5
+  final double? cellShadowDx;
+
+  /// cell 阴影垂直偏移（px），默认 5
+  final double? cellShadowDy;
+
+  /// cell 阴影模糊半径（px），默认 5
+  final double? cellShadowBlur;
+
+  /// 底部提示文本（如 "滑动切换，点击放大"），从 .gallery-txt 标签的文本内容提取
+  /// null 表示无底部提示
+  final String? galleryTxt;
+
+  /// 底部提示文本样式（从 .gallery-txt CSS 提取）
+  final EpubGalleryTextStyle? galleryTxtStyle;
+
+  const EpubGalleryChapterStyle({
+    this.backgroundImageSrc,
+    this.backgroundColor,
+    this.backgroundRepeat,
+    this.backgroundSize,
+    this.galleryTitle,
+    this.galleryTitleStyle,
+    this.cellBorderWidth,
+    this.cellBorderColor,
+    this.cellBorderStyle,
+    this.cellBorderRadius,
+    this.cellMargin,
+    this.cellShadowColor,
+    this.cellShadowDx,
+    this.cellShadowDy,
+    this.cellShadowBlur,
+    this.galleryTxt,
+    this.galleryTxtStyle,
   });
 }
 
@@ -537,6 +631,15 @@ class EpubParser {
           if (galleryImages.isNotEmpty) {
             chapter.isGallery = true;
             chapter.galleryImages = galleryImages;
+            // 同步提取画廊章节级样式（背景图、gallery-title、cell 边框阴影、gallery-txt）
+            // 让 Flutter EpubGalleryPage 1:1 还原原作者排版
+            chapter.galleryChapterStyle = _extractGalleryChapterStyle(
+              richBody,
+              inlinedBodyAttrs,
+              extractedBasePath,
+              chapterBasePath,
+              epubCss,
+            );
             debugPrint('[EPUB诊断] 章节${chapter.index}识别为画廊页，'
                 '共 ${galleryImages.length} 张图片');
           }
@@ -1508,6 +1611,238 @@ class EpubParser {
         textAlign: textAlign,
         lineHeight: lineHeight,
       );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 提取画廊章节级样式（背景图、gallery-title、cell 边框阴影、gallery-txt）
+  ///
+  /// 从 EPUB CSS + body 属性中提取章节级样式，让 Flutter EpubGalleryPage
+  /// 1:1 还原原作者排版。提取内容：
+  /// - 背景图：从 .video-bg/.box-bg 等的 background-image: url(...) 提取
+  ///   路径用 _resolveGallerySrc 解析为绝对路径或 data URI
+  /// - gallery-title：从 HTML 中 .gallery-title 标签的文本提取 + CSS 样式
+  /// - cell 边框阴影：从 .duokan-image-gallery-cell CSS 提取 border/box-shadow/margin
+  /// - gallery-txt：从 HTML 中 .gallery-txt 标签的文本提取 + CSS 样式
+  ///
+  /// [richBody] body HTML（图片路径已改写）
+  /// [inlinedBodyAttrs] body 属性字符串（含 class/style/bgcolor，可能已改写 url）
+  /// [extractedBasePath] 解压根目录（解压模式）或空字符串（内嵌模式）
+  /// [chapterBasePath] 章节文件所在目录
+  /// [epubCss] EPUB 原始合并 CSS（未改写路径）
+  static EpubGalleryChapterStyle? _extractGalleryChapterStyle(
+    String richBody,
+    String inlinedBodyAttrs,
+    String extractedBasePath,
+    String? chapterBasePath,
+    String epubCss,
+  ) {
+    try {
+      // 1. 提取背景图：从 body class（如 video-bg）找对应 CSS 的 background-image
+      //    body class 在 inlinedBodyAttrs 里（如 class="epub-chapter-bg video-bg"）
+      //    遍历每个 class，在 epubCss 中查找 .classname { background-image: url(...) }
+      String? backgroundImageSrc;
+      int? backgroundColor;
+      String? backgroundRepeat;
+      String? backgroundSize;
+
+      // body 上的 inline style 背景图（如 style="background: url(...)"）
+      // inlinedBodyAttrs 的 url() 已被 _rewriteStyleUrlsToPath 改写为绝对路径
+      final inlineBgMatch = RegExp(r'background(?:-image)?\s*:\s*url\(([^)]+)\)')
+          .firstMatch(inlinedBodyAttrs);
+      if (inlineBgMatch != null) {
+        backgroundImageSrc = inlineBgMatch.group(1)?.trim().replaceAll("'", '').replaceAll('"', '').trim();
+      }
+      // body 上的 inline 背景色（bgcolor="#000" 或 style="background-color:#000"）
+      final bgcolorMatch = RegExp(r'bgcolor\s*=\s*"([^"]+)"').firstMatch(inlinedBodyAttrs);
+      if (bgcolorMatch != null) {
+        backgroundColor = _parseCssColor(bgcolorMatch.group(1)!);
+      }
+      final inlineBgColorMatch = RegExp(r'background-color\s*:\s*([^;"]+)')
+          .firstMatch(inlinedBodyAttrs);
+      if (inlineBgColorMatch != null && backgroundColor == null) {
+        backgroundColor = _parseCssColor(inlineBgColorMatch.group(1)!);
+      }
+
+      // body class 列表（从 inlinedBodyAttrs 提取，去掉 epub-chapter-bg 标记）
+      final bodyClassMatch = RegExp(r'class="([^"]*)"').firstMatch(inlinedBodyAttrs);
+      final bodyClasses = bodyClassMatch?.group(1)?.split(RegExp(r'\s+')) ?? <String>[];
+      // 遍历 body class（除 epub-chapter-bg 外），在 CSS 中找背景定义
+      for (final cls in bodyClasses) {
+        if (cls.isEmpty || cls == 'epub-chapter-bg') continue;
+        final block = _extractCssBlock(epubCss, '.$cls');
+        if (block == null) continue;
+        // background-image: url(../Images/xxx.jpg)
+        final bgImgMatch = RegExp(
+          r'background-image\s*:\s*url\(([^)]+)\)',
+        ).firstMatch(block);
+        if (bgImgMatch != null && backgroundImageSrc == null) {
+          final rawUrl = bgImgMatch.group(1)!.trim().replaceAll("'", '').replaceAll('"', '').trim();
+          backgroundImageSrc = _resolveGallerySrc(
+            rawUrl, extractedBasePath, chapterBasePath,
+          );
+        }
+        // background-color
+        final bgClrMatch = RegExp(r'background-color\s*:\s*([^;}\s]+)').firstMatch(block);
+        if (bgClrMatch != null && backgroundColor == null) {
+          backgroundColor = _parseCssColor(bgClrMatch.group(1)!);
+        }
+        // background-repeat
+        final bgRepMatch = RegExp(r'background-repeat\s*:\s*([^;}\s]+)').firstMatch(block);
+        if (bgRepMatch != null) {
+          backgroundRepeat = bgRepMatch.group(1);
+        }
+        // background-size
+        final bgSizeMatch = RegExp(r'background-size\s*:\s*([^;}\s]+)').firstMatch(block);
+        if (bgSizeMatch != null) {
+          backgroundSize = bgSizeMatch.group(1);
+        }
+      }
+
+      // 2. 提取 gallery-title 文本 + 样式
+      //    HTML: <h3 class="gallery-title">画廊图</h3>
+      String? galleryTitle;
+      EpubGalleryTextStyle? galleryTitleStyle;
+      try {
+        final doc = html_parser.parse(richBody);
+        final titleEl = doc.querySelector('.gallery-title');
+        if (titleEl != null) {
+          galleryTitle = titleEl.text.trim();
+          if (galleryTitle.isEmpty) galleryTitle = null;
+        }
+      } catch (_) {
+        // HTML 解析失败时只跳过标题文本提取
+      }
+      galleryTitleStyle = _extractGalleryTextStyle(epubCss, '.gallery-title');
+
+      // 3. 提取 cell 边框/阴影/margin 样式
+      //    .duokan-image-gallery-cell { margin: 10px 0; border: solid 1px; box-shadow: 5px 5px 5px #888 }
+      final cellBlock = _extractCssBlock(epubCss, '.duokan-image-gallery-cell');
+      double? cellBorderWidth;
+      int? cellBorderColor;
+      String? cellBorderStyle;
+      double? cellBorderRadius;
+      double? cellMargin;
+      int? cellShadowColor;
+      double? cellShadowDx;
+      double? cellShadowDy;
+      double? cellShadowBlur;
+
+      if (cellBlock != null) {
+        // border: solid 1px / border: 1px solid #888
+        final borderMatch = RegExp(
+          r'border\s*:\s*(?:([a-zA-Z]+)\s+)?(\d+(?:\.\d+)?px)?\s*(?:([a-zA-Z]+)\s+)?(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|[a-zA-Z]+)?',
+        ).firstMatch(cellBlock);
+        if (borderMatch != null) {
+          // 解析 border shorthand：可能是 solid 1px / 1px solid #888 / solid 1px #888
+          final style1 = borderMatch.group(1);
+          final width = borderMatch.group(2);
+          final style2 = borderMatch.group(3);
+          final color = borderMatch.group(4);
+          if (style1 != null) cellBorderStyle = style1;
+          if (style2 != null) cellBorderStyle = style2;
+          if (width != null) {
+            cellBorderWidth = double.tryParse(width.replaceAll('px', ''));
+          }
+          if (color != null) {
+            cellBorderColor = _parseCssColor(color);
+          }
+        }
+        // border-width / border-style / border-color 分写
+        final bwMatch = RegExp(r'border-width\s*:\s*(\d+(?:\.\d+)?px)').firstMatch(cellBlock);
+        if (bwMatch != null) {
+          cellBorderWidth = double.tryParse(bwMatch.group(1)!.replaceAll('px', ''));
+        }
+        final bsMatch = RegExp(r'border-style\s*:\s*([a-zA-Z]+)').firstMatch(cellBlock);
+        if (bsMatch != null) {
+          cellBorderStyle = bsMatch.group(1);
+        }
+        final bcMatch = RegExp(r'border-color\s*:\s*(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|[a-zA-Z]+)').firstMatch(cellBlock);
+        if (bcMatch != null) {
+          cellBorderColor = _parseCssColor(bcMatch.group(1)!);
+        }
+        // border-radius
+        final brMatch = RegExp(r'border-radius\s*:\s*(\d+(?:\.\d+)?px)').firstMatch(cellBlock);
+        if (brMatch != null) {
+          cellBorderRadius = double.tryParse(brMatch.group(1)!.replaceAll('px', ''));
+        }
+        // margin: 10px 0 / margin: 10px 0 10px 0
+        final marginMatch = RegExp(r'margin\s*:\s*([^;}\s]+(?:\s+[^;}\s]+){0,3})').firstMatch(cellBlock);
+        if (marginMatch != null) {
+          final parts = marginMatch.group(1)!.split(RegExp(r'\s+'));
+          if (parts.isNotEmpty) {
+            // 取第一个值作为上下左右统一 margin（cell 通常上下相同）
+            final first = parts[0].replaceAll('px', '');
+            final m = double.tryParse(first);
+            if (m != null) cellMargin = m;
+          }
+        }
+        // box-shadow: 5px 5px 5px #888888 / 5px 5px 5px rgba(0,0,0,0.5)
+        final shadowMatch = RegExp(
+          r'box-shadow\s*:\s*(\d+(?:\.\d+)?px)\s+(\d+(?:\.\d+)?px)\s+(\d+(?:\.\d+)?px)\s+(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|[a-zA-Z]+)',
+        ).firstMatch(cellBlock);
+        if (shadowMatch != null) {
+          cellShadowDx = double.tryParse(shadowMatch.group(1)!.replaceAll('px', ''));
+          cellShadowDy = double.tryParse(shadowMatch.group(2)!.replaceAll('px', ''));
+          cellShadowBlur = double.tryParse(shadowMatch.group(3)!.replaceAll('px', ''));
+          cellShadowColor = _parseCssColor(shadowMatch.group(4)!);
+        }
+      }
+
+      // 4. 提取 gallery-txt 文本 + 样式
+      //    HTML: <p class="gallery-txt">滑动切换，点击放大</p>
+      String? galleryTxt;
+      EpubGalleryTextStyle? galleryTxtStyle;
+      try {
+        final doc = html_parser.parse(richBody);
+        final txtEl = doc.querySelector('.gallery-txt');
+        if (txtEl != null) {
+          galleryTxt = txtEl.text.trim();
+          if (galleryTxt.isEmpty) galleryTxt = null;
+        }
+      } catch (_) {
+        // HTML 解析失败时只跳过文本提取
+      }
+      galleryTxtStyle = _extractGalleryTextStyle(epubCss, '.gallery-txt');
+
+      return EpubGalleryChapterStyle(
+        backgroundImageSrc: backgroundImageSrc?.isNotEmpty == true ? backgroundImageSrc : null,
+        backgroundColor: backgroundColor,
+        backgroundRepeat: backgroundRepeat,
+        backgroundSize: backgroundSize,
+        galleryTitle: galleryTitle,
+        galleryTitleStyle: galleryTitleStyle,
+        cellBorderWidth: cellBorderWidth,
+        cellBorderColor: cellBorderColor,
+        cellBorderStyle: cellBorderStyle,
+        cellBorderRadius: cellBorderRadius,
+        cellMargin: cellMargin,
+        cellShadowColor: cellShadowColor,
+        cellShadowDx: cellShadowDx,
+        cellShadowDy: cellShadowDy,
+        cellShadowBlur: cellShadowBlur,
+        galleryTxt: galleryTxt,
+        galleryTxtStyle: galleryTxtStyle,
+      );
+    } catch (e) {
+      debugPrint('[EPUB诊断] 画廊章节样式提取失败: $e');
+      return null;
+    }
+  }
+
+  /// 提取指定选择器的 CSS 声明块内容（大括号内的文本）
+  ///
+  /// 用于查找 .video-bg / .duokan-image-gallery-cell 等选择器的样式定义。
+  /// 支持选择器后有空格/换行。返回 null 表示未找到。
+  static String? _extractCssBlock(String css, String selector) {
+    try {
+      final blockPattern = RegExp(
+        RegExp.escape(selector) + r'\s*\{([^}]*)\}',
+      );
+      final match = blockPattern.firstMatch(css);
+      if (match == null) return null;
+      return match.group(1);
     } catch (_) {
       return null;
     }

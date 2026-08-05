@@ -27,6 +27,10 @@ class EpubGalleryPage extends StatefulWidget {
   final Color backgroundColor;
   final Color textColor;
 
+  /// 画廊章节级样式（背景图、gallery-title、cell 边框阴影、gallery-txt 等）
+  /// 从 EPUB CSS 提取，null 时用兜底样式（白底 + 无标题）
+  final EpubGalleryChapterStyle? chapterStyle;
+
   /// 是否从章节末尾进入（用于从下一章往前翻到本章最后一页）
   final bool initialPageToEnd;
 
@@ -42,6 +46,7 @@ class EpubGalleryPage extends StatefulWidget {
     required this.chapterTitle,
     required this.backgroundColor,
     required this.textColor,
+    this.chapterStyle,
     this.initialPageToEnd = false,
     required this.onPreviousChapter,
     required this.onNextChapter,
@@ -55,6 +60,11 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   late PageController _pageController;
   late int _currentIndex;
   bool _isNavigating = false; // 防止章节切换重复触发
+
+  // 边界章节切换手势追踪（指针级，不参与手势竞技场）
+  // PageView 会消费水平拖动手势，外层 GestureDetector.onHorizontalDragEnd
+  // 在边界回弹时不触发，改用 Listener 监听原始指针事件判断边界拖动意图
+  Offset? _dragStartPosition;
 
   @override
   void initState() {
@@ -153,92 +163,249 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   Widget build(BuildContext context) {
     if (widget.images.isEmpty) {
       return Container(
-        color: widget.backgroundColor,
+        color: _resolveBgColor(),
         alignment: Alignment.center,
         child: Text('画廊无图片', style: TextStyle(color: widget.textColor)),
       );
     }
 
-    return Container(
-      color: widget.backgroundColor,
-      child: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(),
-            Expanded(child: _buildPageView()),
-            _buildFooter(),
-          ],
+    // 还原作者排版：背景图铺底 + gallery-title 顶部 + PageView 主体 + gallery-txt 底部
+    // 原作者 gallery.xhtml 结构：
+    //   <body class="video-bg">
+    //     <h3 class="gallery-title">画廊图</h3>
+    //     <div class="duokan-image-gallery gallery-pic">...cells...</div>
+    //     <p class="gallery-txt">滑动切换，点击放大</p>
+    //   </body>
+    // 这里用 Stack 铺背景图，Column 放标题/PageView/底部文字，1:1 还原
+    return Stack(
+      children: [
+        // 背景层：原作者 .video-bg 的 background-image: cover
+        Positioned.fill(child: _buildBackground()),
+        // 内容层：SafeArea + 标题 + PageView + 底部提示
+        SafeArea(
+          child: Column(
+            children: [
+              if (_hasGalleryTitle()) _buildGalleryTitle(),
+              Expanded(child: _buildPageView()),
+              if (_hasGalleryTxt()) _buildGalleryTxt(),
+              _buildPageIndicator(),
+            ],
+          ),
         ),
+      ],
+    );
+  }
+
+  /// 解析背景色：优先用 chapterStyle.backgroundColor，否则用阅读器 backgroundColor
+  Color _resolveBgColor() {
+    final bgClr = widget.chapterStyle?.backgroundColor;
+    if (bgClr != null) return Color(bgClr);
+    return widget.backgroundColor;
+  }
+
+  /// 构建背景层：还原作者 .video-bg 的 background-image: url(...) cover
+  /// - 有背景图：Image.cover 铺满全屏
+  /// - 无背景图但有背景色：纯色容器
+  /// - 都无：阅读器背景色
+  Widget _buildBackground() {
+    final bgSrc = widget.chapterStyle?.backgroundImageSrc;
+    final bgClr = widget.chapterStyle?.backgroundColor;
+
+    // 有背景图：铺满全屏（cover 模式，对齐原作者 background-size: cover）
+    if (bgSrc != null && bgSrc.isNotEmpty) {
+      return _buildBgImage(bgSrc);
+    }
+    // 无背景图但有背景色：纯色
+    if (bgClr != null) {
+      return ColoredBox(color: Color(bgClr), child: const SizedBox.expand());
+    }
+    // 都无：阅读器背景色
+    return ColoredBox(
+      color: widget.backgroundColor,
+      child: const SizedBox.expand(),
+    );
+  }
+
+  /// 构建背景图（支持 file:// / 绝对路径 / data: URI）
+  Widget _buildBgImage(String src) {
+    final fit = widget.chapterStyle?.backgroundSize == 'contain'
+        ? BoxFit.contain
+        : BoxFit.cover;
+    if (src.startsWith('data:')) {
+      final bytes = _decodeDataUri(src);
+      if (bytes != null) {
+        return Image.memory(bytes, fit: fit, gaplessPlayback: true);
+      }
+      return ColoredBox(color: _resolveBgColor(), child: const SizedBox.expand());
+    }
+    final filePath = src.startsWith('file://') ? src.substring(7) : src;
+    if (filePath.contains('/') || filePath.contains('\\')) {
+      return Image.file(
+        File(filePath),
+        fit: fit,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => ColoredBox(
+          color: _resolveBgColor(),
+          child: const SizedBox.expand(),
+        ),
+      );
+    }
+    return Image.network(
+      src,
+      fit: fit,
+      gaplessPlayback: true,
+      errorBuilder: (_, __, ___) => ColoredBox(
+        color: _resolveBgColor(),
+        child: const SizedBox.expand(),
       ),
     );
   }
 
-  /// 顶部：章节标题 + 返回提示
-  Widget _buildHeader() {
+  /// 是否有 gallery-title（原作者 .gallery-title 标签文本）
+  bool _hasGalleryTitle() {
+    final title = widget.chapterStyle?.galleryTitle;
+    return title != null && title.isNotEmpty;
+  }
+
+  /// 构建 gallery-title：还原作者 <h3 class="gallery-title"> 样式
+  /// 原作者 CSS：font-family h3, font-weight bold, font-size 1.5em,
+  /// text-align center, text-shadow 0 1 1px #fff, margin 2em auto
+  Widget _buildGalleryTitle() {
+    final style = widget.chapterStyle?.galleryTitleStyle;
+    const baseFontSize = 16.0;
+    final fontSizeEm = style?.fontSizeEm ?? 1.5;
+    // 浅色背景用深色文字，深色背景用浅色文字（兜底）
+    final isLightBg = _isLightBg(widget.textColor);
+    final color = style?.color != null
+        ? Color(style!.color!)
+        : (isLightBg ? const Color(0xFF1A1A1A) : widget.textColor);
+    final fontWeight = style?.fontWeight != null
+        ? FontWeight.values[(style!.fontWeight! / 100).round().clamp(0, 8)]
+        : FontWeight.bold;
+    final height = style?.lineHeight ?? 1.2;
+
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: DesignTokens.spacingMd,
         vertical: DesignTokens.spacingSm,
       ),
       child: Text(
-        widget.chapterTitle,
+        widget.chapterStyle!.galleryTitle!,
         style: TextStyle(
-          color: widget.textColor,
-          fontSize: 14,
-          fontWeight: FontWeight.w500,
+          color: color,
+          fontSize: fontSizeEm * baseFontSize,
+          fontWeight: fontWeight,
+          height: height,
+          shadows: const [
+            Shadow(offset: Offset(0, 1), blurRadius: 1, color: Colors.white54),
+          ],
         ),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        textAlign: TextAlign.center,
+        textAlign: _resolveTextAlign(style?.textAlign, TextAlign.center),
       ),
     );
   }
 
-  /// 底部：页码指示器 + 滑动提示
-  Widget _buildFooter() {
+  /// 是否有 gallery-txt（原作者 .gallery-txt 标签文本）
+  bool _hasGalleryTxt() {
+    final txt = widget.chapterStyle?.galleryTxt;
+    return txt != null && txt.isNotEmpty;
+  }
+
+  /// 构建 gallery-txt：还原作者 <p class="gallery-txt"> 样式
+  /// 原作者 CSS：font-family ht, font-size 0.7em, text-align center,
+  /// text-indent 0, text-shadow 0 1 1px #fff
+  Widget _buildGalleryTxt() {
+    final style = widget.chapterStyle?.galleryTxtStyle;
+    const baseFontSize = 16.0;
+    final fontSizeEm = style?.fontSizeEm ?? 0.7;
+    final isLightBg = _isLightBg(widget.textColor);
+    final color = style?.color != null
+        ? Color(style!.color!)
+        : (isLightBg ? const Color(0xFF1A1A1A) : widget.textColor);
+    final fontWeight = style?.fontWeight != null
+        ? FontWeight.values[(style!.fontWeight! / 100).round().clamp(0, 8)]
+        : FontWeight.w400;
+    final height = style?.lineHeight ?? 1.5;
+
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: DesignTokens.spacingMd,
-        vertical: DesignTokens.spacingSm,
+        vertical: DesignTokens.spacingXs,
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '${_currentIndex + 1} / ${widget.images.length}',
-            style: TextStyle(
-              color: widget.textColor.withValues(alpha: 0.7),
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '滑动切换，点击放大',
-            style: TextStyle(
-              color: widget.textColor.withValues(alpha: 0.5),
-              fontSize: 11,
-            ),
-          ),
-        ],
+      child: Text(
+        widget.chapterStyle!.galleryTxt!,
+        style: TextStyle(
+          color: color,
+          fontSize: fontSizeEm * baseFontSize,
+          fontWeight: fontWeight,
+          height: height,
+          shadows: const [
+            Shadow(offset: Offset(0, 1), blurRadius: 1, color: Colors.white54),
+          ],
+        ),
+        textAlign: _resolveTextAlign(style?.textAlign, TextAlign.center),
       ),
     );
   }
 
+  /// 页码指示器（保留应用自身功能，原作者无此元素）
+  Widget _buildPageIndicator() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: DesignTokens.spacingMd,
+        vertical: DesignTokens.spacingXs,
+      ),
+      child: Text(
+        '${_currentIndex + 1} / ${widget.images.length}',
+        style: TextStyle(
+          color: widget.textColor.withValues(alpha: 0.7),
+          fontSize: 12,
+        ),
+      ),
+    );
+  }
+
+  /// 将 CSS text-align 值转为 Flutter TextAlign
+  TextAlign _resolveTextAlign(String? cssAlign, TextAlign fallback) {
+    switch (cssAlign) {
+      case 'left':
+        return TextAlign.left;
+      case 'right':
+        return TextAlign.right;
+      case 'justify':
+        return TextAlign.justify;
+      case 'center':
+        return TextAlign.center;
+      default:
+        return fallback;
+    }
+  }
+
+  /// 判断当前背景是否为浅色（用于决定兜底文字色）
+  bool _isLightBg(Color textColor) {
+    // textColor 是阅读器的文字色，浅色背景 → 深色文字 → luminance 低
+    return textColor.computeLuminance() < 0.5;
+  }
+
   /// 主体：PageView 横向滑动
+  ///
+  /// 边界章节切换用 Listener（指针级）而非 GestureDetector：
+  /// PageView 会赢得水平拖动手势竞技场，外层 GestureDetector.onHorizontalDragEnd
+  /// 在边界回弹时不触发，导致"翻到底无法切下一章"。Listener 不参与竞技场，
+  /// 始终能收到指针事件，通过位移+速度判断边界拖动意图。
   Widget _buildPageView() {
-    return GestureDetector(
-      // 检测边界滑动意图：在第一页往左滑或最后一页往右滑
-      onHorizontalDragEnd: (details) {
-        final velocity = details.primaryVelocity ?? 0;
-        // velocity > 0 表示往右滑（对应往前一章），< 0 表示往左滑（对应往后一章）
-        if (velocity > 200 && _currentIndex == 0) {
-          _handlePreviousBoundary();
-        } else if (velocity < -200 &&
-            _currentIndex == widget.images.length - 1) {
-          _handleNextBoundary();
-        }
+    return Listener(
+      onPointerDown: (event) {
+        _dragStartPosition = event.position;
       },
+      onPointerUp: _handlePointerUp,
+      onPointerCancel: _handlePointerUp,
       child: PageView.builder(
+        // AlwaysScrollableScrollPhysics：让边界处也能产生 overscroll，
+        // 配合 Listener 检测边界拖动（PageView 回弹不影响指针位移计算）
+        physics: const AlwaysScrollableScrollPhysics(),
         controller: _pageController,
         itemCount: widget.images.length,
         onPageChanged: _onPageChanged,
@@ -248,11 +415,60 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
             image: image,
             index: index,
             textColor: widget.textColor,
+            chapterStyle: widget.chapterStyle,
             onTap: () => _showFullScreenPreview(index),
           );
         },
       ),
     );
+  }
+
+  /// 指针抬起时判断边界章节切换意图
+  ///
+  /// 判断条件（同时满足）：
+  /// 1. 当前在第一页（或最后一页）
+  /// 2. 拖动方向正确：第一页向右滑（dx>0）→ 上一章；最后一页向左滑（dx<0）→ 下一章
+  /// 3. 水平位移占主导（|dx| > |dy|），避免纵向滚动误触
+  /// 4. 拖动位移 ≥ 阈值（50px），避免点击/小幅拖动误触
+  ///
+  /// 不用速度判断：PointerUp 时速度计算不稳定（dt 接近 0），
+  /// 且用户在边界回弹后松手也应触发切章。
+  void _handlePointerUp(PointerEvent event) {
+    final start = _dragStartPosition;
+    _dragStartPosition = null;
+
+    if (start == null) return;
+
+    final dx = event.position.dx - start.dx;
+    final dy = event.position.dy - start.dy;
+
+    const distanceThreshold = 50.0;
+
+    // 水平位移必须占主导（避免纵向滚动误触）
+    if (dx.abs() <= dy.abs()) return;
+
+    // 第一页向右滑（dx > 0）→ 上一章
+    if (_currentIndex == 0 && dx > distanceThreshold) {
+      _handlePreviousBoundary();
+      return;
+    }
+    // 最后一页向左滑（dx < 0）→ 下一章
+    if (_currentIndex == widget.images.length - 1 &&
+        dx < -distanceThreshold) {
+      _handleNextBoundary();
+      return;
+    }
+  }
+
+  /// 解码 data: URI 为字节（用于背景图 data URI）
+  Uint8List? _decodeDataUri(String dataUri) {
+    try {
+      final commaIdx = dataUri.indexOf(',');
+      if (commaIdx < 0) return null;
+      return base64Decode(dataUri.substring(commaIdx + 1));
+    } catch (_) {
+      return null;
+    }
   }
 }
 
@@ -270,11 +486,15 @@ class _GalleryImageItem extends StatelessWidget {
   final Color textColor;
   final VoidCallback onTap;
 
+  /// 画廊章节级样式（用于 cell 边框/阴影/margin 装饰）
+  final EpubGalleryChapterStyle? chapterStyle;
+
   const _GalleryImageItem({
     required this.image,
     required this.index,
     required this.textColor,
     required this.onTap,
+    this.chapterStyle,
   });
 
   @override
@@ -282,14 +502,16 @@ class _GalleryImageItem extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(
+        // cell 外边距：还原作者 .duokan-image-gallery-cell { margin: 10px 0 }
+        // 默认上下 10px，左右保留设计间距让图片不贴边
+        padding: EdgeInsets.symmetric(
           horizontal: DesignTokens.spacingMd,
-          vertical: DesignTokens.spacingSm,
+          vertical: chapterStyle?.cellMargin ?? DesignTokens.spacingSm,
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Expanded(child: _buildImage()),
+            Expanded(child: _buildCellWithDecoration()),
             if (image.maintitle.isNotEmpty || image.subtitle.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: DesignTokens.spacingSm),
@@ -326,6 +548,67 @@ class _GalleryImageItem extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// 构建 cell 容器（带原作者 border + box-shadow 装饰）
+  ///
+  /// 原作者 CSS：.duokan-image-gallery-cell {
+  ///   margin: 10px 0; border: solid 1px; box-shadow: 5px 5px 5px #888 }
+  /// 这里用 Container + BoxDecoration 还原边框和阴影
+  Widget _buildCellWithDecoration() {
+    final cs = chapterStyle;
+    // 没有任何装饰配置时直接返回图片
+    if (cs == null ||
+        (cs.cellBorderWidth == null && cs.cellShadowColor == null)) {
+      return _buildImage();
+    }
+
+    final hasBorder = cs.cellBorderWidth != null && cs.cellBorderWidth! > 0;
+    final hasShadow = cs.cellShadowColor != null;
+
+    return Container(
+      decoration: BoxDecoration(
+        border: hasBorder
+            ? Border.all(
+                color: Color(cs.cellBorderColor ?? 0xFF888888),
+                width: cs.cellBorderWidth!,
+                style: _resolveBorderStyle(cs.cellBorderStyle),
+              )
+            : null,
+        borderRadius: cs.cellBorderRadius != null && cs.cellBorderRadius! > 0
+            ? BorderRadius.circular(cs.cellBorderRadius!)
+            : null,
+        boxShadow: hasShadow
+            ? [
+                BoxShadow(
+                  color: Color(cs.cellShadowColor!).withValues(alpha: 0.5),
+                  offset: Offset(cs.cellShadowDx ?? 5, cs.cellShadowDy ?? 5),
+                  blurRadius: cs.cellShadowBlur ?? 5,
+                ),
+              ]
+            : null,
+      ),
+      child: ClipRRect(
+        borderRadius: cs.cellBorderRadius != null && cs.cellBorderRadius! > 0
+            ? BorderRadius.circular(cs.cellBorderRadius!)
+            : BorderRadius.zero,
+        child: _buildImage(),
+      ),
+    );
+  }
+
+  /// 将 CSS border-style 值转为 Flutter BorderStyle
+  BorderStyle _resolveBorderStyle(String? cssStyle) {
+    switch (cssStyle) {
+      case 'dashed':
+        return BorderStyle.solid; // Flutter 不支持 dashed，退化为 solid
+      case 'dotted':
+        return BorderStyle.solid;
+      case 'none':
+        return BorderStyle.none;
+      default:
+        return BorderStyle.solid;
+    }
   }
 
   /// 构建 maintitle 的 TextStyle

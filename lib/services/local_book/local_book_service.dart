@@ -529,6 +529,43 @@ class LocalBookService {
     return epubBook.chapters[chapter.index].galleryImages;
   }
 
+  /// 获取 EPUB 画廊章节的章节级样式
+  ///
+  /// 返回解析时预提取的 [EpubGalleryChapterStyle]（背景图、gallery-title、
+  /// cell 边框阴影、gallery-txt 等），让 Flutter EpubGalleryPage 还原原作者排版。
+  /// 返回 null 表示无章节级样式，调用方用兜底渲染。
+  Future<EpubGalleryChapterStyle?> getEpubGalleryChapterStyle(
+    Book book,
+    Chapter chapter,
+  ) async {
+    var epubBook = _epubCache[book.bookUrl];
+
+    // Fallback: ensure epub data is loaded by reading from disk
+    if (epubBook == null) {
+      try {
+        final file = File(book.bookUrl);
+        if (!await file.exists()) return null;
+
+        final bytes = await file.readAsBytes();
+        _epubBytesCache[book.bookUrl] = bytes;
+        final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
+        epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        if (epubBook != null) {
+          _epubCache[book.bookUrl] = epubBook;
+        }
+      } catch (e) {
+        return null;
+      }
+    }
+
+    if (epubBook == null) return null;
+    if (chapter.index < 0 || chapter.index >= epubBook.chapters.length) {
+      return null;
+    }
+
+    return epubBook.chapters[chapter.index].galleryChapterStyle;
+  }
+
   /// Returns the raw HTML content of an EPUB chapter (not stripped by extractTextFromHtml).
   /// This is needed so the reader can render EPUB content with flutter_html.
   Future<String?> getEpubHtmlContent(Book book, Chapter chapter) async {
