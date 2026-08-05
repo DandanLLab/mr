@@ -782,25 +782,30 @@ body.reader-scroll #reader-content-b {
   word-break: break-word;
 }
 
-/* 7. 段落默认样式（EPUB 的 <p> 不走 .reader-p，这里兜底） */
-#reader-content-a p {
-  margin: 0 0 var(--reader-paragraph-spacing) 0;
-  text-align: justify;
-  text-indent: var(--reader-text-indent);
+/* 7. 段落默认样式（EPUB 的 <p> 不走 .reader-p，这里兜底）
+   只提供 EPUB 原作者 CSS 不会设的属性（word-break/overflow-wrap），
+   不覆盖 margin/text-indent/font-family/line-height 等，
+   让 EPUB 原作者 p { text-indent:2em; margin:0.5em 0; line-height:1.5em } 正常生效。
+   用 .epub-chapter-bg p（class 选择器）而非 #reader-content-a p（ID 选择器），
+   避免 ID 选择器优先级过高覆盖 EPUB CSS。 */
+.epub-chapter-bg p {
   word-break: break-word;
   overflow-wrap: break-word;
-  font-weight: var(--reader-text-weight);
 }
-#reader-content-a p:last-child { margin-bottom: 0; }
+.epub-chapter-bg p:last-child { margin-bottom: 0; }
 
-/* 8. 标题样式 */
-#reader-content-a h1,
-#reader-content-a h2,
-#reader-content-a h3,
-#reader-content-a h4,
-#reader-content-a h5,
-#reader-content-a h6 {
-  margin: 1em 0 0.5em;
+/* 8. 标题样式：只提供 font-weight:bold（兜底，EPUB 原作者一般也会设 bold），
+   不覆盖 margin/font-family/font-size/color 等，
+   让 EPUB 原作者 h3.chapter-title { margin:1em 0 2.5em; font-family:"fzjt";
+   font-size:1.6em; color:#272729 } 正常生效。
+   用 .epub-chapter-bg（class 选择器）而非 #reader-content-a（ID 选择器），
+   避免 ID 选择器优先级过高覆盖 EPUB CSS。 */
+.epub-chapter-bg h1,
+.epub-chapter-bg h2,
+.epub-chapter-bg h3,
+.epub-chapter-bg h4,
+.epub-chapter-bg h5,
+.epub-chapter-bg h6 {
   font-weight: bold;
   line-height: var(--reader-line-height);
 }
@@ -826,33 +831,38 @@ body.reader-scroll #reader-content-b {
   object-fit: contain;
 }
 
-/* 9. 引用块 */
-#reader-content-a blockquote {
+/* 9. 引用块：用 .epub-chapter-bg（class 选择器），让 EPUB 原作者 blockquote
+   CSS 正常生效（如有）。无 EPUB CSS 时作为合理默认。 */
+.epub-chapter-bg blockquote {
   margin: 0 0 var(--reader-paragraph-spacing) 0;
   padding: 0 1em;
   border-left: 3px solid currentColor;
   opacity: 0.85;
 }
 
-/* 10. 列表 */
-#reader-content-a ul,
-#reader-content-a ol {
+/* 10. 列表：用 .epub-chapter-bg（class 选择器），让 EPUB 原作者 ul/ol/li
+   CSS 正常生效（如有）。无 EPUB CSS 时作为合理默认。 */
+.epub-chapter-bg ul,
+.epub-chapter-bg ol {
   margin: 0 0 var(--reader-paragraph-spacing) 0;
   padding-left: 1.5em;
 }
-#reader-content-a li { margin: 0.2em 0; }
+.epub-chapter-bg li { margin: 0.2em 0; }
 
-/* 11. 分隔线 */
-#reader-content-a hr {
+/* 11. 分隔线：用 .epub-chapter-bg（class 选择器），让 EPUB 原作者 hr CSS
+   正常生效（如 .book-line { border-color: #ff0000 }）。 */
+.epub-chapter-bg hr {
   border: none;
   border-top: 1px solid currentColor;
   opacity: 0.3;
   margin: 1em 0;
 }
 
-/* 12. 链接：用主题色，不用 EPUB 的红色 */
-#reader-content-a a {
-  color: var(--reader-text-color);
+/* 12. 链接：只提供下划线，颜色交给 EPUB 原作者 CSS（a { color: #ff0000 }）。
+   用 .epub-chapter-bg a（class 选择器）而非 #reader-content-a a（ID 选择器），
+   避免 ID 选择器优先级过高覆盖 EPUB CSS 的链接颜色。
+   4e 已显式保留 .epub-chapter-bg a { color: #ff0000 }，这里只补充下划线。 */
+.epub-chapter-bg a {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
