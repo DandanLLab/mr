@@ -680,14 +680,16 @@ body.reader-scroll #reader-content-b {
 
 /* 4. 章节级背景容器（EPUB body class/style 的 wrapper div，由 EpubParser
    标记 .epub-chapter-bg）：
-   - min-height: 100% 让背景图/背景色填满整页（覆盖整个阅读页面）
+   - min-height: var(--reader-safe-height) 让背景图/背景色填满整页。
+     不用 100% 是因为 column 子元素的百分比高度在某些 WebView 上解析不一致
+     （可能相对 column 容器的 content height，也可能被 column-fill:auto 影响）。
+     用 JS 注入的 --reader-safe-height（实际像素值）最可靠，背景必铺满整页。
    - box-sizing: border-box 让 EPUB body 的 padding 包含在高度内，不溢出
    - break-inside: avoid 防止被分页切断（视频页/卷头页/序号页等整页显示）
    - background-attachment 的 fixed 已在 EpubParser 通用修正为 scroll
-   应用于任何承载 body 背景属性的章节容器
    关键：column-break-inside:avoid 防止容器被 column 布局切分到多列（多页） */
 #reader-content-a .epub-chapter-bg {
-  min-height: 100%;
+  min-height: var(--reader-safe-height);
   box-sizing: border-box;
   break-inside: avoid;
   column-break-inside: avoid;
@@ -702,60 +704,73 @@ body.reader-scroll #reader-content-b {
    .volume-first { margin: 90% auto }
    .intro-box { margin: 45% auto }
    .video-title { margin: 50% 0 1em 0 }
-   在分栏布局下，百分比 margin-top/bottom 相对的是 column width（=页面宽度），
-   会被放大几十倍，导致内容被推到下方几十页空白。
-   1:1 还原方案：把百分比 margin-top/bottom 从 % 转成 vh（相对 viewport height），
-   这样原作者的 45% margin 在分栏下就是 45vh margin，内容精确推到页面 45% 位置。
-   左右 margin 保留 auto（居中），不转 vh。
-   .box { margin: 0em 50% 0em 0em } 的 50% 是左右 margin，相对 width 是正确的，保留。 */
+
+   正确方案：用 calc(var(--reader-safe-width) * 比例) 精确还原原作者百分比。
+   CSS 规范：margin 百分比始终相对包含块 width（非 height）。
+   之前用 vh 是错的——vh 相对 viewport height，把 45% width 换成 45% height
+   会导致 copyright 页 book-title(45vh)+book-author(45vh+20vh)+... 累计 > 100vh，
+   内容被推到第二页（溢出）。而 45% × safe-width ≈ 180px，多元素 margin 折叠后
+   总高度 ≈ 500px < safe-height(700px)，正确留在一页内。
+
+   之前"百分比被放大几十倍"的根因是 .epub-chapter-bg 用了 position:absolute，
+   包含块变成 #reader-content-a（多页总宽度）。现已改回 column 流，
+   包含块 = column = safe-width，百分比行为恢复正常。
+
+   用 calc(var(--reader-safe-width) * 0.45) 而非原始 45%，是为了避开某些
+   WebView 在 column 子元素上百分比 margin 解析不一致的问题（显式 calc 更可靠）。
+
+   .volume-first 原作者 margin:90% auto 上下各 90%=180% 必溢出，
+   改成 margin-top:90% 无下 margin（文字靠下显示，不溢出）。 */
 #reader-content-a .epub-chapter-bg .book-title {
-  margin: 45vh auto !important;
+  margin: calc(var(--reader-safe-width) * 0.45) auto !important;
 }
 #reader-content-a .epub-chapter-bg .book-author {
-  margin: 45vh auto 20vh auto !important;
+  margin: calc(var(--reader-safe-width) * 0.45) auto calc(var(--reader-safe-width) * 0.2) auto !important;
 }
 #reader-content-a .epub-chapter-bg .book-line {
-  margin-bottom: 6vh !important;
+  margin-bottom: calc(var(--reader-safe-width) * 0.06) !important;
 }
 #reader-content-a .epub-chapter-bg .volume-title {
-  margin: 30vh auto 0 auto !important;
+  margin: calc(var(--reader-safe-width) * 0.3) auto 0 auto !important;
 }
 #reader-content-a .epub-chapter-bg .volume-first {
-  margin: 90vh auto !important;
+  margin: calc(var(--reader-safe-width) * 0.9) auto 0 auto !important;
 }
 #reader-content-a .epub-chapter-bg .intro-box {
-  margin: 45vh auto !important;
+  margin: calc(var(--reader-safe-width) * 0.45) auto !important;
 }
 #reader-content-a .epub-chapter-bg .video-title {
-  margin: 50vh 0 1em 0 !important;
+  margin: calc(var(--reader-safe-width) * 0.5) 0 1em 0 !important;
 }
 
-/* 4c. EPUB 章节背景容器：absolute 跳出 column 布局，直接铺满 stage。
-   根因：#reader-content-a 是 column 容器，其子元素 .epub-chapter-bg 的
-   width:100% 相对的是 column 宽度而非 stage 宽度，且会被 column 布局切分。
-   修复：用 position:absolute 让 .epub-chapter-bg 跳出 column 流，
-   直接相对 #reader-stage（最近的 positioned 祖先）定位，width/height:100%
-   铺满整个 stage = viewport（扣除 padding）。
+/* 4c. EPUB 章节背景容器：留在 column 流里，背景才能铺满单页。
+   根因（之前 position:absolute 方案错在哪里）：
+   - #reader-content-a 自身是 position:absolute（见上方 .reader-content 规则），
+     且只设了 left:0 没设 right:0，所以它的 width 是 auto，由 column 布局自动
+     扩展为"多页总宽度"（= pageCount * (columnWidth + gap)）。
+   - 若 .epub-chapter-bg 也用 position:absolute，它的最近 positioned 祖先
+     是 #reader-content-a（不是 #reader-stage），width:100% 会变成"多页总宽度"。
+   - 于是 background-size:cover 相对这个超宽容器缩放，背景图被拉伸到巨大尺寸，
+     用户在单页 viewport 里只能看到背景中间一小块——这就是"居中框框"现象。
+   正确修复：让 .epub-chapter-bg 留在 column 流，作为 column 子元素：
+   - width 自动 = column-width = 单页宽度（不需要显式 width）
+   - min-height:100%（4a 已设）= #reader-content-a 高度 = stage 高度，占满一整页
+   - break-inside:avoid（4a 已设）防止容器被切分到多列（多页）
+   - background-size:cover 相对"单页宽度 × stage 高度"正确铺满
+   - overflow:hidden 防止内部内容溢出 + 阻止 4b 的 vh margin 穿透到容器外
    匹配规则：
    - .volume-bg/.box-bg/.video-bg：原作者 class 标记的背景容器
    - [style*="background"]：EpubParser 把 body bgcolor/style 转成 inline style，
-     copyright(白底) 和 foreword1(黑底) 等无 class 但有背景色的章节也能匹配。
-     正文章节 body 通常无背景属性，不受影响。
-   关键修复：
-   - position:absolute 跳出 column 布局，不被分栏切分
-   - top/left/right/bottom:0 + width/height:100% 铺满 stage
-   - background-size:cover 才能正确铺满（原 .video-bg 设了 cover） */
+     copyright(白底 #fff) 和 foreword1(黑底 #000) 等无 class 但有背景色的章节也能匹配。
+     正文章节 body 通常无背景属性，不受影响。 */
 #reader-content-a .epub-chapter-bg.volume-bg,
 #reader-content-a .epub-chapter-bg.box-bg,
 #reader-content-a .epub-chapter-bg.video-bg,
 #reader-content-a .epub-chapter-bg[style*="background"] {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: 100%;
-  height: 100%;
+  /* 不用 position:absolute，留在 column 流里才能让 width = 单页宽度。
+     overflow:hidden 既防止内部内容溢出导致背景超出单页，
+     又创建 BFC 阻止 4b 的 calc margin 穿透到 .epub-chapter-bg 外面
+     （否则 .book-title 的 margin-top 会"顶"到容器外，背景色从 margin 处才开始）。 */
   overflow: hidden;
 }
 
@@ -778,6 +793,14 @@ body.reader-scroll #reader-content-b {
 #reader-content-a .epub-chapter-bg .preface,
 #reader-content-a .epub-chapter-bg .content-matrix {
   max-width: 100% !important;
+}
+
+/* 4d-2. .content-matrix 原作者固定 width:540px height:360px（视频海报）。
+   max-width:100% 会把 540px 压到屏幕宽度，但 height:360px 不变 → 视频被压扁。
+   必须同时设 height:auto 保持 3:2 比例，配合 max-height 限制不超高内容区。 */
+#reader-content-a .epub-chapter-bg .content-matrix {
+  height: auto !important;
+  max-height: var(--reader-safe-height) !important;
 }
 
 /* 4e. 保留 EPUB 原作者链接颜色（a: #ff0000, a:hover: #ff00ff）。
