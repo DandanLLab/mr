@@ -2564,8 +2564,37 @@ window.readerApi = (function() {
     return prependedChapterCount;
   }
 
+  // CSS 变量热更新：Dart 侧样式变化时调用，无需 reload WebView
+  // 接收一个对象，key 为 CSS 变量名（如 '--reader-font-size'），value 为变量值
+  // 同时处理菜单颜色（基于 backgroundColor 亮度自动计算）
+  function updateStyle(vars) {
+    var root = document.documentElement;
+    for (var key in vars) {
+      if (key.charAt(0) === '-' && key.charAt(1) === '-') {
+        root.style.setProperty(key, vars[key]);
+      }
+    }
+    // 菜单颜色随背景色亮度自动适配
+    var bgColor = vars['--reader-bg-color'];
+    if (bgColor) {
+      var hex = bgColor.replace('#', '');
+      if (hex.length === 6) {
+        var r = parseInt(hex.substr(0,2), 16);
+        var g = parseInt(hex.substr(2,2), 16);
+        var b = parseInt(hex.substr(4,2), 16);
+        var luminance = (0.299*r + 0.587*g + 0.114*b) / 255;
+        var isDark = luminance < 0.5;
+        root.style.setProperty('--reader-menu-bg', isDark ? 'rgba(38,38,38,0.78)' : 'rgba(255,255,255,0.82)');
+        root.style.setProperty('--reader-menu-text', isDark ? '#FAFAFA' : '#1A1A1A');
+        root.style.setProperty('--reader-menu-divider', isDark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.10)');
+        root.style.setProperty('--reader-menu-shadow', isDark ? '0 6px 24px rgba(0,0,0,0.45), 0 2px 6px rgba(0,0,0,0.28)' : '0 6px 24px rgba(0,0,0,0.18), 0 2px 6px rgba(0,0,0,0.10)');
+      }
+    }
+  }
+
   return {
     init: init,
+    updateStyle: updateStyle,
     getPageCount: getPageCount,
     getCurrentPage: getCurrentPage,
     jumpToPage: jumpToPage,

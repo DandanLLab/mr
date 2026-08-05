@@ -129,18 +129,60 @@ class _ReaderWebViewState extends State<ReaderWebView> {
       _reloadHtml();
       return;
     }
-    // 样式变化（字号/行高/缩进/颜色/字重/标题模式等）→ 防抖 reload
     // 用快照比较，避免同一 provider 实例导致比较永远 false 的陷阱
     final current = _StyleSnapshot.fromProvider(widget.provider);
-    if (_lastStyleSnapshot != current) {
+    if (_lastStyleSnapshot == current) return;
+    // 结构性变化（简繁转换/翻页模式/动画时长/标题显隐/高亮规则）→ 必须 reload
+    // 这些字段影响内容或 HTML 结构，无法通过 CSS 变量热更新
+    if (_lastStyleSnapshot!.hasStructuralChange(current)) {
       _lastStyleSnapshot = current;
       _currentHtml = _generateHtml();
-      // 防抖：滑块拖动期间高频触发，等 200ms 静止后才真正 reload
       _styleReloadDebounce?.cancel();
       _styleReloadDebounce = Timer(_styleReloadDelay, () {
         if (mounted) _reloadHtml();
       });
+      return;
     }
+    // 纯样式变化（字号/行距/颜色/字重/padding 等）→ CSS 变量热更新
+    // 即时生效，无白屏闪烁，无需防抖
+    _lastStyleSnapshot = current;
+    _applyStyleHotUpdate(current);
+  }
+
+  /// 构建纯样式 CSS 变量 Map 并通过 JS 热更新
+  ///
+  /// 仅包含可热更新的 CSS 变量（字号/行距/颜色/字重/padding/标题样式等），
+  /// 结构性字段（简繁转换/翻页模式/高亮规则等）不在此处理。
+  void _applyStyleHotUpdate(_StyleSnapshot s) {
+    final textColor = '#${s.textColor.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+    final bgColor = '#${s.backgroundColor.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+    final fontFamily = s.fontFamily.isEmpty ? 'inherit' : s.fontFamily;
+    final titleAlign = s.titleMode == 1
+        ? 'center'
+        : s.titleMode == 3
+            ? 'right'
+            : 'left';
+    final titleFontSizeCalc = 'calc(var(--reader-font-size) * 1.4 + ${s.titleSize}px)';
+    widget.controller.updateStyle({
+      '--reader-font-size': '${s.fontSize}px',
+      '--reader-line-height': '${s.lineHeight}',
+      '--reader-letter-spacing': '${s.letterSpacing}px',
+      '--reader-paragraph-spacing': '${s.paragraphSpacing}px',
+      '--reader-text-indent': '${s.paragraphIndent.length.toDouble()}em',
+      '--reader-text-color': textColor,
+      '--reader-bg-color': bgColor,
+      '--reader-font-family': fontFamily,
+      '--reader-text-weight': '${s.textBoldFine}',
+      '--reader-title-weight': '${s.titleBoldFine}',
+      '--reader-title-align': titleAlign,
+      '--reader-title-font-size': titleFontSizeCalc,
+      '--reader-padding-top-raw': '${s.paddingTop}px',
+      '--reader-padding-bottom-raw': '${s.paddingBottom}px',
+      '--reader-padding-left-raw': '${s.paddingLeft}px',
+      '--reader-padding-right-raw': '${s.paddingRight}px',
+      '--reader-title-top-spacing': '${s.titleTopSpacing}px',
+      '--reader-title-bottom-spacing': '${s.titleBottomSpacing}px',
+    });
   }
 
   /// 生成 HTML 内容
@@ -443,6 +485,38 @@ class _StyleSnapshot {
       }
     }
     return true;
+  }
+
+  /// 判断结构性字段是否变化（需要 reload WebView）
+  ///
+  /// 结构性字段影响内容或 HTML 结构，无法通过 CSS 变量热更新：
+  /// - chineseConverterType：简繁转换需要重新转换内容
+  /// - pageModeIndex：翻页模式影响 Dart 侧 delegate 选择
+  /// - pageAnimDurationMs：翻页动画时长影响 Dart 侧 delegate
+  /// - showChapterTitle：控制标题 HTML 是否生成
+  /// - highlightRulesSnapshot：高亮规则需要重新扫描内容应用
+  ///
+  /// 纯样式字段（字号/行距/颜色/字重/padding/标题样式等）不在此判断，
+  /// 它们通过 CSS 变量热更新即时生效。
+  bool hasStructuralChange(_StyleSnapshot other) {
+    if (chineseConverterType != other.chineseConverterType ||
+        pageModeIndex != other.pageModeIndex ||
+        pageAnimDurationMs != other.pageAnimDurationMs ||
+        showChapterTitle != other.showChapterTitle) {
+      return true;
+    }
+    final a = highlightRulesSnapshot;
+    final b = other.highlightRulesSnapshot;
+    if (a.length != b.length) return true;
+    for (var i = 0; i < a.length; i++) {
+      final ra = a[i] as List<Object?>;
+      final rb = b[i] as List<Object?>;
+      if (ra.length != rb.length) return true;
+      for (var j = 0; j < ra.length; j++) {
+        if (ra[j] != rb[j]) return true;
+      }
+    }
+    return false;
   }
 
   @override

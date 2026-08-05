@@ -150,6 +150,23 @@ class ReaderWebViewController {
     _isReady = true;
   }
 
+  /// CSS 变量热更新（不 reload WebView）
+  ///
+  /// [vars] 为 CSS 变量键值对，key 是变量名（如 '--reader-font-size'），value 是变量值。
+  /// JS 侧 updateStyle 会遍历 vars 调 setProperty 即时更新，
+  /// 同时基于 --reader-bg-color 重算菜单颜色。
+  ///
+  /// 仅适用于纯视觉样式（字号/行距/颜色/字重/padding 等），
+  /// 内容/模式/简繁转换/翻页模式等结构性变化仍需 reload。
+  Future<void> updateStyle(Map<String, String> vars) async {
+    if (!_isReady) return;
+    if (vars.isEmpty) return;
+    final json = jsonEncode(vars);
+    await _webviewController?.evaluateJavascript(
+      source: 'window.readerApi.updateStyle($json);',
+    );
+  }
+
   /// 翻到指定页
   /// [animate]: true=带翻页动画（用户主动翻页）, false=无动画（进度恢复/初始化）
   Future<void> jumpToPage(int pageIndex, {bool animate = true}) async {
