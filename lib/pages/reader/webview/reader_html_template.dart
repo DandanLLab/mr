@@ -677,20 +677,36 @@ body.reader-scroll #reader-content-b {
   page-break-inside: avoid;
 }
 
-/* 4b. EPUB 特殊章节（卷首图/序号表/画廊/视频/版权/序言等）原作者 CSS 大量使用
-   百分比 margin（如 margin: 30% auto / 45% auto / 90% auto / 50% 0）做垂直占位。
-   在分栏布局下，百分比 margin-top/bottom 相对的是 column width（=页面宽度）而非
-   viewport height，导致内容被推到下方几十页空白，看起来"排版错乱"。
-   这里对这些特殊章节的容器做安全化处理：
-   - 将百分比 margin-top 替换为合理的固定值（基于 viewport height）
-   - 保证内容在当前页可见，不产生大量空白页
-   注意：仅作用于 .epub-chapter-bg 直接子元素，不影响正文 .reader-p */
-#reader-content-a .epub-chapter-bg > * {
-  /* 百分比 margin 在分栏下相对 column width，会放大几十倍。
-     用 !important 强制覆盖 EPUB 原作者的百分比 margin。
-     选择合理默认值：5vh 顶部留白，0 底部，让内容靠上显示 */
+/* 4b. EPUB 特殊章节原作者 CSS 用百分比 margin 做垂直占位：
+   .book-title { margin: 45% auto }
+   .book-author { margin: 45% auto 20% auto }
+   .book-line { margin-bottom: 6% }
+   .volume-title { margin: 30% auto 0 auto }
+   .volume-first { margin: 90% auto }
+   .intro-box { margin: 45% auto }
+   .video-title { margin: 50% 0 1em 0 }
+   .box { margin: 0em 50% 0em 0em }（右半屏占位）
+   在分栏布局下，百分比 margin-top/bottom 相对 column width（=页面宽度），
+   会导致内容被推到下方几十页空白。
+   精确匹配这些 class，用 !important 覆盖百分比 margin。
+   在 4c 的 flex 容器内，margin:auto 让元素垂直居中。
+   不影响 .book-creator(负margin)/.duokan-footnote-content(固定margin) 等元素。 */
+#reader-content-a .epub-chapter-bg .book-title,
+#reader-content-a .epub-chapter-bg .book-author,
+#reader-content-a .epub-chapter-bg .book-line,
+#reader-content-a .epub-chapter-bg .volume-title,
+#reader-content-a .epub-chapter-bg .volume-first,
+#reader-content-a .epub-chapter-bg .intro-box,
+#reader-content-a .epub-chapter-bg .video-title {
   margin-top: auto !important;
   margin-bottom: auto !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+/* .box 原作者用 margin: 0em 50% 0em 0em 做右半屏占位，分栏下会溢出，
+   重置为 auto 居中 */
+#reader-content-a .epub-chapter-bg .box {
+  margin: auto !important;
 }
 
 /* 4c. 针对 EPUB 常见的卷首图/序号表/版权页等特殊容器进一步优化：
@@ -711,10 +727,10 @@ body.reader-scroll #reader-content-b {
   min-height: 100%;
 }
 
-/* 4d. EPUB 原作者用 width:35px 等固定小宽度做装饰（如 .volume-title），
-   在分栏下会偏左上角，flex 居中后自动归正，无需额外处理。
-   但 .box 等容器原本用 margin: 0em 50% 做右半屏占位，分栏下会溢出，
-   需要重置为 auto 居中 */
+/* 4d. EPUB 原作者用 width:35px/.content-matrix width:540px 等固定宽度做装饰。
+   保留原作者的 width（装饰元素需要固定尺寸），只加 max-width:100% 防止溢出。
+   不再用 width:auto 覆盖，避免破坏 .volume-title 装饰框和 .content-matrix 视频尺寸。
+   .box/.intro-box 等容器原本用 margin 做占位，flex 居中后自动归正。 */
 #reader-content-a .epub-chapter-bg .box,
 #reader-content-a .epub-chapter-bg .intro-box,
 #reader-content-a .epub-chapter-bg .volume-title,
@@ -727,11 +743,19 @@ body.reader-scroll #reader-content-b {
 #reader-content-a .epub-chapter-bg .volume-first,
 #reader-content-a .epub-chapter-bg .chapter-title,
 #reader-content-a .epub-chapter-bg .other-title,
-#reader-content-a .epub-chapter-bg .preface {
-  margin-left: auto !important;
-  margin-right: auto !important;
-  width: auto !important;
+#reader-content-a .epub-chapter-bg .preface,
+#reader-content-a .epub-chapter-bg .content-matrix {
   max-width: 100% !important;
+}
+
+/* 4e. 保留 EPUB 原作者链接颜色（a: #ff0000, a:hover: #ff00ff）。
+   阅读器 html,body 设了 color: var(--reader-text-color)，会通过继承影响链接。
+   原作者 CSS 的 a 选择器优先级更高，但为防止阅读器 CSS 变量干扰，显式保留。 */
+#reader-content-a .epub-chapter-bg a {
+  color: #ff0000;
+}
+#reader-content-a .epub-chapter-bg a:hover {
+  color: #ff00ff;
 }
 
 /* 5. 滑动看图容器（多看画廊 duokan-image-gallery）：
