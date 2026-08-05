@@ -715,27 +715,32 @@ body.reader-scroll #reader-content-b {
   margin: 50vh 0 1em 0 !important;
 }
 
-/* 4c. EPUB 章节背景容器：width/height:100% 铺满 stage，让背景色/背景图覆盖
-   整个阅读器页面。不用 min-height（相对 column 容器，不够大），用 height:100%
-   相对 #reader-stage（absolute 定位的父容器）。
+/* 4c. EPUB 章节背景容器：absolute 跳出 column 布局，直接铺满 stage。
+   根因：#reader-content-a 是 column 容器，其子元素 .epub-chapter-bg 的
+   width:100% 相对的是 column 宽度而非 stage 宽度，且会被 column 布局切分。
+   修复：用 position:absolute 让 .epub-chapter-bg 跳出 column 流，
+   直接相对 #reader-stage（最近的 positioned 祖先）定位，width/height:100%
+   铺满整个 stage = viewport（扣除 padding）。
    匹配规则：
    - .volume-bg/.box-bg/.video-bg：原作者 class 标记的背景容器
    - [style*="background"]：EpubParser 把 body bgcolor/style 转成 inline style，
      copyright(白底) 和 foreword1(黑底) 等无 class 但有背景色的章节也能匹配。
      正文章节 body 通常无背景属性，不受影响。
    关键修复：
-   - width:100% + height:100% 让背景容器尺寸 = stage 尺寸 = viewport
-   - background-size:cover 才能正确铺满（原 .video-bg 设了 cover）
-   - position:relative 让容器作为定位上下文，不参与 column 分栏切分
-   - break-inside:avoid 防止被分栏切断 */
+   - position:absolute 跳出 column 布局，不被分栏切分
+   - top/left/right/bottom:0 + width/height:100% 铺满 stage
+   - background-size:cover 才能正确铺满（原 .video-bg 设了 cover） */
 #reader-content-a .epub-chapter-bg.volume-bg,
 #reader-content-a .epub-chapter-bg.box-bg,
 #reader-content-a .epub-chapter-bg.video-bg,
 #reader-content-a .epub-chapter-bg[style*="background"] {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   width: 100%;
   height: 100%;
-  min-height: 100%;
-  position: relative;
   overflow: hidden;
 }
 
