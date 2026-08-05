@@ -677,6 +677,57 @@ body.reader-scroll #reader-content-b {
   page-break-inside: avoid;
 }
 
+/* 4b. EPUB 特殊章节（卷首图/序号表/画廊/视频/版权/序言等）原作者 CSS 大量使用
+   百分比 margin（如 margin: 30% auto / 45% auto / 90% auto / 50% 0）做垂直占位。
+   在分栏布局下，百分比 margin-top/bottom 相对的是 column width（=页面宽度）而非
+   viewport height，导致内容被推到下方几十页空白，看起来"排版错乱"。
+   这里对这些特殊章节的容器做安全化处理：
+   - 将百分比 margin-top 替换为合理的固定值（基于 viewport height）
+   - 保证内容在当前页可见，不产生大量空白页
+   注意：仅作用于 .epub-chapter-bg 直接子元素，不影响正文 .reader-p */
+#reader-content-a .epub-chapter-bg > * {
+  /* 百分比 margin 在分栏下相对 column width，会放大几十倍。
+     用 !important 强制覆盖 EPUB 原作者的百分比 margin。
+     选择合理默认值：5vh 顶部留白，0 底部，让内容靠上显示 */
+  margin-top: auto !important;
+  margin-bottom: auto !important;
+}
+
+/* 4c. 针对 EPUB 常见的卷首图/序号表/版权页等特殊容器进一步优化：
+   flex 居中让内容垂直水平居中，整页显示 */
+#reader-content-a .epub-chapter-bg.volume-bg,
+#reader-content-a .epub-chapter-bg.box-bg,
+#reader-content-a .epub-chapter-bg.video-bg {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 100%;
+}
+
+/* 4d. EPUB 原作者用 width:35px 等固定小宽度做装饰（如 .volume-title），
+   在分栏下会偏左上角，flex 居中后自动归正，无需额外处理。
+   但 .box 等容器原本用 margin: 0em 50% 做右半屏占位，分栏下会溢出，
+   需要重置为 auto 居中 */
+#reader-content-a .epub-chapter-bg .box,
+#reader-content-a .epub-chapter-bg .intro-box,
+#reader-content-a .epub-chapter-bg .volume-title,
+#reader-content-a .epub-chapter-bg .gallery-title,
+#reader-content-a .epub-chapter-bg .video-title,
+#reader-content-a .epub-chapter-bg .book-title,
+#reader-content-a .epub-chapter-bg .book-author,
+#reader-content-a .epub-chapter-bg .book-creator,
+#reader-content-a .epub-chapter-bg .book-link,
+#reader-content-a .epub-chapter-bg .volume-first,
+#reader-content-a .epub-chapter-bg .chapter-title,
+#reader-content-a .epub-chapter-bg .other-title,
+#reader-content-a .epub-chapter-bg .preface {
+  margin-left: auto !important;
+  margin-right: auto !important;
+  width: auto !important;
+  max-width: 100% !important;
+}
+
 /* 5. 滑动看图容器（多看画廊 duokan-image-gallery）：
    作为完整滚动单元，整页显示不分页
    - max-height 限制在一页内（内容区高度 - 上下 margin）
