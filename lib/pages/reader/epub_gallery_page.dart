@@ -499,6 +499,8 @@ class _GalleryImageItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasTitle =
+        image.maintitle.isNotEmpty || image.subtitle.isNotEmpty;
     return GestureDetector(
       onTap: onTap,
       child: Padding(
@@ -508,43 +510,53 @@ class _GalleryImageItem extends StatelessWidget {
           horizontal: DesignTokens.spacingMd,
           vertical: chapterStyle?.cellMargin ?? DesignTokens.spacingSm,
         ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Expanded(child: _buildCellWithDecoration()),
-            if (image.maintitle.isNotEmpty || image.subtitle.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: DesignTokens.spacingSm),
-                child: Column(
-                  children: [
-                    if (image.maintitle.isNotEmpty)
-                      Text(
-                        image.maintitle,
-                        // 使用从 EPUB CSS 提取的原作者样式，
-                        // 缺失时用兜底样式（黑体风格、居中）
-                        style: _buildMaintitleStyle(),
-                        textAlign: _resolveTextAlign(
-                          image.maintitleStyle?.textAlign,
-                          TextAlign.center,
-                        ),
-                      ),
-                    if (image.subtitle.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        image.subtitle,
-                        // 使用从 EPUB CSS 提取的原作者样式，
-                        // 缺失时用兜底样式（细黑体风格、居中）
-                        style: _buildSubtitleStyle(),
-                        textAlign: _resolveTextAlign(
-                          image.subtitleStyle?.textAlign,
-                          TextAlign.center,
-                        ),
-                      ),
-                    ],
-                  ],
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // 图片最大高度：可用高度的 75%（有标题时）或 90%（无标题时）
+            // 避免图片 contain 后撑满整个空间，留出标题和呼吸空间
+            final maxImgHeight = constraints.maxHeight * (hasTitle ? 0.75 : 0.9);
+            return Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: maxImgHeight),
+                  child: _buildCellWithDecoration(),
                 ),
-              ),
-          ],
+                if (hasTitle)
+                  Padding(
+                    padding: const EdgeInsets.only(top: DesignTokens.spacingSm),
+                    child: Column(
+                      children: [
+                        if (image.maintitle.isNotEmpty)
+                          Text(
+                            image.maintitle,
+                            // 使用从 EPUB CSS 提取的原作者样式，
+                            // 缺失时用兜底样式（黑体风格、居中）
+                            style: _buildMaintitleStyle(),
+                            textAlign: _resolveTextAlign(
+                              image.maintitleStyle?.textAlign,
+                              TextAlign.center,
+                            ),
+                          ),
+                        if (image.subtitle.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            image.subtitle,
+                            // 使用从 EPUB CSS 提取的原作者样式，
+                            // 缺失时用兜底样式（细黑体风格、居中）
+                            style: _buildSubtitleStyle(),
+                            textAlign: _resolveTextAlign(
+                              image.subtitleStyle?.textAlign,
+                              TextAlign.center,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -554,45 +566,51 @@ class _GalleryImageItem extends StatelessWidget {
   ///
   /// 原作者 CSS：.duokan-image-gallery-cell {
   ///   margin: 10px 0; border: solid 1px; box-shadow: 5px 5px 5px #888 }
-  /// 这里用 Container + BoxDecoration 还原边框和阴影
+  /// .duokan-image-gallery { text-align: center } → cell 水平居中
+  /// 这里用 Container + BoxDecoration 还原边框和阴影，加 alignment 确保图片居中
   Widget _buildCellWithDecoration() {
     final cs = chapterStyle;
-    // 没有任何装饰配置时直接返回图片
+    // 没有任何装饰配置时直接返回居中图片
     if (cs == null ||
         (cs.cellBorderWidth == null && cs.cellShadowColor == null)) {
-      return _buildImage();
+      return Center(child: _buildImage());
     }
 
     final hasBorder = cs.cellBorderWidth != null && cs.cellBorderWidth! > 0;
     final hasShadow = cs.cellShadowColor != null;
 
-    return Container(
-      decoration: BoxDecoration(
-        border: hasBorder
-            ? Border.all(
-                color: Color(cs.cellBorderColor ?? 0xFF888888),
-                width: cs.cellBorderWidth!,
-                style: _resolveBorderStyle(cs.cellBorderStyle),
-              )
-            : null,
-        borderRadius: cs.cellBorderRadius != null && cs.cellBorderRadius! > 0
-            ? BorderRadius.circular(cs.cellBorderRadius!)
-            : null,
-        boxShadow: hasShadow
-            ? [
-                BoxShadow(
-                  color: Color(cs.cellShadowColor!).withValues(alpha: 0.5),
-                  offset: Offset(cs.cellShadowDx ?? 5, cs.cellShadowDy ?? 5),
-                  blurRadius: cs.cellShadowBlur ?? 5,
-                ),
-              ]
-            : null,
-      ),
-      child: ClipRRect(
-        borderRadius: cs.cellBorderRadius != null && cs.cellBorderRadius! > 0
-            ? BorderRadius.circular(cs.cellBorderRadius!)
-            : BorderRadius.zero,
-        child: _buildImage(),
+    // cell 宽度由图片内容决定（不撑满屏宽），水平居中对齐原作者 text-align:center
+    return Center(
+      child: Container(
+        // alignment 让图片在 cell 内居中
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          border: hasBorder
+              ? Border.all(
+                  color: Color(cs.cellBorderColor ?? 0xFF888888),
+                  width: cs.cellBorderWidth!,
+                  style: _resolveBorderStyle(cs.cellBorderStyle),
+                )
+              : null,
+          borderRadius: cs.cellBorderRadius != null && cs.cellBorderRadius! > 0
+              ? BorderRadius.circular(cs.cellBorderRadius!)
+              : null,
+          boxShadow: hasShadow
+              ? [
+                  BoxShadow(
+                    color: Color(cs.cellShadowColor!).withValues(alpha: 0.5),
+                    offset: Offset(cs.cellShadowDx ?? 5, cs.cellShadowDy ?? 5),
+                    blurRadius: cs.cellShadowBlur ?? 5,
+                  ),
+                ]
+              : null,
+        ),
+        child: ClipRRect(
+          borderRadius: cs.cellBorderRadius != null && cs.cellBorderRadius! > 0
+              ? BorderRadius.circular(cs.cellBorderRadius!)
+              : BorderRadius.zero,
+          child: _buildImage(),
+        ),
       ),
     );
   }
@@ -1001,11 +1019,12 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
     );
   }
 
-  /// 右下角信息面板
+  /// 底部居中信息面板
   ///
+  /// 对齐原作者意图：.duokan-image-maintitle { text-align: center }
+  /// .duokan-image-subtitle { text-align: justify }
+  /// 信息面板在屏幕底部居中显示（不是右下角），maintitle 居中、subtitle 居中。
   /// 使用 AnimatedSwitcher 在切换图片时实现淡入淡出 + 上滑动画。
-  /// easeInOutCubicEmphasized：比 easeOutCubic 更柔和，有"弹性"感。
-  /// 大标题用大字号粗体，副标题用小字号常规。
   Widget _buildInfoPanel() {
     final image = widget.images[_currentIndex];
     final hasInfo =
@@ -1013,13 +1032,11 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
     if (!hasInfo) return const SizedBox.shrink();
 
     return Positioned(
+      left: 0,
       right: 0,
       bottom: 0,
       child: SafeArea(
         child: Container(
-          constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.88,
-          ),
           padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -1050,7 +1067,7 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
             },
             child: Column(
               key: ValueKey(_currentIndex),
-              crossAxisAlignment: CrossAxisAlignment.end,
+              crossAxisAlignment: CrossAxisAlignment.center,
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (image.maintitle.isNotEmpty)
@@ -1060,7 +1077,7 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
                     style: _buildFullScreenMaintitleStyle(image.maintitleStyle),
                     textAlign: _resolveTextAlign(
                       image.maintitleStyle?.textAlign,
-                      TextAlign.right,
+                      TextAlign.center,
                     ),
                   ),
                 if (image.subtitle.isNotEmpty) ...[
@@ -1070,7 +1087,7 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
                     style: _buildFullScreenSubtitleStyle(image.subtitleStyle),
                     textAlign: _resolveTextAlign(
                       image.subtitleStyle?.textAlign,
-                      TextAlign.right,
+                      TextAlign.center,
                     ),
                   ),
                 ],

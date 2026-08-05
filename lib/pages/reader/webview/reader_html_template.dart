@@ -814,17 +814,15 @@ body.reader-scroll #reader-content-b {
   margin: calc(var(--reader-safe-height) * 0.35) 0 1em 0 !important;
 }
 
-/* 4b-2. volume-title 装饰盒子放大：
-   原作者 width:35px 明显是错误值（35px 放不下两个中文字符），
-   导致「小丑」「序列途径」等卷标题被压缩或换行。
-   修复：去掉固定 width，改用 padding 让盒子自适应内容；
-   保留装饰样式（border, border-radius, background）。
-   同时加大 padding 让盒子视觉上更大更协调。 */
-#reader-content-a .epub-chapter-bg .volume-title {
-  width: auto !important;
-  min-width: fit-content !important;
-  padding: 12px 24px !important;
-}
+/* 4b-2. volume-title 竖排还原：
+   原作者 .volume-title { width: 35px; padding: 10px 5px;
+     font-size: 1.3em; line-height: 1.2em; text-align: center;
+     border: 3px solid rgba(40,40,40,0.5); border-radius: 10px;
+     background-color: rgba(255,255,255,0.9) }
+   width:35px 是故意的！35px 宽度下中文字符会每行1字垂直排列，
+   配合 border+border-radius+background 形成竖条盒子装饰。
+   如"序列途径"4字竖排显示在带边框圆角的白色竖条里。
+   1:1 还原原作者排版，不覆盖 width/padding。 */
 
 /* 4b-3. 特殊章节内容溢出修复：
    A. illustration(.box-bg)：.box { margin: 0em 50% 0em 0em; padding: 3px }
