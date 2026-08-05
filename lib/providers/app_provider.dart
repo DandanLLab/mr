@@ -74,12 +74,19 @@ class AppProvider extends ChangeNotifier with WidgetsBindingObserver {
   // 底栏配置
   String _navBarLayoutMode = 'floating'; // floating, standard, sidebar
   String _navBarEffectMode = 'glass'; // solid, glass, frosted
-  int _navBarOpacity = 72;
+  int? _navBarBackgroundColor;
+  int _navBarOpacity = 76;
   int? _navBarBorderColor;
   int _navBarBorderAlpha = 100;
   String? _navBarWallpaperPath;
   String? _navBarSidebarBackgroundPath;
   String _navBarSidebarGravity = 'start'; // start, end
+  bool _navBarSidebarShowLabels = true;
+
+  // 通用界面设置（移植自 legado-main 主题设置通用项）
+  bool _immersiveNavBar = false;
+  int _barElevation = 4;
+  int _globalFontScale = 10;
 
   ThemeMode get themeMode => _themeMode;
   bool get isNoImageMode => _isNoImageMode;
@@ -106,12 +113,20 @@ class AppProvider extends ChangeNotifier with WidgetsBindingObserver {
   // 底栏配置 getter
   String get navBarLayoutMode => _navBarLayoutMode;
   String get navBarEffectMode => _navBarEffectMode;
+  int? get navBarBackgroundColor => _navBarBackgroundColor;
   int get navBarOpacity => _navBarOpacity;
   int? get navBarBorderColor => _navBarBorderColor;
   int get navBarBorderAlpha => _navBarBorderAlpha;
   String? get navBarWallpaperPath => _navBarWallpaperPath;
   String? get navBarSidebarBackgroundPath => _navBarSidebarBackgroundPath;
   String get navBarSidebarGravity => _navBarSidebarGravity;
+  bool get navBarSidebarShowLabels => _navBarSidebarShowLabels;
+
+  // 通用界面设置 getter
+  bool get immersiveNavBar => _immersiveNavBar;
+  int get barElevation => _barElevation;
+  int get globalFontScale => _globalFontScale;
+  double get globalFontScaleFactor => _globalFontScale / 10.0;
 
   // 获取当前主题的背景图片
   String? get currentBackgroundImage {
@@ -444,13 +459,22 @@ class AppProvider extends ChangeNotifier with WidgetsBindingObserver {
     // 加载底栏配置
     _navBarLayoutMode = prefs.getString('navBarLayoutMode') ?? 'floating';
     _navBarEffectMode = prefs.getString('navBarEffectMode') ?? 'glass';
-    _navBarOpacity = prefs.getInt('navBarOpacity') ?? 72;
+    final bgColorValue = prefs.getInt('navBarBackgroundColor');
+    _navBarBackgroundColor = bgColorValue != null && bgColorValue != 0 ? bgColorValue : null;
+    _navBarOpacity = prefs.getInt('navBarOpacity') ?? 76;
     final borderColorValue = prefs.getInt('navBarBorderColor');
     _navBarBorderColor = borderColorValue != null && borderColorValue != 0 ? borderColorValue : null;
     _navBarBorderAlpha = prefs.getInt('navBarBorderAlpha') ?? 100;
     _navBarWallpaperPath = prefs.getString('navBarWallpaperPath');
     _navBarSidebarBackgroundPath = prefs.getString('navBarSidebarBackgroundPath');
     _navBarSidebarGravity = prefs.getString('navBarSidebarGravity') ?? 'start';
+    _navBarSidebarShowLabels = prefs.getBool('navBarSidebarShowLabels') ?? true;
+    _navBarSidebarShowLabels = prefs.getBool('navBarSidebarShowLabels') ?? true;
+
+    // 加载通用界面设置
+    _immersiveNavBar = prefs.getBool('immersiveNavBar') ?? false;
+    _barElevation = prefs.getInt('barElevation') ?? 4;
+    _globalFontScale = prefs.getInt('globalFontScale') ?? 10;
 
     notifyListeners();
   }
@@ -799,29 +823,56 @@ class AppProvider extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
+  // 设置通用界面项（移植自 legado-main 主题通用设置）
+  Future<void> setGeneralInterface({
+    bool? immersiveNavBar,
+    int? barElevation,
+    int? globalFontScale,
+  }) async {
+    if (immersiveNavBar != null) _immersiveNavBar = immersiveNavBar;
+    if (barElevation != null) _barElevation = barElevation;
+    if (globalFontScale != null) _globalFontScale = globalFontScale.clamp(8, 16);
+    final prefs = await SharedPreferences.getInstance();
+    if (immersiveNavBar != null) await prefs.setBool('immersiveNavBar', immersiveNavBar);
+    if (barElevation != null) await prefs.setInt('barElevation', barElevation);
+    if (globalFontScale != null) await prefs.setInt('globalFontScale', _globalFontScale);
+    notifyListeners();
+  }
+
   // 设置底栏配置
   Future<void> setNavBarConfig({
     String? layoutMode,
     String? effectMode,
+    int? backgroundColor,
     int? opacity,
     int? borderColor,
     int? borderAlpha,
     String? wallpaperPath,
     String? sidebarBackgroundPath,
     String? sidebarGravity,
+    bool? sidebarShowLabels,
   }) async {
     if (layoutMode != null) _navBarLayoutMode = layoutMode;
     if (effectMode != null) _navBarEffectMode = effectMode;
+    if (backgroundColor != null) _navBarBackgroundColor = backgroundColor == 0 ? null : backgroundColor;
     if (opacity != null) _navBarOpacity = opacity;
     if (borderColor != null) _navBarBorderColor = borderColor == 0 ? null : borderColor;
     if (borderAlpha != null) _navBarBorderAlpha = borderAlpha;
     if (wallpaperPath != null) _navBarWallpaperPath = wallpaperPath.isEmpty ? null : wallpaperPath;
     if (sidebarBackgroundPath != null) _navBarSidebarBackgroundPath = sidebarBackgroundPath.isEmpty ? null : sidebarBackgroundPath;
     if (sidebarGravity != null) _navBarSidebarGravity = sidebarGravity;
+    if (sidebarShowLabels != null) _navBarSidebarShowLabels = sidebarShowLabels;
 
     final prefs = await SharedPreferences.getInstance();
     if (layoutMode != null) await prefs.setString('navBarLayoutMode', layoutMode);
     if (effectMode != null) await prefs.setString('navBarEffectMode', effectMode);
+    if (backgroundColor != null) {
+      if (backgroundColor == 0) {
+        await prefs.remove('navBarBackgroundColor');
+      } else {
+        await prefs.setInt('navBarBackgroundColor', backgroundColor);
+      }
+    }
     if (opacity != null) await prefs.setInt('navBarOpacity', opacity);
     if (borderColor != null) {
       if (borderColor == 0) {
@@ -846,6 +897,7 @@ class AppProvider extends ChangeNotifier with WidgetsBindingObserver {
       }
     }
     if (sidebarGravity != null) await prefs.setString('navBarSidebarGravity', sidebarGravity);
+    if (sidebarShowLabels != null) await prefs.setBool('navBarSidebarShowLabels', sidebarShowLabels);
 
     notifyListeners();
   }

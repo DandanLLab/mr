@@ -14,6 +14,7 @@ import '../../services/storage_service.dart';
 import '../../services/cover_config_service.dart';
 import '../../services/image_decode_provider.dart';
 import '../../utils/design_tokens.dart';
+import '../../widgets/android_switch.dart';
 
 /// 书架布局类型
 enum BookshelfLayout {
@@ -151,12 +152,21 @@ class _BookshelfPageState extends State<BookshelfPage>
           // 获取动态分组列表（只显示有书籍的分组）
           final groups = provider.getVisibleGroups();
 
+          // 参考订阅页：顶栏使用 primary 背景，按明暗自适应前景色
+          final primaryColor = Theme.of(context).colorScheme.primary;
+          final appBarForeground =
+              ThemeData.estimateBrightnessForColor(primaryColor) ==
+                      Brightness.dark
+                  ? Colors.white
+                  : Colors.black;
+
           // 参考原版 Style1：TabLayout + ViewPager
           // 分组标签和搜索在同一排，左右滑动切换分组
           return Column(
             children: [
               // 顶部区域：状态栏间距 + RoundedTagBarView 标签栏 + 操作按钮
               Container(
+                color: primaryColor,
                 padding: EdgeInsets.only(
                   top: MediaQuery.of(context).padding.top,
                 ),
@@ -166,6 +176,19 @@ class _BookshelfPageState extends State<BookshelfPage>
                     const SizedBox(height: DesignTokens.spacingSm),
                     Row(
                       children: [
+                        // 标题"书架"：仅在无分组标签（文件夹/单组模式）时显示
+                        // 标签模式（多分组）下标签栏占位，不显示标题
+                        if (groups.length <= 1) ...[
+                          Text(
+                            '书架',
+                            style: TextStyle(
+                              fontSize: DesignTokens.fontTitle,
+                              fontWeight: FontWeight.w600,
+                              color: appBarForeground,
+                            ),
+                          ),
+                          const SizedBox(width: DesignTokens.spacingSm),
+                        ],
                         // 分组标签栏（RoundedTagBarView 风格）
                         Expanded(
                           child: Container(
@@ -173,17 +196,9 @@ class _BookshelfPageState extends State<BookshelfPage>
                               horizontal: DesignTokens.spacingLg,
                             ),
                             height: DesignTokens.tagBarHeight,
-                            decoration: BoxDecoration(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(
-                                DesignTokens.panelRadius,
-                              ),
-                            ),
+                            // 透明背景（参考 legado_max view_bookshelf_group_switch.xml tabBackground=transparent）
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 3.0,
-                              vertical: 1.0,
+                              horizontal: 4.0,
                             ),
                             child: ListView.builder(
                               controller: _tagScrollController,
@@ -229,14 +244,15 @@ class _BookshelfPageState extends State<BookshelfPage>
                                           DesignTokens.tagItemPaddingHorizontal,
                                     ),
                                     alignment: Alignment.center,
+                                    // 选中标签底部下划线指示器（参考 legado_max TabLayout tabIndicator）
                                     decoration: BoxDecoration(
-                                      color: isSelected
-                                          ? Theme.of(
-                                              context,
-                                            ).colorScheme.surface
-                                          : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(
-                                        DesignTokens.actionRadius,
+                                      border: Border(
+                                        bottom: BorderSide(
+                                          width: 2,
+                                          color: isSelected
+                                              ? appBarForeground
+                                              : Colors.transparent,
+                                        ),
                                       ),
                                     ),
                                     child: Text(
@@ -250,13 +266,8 @@ class _BookshelfPageState extends State<BookshelfPage>
                                             ? FontWeight.w500
                                             : FontWeight.normal,
                                         color: isSelected
-                                            ? Theme.of(
-                                                context,
-                                              ).colorScheme.secondary
-                                            : Theme.of(context)
-                                                  .colorScheme
-                                                  .onSurface
-                                                  .withValues(alpha: 0.7),
+                                            ? appBarForeground
+                                            : appBarForeground.withValues(alpha: 0.7),
                                       ),
                                     ),
                                   ),
@@ -265,67 +276,22 @@ class _BookshelfPageState extends State<BookshelfPage>
                             ),
                           ),
                         ),
-                        // 搜索入口
-                        Builder(
-                          builder: (context) {
-                            final scheme = Theme.of(context).colorScheme;
-                            final isDark = scheme.brightness == Brightness.dark;
-                            final background = isDark
-                                ? scheme.surfaceContainerHighest
-                                : scheme.primaryContainer.withValues(alpha: 0.72);
-                            final foreground = isDark
-                                ? scheme.onSurface
-                                : scheme.onPrimaryContainer;
-                            final border = isDark
-                                ? scheme.outlineVariant
-                                : scheme.primary.withValues(alpha: 0.42);
-                            return Padding(
-                              padding: const EdgeInsets.only(left: 4),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(
-                                  DesignTokens.searchRadius,
-                                ),
-                                onTap: () => Navigator.pushNamed(
-                                  context,
-                                  AppRoutes.search,
-                                ),
-                                child: Container(
-                                  height: 36,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: DesignTokens.spacingMd,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: background,
-                                    borderRadius: BorderRadius.circular(
-                                      DesignTokens.searchRadius,
-                                    ),
-                                    border: Border.all(color: border),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.search,
-                                        size: 20,
-                                        color: foreground,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        '搜索',
-                                        style: TextStyle(color: foreground),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
+                        // 搜索（参考 legado_max main_bookshelf.xml menu_search showAsAction=always）
+                        IconButton(
+                          icon: Icon(Icons.search,
+                              size: 22,
+                              color: appBarForeground),
+                          tooltip: '搜索',
+                          onPressed: () => Navigator.pushNamed(
+                            context,
+                            AppRoutes.search,
+                          ),
                         ),
                         // 更多菜单
                         PopupMenuButton<String>(
                           icon: Icon(
                             Icons.more_vert,
-                            color: Theme.of(context).colorScheme.onSurface,
+                            color: appBarForeground,
                           ),
                           tooltip: '更多选项',
                           color: Theme.of(context).colorScheme.surface,
@@ -870,77 +836,66 @@ class _BookshelfPageState extends State<BookshelfPage>
         builder: (context, setDialogState) => AlertDialog(
           title: const Text('书架布局'),
           content: SizedBox(
-            width: 400,
+            width: 360,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 分组样式
-                  Row(
-                    children: [
-                      const Expanded(
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(vertical: 6),
-                          child: Text('分组样式'),
+                  // 分组样式（紧凑行，6dp 内边距，缩小触摸目标）
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 4),
+                    child: Row(
+                      children: [
+                        const Expanded(child: Text('分组样式')),
+                        DropdownButton<GroupStyle>(
+                          value: _groupStyle,
+                          underline: const SizedBox(),
+                          isDense: true,
+                          style: const TextStyle(fontSize: 14),
+                          items: const [
+                            DropdownMenuItem(
+                              value: GroupStyle.none,
+                              child: Text('不分组'),
+                            ),
+                            DropdownMenuItem(
+                              value: GroupStyle.byGroup,
+                              child: Text('按分组'),
+                            ),
+                          ],
+                          onChanged: (v) {
+                            if (v != null) {
+                              setDialogState(() => _groupStyle = v);
+                            }
+                          },
                         ),
-                      ),
-                      DropdownButton<GroupStyle>(
-                        value: _groupStyle,
-                        underline: const SizedBox(),
-                        items: const [
-                          DropdownMenuItem(
-                            value: GroupStyle.none,
-                            child: Text('不分组'),
-                          ),
-                          DropdownMenuItem(
-                            value: GroupStyle.byGroup,
-                            child: Text('按分组'),
-                          ),
-                        ],
-                        onChanged: (v) {
-                          if (v != null) {
-                            setDialogState(() => _groupStyle = v);
-                          }
-                        },
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                  // 显示未读标志
-                  SwitchListTile(
-                    title: const Text('显示未读标志'),
-                    value: _showUnread,
-                    onChanged: (v) {
-                      setDialogState(() => _showUnread = v);
-                    },
-                    contentPadding: EdgeInsets.zero,
+                  // 紧凑开关：显示未读标志
+                  _buildCompactSwitch(
+                    '显示未读标志',
+                    _showUnread,
+                    (v) => setDialogState(() => _showUnread = v),
                   ),
-                  // 显示上次更新时间
-                  SwitchListTile(
-                    title: const Text('显示上次更新时间'),
-                    value: _showLastUpdateTime,
-                    onChanged: (v) {
-                      setDialogState(() => _showLastUpdateTime = v);
-                    },
-                    contentPadding: EdgeInsets.zero,
+                  // 紧凑开关：显示上次更新时间
+                  _buildCompactSwitch(
+                    '显示上次更新时间',
+                    _showLastUpdateTime,
+                    (v) => setDialogState(() => _showLastUpdateTime = v),
                   ),
-                  // 显示等待更新数量
-                  SwitchListTile(
-                    title: const Text('显示等待更新数量'),
-                    value: _showWaitUpdate,
-                    onChanged: (v) {
-                      setDialogState(() => _showWaitUpdate = v);
-                    },
-                    contentPadding: EdgeInsets.zero,
+                  // 紧凑开关：显示等待更新数量
+                  _buildCompactSwitch(
+                    '显示等待更新数量',
+                    _showWaitUpdate,
+                    (v) => setDialogState(() => _showWaitUpdate = v),
                   ),
-                  // 显示快速滚动条
-                  SwitchListTile(
-                    title: const Text('显示快速滚动条'),
-                    value: _showFastScroller,
-                    onChanged: (v) {
-                      setDialogState(() => _showFastScroller = v);
-                    },
-                    contentPadding: EdgeInsets.zero,
+                  // 紧凑开关：显示快速滚动条
+                  _buildCompactSwitch(
+                    '显示快速滚动条',
+                    _showFastScroller,
+                    (v) => setDialogState(() => _showFastScroller = v),
                   ),
                   const SizedBox(height: DesignTokens.spacingSm),
                   // 视图和排序（两列布局）
@@ -952,16 +907,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 6),
-                              child: Text(
-                                '视图',
-                                style: TextStyle(
-                                  fontSize: DesignTokens.fontSubtitle,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
+                            _buildSectionLabel('视图'),
                             _buildRadioItem(
                               '列表',
                               BookshelfLayout.list,
@@ -969,7 +915,8 @@ class _BookshelfPageState extends State<BookshelfPage>
                               (v) {
                                 setDialogState(() {
                                   _layout = v;
-                                  _gridColumnCount = _getGridColumnCount(v);
+                                  _gridColumnCount =
+                                      _getGridColumnCount(v);
                                 });
                               },
                             ),
@@ -980,7 +927,8 @@ class _BookshelfPageState extends State<BookshelfPage>
                               (v) {
                                 setDialogState(() {
                                   _layout = v;
-                                  _gridColumnCount = _getGridColumnCount(v);
+                                  _gridColumnCount =
+                                      _getGridColumnCount(v);
                                 });
                               },
                             ),
@@ -991,7 +939,8 @@ class _BookshelfPageState extends State<BookshelfPage>
                               (v) {
                                 setDialogState(() {
                                   _layout = v;
-                                  _gridColumnCount = _getGridColumnCount(v);
+                                  _gridColumnCount =
+                                      _getGridColumnCount(v);
                                 });
                               },
                             ),
@@ -1002,7 +951,8 @@ class _BookshelfPageState extends State<BookshelfPage>
                               (v) {
                                 setDialogState(() {
                                   _layout = v;
-                                  _gridColumnCount = _getGridColumnCount(v);
+                                  _gridColumnCount =
+                                      _getGridColumnCount(v);
                                 });
                               },
                             ),
@@ -1013,7 +963,8 @@ class _BookshelfPageState extends State<BookshelfPage>
                               (v) {
                                 setDialogState(() {
                                   _layout = v;
-                                  _gridColumnCount = _getGridColumnCount(v);
+                                  _gridColumnCount =
+                                      _getGridColumnCount(v);
                                 });
                               },
                             ),
@@ -1024,7 +975,8 @@ class _BookshelfPageState extends State<BookshelfPage>
                               (v) {
                                 setDialogState(() {
                                   _layout = v;
-                                  _gridColumnCount = _getGridColumnCount(v);
+                                  _gridColumnCount =
+                                      _getGridColumnCount(v);
                                 });
                               },
                             ),
@@ -1035,29 +987,21 @@ class _BookshelfPageState extends State<BookshelfPage>
                               (v) {
                                 setDialogState(() {
                                   _layout = v;
-                                  _gridColumnCount = _getGridColumnCount(v);
+                                  _gridColumnCount =
+                                      _getGridColumnCount(v);
                                 });
                               },
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(width: DesignTokens.spacingLg),
+                      const SizedBox(width: DesignTokens.spacingSm),
                       // 排序
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 6),
-                              child: Text(
-                                '排序',
-                                style: TextStyle(
-                                  fontSize: DesignTokens.fontSubtitle,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
+                            _buildSectionLabel('排序'),
                             _buildRadioItem(
                               '按阅读时间',
                               BookshelfSort.byTime,
@@ -1114,17 +1058,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                   // 书名显示（仅网格模式）
                   if (_layout != BookshelfLayout.list &&
                       _layout != BookshelfLayout.listCompact) ...[
-                    const SizedBox(height: DesignTokens.spacingSm),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 6),
-                      child: Text(
-                        '书名',
-                        style: TextStyle(
-                          fontSize: DesignTokens.fontSubtitle,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
+                    _buildSectionLabel('书名'),
                     Row(
                       children: [
                         _buildRadioItem(
@@ -1132,49 +1066,76 @@ class _BookshelfPageState extends State<BookshelfPage>
                           BookNameDisplay.show,
                           _bookNameDisplay,
                           (v) {
-                            setDialogState(() => _bookNameDisplay = v);
+                            setDialogState(
+                                () => _bookNameDisplay = v);
                           },
                         ),
-                        const SizedBox(width: DesignTokens.spacingLg),
+                        const SizedBox(width: DesignTokens.spacingSm),
                         _buildRadioItem(
                           '隐藏',
                           BookNameDisplay.hide,
                           _bookNameDisplay,
                           (v) {
-                            setDialogState(() => _bookNameDisplay = v);
+                            setDialogState(
+                                () => _bookNameDisplay = v);
                           },
                         ),
-                        const SizedBox(width: DesignTokens.spacingLg),
+                        const SizedBox(width: DesignTokens.spacingSm),
                         _buildRadioItem(
                           '叠加',
                           BookNameDisplay.overlay,
                           _bookNameDisplay,
                           (v) {
-                            setDialogState(() => _bookNameDisplay = v);
+                            setDialogState(
+                                () => _bookNameDisplay = v);
                           },
                         ),
                       ],
                     ),
                   ],
-                  const SizedBox(height: DesignTokens.spacingLg),
+                  const SizedBox(height: DesignTokens.spacingSm),
                   // 间距
-                  Row(
-                    children: [
-                      const Text('间距'),
-                      Expanded(
-                        child: Slider(
-                          value: _margin,
-                          min: 0,
-                          // 根据列数动态限制最大间距，防止负宽度崩溃
-                          max: _maxMarginForColumns(),
-                          divisions: 12,
-                          onChanged: (v) {
-                            setDialogState(() => _margin = v);
-                          },
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 4),
+                    child: Row(
+                      children: [
+                        const Text('间距'),
+                        Expanded(
+                          child: SliderTheme(
+                            data: const SliderThemeData(
+                              trackHeight: 2,
+                              thumbShape:
+                                  RoundSliderThumbShape(
+                                      enabledThumbRadius: 6),
+                              overlayShape:
+                                  RoundSliderOverlayShape(
+                                      overlayRadius: 12),
+                              showValueIndicator:
+                                  ShowValueIndicator.onDrag,
+                            ),
+                            child: Slider(
+                              value: _margin,
+                              min: 0,
+                              // 根据列数动态限制最大间距，防止负宽度崩溃
+                              max: _maxMarginForColumns(),
+                              divisions: 12,
+                              label: _margin.toInt().toString(),
+                              onChanged: (v) {
+                                setDialogState(() => _margin = v);
+                              },
+                            ),
+                          ),
                         ),
-                      ),
-                      Text('${_margin.toInt()}'),
-                    ],
+                        SizedBox(
+                          width: 28,
+                          child: Text(
+                            _margin.toInt().toString(),
+                            textAlign: TextAlign.end,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -1216,6 +1177,45 @@ class _BookshelfPageState extends State<BookshelfPage>
     );
   }
 
+  /// 构建紧凑开关行（6dp 内边距，缩小触摸目标，对齐 legado_max 的 ThemeSwitch）
+  Widget _buildCompactSwitch(
+    String title,
+    bool value,
+    ValueChanged<bool> onChanged,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      child: Row(
+        children: [
+          Expanded(child: Text(title)),
+          AndroidSwitch(
+            value: value,
+            onChanged: onChanged,
+            accentColor: colorScheme.secondary,
+            isDark: Theme.of(context).brightness == Brightness.dark,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建小节标签（强调色，16sp，6dp 内边距，对齐 legado_max 的 AccentTextView）
+  Widget _buildSectionLabel(String text) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: DesignTokens.fontSubtitle,
+          fontWeight: FontWeight.w500,
+          color: colorScheme.primary,
+        ),
+      ),
+    );
+  }
+
   void _saveBookshelfConfig() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('bookshelf_layout', _layout.index);
@@ -1238,23 +1238,27 @@ class _BookshelfPageState extends State<BookshelfPage>
   ) {
     return InkWell(
       onTap: () => onChanged(value),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Radio<T>(
-            value: value,
-            groupValue: groupValue,
-            onChanged: (v) {
-              if (v != null) onChanged(v);
-            },
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            visualDensity: VisualDensity.compact,
-          ),
-          Text(label),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Radio<T>(
+              value: value,
+              groupValue: groupValue,
+              onChanged: (v) {
+                if (v != null) onChanged(v);
+              },
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+            ),
+            Text(label, style: const TextStyle(fontSize: 14)),
+          ],
+        ),
       ),
     );
   }
+
 
   void _showLogDialog() {
     showDialog(

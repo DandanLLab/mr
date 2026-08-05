@@ -12,6 +12,10 @@ import '../../routes/app_routes.dart';
 import '../../services/cover_config_service.dart';
 import '../../widgets/android_switch.dart';
 import '../../widgets/common_widgets.dart';
+import '../../services/bubble_package_manager.dart';
+import '../../services/cover_html_template_config.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 class ThemeSettingsPage extends StatefulWidget {
   const ThemeSettingsPage({super.key});
@@ -22,6 +26,9 @@ class ThemeSettingsPage extends StatefulWidget {
 
 class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
   bool _mainTransparentStatusBar = false;
+  bool _immersiveNavBar = false;
+  int _barElevation = 4;
+  int _globalFontScale = 10;
 
   @override
   void initState() {
@@ -33,6 +40,9 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _mainTransparentStatusBar = prefs.getBool('mainTransparentStatusBar') ?? false;
+      _immersiveNavBar = prefs.getBool('immersiveNavBar') ?? false;
+      _barElevation = prefs.getInt('barElevation') ?? 4;
+      _globalFontScale = prefs.getInt('globalFontScale') ?? 10;
     });
   }
 
@@ -77,11 +87,35 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
                 await prefs.setBool('mainTransparentStatusBar', value);
               },
             ),
+            _buildSwitchItem(
+              title: '沉浸导航栏',
+              subtitle: '导航栏沉浸，内容延伸到导航栏下方',
+              value: _immersiveNavBar,
+              onChanged: (value) async {
+                setState(() => _immersiveNavBar = value);
+                context.read<AppProvider>().setGeneralInterface(immersiveNavBar: value);
+              },
+            ),
+            _buildListItem(
+              title: '栏位海拔',
+              subtitle: '$_barElevation dp',
+              onTap: () => _showBarElevationDialog(),
+            ),
+            _buildListItem(
+              title: '字号缩放',
+              subtitle: '${_globalFontScale == 10 ? "默认" : "${(_globalFontScale / 10).toStringAsFixed(1)}x"}',
+              onTap: () => _showFontScaleDialog(),
+            ),
           ]),
 
           // 界面管理
           _buildCategoryTitle('界面管理'),
           _buildSection([
+            _buildListItem(
+              title: '应用主题管理',
+              subtitle: '将日间/夜间主题、顶栏、底栏打包为一套配置',
+              onTap: () => Navigator.push(context, AppPageRoute(builder: (_) => const ApplicationThemeManagePage())),
+            ),
             _buildListItem(
               title: '主题管理',
               subtitle: '管理日间/夜间主题颜色和背景',
@@ -211,6 +245,89 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
               onChanged: onChanged,
               accentColor: accentColor,
               isDark: isDark,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showBarElevationDialog() {
+    int temp = _barElevation;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('栏位海拔'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('$temp dp', style: const TextStyle(fontSize: 16)),
+              const SizedBox(height: 12),
+              Slider(
+                value: temp.toDouble(),
+                min: 0,
+                max: 24,
+                divisions: 24,
+                label: '$temp dp',
+                onChanged: (v) => setDialogState(() => temp = v.round()),
+              ),
+              const SizedBox(height: 4),
+              const Text('设置状态栏和工具栏的阴影高度，0 为无阴影',
+                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                this.setState(() => _barElevation = temp);
+                context.read<AppProvider>().setGeneralInterface(barElevation: temp);
+              },
+              child: const Text('确定'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showFontScaleDialog() {
+    int temp = _globalFontScale;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('字号缩放'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(temp == 10 ? '默认' : '${(temp / 10).toStringAsFixed(1)}x',
+                  style: const TextStyle(fontSize: 16)),
+              const SizedBox(height: 12),
+              Slider(
+                value: temp.toDouble(),
+                min: 8,
+                max: 16,
+                divisions: 8,
+                label: temp == 10 ? '默认' : '${(temp / 10).toStringAsFixed(1)}x',
+                onChanged: (v) => setDialogState(() => temp = v.round()),
+              ),
+              const SizedBox(height: 4),
+              const Text('全局界面字号缩放，10 为默认大小',
+                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                this.setState(() => _globalFontScale = temp);
+                context.read<AppProvider>().setGeneralInterface(globalFontScale: temp);
+              },
+              child: const Text('确定'),
             ),
           ],
         ),
@@ -2630,12 +2747,14 @@ class NavigationBarConfig {
   bool isBuiltin;
   String layoutMode; // floating, standard, sidebar
   String effectMode; // solid, glass, frosted
+  int? backgroundColor; // 底栏背景色
   int opacity;
   int? borderColor;
   int borderAlpha;
   String? wallpaperPath;
   String? sidebarBackgroundPath;
   String sidebarGravity; // start, end
+  bool sidebarShowLabels; // 侧边栏显示标签
   Map<String, String> icons; // 自定义图标
   DateTime updatedAt;
 
@@ -2646,26 +2765,30 @@ class NavigationBarConfig {
     this.isBuiltin = false,
     this.layoutMode = 'floating',
     this.effectMode = 'glass',
-    this.opacity = 72,
+    this.backgroundColor,
+    this.opacity = 76,
     this.borderColor,
     this.borderAlpha = 100,
     this.wallpaperPath,
     this.sidebarBackgroundPath,
     this.sidebarGravity = 'start',
+    this.sidebarShowLabels = true,
     Map<String, String>? icons,
     DateTime? updatedAt,
   }) : icons = icons ?? {}, updatedAt = updatedAt ?? DateTime.now();
 
   String toJson() {
     final iconsJson = icons.entries.map((e) => '${e.key}=${e.value}').join(',');
-    return '$id|$name|$isNight|$isBuiltin|$layoutMode|$effectMode|$opacity|${borderColor ?? 0}|$borderAlpha|${wallpaperPath ?? ''}|${sidebarBackgroundPath ?? ''}|$sidebarGravity|$iconsJson|${updatedAt.millisecondsSinceEpoch}';
+    return '$id|$name|$isNight|$isBuiltin|$layoutMode|$effectMode|${backgroundColor ?? 0}|$opacity|${borderColor ?? 0}|$borderAlpha|${wallpaperPath ?? ''}|${sidebarBackgroundPath ?? ''}|$sidebarGravity|$sidebarShowLabels|$iconsJson|${updatedAt.millisecondsSinceEpoch}';
   }
 
   factory NavigationBarConfig.fromJson(String json) {
     final parts = json.split('|');
     final icons = <String, String>{};
-    if (parts.length > 12 && parts[12].isNotEmpty) {
-      for (final entry in parts[12].split(',')) {
+    // 兼容旧格式(无backgroundColor/sidebarShowLabels)和新格式
+    final iconsIndex = parts.length > 14 ? 14 : 12;
+    if (parts.length > iconsIndex && parts[iconsIndex].isNotEmpty) {
+      for (final entry in parts[iconsIndex].split(',')) {
         if (entry.contains('=')) {
           final kv = entry.split('=');
           icons[kv[0]] = kv[1];
@@ -2679,14 +2802,16 @@ class NavigationBarConfig {
       isBuiltin: parts[3] == 'true',
       layoutMode: parts[4],
       effectMode: parts[5],
-      opacity: int.parse(parts[6]),
-      borderColor: int.parse(parts[7]) == 0 ? null : int.parse(parts[7]),
-      borderAlpha: int.parse(parts[8]),
-      wallpaperPath: parts[9].isEmpty ? null : parts[9],
-      sidebarBackgroundPath: parts[10].isEmpty ? null : parts[10],
+      backgroundColor: parts.length > 6 && parts[6].isNotEmpty && int.parse(parts[6]) != 0 ? int.parse(parts[6]) : null,
+      opacity: parts.length > 7 ? int.parse(parts[7]) : 76,
+      borderColor: parts.length > 8 ? (int.parse(parts[8]) == 0 ? null : int.parse(parts[8])) : null,
+      borderAlpha: parts.length > 9 ? int.parse(parts[9]) : 100,
+      wallpaperPath: parts.length > 10 ? (parts[10].isEmpty ? null : parts[10]) : null,
+      sidebarBackgroundPath: parts.length > 11 ? (parts[11].isEmpty ? null : parts[11]) : null,
       sidebarGravity: parts[11],
+      sidebarShowLabels: parts.length > 13 ? parts[13] == 'true' : true,
       icons: icons,
-      updatedAt: parts.length > 13 ? DateTime.fromMillisecondsSinceEpoch(int.parse(parts[13])) : DateTime.now(),
+      updatedAt: parts.length > 15 ? DateTime.fromMillisecondsSinceEpoch(int.parse(parts[15])) : (parts.length > 13 ? DateTime.fromMillisecondsSinceEpoch(int.parse(parts[13])) : DateTime.now()),
     );
   }
 
@@ -2698,12 +2823,14 @@ class NavigationBarConfig {
       isBuiltin: isBuiltin,
       layoutMode: layoutMode,
       effectMode: effectMode,
+      backgroundColor: backgroundColor,
       opacity: opacity,
       borderColor: borderColor,
       borderAlpha: borderAlpha,
       wallpaperPath: wallpaperPath,
       sidebarBackgroundPath: sidebarBackgroundPath,
       sidebarGravity: sidebarGravity,
+      sidebarShowLabels: sidebarShowLabels,
       icons: Map.from(icons),
       updatedAt: updatedAt,
     );
@@ -2744,7 +2871,7 @@ class _NavigationBarManagePageState extends State<NavigationBarManagePage> {
         isBuiltin: true,
         layoutMode: 'floating',
         effectMode: 'glass',
-        opacity: 72,
+        opacity: 76,
       ));
       // 夜间默认底栏包
       _configs.add(NavigationBarConfig(
@@ -2754,7 +2881,7 @@ class _NavigationBarManagePageState extends State<NavigationBarManagePage> {
         isBuiltin: true,
         layoutMode: 'floating',
         effectMode: 'glass',
-        opacity: 72,
+        opacity: 76,
       ));
       
       // 加载自定义底栏包
@@ -2797,12 +2924,14 @@ class _NavigationBarManagePageState extends State<NavigationBarManagePage> {
     await appProvider.setNavBarConfig(
       layoutMode: config.layoutMode,
       effectMode: config.effectMode,
+      backgroundColor: config.backgroundColor ?? 0,
       opacity: config.opacity,
       borderColor: config.borderColor ?? 0,
       borderAlpha: config.borderAlpha,
       wallpaperPath: config.wallpaperPath ?? '',
       sidebarBackgroundPath: config.sidebarBackgroundPath ?? '',
       sidebarGravity: config.sidebarGravity,
+      sidebarShowLabels: config.sidebarShowLabels,
     );
 
     if (mounted) {
@@ -3404,6 +3533,14 @@ class _NavBarEditDialogState extends State<_NavBarEditDialog> {
                       isPercentage: true,
                     ),
 
+                    // 底栏背景色 - 非侧边栏模式
+                    _buildColorOption(
+                      '底栏背景色',
+                      _config.backgroundColor != null ? Color(_config.backgroundColor!) : Colors.transparent,
+                      (color) => setState(() => _config.backgroundColor = color.value),
+                      canDisable: true,
+                    ),
+
                     // 边框颜色 - 非侧边栏模式
                     _buildColorOption(
                       '边框颜色',
@@ -3436,6 +3573,27 @@ class _NavBarEditDialogState extends State<_NavBarEditDialog> {
                         '侧边栏位置',
                         _config.sidebarGravity == 'start' ? '左侧' : '右侧',
                         () => _showSidebarGravityPicker(),
+                      ),
+
+                    // 侧边栏显示标签 - 仅侧边栏模式
+                    if (_config.layoutMode == 'sidebar')
+                      _buildOptionRow(
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                '显示标签',
+                                style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
+                              ),
+                            ),
+                            AndroidSwitch(
+                              value: _config.sidebarShowLabels,
+                              onChanged: (v) => setState(() => _config.sidebarShowLabels = v),
+                              accentColor: Theme.of(context).colorScheme.secondary,
+                              isDark: Theme.of(context).brightness == Brightness.dark,
+                            ),
+                          ],
+                        ),
                       ),
 
                     // 图标配置
@@ -5848,7 +6006,8 @@ class BookInfoItem {
   BookInfoItem(this.title, this.visible);
 }
 
-// 气泡管理页面
+// 气泡管理页面 - 移植自 legado_max BubbleManageActivity
+// 完整多气泡包管理系统：创建/编辑/删除/导入导出/多配置切换
 class BubbleManagePage extends StatefulWidget {
   const BubbleManagePage({super.key});
   @override
@@ -5856,116 +6015,470 @@ class BubbleManagePage extends StatefulWidget {
 }
 
 class _BubbleManagePageState extends State<BubbleManagePage> {
-  double _sizeScale = 1.0;
-  Color _dayColor = const Color(0xFFF5F5F5);
-  Color _nightColor = const Color(0xFF424242);
+  final List<BubblePackageEntry> _entries = [];
+  String _activeDirName = BubblePackageManager.builtinDirName;
+  bool _isMultiSelectMode = false;
+  final Set<String> _selectedDirNames = {};
+  bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    _loadSettings();
+    _loadPackages();
   }
 
-  Future<void> _loadSettings() async {
+  Future<void> _loadPackages() async {
+    await BubblePackageManager.instance.init();
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _sizeScale = prefs.getDouble('bubbleSizeScale') ?? 1.0;
-      _dayColor = Color(prefs.getInt('bubbleDayColor') ?? 0xFFF5F5F5);
-      _nightColor = Color(prefs.getInt('bubbleNightColor') ?? 0xFF424242);
+      _activeDirName = prefs.getString("paragraphBubblePackage") ?? BubblePackageManager.builtinDirName;
+      _entries
+        ..clear()
+        ..addAll(BubblePackageManager.instance.loadEntries());
+      if (_isMultiSelectMode) {
+        _selectedDirNames.retainWhere((name) => _entries.any((e) => e.dirName == name));
+        if (_selectedDirNames.isEmpty) _isMultiSelectMode = false;
+      }
     });
   }
 
-  Future<void> _saveSettings() async {
+  Future<void> _applyEntry(BubblePackageEntry entry) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble('bubbleSizeScale', _sizeScale);
-    await prefs.setInt('bubbleDayColor', _dayColor.value);
-    await prefs.setInt('bubbleNightColor', _nightColor.value);
+    await prefs.setString("paragraphBubblePackage", entry.dirName);
+    setState(() => _activeDirName = entry.dirName);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("已应用气泡包: ${entry.config.name}"), duration: const Duration(seconds: 2)),
+      );
+    }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('气泡管理'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.save),
-            tooltip: '保存',
-            onPressed: () {
-              _saveSettings();
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('设置已保存')));
-            },
-          ),
-        ],
+  void _showAddActions() {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(leading: const Icon(Icons.add), title: const Text("手动创建"),
+              onTap: () { Navigator.pop(ctx); _showEditDialog(null); }),
+            ListTile(leading: const Icon(Icons.file_upload), title: const Text("导入 zip"),
+              onTap: () { Navigator.pop(ctx); _importZip(); }),
+            ListTile(leading: const Icon(Icons.link), title: const Text("导入 URL"),
+              onTap: () { Navigator.pop(ctx); _showImportUrlDialog(); }),
+          ],
+        ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          ListTile(
-            title: const Text('大小倍率'),
-            subtitle: Slider(
-              value: _sizeScale,
-              min: 0.5,
-              max: 2.0,
-              divisions: 15,
-              onChanged: (v) => setState(() => _sizeScale = v),
-            ),
-            trailing: Text(_sizeScale.toStringAsFixed(1)),
-          ),
-          ListTile(
-            leading: Container(width: 32, height: 32, decoration: BoxDecoration(color: _dayColor, borderRadius: BorderRadius.circular(8))),
-            title: const Text('日间颜色'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _showColorPicker('日间颜色', _dayColor, (c) => setState(() => _dayColor = c)),
-          ),
-          ListTile(
-            leading: Container(width: 32, height: 32, decoration: BoxDecoration(color: _nightColor, borderRadius: BorderRadius.circular(8))),
-            title: const Text('夜间颜色'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _showColorPicker('夜间颜色', _nightColor, (c) => setState(() => _nightColor = c)),
-          ),
+    );
+  }
+
+  Future<void> _importZip() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ["zip"]);
+      if (result == null || result.files.single.path == null) return;
+      setState(() => _isLoading = true);
+      final entries = await BubblePackageManager.instance.importZip(File(result.files.single.path!));
+      await _loadPackages();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("导入成功，共 ${entries.length} 个气泡包")));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("导入失败: $e")));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _showImportUrlDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("导入 URL"),
+        content: TextField(controller: controller, decoration: const InputDecoration(hintText: "https://example.com/bubble.zip"), keyboardType: TextInputType.url),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("取消")),
+          TextButton(onPressed: () { Navigator.pop(ctx); _importFromUrl(controller.text.trim()); }, child: const Text("确定")),
         ],
       ),
     );
   }
 
-  void _showColorPicker(String title, Color currentColor, ValueChanged<Color> onChanged) {
+  Future<void> _importFromUrl(String url) async {
+    if (url.isEmpty) return;
+    try {
+      setState(() => _isLoading = true);
+      final tempDir = await getTemporaryDirectory();
+      final zipFile = File("${tempDir.path}/bubble_import_${DateTime.now().millisecondsSinceEpoch}.zip");
+      final request = await HttpClient().getUrl(Uri.parse(url));
+      final response = await request.close();
+      final sink = zipFile.openWrite();
+      await response.pipe(sink);
+      await BubblePackageManager.instance.importZip(zipFile);
+      await _loadPackages();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("导入成功")));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("导入失败: $e")));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _showEntryActions(BubblePackageEntry entry) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!entry.isBuiltin) ListTile(leading: const Icon(Icons.edit), title: const Text("编辑"),
+              onTap: () { Navigator.pop(ctx); _showEditDialog(entry); }),
+            if (!entry.isBuiltin) ListTile(leading: const Icon(Icons.ios_share), title: const Text("导出"),
+              onTap: () { Navigator.pop(ctx); _exportEntry(entry); }),
+            if (!entry.isBuiltin) ListTile(leading: const Icon(Icons.share), title: const Text("分享 ZIP"),
+              onTap: () { Navigator.pop(ctx); _shareZip(entry); }),
+            if (!entry.isBuiltin) ListTile(leading: const Icon(Icons.delete, color: Colors.red),
+              title: const Text("删除", style: TextStyle(color: Colors.red)),
+              onTap: () { Navigator.pop(ctx); _confirmDelete(entry); }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _exportEntry(BubblePackageEntry entry) async {
+    try {
+      setState(() => _isLoading = true);
+      final zipFile = await BubblePackageManager.instance.exportZip([entry]);
+      final savePath = await FilePicker.platform.saveFile(
+        dialogTitle: "导出气泡包",
+        fileName: zipFile.path.split(Platform.pathSeparator).last);
+      if (savePath != null) {
+        await zipFile.copy(savePath);
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("导出成功")));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("导出失败: $e")));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _shareZip(BubblePackageEntry entry) async {
+    try {
+      setState(() => _isLoading = true);
+      final zipFile = await BubblePackageManager.instance.exportZip([entry]);
+      await Share.shareXFiles([XFile(zipFile.path)], text: "段评气泡包: ${entry.config.name}");
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("分享失败: $e")));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _confirmDelete(BubblePackageEntry entry) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("删除"),
+        content: Text("确定删除「${entry.config.name}」？"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("取消")),
+          TextButton(onPressed: () async {
+            Navigator.pop(ctx);
+            await BubblePackageManager.instance.deleteLocal(entry);
+            if (entry.dirName == _activeDirName) {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setString("paragraphBubblePackage", BubblePackageManager.builtinDirName);
+            }
+            await _loadPackages();
+          }, child: const Text("删除", style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+  }
+
+  void _showEditDialog(BubblePackageEntry? entry) {
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) => BubbleEditPage(
+          entry: entry,
+          onSave: () => _loadPackages(),
+        ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) =>
+            FadeTransition(opacity: animation, child: child),
+        transitionDuration: const Duration(milliseconds: 200),
+      ),
+    );
+  }
+
+  void _enterMultiSelectMode(BubblePackageEntry entry) {
+    if (entry.isBuiltin) return;
+    setState(() {
+      _isMultiSelectMode = true;
+      _selectedDirNames..clear()..add(entry.dirName);
+    });
+  }
+
+  void _exitMultiSelectMode() {
+    setState(() { _isMultiSelectMode = false; _selectedDirNames.clear(); });
+  }
+
+  void _toggleSelection(BubblePackageEntry entry) {
+    if (entry.isBuiltin) return;
+    setState(() {
+      if (_selectedDirNames.contains(entry.dirName)) _selectedDirNames.remove(entry.dirName);
+      else _selectedDirNames.add(entry.dirName);
+      if (_selectedDirNames.isEmpty) _isMultiSelectMode = false;
+    });
+  }
+
+  void _selectAllOrClear() {
+    final localDirNames = _entries.where((e) => !e.isBuiltin).map((e) => e.dirName).toSet();
+    if (_selectedDirNames.length == localDirNames.length && _selectedDirNames.containsAll(localDirNames)) {
+      _exitMultiSelectMode();
+      return;
+    }
+    setState(() { _selectedDirNames..clear()..addAll(localDirNames); });
+  }
+
+  Future<void> _exportSelected() async {
+    final entries = _entries.where((e) => _selectedDirNames.contains(e.dirName)).toList();
+    if (entries.isEmpty) return;
+    try {
+      setState(() => _isLoading = true);
+      final zipFile = await BubblePackageManager.instance.exportZip(entries);
+      final savePath = await FilePicker.platform.saveFile(
+        dialogTitle: "导出气泡包",
+        fileName: zipFile.path.split(Platform.pathSeparator).last);
+      if (savePath != null) {
+        await zipFile.copy(savePath);
+        _exitMultiSelectMode();
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("导出成功")));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("导出失败: $e")));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _deleteSelected() async {
+    final entries = _entries.where((e) => _selectedDirNames.contains(e.dirName)).toList();
+    if (entries.isEmpty) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("删除"),
+        content: Text("确定删除选中的 ${entries.length} 个气泡包？"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("取消")),
+          TextButton(onPressed: () async {
+            Navigator.pop(ctx);
+            for (final entry in entries) await BubblePackageManager.instance.deleteLocal(entry);
+            _exitMultiSelectMode();
+            await _loadPackages();
+          }, child: const Text("删除", style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+  }
+
+  Color _parseColor(String? colorStr, Color fallback) {
+    if (colorStr == null || colorStr.isEmpty) return fallback;
+    try { final hex = colorStr.replaceAll("#", ""); return Color(int.parse("FF$hex", radix: 16)); }
+    catch (_) { return fallback; }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_isMultiSelectMode ? "已选 ${_selectedDirNames.length} 项" : "气泡管理"),
+        actions: _isMultiSelectMode
+            ? [
+                IconButton(icon: const Icon(Icons.select_all), onPressed: _selectAllOrClear, tooltip: "全选"),
+                IconButton(icon: const Icon(Icons.ios_share), onPressed: _exportSelected, tooltip: "导出"),
+                IconButton(icon: const Icon(Icons.delete), onPressed: _deleteSelected, tooltip: "删除"),
+              ]
+            : [IconButton(icon: const Icon(Icons.add), onPressed: _showAddActions, tooltip: "添加")],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text("管理段评气泡样式，长按本地条目可多选",
+                      style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant)),
+                  ),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: _entries.length,
+                    itemBuilder: (context, index) {
+                      final entry = _entries[index];
+                      final isActive = entry.dirName == _activeDirName;
+                      final isSelected = _selectedDirNames.contains(entry.dirName);
+                      return _buildEntryTile(entry, isActive, isSelected);
+                    },
+                  ),
+                ),
+              ],
+            ),
+      floatingActionButton: _isMultiSelectMode ? null : FloatingActionButton(onPressed: _showAddActions, child: const Icon(Icons.add)),
+    );
+  }
+
+  Widget _buildEntryTile(BubblePackageEntry entry, bool isActive, bool isSelected) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final normalColor = _parseColor(isDark ? entry.config.nightNormalColor : entry.config.dayNormalColor, Colors.grey);
+    final emphasisColor = _parseColor(isDark ? entry.config.nightEmphasisColor : entry.config.dayEmphasisColor, Colors.red);
+    return InkWell(
+      onTap: () { if (_isMultiSelectMode) _toggleSelection(entry); else _showEntryActions(entry); },
+      onLongPress: () { if (!_isMultiSelectMode) _enterMultiSelectMode(entry); },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: colorScheme.outlineVariant, width: 0.5)),
+          color: isSelected ? colorScheme.primaryContainer.withValues(alpha: 0.3) : null,
+        ),
+        child: Row(
+          children: [
+            if (_isMultiSelectMode)
+              Padding(padding: const EdgeInsets.only(right: 12),
+                child: Icon(isSelected ? Icons.check_box : Icons.check_box_outline_blank, color: colorScheme.primary)),
+            Container(
+              width: 48, height: 48, margin: const EdgeInsets.only(right: 12),
+              decoration: BoxDecoration(color: normalColor, borderRadius: BorderRadius.circular(12)),
+              child: Center(child: Container(width: 28, height: 28,
+                decoration: BoxDecoration(color: emphasisColor, shape: BoxShape.circle),
+                child: const Center(child: Text("5", style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold))))),
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Text(entry.config.name, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: colorScheme.onSurface)),
+                    if (entry.isBuiltin) Container(margin: const EdgeInsets.only(left: 6), padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                      decoration: BoxDecoration(color: colorScheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(4)),
+                      child: Text("内置", style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant))),
+                  ]),
+                  const SizedBox(height: 2),
+                  Text("大小倍率 ${entry.config.sizeScale.toStringAsFixed(1)}", style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+                ],
+              ),
+            ),
+            if (isActive && !_isMultiSelectMode) Icon(Icons.check_circle, color: colorScheme.primary, size: 22),
+            if (!entry.isBuiltin && !_isMultiSelectMode) IconButton(icon: const Icon(Icons.more_vert, size: 20), onPressed: () => _showEntryActions(entry)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 气泡包编辑页面
+class BubbleEditPage extends StatefulWidget {
+  final BubblePackageEntry? entry;
+  final VoidCallback onSave;
+  const BubbleEditPage({super.key, this.entry, required this.onSave});
+  @override
+  State<BubbleEditPage> createState() => _BubbleEditPageState();
+}
+
+class _BubbleEditPageState extends State<BubbleEditPage> {
+  late BubblePackageConfig _config;
+  final _nameController = TextEditingController();
+  final _svgController = TextEditingController();
+  @override
+  void initState() {
+    super.initState();
+    if (widget.entry != null) { _config = widget.entry!.config.copy(); }
+    else { _config = BubblePackageManager.instance.builtinConfig().copy()..name = "自定义段评气泡"..dirName = ""..updatedAt = DateTime.now().millisecondsSinceEpoch; }
+    _nameController.text = _config.name;
+    _svgController.text = _config.svgTemplate;
+  }
+  @override
+  void dispose() { _nameController.dispose(); _svgController.dispose(); super.dispose(); }
+  Future<void> _save() async {
+    _config.name = _nameController.text.trim();
+    _config.svgTemplate = _svgController.text;
+    try {
+      await BubblePackageManager.instance.addOrUpdate(_config, oldEntry: widget.entry);
+      widget.onSave();
+      if (mounted) Navigator.pop(context);
+    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("保存失败: $e"))); }
+  }
+  Color _parseColor(String? colorStr, Color fallback) {
+    if (colorStr == null || colorStr.isEmpty) return fallback;
+    try { final hex = colorStr.replaceAll("#", ""); return Color(int.parse("FF$hex", radix: 16)); } catch (_) { return fallback; }
+  }
+  String _colorToHex(Color color) => "#${color.value.toRadixString(16).substring(2).toUpperCase()}";
+  void _pickColor(String title, String? currentColor, String fallback, ValueChanged<String> onChanged) {
+    final current = _parseColor(currentColor, _parseColor(fallback, Colors.grey));
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(title),
-        content: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            Colors.red, Colors.pink, Colors.purple, Colors.deepPurple,
-            Colors.indigo, Colors.blue, Colors.lightBlue, Colors.cyan,
-            Colors.teal, Colors.green, Colors.lightGreen, Colors.lime,
-            Colors.yellow, Colors.amber, Colors.orange, Colors.deepOrange,
-            Colors.brown, Colors.grey, Colors.blueGrey, Colors.black, Colors.white,
-          ].map((c) => GestureDetector(
-            onTap: () {
-              onChanged(c);
-              Navigator.pop(ctx);
-            },
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: c,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: c == currentColor ? Theme.of(context).colorScheme.primary : Colors.grey,
-                  width: c == currentColor ? 3 : 1,
-                ),
-              ),
-            ),
-          )).toList(),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-        ],
+        content: Wrap(spacing: 8, runSpacing: 8, children: [
+          Colors.red, Colors.pink, Colors.purple, Colors.deepPurple, Colors.indigo, Colors.blue, Colors.lightBlue, Colors.cyan,
+          Colors.teal, Colors.green, Colors.lightGreen, Colors.lime, Colors.yellow, Colors.amber, Colors.orange, Colors.deepOrange,
+          Colors.brown, Colors.grey, Colors.blueGrey, Colors.black, Colors.white,
+        ].map((c) => GestureDetector(
+          onTap: () { onChanged(_colorToHex(c)); Navigator.pop(ctx); },
+          child: Container(width: 40, height: 40,
+            decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: c == current ? Theme.of(context).colorScheme.primary : Colors.grey, width: c == current ? 3 : 1))),
+        )).toList()),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("取消"))],
       ),
+    );
+  }
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.entry == null ? "添加气泡包" : "编辑气泡包"),
+        actions: [IconButton(icon: const Icon(Icons.save), onPressed: _save, tooltip: "保存")],
+      ),
+      body: ListView(padding: const EdgeInsets.all(16), children: [
+        TextField(controller: _nameController, decoration: const InputDecoration(labelText: "名称", border: OutlineInputBorder())),
+        const SizedBox(height: 16),
+        ListTile(title: const Text("大小倍率"),
+          subtitle: Slider(value: _config.sizeScale, min: BubblePackageManager.minSizeScale, max: BubblePackageManager.maxSizeScale, divisions: 10, onChanged: (v) => setState(() => _config.sizeScale = v)),
+          trailing: Text(_config.sizeScale.toStringAsFixed(1))),
+        const Divider(),
+        ListTile(leading: Container(width: 32, height: 32, decoration: BoxDecoration(color: _parseColor(_config.dayNormalColor, Colors.grey), borderRadius: BorderRadius.circular(8))),
+          title: const Text("日间普通颜色"), trailing: const Icon(Icons.chevron_right),
+          onTap: () => _pickColor("日间普通颜色", _config.dayNormalColor, BubblePackageManager.defaultNormalColor, (c) => setState(() => _config.dayNormalColor = c))),
+        ListTile(leading: Container(width: 32, height: 32, decoration: BoxDecoration(color: _parseColor(_config.dayEmphasisColor, Colors.red), borderRadius: BorderRadius.circular(8))),
+          title: const Text("日间强调颜色"), trailing: const Icon(Icons.chevron_right),
+          onTap: () => _pickColor("日间强调颜色", _config.dayEmphasisColor, BubblePackageManager.defaultEmphasisColor, (c) => setState(() => _config.dayEmphasisColor = c))),
+        ListTile(leading: Container(width: 32, height: 32, decoration: BoxDecoration(color: _parseColor(_config.nightNormalColor, Colors.grey), borderRadius: BorderRadius.circular(8))),
+          title: const Text("夜间普通颜色"), trailing: const Icon(Icons.chevron_right),
+          onTap: () => _pickColor("夜间普通颜色", _config.nightNormalColor, BubblePackageManager.defaultNormalColor, (c) => setState(() => _config.nightNormalColor = c))),
+        ListTile(leading: Container(width: 32, height: 32, decoration: BoxDecoration(color: _parseColor(_config.nightEmphasisColor, Colors.red), borderRadius: BorderRadius.circular(8))),
+          title: const Text("夜间强调颜色"), trailing: const Icon(Icons.chevron_right),
+          onTap: () => _pickColor("夜间强调颜色", _config.nightEmphasisColor, BubblePackageManager.defaultEmphasisColor, (c) => setState(() => _config.nightEmphasisColor = c))),
+        const Divider(),
+        const Padding(padding: EdgeInsets.fromLTRB(16, 8, 16, 4), child: Text("SVG 模板", style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500))),
+        Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text("支持 \${color} 和 \${num} 变量", style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant))),
+        const SizedBox(height: 8),
+        Container(padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(border: Border.all(color: colorScheme.outline), borderRadius: BorderRadius.circular(8)),
+          child: TextField(controller: _svgController, maxLines: 10, style: const TextStyle(fontFamily: "monospace", fontSize: 12),
+            decoration: const InputDecoration(border: InputBorder.none, hintText: "SVG 模板代码"))),
+      ]),
     );
   }
 }
@@ -5982,6 +6495,8 @@ class _CoverConfigPageState extends State<CoverConfigPage> {
   bool _loadCoverOnlyWifi = false;
   bool _loadCoverHighQuality = false;
   bool _useDefaultCover = false;
+  // HTML封面
+  bool _coverHtmlEnable = false;
   // 日间
   String _coverCollectionDay = '';
   String _coverCollectionModeDay = 'random';
@@ -6013,6 +6528,7 @@ class _CoverConfigPageState extends State<CoverConfigPage> {
       _loadCoverOnlyWifi = prefs.getBool('loadCoverOnlyWifi') ?? false;
       _loadCoverHighQuality = prefs.getBool('loadCoverHighQuality') ?? false;
       _useDefaultCover = prefs.getBool('useDefaultCover') ?? false;
+      _coverHtmlEnable = prefs.getBool('coverHtmlEnable') ?? false;
       _coverCollectionDay = prefs.getString('coverCollectionDay') ?? '';
       _coverCollectionModeDay = prefs.getString('coverCollectionModeDay') ?? 'random';
       _coverShowName = prefs.getBool('coverShowName') ?? true;
@@ -6115,6 +6631,35 @@ class _CoverConfigPageState extends State<CoverConfigPage> {
             onTap: () => _showCoverRuleDialog(),
           ),
 
+          // HTML封面
+          _buildSwitchItem(
+            title: 'HTML封面',
+            subtitle: '使用HTML代码生成封面',
+            value: _coverHtmlEnable,
+            onChanged: (v) {
+              setState(() => _coverHtmlEnable = v);
+              _saveBool('coverHtmlEnable', v);
+              if (v) {
+                _navigateToCoverHtmlTemplateList();
+              }
+            },
+          ),
+
+          // HTML封面代码 - 仅启用时显示
+          if (_coverHtmlEnable)
+            _buildListItem(
+              title: 'HTML封面代码',
+              subtitle: '编辑HTML封面模板',
+              onTap: () => _navigateToCoverHtmlTemplateList(),
+            ),
+
+          // 封面图集管理
+          _buildListItem(
+            title: '封面图集',
+            subtitle: '管理封面图集图片',
+            onTap: () => _navigateToCoverCollectionManage(),
+          ),
+
           // 总是使用默认封面
           _buildSwitchItem(
             title: '总是使用默认封面',
@@ -6124,12 +6669,6 @@ class _CoverConfigPageState extends State<CoverConfigPage> {
               setState(() => _useDefaultCover = v);
               _saveBool('useDefaultCover', v);
             },
-          ),
-
-          // 封面图集
-          _buildListItem(
-            title: '封面图集',
-            onTap: () => _navigateToCoverCollectionManage(),
           ),
 
           const SizedBox(height: 8),
@@ -6601,6 +7140,20 @@ class _CoverConfigPageState extends State<CoverConfigPage> {
     }
   }
 
+  /// 导航到HTML封面模板列表页
+  void _navigateToCoverHtmlTemplateList() {
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            const CoverHtmlTemplateListPage(),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) =>
+            FadeTransition(opacity: animation, child: child),
+        transitionDuration: const Duration(milliseconds: 200),
+      ),
+    );
+  }
+
   /// 导航到封面图集管理页 - 使用流畅的页面过渡
   void _navigateToCoverCollectionManage() {
     Navigator.push(
@@ -6714,6 +7267,228 @@ class _CoverConfigPageState extends State<CoverConfigPage> {
         );
       }
     }
+  }
+}
+
+/// HTML封面模板列表页 - 移植自 legado_max CoverHtmlTemplateListScreen
+class CoverHtmlTemplateListPage extends StatefulWidget {
+  const CoverHtmlTemplateListPage({super.key});
+  @override
+  State<CoverHtmlTemplateListPage> createState() => _CoverHtmlTemplateListPageState();
+}
+
+class _CoverHtmlTemplateListPageState extends State<CoverHtmlTemplateListPage> {
+  List<CoverHtmlTemplate> _templates = [];
+  String _selectedId = "";
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTemplates();
+  }
+
+  Future<void> _loadTemplates() async {
+    await CoverHtmlTemplateConfig.instance.load();
+    final selected = await CoverHtmlTemplateConfig.instance.getSelectedTemplate();
+    setState(() {
+      _templates = CoverHtmlTemplateConfig.instance.templateList;
+      _selectedId = selected?.id ?? "";
+    });
+  }
+
+  Future<void> _selectTemplate(CoverHtmlTemplate template) async {
+    await CoverHtmlTemplateConfig.instance.setSelectedTemplate(template.id);
+    await _loadTemplates();
+  }
+
+  void _addTemplate() {
+    final template = CoverHtmlTemplate(
+      id: CoverHtmlTemplateConfig.instance.generateId(),
+      name: "新模板",
+      htmlCode: "",
+    );
+    Navigator.push(context, PageRouteBuilder(
+      pageBuilder: (context, animation, secondaryAnimation) => CoverHtmlCodePage(template: template, isNew: true),
+      transitionsBuilder: (context, animation, secondaryAnimation, child) => FadeTransition(opacity: animation, child: child),
+      transitionDuration: const Duration(milliseconds: 200),
+    )).then((_) => _loadTemplates());
+  }
+
+  void _editTemplate(CoverHtmlTemplate template) {
+    Navigator.push(context, PageRouteBuilder(
+      pageBuilder: (context, animation, secondaryAnimation) => CoverHtmlCodePage(template: template.copy(), isNew: false),
+      transitionsBuilder: (context, animation, secondaryAnimation, child) => FadeTransition(opacity: animation, child: child),
+      transitionDuration: const Duration(milliseconds: 200),
+    )).then((_) => _loadTemplates());
+  }
+
+  void _deleteTemplate(int index) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("删除"),
+        content: Text("确定删除「${_templates[index].name}」？"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("取消")),
+          TextButton(onPressed: () async {
+            Navigator.pop(ctx);
+            await CoverHtmlTemplateConfig.instance.deleteTemplate(index);
+            await _loadTemplates();
+          }, child: const Text("删除", style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+  }
+
+  void _renameTemplate(CoverHtmlTemplate template) {
+    final controller = TextEditingController(text: template.name);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("重命名"),
+        content: TextField(controller: controller, decoration: const InputDecoration(labelText: "名称")),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("取消")),
+          TextButton(onPressed: () async {
+            template.name = controller.text.trim();
+            await CoverHtmlTemplateConfig.instance.updateTemplate(template);
+            if (mounted) Navigator.pop(ctx);
+            await _loadTemplates();
+          }, child: const Text("确定")),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("HTML封面模板"),
+        actions: [IconButton(icon: const Icon(Icons.add), onPressed: _addTemplate, tooltip: "新建")],
+      ),
+      body: ListView.builder(
+        itemCount: _templates.length,
+        itemBuilder: (context, index) {
+          final template = _templates[index];
+          final isSelected = template.id == _selectedId;
+          return InkWell(
+            onTap: () => _selectTemplate(template),
+            onLongPress: () {
+              showModalBottomSheet(context: context, builder: (ctx) => SafeArea(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  ListTile(leading: const Icon(Icons.edit), title: const Text("编辑代码"),
+                    onTap: () { Navigator.pop(ctx); _editTemplate(template); }),
+                  ListTile(leading: const Icon(Icons.text_fields), title: const Text("重命名"),
+                    onTap: () { Navigator.pop(ctx); _renameTemplate(template); }),
+                  ListTile(leading: const Icon(Icons.delete, color: Colors.red),
+                    title: const Text("删除", style: TextStyle(color: Colors.red)),
+                    onTap: () { Navigator.pop(ctx); _deleteTemplate(index); }),
+                ]),
+              ));
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: colorScheme.outlineVariant, width: 0.5)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(template.name, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: colorScheme.onSurface)),
+                        const SizedBox(height: 2),
+                        Text("${template.htmlCode.length} 字符", style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+                      ],
+                    ),
+                  ),
+                  if (isSelected) Icon(Icons.check_circle, color: colorScheme.primary, size: 22),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// HTML封面代码编辑页 - 移植自 legado_max CoverHtmlCodeScreen
+class CoverHtmlCodePage extends StatefulWidget {
+  final CoverHtmlTemplate template;
+  final bool isNew;
+  const CoverHtmlCodePage({super.key, required this.template, required this.isNew});
+  @override
+  State<CoverHtmlCodePage> createState() => _CoverHtmlCodePageState();
+}
+
+class _CoverHtmlCodePageState extends State<CoverHtmlCodePage> {
+  late CoverHtmlTemplate _template;
+  final _codeController = TextEditingController();
+  final _nameController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _template = widget.template;
+    _codeController.text = _template.htmlCode;
+    _nameController.text = _template.name;
+  }
+
+  @override
+  void dispose() { _codeController.dispose(); _nameController.dispose(); super.dispose(); }
+
+  Future<void> _save() async {
+    _template.name = _nameController.text.trim().isEmpty ? "未命名" : _nameController.text.trim();
+    _template.htmlCode = _codeController.text;
+    if (widget.isNew) {
+      await CoverHtmlTemplateConfig.instance.addTemplate(_template);
+    } else {
+      await CoverHtmlTemplateConfig.instance.updateTemplate(_template);
+    }
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.isNew ? "新建模板" : "编辑模板"),
+        actions: [IconButton(icon: const Icon(Icons.save), onPressed: _save, tooltip: "保存")],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          TextField(
+            controller: _nameController,
+            decoration: const InputDecoration(labelText: "模板名称", border: OutlineInputBorder()),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: Text("支持 {{bookName}} 和 {{author}} 变量", style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              border: Border.all(color: colorScheme.outline),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: TextField(
+              controller: _codeController,
+              maxLines: 20,
+              style: const TextStyle(fontFamily: "monospace", fontSize: 12),
+              decoration: const InputDecoration(border: InputBorder.none, hintText: "HTML代码"),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -7428,6 +8203,920 @@ class _CoverCollectionDetailPageState extends State<CoverCollectionDetailPage> {
     }
   }
 }
+
+// ============================================================
+// 应用主题管理 - 移植自 legado-main: ApplicationThemeManager / ApplicationThemeActivity / ApplicationThemeEditActivity
+// ============================================================
+
+class AppComponentRef {
+  final String id;
+  final String name;
+  const AppComponentRef(this.id, this.name);
+  const AppComponentRef.empty() : id = '', name = '';
+  bool get isEmpty => id.isEmpty;
+  bool get isNotEmpty => id.isNotEmpty;
+  Map<String, dynamic> toJson() => {'id': id, 'name': name};
+  factory AppComponentRef.fromJson(Map<String, dynamic> json) =>
+      AppComponentRef(json['id'] as String? ?? '', json['name'] as String? ?? '');
+}
+
+class ApplicationThemeConfig {
+  String id;
+  String name;
+  AppComponentRef dayTheme;
+  AppComponentRef nightTheme;
+  AppComponentRef dayTopBar;
+  AppComponentRef nightTopBar;
+  AppComponentRef dayBottomBar;
+  AppComponentRef nightBottomBar;
+  DateTime updatedAt;
+
+  ApplicationThemeConfig({
+    required this.id,
+    required this.name,
+    this.dayTheme = const AppComponentRef.empty(),
+    this.nightTheme = const AppComponentRef.empty(),
+    this.dayTopBar = const AppComponentRef.empty(),
+    this.nightTopBar = const AppComponentRef.empty(),
+    this.dayBottomBar = const AppComponentRef.empty(),
+    this.nightBottomBar = const AppComponentRef.empty(),
+    DateTime? updatedAt,
+  }) : updatedAt = updatedAt ?? DateTime.now();
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'dayTheme': dayTheme.toJson(),
+        'nightTheme': nightTheme.toJson(),
+        'dayTopBar': dayTopBar.toJson(),
+        'nightTopBar': nightTopBar.toJson(),
+        'dayBottomBar': dayBottomBar.toJson(),
+        'nightBottomBar': nightBottomBar.toJson(),
+        'updatedAt': updatedAt.millisecondsSinceEpoch,
+      };
+
+  factory ApplicationThemeConfig.fromJson(Map<String, dynamic> json) {
+    AppComponentRef parseRef(String key) {
+      final v = json[key];
+      if (v is Map<String, dynamic>) return AppComponentRef.fromJson(v);
+      return const AppComponentRef.empty();
+    }
+    return ApplicationThemeConfig(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '未命名',
+      dayTheme: parseRef('dayTheme'),
+      nightTheme: parseRef('nightTheme'),
+      dayTopBar: parseRef('dayTopBar'),
+      nightTopBar: parseRef('nightTopBar'),
+      dayBottomBar: parseRef('dayBottomBar'),
+      nightBottomBar: parseRef('nightBottomBar'),
+      updatedAt: json['updatedAt'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(json['updatedAt'] as int)
+          : DateTime.now(),
+    );
+  }
+
+  ApplicationThemeConfig copyWith({
+    String? name,
+    AppComponentRef? dayTheme,
+    AppComponentRef? nightTheme,
+    AppComponentRef? dayTopBar,
+    AppComponentRef? nightTopBar,
+    AppComponentRef? dayBottomBar,
+    AppComponentRef? nightBottomBar,
+  }) {
+    return ApplicationThemeConfig(
+      id: id,
+      name: name ?? this.name,
+      dayTheme: dayTheme ?? this.dayTheme,
+      nightTheme: nightTheme ?? this.nightTheme,
+      dayTopBar: dayTopBar ?? this.dayTopBar,
+      nightTopBar: nightTopBar ?? this.nightTopBar,
+      dayBottomBar: dayBottomBar ?? this.dayBottomBar,
+      nightBottomBar: nightBottomBar ?? this.nightBottomBar,
+      updatedAt: DateTime.now(),
+    );
+  }
+}
+class ApplicationThemeStore {
+  static const _configsKey = 'applicationThemes';
+  static const _currentIdKey = 'currentApplicationThemeId';
+
+  static Future<List<ApplicationThemeConfig>> load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_configsKey);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list
+          .map((e) => ApplicationThemeConfig.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> save(List<ApplicationThemeConfig> configs) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = jsonEncode(configs.map((c) => c.toJson()).toList());
+    await prefs.setString(_configsKey, raw);
+  }
+
+  static Future<String> currentId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_currentIdKey) ?? '';
+  }
+
+  static Future<void> setCurrentId(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_currentIdKey, id);
+  }
+
+  static Future<List<ThemeConfig>> loadThemes() async {
+    final prefs = await SharedPreferences.getInstance();
+    final themes = <ThemeConfig>[];
+    themes.add(ThemeConfig(
+      id: 'builtin_default', name: '默认', isNight: false, isBuiltin: true,
+      primaryColor: const Color(0xFF795548), accentColor: const Color(0xFFE53935),
+      backgroundColor: const Color(0xFFF5F5F5), navBarColor: const Color(0xFFEEEEEE),
+    ));
+    themes.add(ThemeConfig(
+      id: 'builtin_elegant_blue', name: '典雅蓝', isNight: false, isBuiltin: true,
+      primaryColor: const Color(0xFF03A9F4), accentColor: const Color(0xFFAD1457),
+      backgroundColor: const Color(0xFFF5F5F5), navBarColor: const Color(0xFFEEEEEE),
+    ));
+    themes.add(ThemeConfig(
+      id: 'builtin_black_white', name: '黑白', isNight: true, isBuiltin: true,
+      primaryColor: const Color(0xFF303030), accentColor: const Color(0xFFE0E0E0),
+      backgroundColor: const Color(0xFF424242), navBarColor: const Color(0xFF424242),
+    ));
+    themes.add(ThemeConfig(
+      id: 'builtin_a_screen', name: 'A屏黑', isNight: true, isBuiltin: true,
+      primaryColor: const Color(0xFF000000), accentColor: const Color(0xFFFFFFFF),
+      backgroundColor: const Color(0xFF000000), navBarColor: const Color(0xFF000000),
+    ));
+    final custom = prefs.getStringList('customThemes') ?? [];
+    for (final j in custom) {
+      try {
+        themes.add(ThemeConfig.fromJson(j));
+      } catch (_) {}
+    }
+    return themes;
+  }
+
+  static Future<List<NavigationBarConfig>> loadNavBarConfigs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final configs = <NavigationBarConfig>[];
+    configs.add(NavigationBarConfig(
+      id: 'builtin_default_day', name: '默认', isNight: false, isBuiltin: true,
+    ));
+    configs.add(NavigationBarConfig(
+      id: 'builtin_default_night', name: '默认', isNight: true, isBuiltin: true,
+    ));
+    final custom = prefs.getStringList('customNavBarConfigs') ?? [];
+    for (final j in custom) {
+      try {
+        configs.add(NavigationBarConfig.fromJson(j));
+      } catch (_) {}
+    }
+    return configs;
+  }
+
+  static Future<List<TopBarConfig>> loadTopBarConfigs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final configs = <TopBarConfig>[];
+    configs.add(TopBarConfig(
+      id: 'builtin_default_day', name: '默认', isNight: false, isBuiltin: true,
+    ));
+    configs.add(TopBarConfig(
+      id: 'builtin_default_night', name: '默认', isNight: true, isBuiltin: true,
+    ));
+    final custom = prefs.getStringList('customTopBarConfigs') ?? [];
+    for (final j in custom) {
+      try {
+        configs.add(TopBarConfig.fromJson(j));
+      } catch (_) {}
+    }
+    return configs;
+  }
+
+  static Future<void> apply(BuildContext context, ApplicationThemeConfig config) async {
+    final provider = context.read<AppProvider>();
+    final prefs = await SharedPreferences.getInstance();
+    final themes = await loadThemes();
+
+    if (config.dayTheme.isNotEmpty) {
+      final theme = themes.firstWhere(
+        (t) => t.id == config.dayTheme.id && !t.isNight,
+        orElse: () => themes.firstWhere((t) => t.id == config.dayTheme.id,
+            orElse: () => themes.first),
+      );
+      await provider.setDayThemeColors(
+        primaryColor: theme.primaryColor,
+        accentColor: theme.accentColor,
+        backgroundColor: theme.backgroundColor,
+        surfaceColor: theme.backgroundColor,
+        navBarColor: theme.navBarColor,
+        backgroundImage: theme.mainBgImage ?? '',
+        backgroundBlur: theme.bgImageBlur,
+        bookInfoBackgroundImage: theme.bookInfoBgImage ?? '',
+        panelBackgroundImage: theme.panelBgImage ?? '',
+        panelBackgroundMode: theme.panelBgMode,
+        cornerScale: theme.cornerScale,
+        layoutAlpha: theme.layoutAlpha,
+        panelBorderColor: theme.panelBorderColor ?? Colors.transparent,
+        panelBorderAlpha: theme.panelBorderAlpha,
+        searchFollow: theme.searchFollow,
+        replyFollow: theme.replyFollow,
+        fontScale: theme.fontScale,
+        uiFontPath: theme.uiFont ?? '',
+        titleFontPath: theme.titleFont ?? '',
+      );
+      await prefs.setString('activeDayThemeId', theme.id);
+    }
+
+    if (config.nightTheme.isNotEmpty) {
+      final theme = themes.firstWhere(
+        (t) => t.id == config.nightTheme.id && t.isNight,
+        orElse: () => themes.firstWhere((t) => t.id == config.nightTheme.id,
+            orElse: () => themes.first),
+      );
+      await provider.setNightThemeColors(
+        primaryColor: theme.primaryColor,
+        accentColor: theme.accentColor,
+        backgroundColor: theme.backgroundColor,
+        surfaceColor: theme.backgroundColor,
+        navBarColor: theme.navBarColor,
+        backgroundImage: theme.mainBgImage ?? '',
+        backgroundBlur: theme.bgImageBlur,
+        bookInfoBackgroundImage: theme.bookInfoBgImage ?? '',
+        panelBackgroundImage: theme.panelBgImage ?? '',
+        panelBackgroundMode: theme.panelBgMode,
+        cornerScale: theme.cornerScale,
+        layoutAlpha: theme.layoutAlpha,
+        panelBorderColor: theme.panelBorderColor ?? Colors.transparent,
+        panelBorderAlpha: theme.panelBorderAlpha,
+        searchFollow: theme.searchFollow,
+        replyFollow: theme.replyFollow,
+        fontScale: theme.fontScale,
+        uiFontPath: theme.uiFont ?? '',
+        titleFontPath: theme.titleFont ?? '',
+      );
+      await prefs.setString('activeNightThemeId', theme.id);
+    }
+
+    final navBars = await loadNavBarConfigs();
+    if (config.dayBottomBar.isNotEmpty) {
+      final nav = navBars.firstWhere((n) => n.id == config.dayBottomBar.id && !n.isNight,
+          orElse: () => navBars.firstWhere((n) => n.id == config.dayBottomBar.id,
+              orElse: () => navBars.first));
+      await provider.setNavBarConfig(
+        layoutMode: nav.layoutMode,
+        effectMode: nav.effectMode,
+        opacity: nav.opacity,
+        borderColor: nav.borderColor ?? 0,
+        borderAlpha: nav.borderAlpha,
+        wallpaperPath: nav.wallpaperPath ?? '',
+        sidebarBackgroundPath: nav.sidebarBackgroundPath ?? '',
+        sidebarGravity: nav.sidebarGravity,
+      );
+      await prefs.setString('activeDayNavBarId', nav.id);
+    }
+    if (config.nightBottomBar.isNotEmpty) {
+      final nav = navBars.firstWhere((n) => n.id == config.nightBottomBar.id && n.isNight,
+          orElse: () => navBars.firstWhere((n) => n.id == config.nightBottomBar.id,
+              orElse: () => navBars.first));
+      await provider.setNavBarConfig(
+        layoutMode: nav.layoutMode,
+        effectMode: nav.effectMode,
+        opacity: nav.opacity,
+        borderColor: nav.borderColor ?? 0,
+        borderAlpha: nav.borderAlpha,
+        wallpaperPath: nav.wallpaperPath ?? '',
+        sidebarBackgroundPath: nav.sidebarBackgroundPath ?? '',
+        sidebarGravity: nav.sidebarGravity,
+      );
+      await prefs.setString('activeNightNavBarId', nav.id);
+    }
+
+    if (config.dayTopBar.isNotEmpty) {
+      await prefs.setString('activeDayTopBarId', config.dayTopBar.id);
+    }
+    if (config.nightTopBar.isNotEmpty) {
+      await prefs.setString('activeNightTopBarId', config.nightTopBar.id);
+    }
+
+    await setCurrentId(config.id);
+  }
+
+  static Future<ApplicationThemeConfig> captureCurrent(String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    final dayThemeId = prefs.getString('activeDayThemeId') ?? '';
+    final nightThemeId = prefs.getString('activeNightThemeId') ?? '';
+    final dayNavBarId = prefs.getString('activeDayNavBarId') ?? '';
+    final nightNavBarId = prefs.getString('activeNightNavBarId') ?? '';
+    final dayTopBarId = prefs.getString('activeDayTopBarId') ?? '';
+    final nightTopBarId = prefs.getString('activeNightTopBarId') ?? '';
+
+    final themes = await loadThemes();
+    final navBars = await loadNavBarConfigs();
+    final topBars = await loadTopBarConfigs();
+
+    String nameOf(List list, String id) {
+      if (id.isEmpty) return '';
+      for (final item in list) {
+        if (item.id == id) return item.name;
+      }
+      return '';
+    }
+
+    return ApplicationThemeConfig(
+      id: 'app_${DateTime.now().microsecondsSinceEpoch}',
+      name: name,
+      dayTheme: AppComponentRef(dayThemeId, nameOf(themes, dayThemeId)),
+      nightTheme: AppComponentRef(nightThemeId, nameOf(themes, nightThemeId)),
+      dayBottomBar: AppComponentRef(dayNavBarId, nameOf(navBars, dayNavBarId)),
+      nightBottomBar: AppComponentRef(nightNavBarId, nameOf(navBars, nightNavBarId)),
+      dayTopBar: AppComponentRef(dayTopBarId, nameOf(topBars, dayTopBarId)),
+      nightTopBar: AppComponentRef(nightTopBarId, nameOf(topBars, nightTopBarId)),
+    );
+  }
+}
+/// 应用主题管理页面 - 参考原版 ApplicationThemeActivity
+class ApplicationThemeManagePage extends StatefulWidget {
+  const ApplicationThemeManagePage({super.key});
+  @override
+  State<ApplicationThemeManagePage> createState() => _ApplicationThemeManagePageState();
+}
+
+class _ApplicationThemeManagePageState extends State<ApplicationThemeManagePage> {
+  final List<ApplicationThemeConfig> _configs = [];
+  String _currentId = '';
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final configs = await ApplicationThemeStore.load();
+    final cur = await ApplicationThemeStore.currentId();
+    if (!mounted) return;
+    setState(() {
+      _configs
+        ..clear()
+        ..addAll(configs);
+      _currentId = cur;
+      _loading = false;
+    });
+  }
+
+  Future<void> _save() async {
+    await ApplicationThemeStore.save(_configs);
+  }
+
+  void _showCreateDialog() {
+    final controller = TextEditingController();
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('新建应用主题'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: '输入应用主题名称',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () async {
+              final name = controller.text.trim();
+              if (name.isEmpty) return;
+              Navigator.pop(ctx);
+              final config = await ApplicationThemeStore.captureCurrent(name);
+              if (!mounted) return;
+              setState(() => _configs.add(config));
+              await _save();
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('已创建应用主题: $name')),
+              );
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _applyConfig(ApplicationThemeConfig config) async {
+    await ApplicationThemeStore.apply(context, config);
+    if (!mounted) return;
+    setState(() => _currentId = config.id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已应用主题: ${config.name}')),
+    );
+  }
+
+  void _showActions(ApplicationThemeConfig config) {
+    final isCurrent = config.id == _currentId;
+    final items = <Widget>[];
+    items.add(_buildDialogItem('应用', () {
+      Navigator.pop(context);
+      _applyConfig(config);
+    }));
+    items.add(_buildDialogItem('编辑', () {
+      Navigator.pop(context);
+      Navigator.push(context,
+          AppPageRoute(builder: (_) => ApplicationThemeEditPage(config: config)))
+          .then((_) => _load());
+    }));
+    items.add(_buildDialogItem('导出', () {
+      Navigator.pop(context);
+      _exportConfig(config);
+    }));
+    if (!isCurrent) {
+      items.add(_buildDialogItem('删除', () {
+        Navigator.pop(context);
+        _confirmDelete(config);
+      }, isDestructive: true));
+    }
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(config.name),
+        content: Column(mainAxisSize: MainAxisSize.min, children: items),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDialogItem(String text, VoidCallback onTap, {bool isDestructive = false}) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: isDestructive ? Theme.of(context).colorScheme.error : null,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _confirmDelete(ApplicationThemeConfig config) {
+    showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除'),
+        content: Text('确定要删除「${config.name}」吗？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('删除', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ),
+        ],
+      ),
+    ).then((confirmed) async {
+      if (confirmed == true) {
+        setState(() => _configs.removeWhere((c) => c.id == config.id));
+        await _save();
+        if (config.id == _currentId) {
+          await ApplicationThemeStore.setCurrentId('');
+          if (!mounted) return;
+          setState(() => _currentId = '');
+        }
+      }
+    });
+  }
+
+  void _exportConfig(ApplicationThemeConfig config) {
+    final j = jsonEncode(config.toJson());
+    ShareHelper.shareText(context, j, subject: '应用主题分享: ${config.name}');
+  }
+
+  void _importConfig() {
+    final controller = TextEditingController();
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('导入应用主题'),
+        content: SizedBox(
+          width: 420,
+          child: TextField(
+            controller: controller,
+            minLines: 5,
+            maxLines: 10,
+            decoration: const InputDecoration(
+              hintText: '粘贴应用主题配置 JSON',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () async {
+              final text = controller.text.trim();
+              if (text.isEmpty) return;
+              try {
+                final j = jsonDecode(text) as Map<String, dynamic>;
+                final config = ApplicationThemeConfig.fromJson(j)
+                  ..id = 'app_${DateTime.now().microsecondsSinceEpoch}';
+                if (!ctx.mounted) return;
+                Navigator.pop(ctx);
+                if (!mounted) return;
+                setState(() => _configs.add(config));
+                await _save();
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('已导入应用主题: ${config.name}')),
+                );
+              } catch (e) {
+                if (!ctx.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('导入失败: $e')),
+                );
+              }
+            },
+            child: const Text('导入'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryTextColor = isDark ? const Color(0xDEFFFFFF) : const Color(0xDE000000);
+    final secondaryTextColor = isDark ? const Color(0xB3FFFFFF) : const Color(0x8A000000);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('应用主题管理'),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'import') _importConfig();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'import', child: Text('导入应用主题')),
+            ],
+          ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _configs.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      '暂无应用主题\n点击下方按钮从当前配置创建',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: secondaryTextColor),
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: _configs.length,
+                  itemBuilder: (_, index) {
+                    final config = _configs[index];
+                    final isCurrent = config.id == _currentId;
+                    final parts = <String>[];
+                    if (config.dayTheme.isNotEmpty) parts.add('日间: ${config.dayTheme.name}');
+                    if (config.nightTheme.isNotEmpty) parts.add('夜间: ${config.nightTheme.name}');
+                    return Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: colorScheme.surface.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: colorScheme.onSurface.withValues(alpha: 0.04),
+                          width: 1,
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          ListTile(
+                            title: Row(
+                              children: [
+                                Text(config.name, style: TextStyle(color: primaryTextColor)),
+                                if (isCurrent) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: colorScheme.secondary.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text('已应用',
+                                        style: TextStyle(fontSize: 11, color: colorScheme.secondary)),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            subtitle: Text(
+                              parts.isEmpty ? '未配置组件' : parts.join(' · '),
+                              style: TextStyle(fontSize: 12, color: secondaryTextColor),
+                            ),
+                            onTap: () => _applyConfig(config),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8, bottom: 8),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                _buildActionBtn(
+                                  isCurrent ? '已应用' : '应用',
+                                  () => _applyConfig(config),
+                                  highlight: isCurrent,
+                                ),
+                                const SizedBox(width: 8),
+                                _buildActionBtn('编辑', () {
+                                  Navigator.push(context,
+                                      AppPageRoute(builder: (_) => ApplicationThemeEditPage(config: config)))
+                                      .then((_) => _load());
+                                }),
+                                const SizedBox(width: 8),
+                                _buildActionBtn('更多', () => _showActions(config)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _showCreateDialog,
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  Widget _buildActionBtn(String text, VoidCallback onTap, {bool highlight = false}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.04);
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 34,
+        constraints: const BoxConstraints(minWidth: 56),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          text,
+          style: TextStyle(
+            fontSize: 13,
+            color: highlight ? Theme.of(context).colorScheme.secondary : null,
+          ),
+        ),
+      ),
+    );
+  }
+}
+/// 应用主题编辑页面 - 参考原版 ApplicationThemeEditActivity
+class ApplicationThemeEditPage extends StatefulWidget {
+  final ApplicationThemeConfig config;
+  const ApplicationThemeEditPage({super.key, required this.config});
+  @override
+  State<ApplicationThemeEditPage> createState() => _ApplicationThemeEditPageState();
+}
+
+class _ApplicationThemeEditPageState extends State<ApplicationThemeEditPage> {
+  late ApplicationThemeConfig _config;
+  final _nameController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _config = widget.config;
+    _nameController.text = widget.config.name;
+  }
+
+  Future<void> _selectComponent(String type, bool isNight) async {
+    if (type == 'theme') {
+      final themes = await ApplicationThemeStore.loadThemes();
+      final filtered = themes.where((t) => t.isNight == isNight).toList();
+      if (!mounted) return;
+      _showSelector(
+        title: isNight ? '夜间主题' : '日间主题',
+        options: filtered.map((t) => AppComponentRef(t.id, t.name)).toList(),
+        current: isNight ? _config.nightTheme : _config.dayTheme,
+        onSelected: (ref) {
+          setState(() {
+            if (isNight) {
+              _config = _config.copyWith(nightTheme: ref);
+            } else {
+              _config = _config.copyWith(dayTheme: ref);
+            }
+          });
+        },
+      );
+    } else if (type == 'topbar') {
+      final topBars = await ApplicationThemeStore.loadTopBarConfigs();
+      final filtered = topBars.where((t) => t.isNight == isNight).toList();
+      if (!mounted) return;
+      _showSelector(
+        title: isNight ? '夜间顶栏' : '日间顶栏',
+        options: filtered.map((t) => AppComponentRef(t.id, t.name)).toList(),
+        current: isNight ? _config.nightTopBar : _config.dayTopBar,
+        onSelected: (ref) {
+          setState(() {
+            if (isNight) {
+              _config = _config.copyWith(nightTopBar: ref);
+            } else {
+              _config = _config.copyWith(dayTopBar: ref);
+            }
+          });
+        },
+      );
+    } else if (type == 'navbar') {
+      final navBars = await ApplicationThemeStore.loadNavBarConfigs();
+      final filtered = navBars.where((n) => n.isNight == isNight).toList();
+      if (!mounted) return;
+      _showSelector(
+        title: isNight ? '夜间底栏' : '日间底栏',
+        options: filtered.map((n) => AppComponentRef(n.id, n.name)).toList(),
+        current: isNight ? _config.nightBottomBar : _config.dayBottomBar,
+        onSelected: (ref) {
+          setState(() {
+            if (isNight) {
+              _config = _config.copyWith(nightBottomBar: ref);
+            } else {
+              _config = _config.copyWith(dayBottomBar: ref);
+            }
+          });
+        },
+      );
+    }
+  }
+
+  void _showSelector({
+    required String title,
+    required List<AppComponentRef> options,
+    required AppComponentRef current,
+    required ValueChanged<AppComponentRef> onSelected,
+  }) {
+    final allOptions = <AppComponentRef>[
+      const AppComponentRef('', '未设置'),
+      ...options,
+    ];
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text(title),
+        children: allOptions.map((ref) {
+          final isSelected = ref.id == current.id;
+          return SimpleDialogOption(
+            onPressed: () {
+              Navigator.pop(ctx);
+              onSelected(ref);
+            },
+            child: Row(
+              children: [
+                Expanded(child: Text(ref.isEmpty ? '未设置' : ref.name)),
+                if (isSelected)
+                  Icon(Icons.check, color: Theme.of(context).colorScheme.secondary, size: 20),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Future<void> _save() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('名称不能为空')));
+      return;
+    }
+    final configs = await ApplicationThemeStore.load();
+    final idx = configs.indexWhere((c) => c.id == _config.id);
+    final updated = _config.copyWith(name: name);
+    if (idx >= 0) {
+      configs[idx] = updated;
+    } else {
+      configs.add(updated);
+    }
+    await ApplicationThemeStore.save(configs);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已保存')));
+    Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryTextColor = isDark ? const Color(0xDEFFFFFF) : const Color(0xDE000000);
+    final secondaryTextColor = isDark ? const Color(0xB3FFFFFF) : const Color(0x8A000000);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('编辑应用主题')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          TextField(
+            controller: _nameController,
+            decoration: const InputDecoration(
+              labelText: '应用主题名称',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 16),
+          _buildCategoryTitle('日间组件', colorScheme),
+          _buildSection([
+            _buildSelectorRow('日间主题', _config.dayTheme, primaryTextColor, secondaryTextColor, () => _selectComponent('theme', false)),
+            _buildSelectorRow('日间顶栏', _config.dayTopBar, primaryTextColor, secondaryTextColor, () => _selectComponent('topbar', false)),
+            _buildSelectorRow('日间底栏', _config.dayBottomBar, primaryTextColor, secondaryTextColor, () => _selectComponent('navbar', false)),
+          ], colorScheme),
+          const SizedBox(height: 16),
+          _buildCategoryTitle('夜间组件', colorScheme),
+          _buildSection([
+            _buildSelectorRow('夜间主题', _config.nightTheme, primaryTextColor, secondaryTextColor, () => _selectComponent('theme', true)),
+            _buildSelectorRow('夜间顶栏', _config.nightTopBar, primaryTextColor, secondaryTextColor, () => _selectComponent('topbar', true)),
+            _buildSelectorRow('夜间底栏', _config.nightBottomBar, primaryTextColor, secondaryTextColor, () => _selectComponent('navbar', true)),
+          ], colorScheme),
+          const SizedBox(height: 24),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: _save,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: colorScheme.secondary,
+                side: BorderSide(color: colorScheme.secondary),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: const Text('保存'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCategoryTitle(String title, ColorScheme colorScheme) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(title,
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colorScheme.secondary)),
+    );
+  }
+
+  Widget _buildSection(List<Widget> children, ColorScheme colorScheme) {
+    return Container(
+      decoration: BoxDecoration(
+        color: colorScheme.surface.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colorScheme.onSurface.withValues(alpha: 0.04), width: 1),
+      ),
+      child: Column(children: children),
+    );
+  }
+
+  Widget _buildSelectorRow(String title, AppComponentRef ref, Color primaryTextColor,
+      Color secondaryTextColor, VoidCallback onTap) {
+    return ListTile(
+      title: Text(title, style: TextStyle(color: primaryTextColor)),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            ref.isEmpty ? '未设置' : ref.name,
+            style: TextStyle(fontSize: 13, color: secondaryTextColor),
+          ),
+          const SizedBox(width: 4),
+          Icon(Icons.chevron_right, color: secondaryTextColor, size: 20),
+        ],
+      ),
+      onTap: onTap,
+    );
+  }
+}
+
 
 /// 导航项数据类 - 参考原版 NavigationBarIconConfig.NavItem
 class _NavItem {
