@@ -284,6 +284,22 @@ class ReaderHtmlTemplate {
   --reader-menu-shadow: $menuShadow;
 }
 
+/* 3-9. EPUB 特殊章节全屏背景：当章节含 .epub-chapter-bg 背景容器时，
+   覆盖 padding 变量为 0，让 --reader-safe-width = viewport width，
+   #reader-root/#reader-stage 铺满 viewport，背景图/背景色铺满全屏。
+   - 正文章节无 .epub-chapter-bg（或无背景属性），不受影响，保留阅读器 padding
+   - :has() 在 Chrome/WebView 105+ 支持，低版本不生效但不会比现在更差
+   - 覆盖变量而非直接 padding，让 --reader-safe-width 自动重算 = vw */
+html:has(.epub-chapter-bg.volume-bg),
+html:has(.epub-chapter-bg.box-bg),
+html:has(.epub-chapter-bg.video-bg),
+html:has(.epub-chapter-bg[style*="background"]) {
+  --reader-padding-top: 0px;
+  --reader-padding-bottom: 0px;
+  --reader-padding-left: 0px;
+  --reader-padding-right: 0px;
+}
+
 * {
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
@@ -818,10 +834,12 @@ body.reader-scroll #reader-content-b {
 
 /* 4d-2. .content-matrix 原作者固定 width:540px height:360px（视频海报）。
    max-width:100% 会把 540px 压到屏幕宽度，但 height:360px 不变 → 视频被压扁。
-   必须同时设 height:auto 保持 3:2 比例，配合 max-height 限制不超高内容区。 */
+   必须同时设 height:auto 保持 3:2 比例。
+   max-height 限制为 safe-height 的 50%，留出 video-title margin(50%) 空间，
+   防止 margin + 视频高度超过一页导致下方溢出。 */
 #reader-content-a .epub-chapter-bg .content-matrix {
   height: auto !important;
-  max-height: var(--reader-safe-height) !important;
+  max-height: calc(var(--reader-safe-height) * 0.5) !important;
 }
 
 /* 4e. 保留 EPUB 原作者链接颜色（a: #ff0000, a:hover: #ff00ff）。
