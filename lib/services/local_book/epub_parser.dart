@@ -241,6 +241,38 @@ class EpubGalleryTextStyle {
   /// 下外边距（em）
   final double? marginBottomEm;
 
+  /// 左外边距（em）— 对齐多看完整 margin 四值支持
+  final double? marginLeftEm;
+
+  /// 右外边距（em）
+  final double? marginRightEm;
+
+  /// 文字阴影（CSS text-shadow 解析结果）
+  /// 原作者常用 `text-shadow: 0 1 1px #fff`，null 表示无阴影
+  final EpubGalleryTextShadow? textShadow;
+
+  /// 首行缩进（em，相对字号）— 对齐多看 text-indent / duokan-text-indent
+  /// 原作者常用 `text-indent: 0em` 取消默认缩进，null 表示未指定
+  final double? textIndentEm;
+
+  /// 上内边距（em）— 对齐多看 padding 支持
+  final double? paddingTopEm;
+
+  /// 下内边距（em）
+  final double? paddingBottomEm;
+
+  /// 左内边距（em）
+  final double? paddingLeftEm;
+
+  /// 右内边距（em）
+  final double? paddingRightEm;
+
+  /// 换行规则（break-all/break-word/normal）— 对齐多看 word-break
+  final String? wordBreak;
+
+  /// 文本两端对齐方式（inter-ideograph/auto/none）— 对齐多看 text-justify
+  final String? textJustify;
+
   const EpubGalleryTextStyle({
     this.fontSizeEm,
     this.fontSizePx,
@@ -251,6 +283,41 @@ class EpubGalleryTextStyle {
     this.fontFamily,
     this.marginTopEm,
     this.marginBottomEm,
+    this.marginLeftEm,
+    this.marginRightEm,
+    this.textShadow,
+    this.textIndentEm,
+    this.paddingTopEm,
+    this.paddingBottomEm,
+    this.paddingLeftEm,
+    this.paddingRightEm,
+    this.wordBreak,
+    this.textJustify,
+  });
+}
+
+/// CSS text-shadow 解析结果
+///
+/// 支持原作 `text-shadow: 0 1 1px #fff` 语法（offset-x offset-y blur color）
+/// 多个阴影只取第一个（Flutter Text.shadows 支持数组，但原作通常单阴影）
+class EpubGalleryTextShadow {
+  /// X 轴偏移（px）
+  final double offsetX;
+
+  /// Y 轴偏移（px）
+  final double offsetY;
+
+  /// 模糊半径（px）
+  final double blurRadius;
+
+  /// 阴影颜色（ARGB int）
+  final int color;
+
+  const EpubGalleryTextShadow({
+    required this.offsetX,
+    required this.offsetY,
+    required this.blurRadius,
+    required this.color,
   });
 }
 
@@ -302,6 +369,34 @@ class EpubGalleryChapterStyle {
   /// cell 外边距（px，上下左右相同），默认 10
   final double? cellMargin;
 
+  /// cell 上外边距（px）— 对齐多看完整 margin 四值支持
+  /// null 时回退到 [cellMargin]
+  final double? cellMarginTop;
+
+  /// cell 下外边距（px）
+  final double? cellMarginBottom;
+
+  /// cell 左外边距（px）
+  final double? cellMarginLeft;
+
+  /// cell 右外边距（px）
+  final double? cellMarginRight;
+
+  /// cell 内边距（px，上下左右相同）— 对齐多看 padding 支持
+  final double? cellPadding;
+
+  /// cell 上内边距（px）
+  final double? cellPaddingTop;
+
+  /// cell 下内边距（px）
+  final double? cellPaddingBottom;
+
+  /// cell 左内边距（px）
+  final double? cellPaddingLeft;
+
+  /// cell 右内边距（px）
+  final double? cellPaddingRight;
+
   /// cell 阴影颜色（ARGB int），null 表示无阴影
   final int? cellShadowColor;
 
@@ -313,6 +408,66 @@ class EpubGalleryChapterStyle {
 
   /// cell 阴影模糊半径（px），默认 5
   final double? cellShadowBlur;
+
+  /// cell 阴影扩散半径（px）— 对齐多看 box-shadow 四值语法（含 spread）
+  final double? cellShadowSpread;
+
+  /// cell 上边框宽度（px）— 对齐多看 border-top/right/bottom/left 分方向支持
+  /// null 时回退到 [cellBorderWidth]
+  final double? cellBorderTopWidth;
+
+  /// cell 右边框宽度（px）
+  final double? cellBorderRightWidth;
+
+  /// cell 下边框宽度（px）
+  final double? cellBorderBottomWidth;
+
+  /// cell 左边框宽度（px）
+  final double? cellBorderLeftWidth;
+
+  /// cell 上边框颜色（ARGB int）— null 时回退到 [cellBorderColor]
+  final int? cellBorderTopColor;
+
+  /// cell 右边框颜色（ARGB int）
+  final int? cellBorderRightColor;
+
+  /// cell 下边框颜色（ARGB int）
+  final int? cellBorderBottomColor;
+
+  /// cell 左边框颜色（ARGB int）
+  final int? cellBorderLeftColor;
+
+  /// cell 上边框样式（solid/dashed/dotted）— null 时回退到 [cellBorderStyle]
+  final String? cellBorderTopStyle;
+
+  /// cell 右边框样式
+  final String? cellBorderRightStyle;
+
+  /// cell 下边框样式
+  final String? cellBorderBottomStyle;
+
+  /// cell 左边框样式
+  final String? cellBorderLeftStyle;
+
+  /// cell 左上圆角（px）— 对齐多看 border-top-left-radius 等四角分写
+  /// null 时回退到 [cellBorderRadius]
+  final double? cellBorderTopLeftRadius;
+
+  /// cell 右上圆角（px）
+  final double? cellBorderTopRightRadius;
+
+  /// cell 右下圆角（px）
+  final double? cellBorderBottomRightRadius;
+
+  /// cell 左下圆角（px）
+  final double? cellBorderBottomLeftRadius;
+
+  /// 背景图位置（如 "top center" / "left top" / "50% 50%"）
+  /// 对齐多看 background-position 支持
+  final String? backgroundPosition;
+
+  /// 背景图是否固定（fixed/scroll）— 对齐多看 background-attachment
+  final String? backgroundAttachment;
 
   /// 底部提示文本（如 "滑动切换，点击放大"），从 .gallery-txt 标签的文本内容提取
   /// null 表示无底部提示
@@ -326,6 +481,8 @@ class EpubGalleryChapterStyle {
     this.backgroundColor,
     this.backgroundRepeat,
     this.backgroundSize,
+    this.backgroundPosition,
+    this.backgroundAttachment,
     this.galleryTitle,
     this.galleryTitleStyle,
     this.cellBorderWidth,
@@ -333,10 +490,36 @@ class EpubGalleryChapterStyle {
     this.cellBorderStyle,
     this.cellBorderRadius,
     this.cellMargin,
+    this.cellMarginTop,
+    this.cellMarginBottom,
+    this.cellMarginLeft,
+    this.cellMarginRight,
+    this.cellPadding,
+    this.cellPaddingTop,
+    this.cellPaddingBottom,
+    this.cellPaddingLeft,
+    this.cellPaddingRight,
     this.cellShadowColor,
     this.cellShadowDx,
     this.cellShadowDy,
     this.cellShadowBlur,
+    this.cellShadowSpread,
+    this.cellBorderTopWidth,
+    this.cellBorderRightWidth,
+    this.cellBorderBottomWidth,
+    this.cellBorderLeftWidth,
+    this.cellBorderTopColor,
+    this.cellBorderRightColor,
+    this.cellBorderBottomColor,
+    this.cellBorderLeftColor,
+    this.cellBorderTopStyle,
+    this.cellBorderRightStyle,
+    this.cellBorderBottomStyle,
+    this.cellBorderLeftStyle,
+    this.cellBorderTopLeftRadius,
+    this.cellBorderTopRightRadius,
+    this.cellBorderBottomRightRadius,
+    this.cellBorderBottomLeftRadius,
     this.galleryTxt,
     this.galleryTxtStyle,
   });
@@ -1574,6 +1757,16 @@ class EpubParser {
       String? fontFamily;
       double? marginTopEm;
       double? marginBottomEm;
+      double? marginLeftEm;
+      double? marginRightEm;
+      EpubGalleryTextShadow? textShadow;
+      double? textIndentEm;
+      double? paddingTopEm;
+      double? paddingBottomEm;
+      double? paddingLeftEm;
+      double? paddingRightEm;
+      String? wordBreak;
+      String? textJustify;
 
       // font-size: 0.9em / 14px / 90%
       // - px：存 fontSizePx（绝对值，渲染时直接用，不被 baseFontSize 缩放）
@@ -1638,8 +1831,8 @@ class EpubParser {
         fontFamily = ffMatch.group(1)?.trim();
       }
 
-      // margin: 1em auto -0.5em auto / 0.5em 0 / 2em auto
-      // 只提取 top/bottom 的 em 值（auto/0 不解析，左右由 Flutter textAlign 处理）
+      // margin: 1em auto -0.5em auto / 0.5em 0 / 2em auto / 10px 0 10px 0
+      // 提取 top/right/bottom/left 四值（auto/0 不解析为 null，调用方用兜底）
       final marginMatch = RegExp(r'margin\s*:\s*([^;}]+)').firstMatch(body);
       if (marginMatch != null) {
         final parts = marginMatch.group(1)!.trim().split(RegExp(r'\s+'));
@@ -1658,18 +1851,161 @@ class EpubParser {
         }
 
         if (parts.length == 1) {
+          // margin: a → 上下左右都是 a
           marginTopEm = parseEm(parts[0]);
           marginBottomEm = marginTopEm;
+          marginLeftEm = marginTopEm;
+          marginRightEm = marginTopEm;
         } else if (parts.length == 2) {
+          // margin: a b → 上下 a，左右 b
           marginTopEm = parseEm(parts[0]);
           marginBottomEm = parseEm(parts[0]);
+          marginLeftEm = parseEm(parts[1]);
+          marginRightEm = parseEm(parts[1]);
         } else if (parts.length == 3) {
+          // margin: a b c → 上 a，左右 b，下 c
           marginTopEm = parseEm(parts[0]);
           marginBottomEm = parseEm(parts[2]);
+          marginLeftEm = parseEm(parts[1]);
+          marginRightEm = parseEm(parts[1]);
         } else if (parts.length >= 4) {
+          // margin: a b c d → 上 a 右 b 下 c 左 d
           marginTopEm = parseEm(parts[0]);
+          marginRightEm = parseEm(parts[1]);
           marginBottomEm = parseEm(parts[2]);
+          marginLeftEm = parseEm(parts[3]);
         }
+      }
+
+      // margin-top/bottom/left/right 分写（覆盖 shorthand）
+      final mtMatch = RegExp(r'margin-top\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
+      if (mtMatch != null) {
+        final v = double.tryParse(mtMatch.group(1)!);
+        final u = mtMatch.group(2);
+        marginTopEm = v != null && u == 'em' ? v : (v != null && u == 'px' ? v / 16 : marginTopEm);
+      }
+      final mbMatch = RegExp(r'margin-bottom\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
+      if (mbMatch != null) {
+        final v = double.tryParse(mbMatch.group(1)!);
+        final u = mbMatch.group(2);
+        marginBottomEm = v != null && u == 'em' ? v : (v != null && u == 'px' ? v / 16 : marginBottomEm);
+      }
+      final mlMatch = RegExp(r'margin-left\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
+      if (mlMatch != null) {
+        final v = double.tryParse(mlMatch.group(1)!);
+        final u = mlMatch.group(2);
+        marginLeftEm = v != null && u == 'em' ? v : (v != null && u == 'px' ? v / 16 : marginLeftEm);
+      }
+      final mrMatch = RegExp(r'margin-right\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
+      if (mrMatch != null) {
+        final v = double.tryParse(mrMatch.group(1)!);
+        final u = mrMatch.group(2);
+        marginRightEm = v != null && u == 'em' ? v : (v != null && u == 'px' ? v / 16 : marginRightEm);
+      }
+
+      // text-shadow: 0 1 1px #fff / 2px 2px 4px gray
+      // 语法：offset-x offset-y blur-radius? color
+      final tsMatch = RegExp(
+        r'text-shadow\s*:\s*(-?[\d.]+)(px)?\s+(-?[\d.]+)(px)?(?:\s+(-?[\d.]+)(px)?)?\s+(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|[a-zA-Z]+)',
+      ).firstMatch(body);
+      if (tsMatch != null) {
+        final ox = double.tryParse(tsMatch.group(1) ?? '0') ?? 0;
+        final oy = double.tryParse(tsMatch.group(3) ?? '0') ?? 0;
+        // blur 可选，默认 0
+        final blur = double.tryParse(tsMatch.group(5) ?? '0') ?? 0;
+        final clrStr = tsMatch.group(7);
+        final clr = clrStr != null ? (_parseCssColor(clrStr) ?? 0xFF000000) : 0xFF000000;
+        textShadow = EpubGalleryTextShadow(
+          offsetX: ox,
+          offsetY: oy,
+          blurRadius: blur,
+          color: clr,
+        );
+      }
+
+      // text-indent: 0em / 2em / 16px（含 duokan-text-indent 多看私有属性）
+      // 对齐多看 text-indent / duokan-text-indent 双属性支持
+      final tiMatch = RegExp(r'(?:duokan-)?text-indent\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
+      if (tiMatch != null) {
+        final v = double.tryParse(tiMatch.group(1)!);
+        final u = tiMatch.group(2);
+        if (v != null) {
+          textIndentEm = u == 'em' ? v : (u == 'px' ? v / 16 : v);
+        }
+      }
+
+      // padding: 3px / 0px 10px / 5px 10px 5px 10px
+      // 四值语法（同 margin），em/px 都转 em
+      final padMatch = RegExp(r'padding\s*:\s*([^;}]+)').firstMatch(body);
+      if (padMatch != null) {
+        final parts = padMatch.group(1)!.trim().split(RegExp(r'\s+'));
+        double? parsePadEm(String token) {
+          final pxM = RegExp(r'^(-?[\d.]+)px$').firstMatch(token);
+          if (pxM != null) return (double.tryParse(pxM.group(1)!) ?? 0) / 16;
+          final emM = RegExp(r'^(-?[\d.]+)em$').firstMatch(token);
+          if (emM != null) return double.tryParse(emM.group(1)!);
+          return null;
+        }
+
+        if (parts.length == 1) {
+          paddingTopEm = parsePadEm(parts[0]);
+          paddingBottomEm = paddingTopEm;
+          paddingLeftEm = paddingTopEm;
+          paddingRightEm = paddingTopEm;
+        } else if (parts.length == 2) {
+          paddingTopEm = parsePadEm(parts[0]);
+          paddingBottomEm = parsePadEm(parts[0]);
+          paddingLeftEm = parsePadEm(parts[1]);
+          paddingRightEm = parsePadEm(parts[1]);
+        } else if (parts.length == 3) {
+          paddingTopEm = parsePadEm(parts[0]);
+          paddingBottomEm = parsePadEm(parts[2]);
+          paddingLeftEm = parsePadEm(parts[1]);
+          paddingRightEm = parsePadEm(parts[1]);
+        } else if (parts.length >= 4) {
+          paddingTopEm = parsePadEm(parts[0]);
+          paddingRightEm = parsePadEm(parts[1]);
+          paddingBottomEm = parsePadEm(parts[2]);
+          paddingLeftEm = parsePadEm(parts[3]);
+        }
+      }
+
+      // padding-top/bottom/left/right 分写（覆盖 shorthand）
+      final ptMatch = RegExp(r'padding-top\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
+      if (ptMatch != null) {
+        final v = double.tryParse(ptMatch.group(1)!);
+        final u = ptMatch.group(2);
+        paddingTopEm = v != null && u == 'em' ? v : (v != null && u == 'px' ? v / 16 : paddingTopEm);
+      }
+      final pbMatch = RegExp(r'padding-bottom\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
+      if (pbMatch != null) {
+        final v = double.tryParse(pbMatch.group(1)!);
+        final u = pbMatch.group(2);
+        paddingBottomEm = v != null && u == 'em' ? v : (v != null && u == 'px' ? v / 16 : paddingBottomEm);
+      }
+      final plMatch = RegExp(r'padding-left\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
+      if (plMatch != null) {
+        final v = double.tryParse(plMatch.group(1)!);
+        final u = plMatch.group(2);
+        paddingLeftEm = v != null && u == 'em' ? v : (v != null && u == 'px' ? v / 16 : paddingLeftEm);
+      }
+      final prMatch = RegExp(r'padding-right\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
+      if (prMatch != null) {
+        final v = double.tryParse(prMatch.group(1)!);
+        final u = prMatch.group(2);
+        paddingRightEm = v != null && u == 'em' ? v : (v != null && u == 'px' ? v / 16 : paddingRightEm);
+      }
+
+      // word-break: break-all / break-word / normal
+      final wbMatch = RegExp(r'word-break\s*:\s*(break-all|break-word|normal|keep-all)').firstMatch(body);
+      if (wbMatch != null) {
+        wordBreak = wbMatch.group(1);
+      }
+
+      // text-justify: inter-ideograph / auto / none / distribute
+      final tjMatch = RegExp(r'text-justify\s*:\s*(inter-ideograph|auto|none|distribute|inter-character)').firstMatch(body);
+      if (tjMatch != null) {
+        textJustify = tjMatch.group(1);
       }
 
       // 至少有一个属性才返回，否则 null（用兜底）
@@ -1681,7 +2017,17 @@ class EpubParser {
           lineHeight == null &&
           fontFamily == null &&
           marginTopEm == null &&
-          marginBottomEm == null) {
+          marginBottomEm == null &&
+          marginLeftEm == null &&
+          marginRightEm == null &&
+          textShadow == null &&
+          textIndentEm == null &&
+          paddingTopEm == null &&
+          paddingBottomEm == null &&
+          paddingLeftEm == null &&
+          paddingRightEm == null &&
+          wordBreak == null &&
+          textJustify == null) {
         return null;
       }
       return EpubGalleryTextStyle(
@@ -1694,6 +2040,16 @@ class EpubParser {
         fontFamily: fontFamily,
         marginTopEm: marginTopEm,
         marginBottomEm: marginBottomEm,
+        marginLeftEm: marginLeftEm,
+        marginRightEm: marginRightEm,
+        textShadow: textShadow,
+        textIndentEm: textIndentEm,
+        paddingTopEm: paddingTopEm,
+        paddingBottomEm: paddingBottomEm,
+        paddingLeftEm: paddingLeftEm,
+        paddingRightEm: paddingRightEm,
+        wordBreak: wordBreak,
+        textJustify: textJustify,
       );
     } catch (_) {
       return null;
@@ -1749,6 +2105,10 @@ class EpubParser {
         backgroundColor = _parseCssColor(inlineBgColorMatch.group(1)!);
       }
 
+      // 背景图位置 / 附件（对齐多看 background-position / background-attachment）
+      String? backgroundPosition;
+      String? backgroundAttachment;
+
       // body class 列表（从 inlinedBodyAttrs 提取，去掉 epub-chapter-bg 标记）
       final bodyClassMatch = RegExp(r'class="([^"]*)"').firstMatch(inlinedBodyAttrs);
       final bodyClasses = bodyClassMatch?.group(1)?.split(RegExp(r'\s+')) ?? <String>[];
@@ -1782,6 +2142,22 @@ class EpubParser {
         if (bgSizeMatch != null) {
           backgroundSize = bgSizeMatch.group(1);
         }
+        // background-position: top center / left top / 50% 50% / 10px 20px
+        // 对齐多看 background-position 支持（影响背景图对齐方式）
+        final bgPosMatch = RegExp(
+          r'background-position\s*:\s*([^;}\s]+(?:\s+[^;}\s]+)?)',
+        ).firstMatch(block);
+        if (bgPosMatch != null) {
+          backgroundPosition = bgPosMatch.group(1)?.trim();
+        }
+        // background-attachment: fixed / scroll
+        // 对齐多看 background-attachment（原作者常用 fixed 固定背景图）
+        final bgAttMatch = RegExp(
+          r'background-attachment\s*:\s*(fixed|scroll|local)',
+        ).firstMatch(block);
+        if (bgAttMatch != null) {
+          backgroundAttachment = bgAttMatch.group(1);
+        }
       }
 
       // 2. 提取 gallery-title 文本 + 样式
@@ -1800,18 +2176,48 @@ class EpubParser {
       }
       galleryTitleStyle = _extractGalleryTextStyle(epubCss, '.gallery-title');
 
-      // 3. 提取 cell 边框/阴影/margin 样式
-      //    .duokan-image-gallery-cell { margin: 10px 0; border: solid 1px; box-shadow: 5px 5px 5px #888 }
+      // 3. 提取 cell 边框/阴影/margin/padding 样式（完整四值 + 分方向支持）
+      //    .duokan-image-gallery-cell { margin: 10px 0; padding: 3px;
+      //      border: 2px solid #20F2f0; border-radius: 10px;
+      //      box-shadow: 5px 5px 5px #888888 }
       final cellBlock = _extractCssBlock(epubCss, '.duokan-image-gallery-cell');
       double? cellBorderWidth;
       int? cellBorderColor;
       String? cellBorderStyle;
       double? cellBorderRadius;
       double? cellMargin;
+      double? cellMarginTop;
+      double? cellMarginBottom;
+      double? cellMarginLeft;
+      double? cellMarginRight;
+      double? cellPadding;
+      double? cellPaddingTop;
+      double? cellPaddingBottom;
+      double? cellPaddingLeft;
+      double? cellPaddingRight;
       int? cellShadowColor;
       double? cellShadowDx;
       double? cellShadowDy;
       double? cellShadowBlur;
+      double? cellShadowSpread;
+      // 分方向边框（对齐多看 border-top/right/bottom/left 支持）
+      double? cellBorderTopWidth;
+      double? cellBorderRightWidth;
+      double? cellBorderBottomWidth;
+      double? cellBorderLeftWidth;
+      int? cellBorderTopColor;
+      int? cellBorderRightColor;
+      int? cellBorderBottomColor;
+      int? cellBorderLeftColor;
+      String? cellBorderTopStyle;
+      String? cellBorderRightStyle;
+      String? cellBorderBottomStyle;
+      String? cellBorderLeftStyle;
+      // 四角圆角（对齐多看 border-top-left-radius 等支持）
+      double? cellBorderTopLeftRadius;
+      double? cellBorderTopRightRadius;
+      double? cellBorderBottomRightRadius;
+      double? cellBorderBottomLeftRadius;
 
       if (cellBlock != null) {
         // border: solid 1px / border: 1px solid #888
@@ -1846,31 +2252,214 @@ class EpubParser {
         if (bcMatch != null) {
           cellBorderColor = _parseCssColor(bcMatch.group(1)!);
         }
-        // border-radius
+
+        // border-top/right/bottom/left 分方向（对齐多看 4 方向边框）
+        // 每个方向支持 shorthand：border-top: 2px solid #888 / border-top: 1px
+        for (final dir in ['top', 'right', 'bottom', 'left']) {
+          final dirMatch = RegExp(
+            r'border-' + dir + r'\s*:\s*(?:([a-zA-Z]+)\s+)?(\d+(?:\.\d+)?px)?\s*(?:([a-zA-Z]+)\s+)?(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|[a-zA-Z]+)?',
+          ).firstMatch(cellBlock);
+          if (dirMatch != null) {
+            final style1 = dirMatch.group(1);
+            final width = dirMatch.group(2);
+            final style2 = dirMatch.group(3);
+            final color = dirMatch.group(4);
+            final w = width != null ? double.tryParse(width.replaceAll('px', '')) : null;
+            final c = color != null ? _parseCssColor(color) : null;
+            final s = style1 ?? style2;
+            switch (dir) {
+              case 'top':
+                if (w != null) cellBorderTopWidth = w;
+                if (c != null) cellBorderTopColor = c;
+                if (s != null) cellBorderTopStyle = s;
+                break;
+              case 'right':
+                if (w != null) cellBorderRightWidth = w;
+                if (c != null) cellBorderRightColor = c;
+                if (s != null) cellBorderRightStyle = s;
+                break;
+              case 'bottom':
+                if (w != null) cellBorderBottomWidth = w;
+                if (c != null) cellBorderBottomColor = c;
+                if (s != null) cellBorderBottomStyle = s;
+                break;
+              case 'left':
+                if (w != null) cellBorderLeftWidth = w;
+                if (c != null) cellBorderLeftColor = c;
+                if (s != null) cellBorderLeftStyle = s;
+                break;
+            }
+          }
+        }
+
+        // border-radius（单值 + 四角分写）
         final brMatch = RegExp(r'border-radius\s*:\s*(\d+(?:\.\d+)?px)').firstMatch(cellBlock);
         if (brMatch != null) {
           cellBorderRadius = double.tryParse(brMatch.group(1)!.replaceAll('px', ''));
         }
-        // margin: 10px 0 / margin: 10px 0 10px 0
-        final marginMatch = RegExp(r'margin\s*:\s*([^;}\s]+(?:\s+[^;}\s]+){0,3})').firstMatch(cellBlock);
+        // border-top-left/right-radius / border-bottom-left/right-radius
+        final btlrMatch = RegExp(r'border-top-left-radius\s*:\s*(\d+(?:\.\d+)?px)').firstMatch(cellBlock);
+        if (btlrMatch != null) {
+          cellBorderTopLeftRadius = double.tryParse(btlrMatch.group(1)!.replaceAll('px', ''));
+        }
+        final btrrMatch = RegExp(r'border-top-right-radius\s*:\s*(\d+(?:\.\d+)?px)').firstMatch(cellBlock);
+        if (btrrMatch != null) {
+          cellBorderTopRightRadius = double.tryParse(btrrMatch.group(1)!.replaceAll('px', ''));
+        }
+        final bbrrMatch = RegExp(r'border-bottom-right-radius\s*:\s*(\d+(?:\.\d+)?px)').firstMatch(cellBlock);
+        if (bbrrMatch != null) {
+          cellBorderBottomRightRadius = double.tryParse(bbrrMatch.group(1)!.replaceAll('px', ''));
+        }
+        final bblrMatch = RegExp(r'border-bottom-left-radius\s*:\s*(\d+(?:\.\d+)?px)').firstMatch(cellBlock);
+        if (bblrMatch != null) {
+          cellBorderBottomLeftRadius = double.tryParse(bblrMatch.group(1)!.replaceAll('px', ''));
+        }
+
+        // margin: 10px 0 / margin: 10px 0 10px 0（四值完整解析）
+        final marginMatch = RegExp(r'margin\s*:\s*([^;}]+)').firstMatch(cellBlock);
         if (marginMatch != null) {
-          final parts = marginMatch.group(1)!.split(RegExp(r'\s+'));
-          if (parts.isNotEmpty) {
-            // 取第一个值作为上下左右统一 margin（cell 通常上下相同）
-            final first = parts[0].replaceAll('px', '');
-            final m = double.tryParse(first);
-            if (m != null) cellMargin = m;
+          final parts = marginMatch.group(1)!.trim().split(RegExp(r'\s+'));
+          double? parseMarginPx(String token) {
+            final pxM = RegExp(r'^(-?[\d.]+)px$').firstMatch(token);
+            if (pxM != null) return double.tryParse(pxM.group(1)!);
+            final emM = RegExp(r'^(-?[\d.]+)em$').firstMatch(token);
+            if (emM != null) {
+              // em 转 px（基准 16，cell 通常是 px 但兼容 em）
+              return (double.tryParse(emM.group(1)!) ?? 0) * 16;
+            }
+            return null;
+          }
+
+          if (parts.length == 1) {
+            cellMargin = parseMarginPx(parts[0]);
+            cellMarginTop = cellMargin;
+            cellMarginBottom = cellMargin;
+            cellMarginLeft = cellMargin;
+            cellMarginRight = cellMargin;
+          } else if (parts.length == 2) {
+            cellMarginTop = parseMarginPx(parts[0]);
+            cellMarginBottom = cellMarginTop;
+            cellMarginLeft = parseMarginPx(parts[1]);
+            cellMarginRight = cellMarginLeft;
+            cellMargin = cellMarginTop; // 兜底取上
+          } else if (parts.length == 3) {
+            cellMarginTop = parseMarginPx(parts[0]);
+            cellMarginBottom = parseMarginPx(parts[2]);
+            cellMarginLeft = parseMarginPx(parts[1]);
+            cellMarginRight = cellMarginLeft;
+            cellMargin = cellMarginTop;
+          } else if (parts.length >= 4) {
+            cellMarginTop = parseMarginPx(parts[0]);
+            cellMarginRight = parseMarginPx(parts[1]);
+            cellMarginBottom = parseMarginPx(parts[2]);
+            cellMarginLeft = parseMarginPx(parts[3]);
+            cellMargin = cellMarginTop;
           }
         }
-        // box-shadow: 5px 5px 5px #888888 / 5px 5px 5px rgba(0,0,0,0.5)
+        // margin-top/bottom/left/right 分写（覆盖 shorthand）
+        final cmtMatch = RegExp(r'margin-top\s*:\s*(-?[\d.]+)(px|em)').firstMatch(cellBlock);
+        if (cmtMatch != null) {
+          final v = double.tryParse(cmtMatch.group(1)!);
+          final u = cmtMatch.group(2);
+          cellMarginTop = v != null ? (u == 'em' ? v * 16 : v) : cellMarginTop;
+        }
+        final cmbMatch = RegExp(r'margin-bottom\s*:\s*(-?[\d.]+)(px|em)').firstMatch(cellBlock);
+        if (cmbMatch != null) {
+          final v = double.tryParse(cmbMatch.group(1)!);
+          final u = cmbMatch.group(2);
+          cellMarginBottom = v != null ? (u == 'em' ? v * 16 : v) : cellMarginBottom;
+        }
+        final cmlMatch = RegExp(r'margin-left\s*:\s*(-?[\d.]+)(px|em)').firstMatch(cellBlock);
+        if (cmlMatch != null) {
+          final v = double.tryParse(cmlMatch.group(1)!);
+          final u = cmlMatch.group(2);
+          cellMarginLeft = v != null ? (u == 'em' ? v * 16 : v) : cellMarginLeft;
+        }
+        final cmrMatch = RegExp(r'margin-right\s*:\s*(-?[\d.]+)(px|em)').firstMatch(cellBlock);
+        if (cmrMatch != null) {
+          final v = double.tryParse(cmrMatch.group(1)!);
+          final u = cmrMatch.group(2);
+          cellMarginRight = v != null ? (u == 'em' ? v * 16 : v) : cellMarginRight;
+        }
+
+        // padding: 3px / padding: 5px 10px（四值完整解析，对齐多看 padding 支持）
+        final padMatch = RegExp(r'padding\s*:\s*([^;}]+)').firstMatch(cellBlock);
+        if (padMatch != null) {
+          final parts = padMatch.group(1)!.trim().split(RegExp(r'\s+'));
+          double? parsePadPx(String token) {
+            final pxM = RegExp(r'^(-?[\d.]+)px$').firstMatch(token);
+            if (pxM != null) return double.tryParse(pxM.group(1)!);
+            final emM = RegExp(r'^(-?[\d.]+)em$').firstMatch(token);
+            if (emM != null) return (double.tryParse(emM.group(1)!) ?? 0) * 16;
+            return null;
+          }
+
+          if (parts.length == 1) {
+            cellPadding = parsePadPx(parts[0]);
+            cellPaddingTop = cellPadding;
+            cellPaddingBottom = cellPadding;
+            cellPaddingLeft = cellPadding;
+            cellPaddingRight = cellPadding;
+          } else if (parts.length == 2) {
+            cellPaddingTop = parsePadPx(parts[0]);
+            cellPaddingBottom = cellPaddingTop;
+            cellPaddingLeft = parsePadPx(parts[1]);
+            cellPaddingRight = cellPaddingLeft;
+            cellPadding = cellPaddingTop;
+          } else if (parts.length == 3) {
+            cellPaddingTop = parsePadPx(parts[0]);
+            cellPaddingBottom = parsePadPx(parts[2]);
+            cellPaddingLeft = parsePadPx(parts[1]);
+            cellPaddingRight = cellPaddingLeft;
+            cellPadding = cellPaddingTop;
+          } else if (parts.length >= 4) {
+            cellPaddingTop = parsePadPx(parts[0]);
+            cellPaddingRight = parsePadPx(parts[1]);
+            cellPaddingBottom = parsePadPx(parts[2]);
+            cellPaddingLeft = parsePadPx(parts[3]);
+            cellPadding = cellPaddingTop;
+          }
+        }
+        // padding-top/bottom/left/right 分写
+        final cptMatch = RegExp(r'padding-top\s*:\s*(-?[\d.]+)(px|em)').firstMatch(cellBlock);
+        if (cptMatch != null) {
+          final v = double.tryParse(cptMatch.group(1)!);
+          final u = cptMatch.group(2);
+          cellPaddingTop = v != null ? (u == 'em' ? v * 16 : v) : cellPaddingTop;
+        }
+        final cpbMatch = RegExp(r'padding-bottom\s*:\s*(-?[\d.]+)(px|em)').firstMatch(cellBlock);
+        if (cpbMatch != null) {
+          final v = double.tryParse(cpbMatch.group(1)!);
+          final u = cpbMatch.group(2);
+          cellPaddingBottom = v != null ? (u == 'em' ? v * 16 : v) : cellPaddingBottom;
+        }
+        final cplMatch = RegExp(r'padding-left\s*:\s*(-?[\d.]+)(px|em)').firstMatch(cellBlock);
+        if (cplMatch != null) {
+          final v = double.tryParse(cplMatch.group(1)!);
+          final u = cplMatch.group(2);
+          cellPaddingLeft = v != null ? (u == 'em' ? v * 16 : v) : cellPaddingLeft;
+        }
+        final cprMatch = RegExp(r'padding-right\s*:\s*(-?[\d.]+)(px|em)').firstMatch(cellBlock);
+        if (cprMatch != null) {
+          final v = double.tryParse(cprMatch.group(1)!);
+          final u = cprMatch.group(2);
+          cellPaddingRight = v != null ? (u == 'em' ? v * 16 : v) : cellPaddingRight;
+        }
+
+        // box-shadow: dx dy blur [spread] color（支持四值 + spread，对齐多看完整语法）
         final shadowMatch = RegExp(
-          r'box-shadow\s*:\s*(\d+(?:\.\d+)?px)\s+(\d+(?:\.\d+)?px)\s+(\d+(?:\.\d+)?px)\s+(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|[a-zA-Z]+)',
+          r'box-shadow\s*:\s*(-?[\d.]+)(px)?\s+(-?[\d.]+)(px)?\s+(-?[\d.]+)(px)?(?:\s+(-?[\d.]+)(px)?)?\s+(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|[a-zA-Z]+)',
         ).firstMatch(cellBlock);
         if (shadowMatch != null) {
-          cellShadowDx = double.tryParse(shadowMatch.group(1)!.replaceAll('px', ''));
-          cellShadowDy = double.tryParse(shadowMatch.group(2)!.replaceAll('px', ''));
-          cellShadowBlur = double.tryParse(shadowMatch.group(3)!.replaceAll('px', ''));
-          cellShadowColor = _parseCssColor(shadowMatch.group(4)!);
+          cellShadowDx = double.tryParse(shadowMatch.group(1) ?? '0');
+          cellShadowDy = double.tryParse(shadowMatch.group(3) ?? '0');
+          cellShadowBlur = double.tryParse(shadowMatch.group(5) ?? '0');
+          // spread 可选（第 7 组），默认 0
+          cellShadowSpread = double.tryParse(shadowMatch.group(7) ?? '0');
+          final clrStr = shadowMatch.group(9);
+          if (clrStr != null) {
+            cellShadowColor = _parseCssColor(clrStr);
+          }
         }
       }
 
@@ -1895,6 +2484,8 @@ class EpubParser {
         backgroundColor: backgroundColor,
         backgroundRepeat: backgroundRepeat,
         backgroundSize: backgroundSize,
+        backgroundPosition: backgroundPosition,
+        backgroundAttachment: backgroundAttachment,
         galleryTitle: galleryTitle,
         galleryTitleStyle: galleryTitleStyle,
         cellBorderWidth: cellBorderWidth,
@@ -1902,10 +2493,36 @@ class EpubParser {
         cellBorderStyle: cellBorderStyle,
         cellBorderRadius: cellBorderRadius,
         cellMargin: cellMargin,
+        cellMarginTop: cellMarginTop,
+        cellMarginBottom: cellMarginBottom,
+        cellMarginLeft: cellMarginLeft,
+        cellMarginRight: cellMarginRight,
+        cellPadding: cellPadding,
+        cellPaddingTop: cellPaddingTop,
+        cellPaddingBottom: cellPaddingBottom,
+        cellPaddingLeft: cellPaddingLeft,
+        cellPaddingRight: cellPaddingRight,
         cellShadowColor: cellShadowColor,
         cellShadowDx: cellShadowDx,
         cellShadowDy: cellShadowDy,
         cellShadowBlur: cellShadowBlur,
+        cellShadowSpread: cellShadowSpread,
+        cellBorderTopWidth: cellBorderTopWidth,
+        cellBorderRightWidth: cellBorderRightWidth,
+        cellBorderBottomWidth: cellBorderBottomWidth,
+        cellBorderLeftWidth: cellBorderLeftWidth,
+        cellBorderTopColor: cellBorderTopColor,
+        cellBorderRightColor: cellBorderRightColor,
+        cellBorderBottomColor: cellBorderBottomColor,
+        cellBorderLeftColor: cellBorderLeftColor,
+        cellBorderTopStyle: cellBorderTopStyle,
+        cellBorderRightStyle: cellBorderRightStyle,
+        cellBorderBottomStyle: cellBorderBottomStyle,
+        cellBorderLeftStyle: cellBorderLeftStyle,
+        cellBorderTopLeftRadius: cellBorderTopLeftRadius,
+        cellBorderTopRightRadius: cellBorderTopRightRadius,
+        cellBorderBottomRightRadius: cellBorderBottomRightRadius,
+        cellBorderBottomLeftRadius: cellBorderBottomLeftRadius,
         galleryTxt: galleryTxt,
         galleryTxtStyle: galleryTxtStyle,
       );

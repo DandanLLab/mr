@@ -238,10 +238,17 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     final fit = widget.chapterStyle?.backgroundSize == 'contain'
         ? BoxFit.contain
         : BoxFit.cover;
+    // background-position → Alignment（对齐多看 background-position 支持）
+    // cover 模式下 alignment 决定图片裁剪对齐方向
+    // 原作者常用 "top center" → Alignment(0, -1)，"center center" → Alignment.center
+    final alignment = _resolveBgPosition(widget.chapterStyle?.backgroundPosition);
+
     if (src.startsWith('data:')) {
       final bytes = _decodeDataUri(src);
       if (bytes != null) {
-        return Image.memory(bytes, fit: fit, gaplessPlayback: true);
+        return Image.memory(
+          bytes, fit: fit, alignment: alignment, gaplessPlayback: true,
+        );
       }
       return ColoredBox(color: _resolveBgColor(), child: const SizedBox.expand());
     }
@@ -250,6 +257,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
       return Image.file(
         File(filePath),
         fit: fit,
+        alignment: alignment,
         gaplessPlayback: true,
         errorBuilder: (_, __, ___) => ColoredBox(
           color: _resolveBgColor(),
@@ -260,12 +268,89 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     return Image.network(
       src,
       fit: fit,
+      alignment: alignment,
       gaplessPlayback: true,
       errorBuilder: (_, __, ___) => ColoredBox(
         color: _resolveBgColor(),
         child: const SizedBox.expand(),
       ),
     );
+  }
+
+  /// 将 CSS background-position 转为 Flutter Alignment
+  ///
+  /// 支持的值：
+  /// - "top center" / "center top" → Alignment(0, -1)
+  /// - "bottom center" / "center bottom" → Alignment(0, 1)
+  /// - "left center" / "center left" → Alignment(-1, 0)
+  /// - "right center" / "center right" → Alignment(1, 0)
+  /// - "center center" / "center" → Alignment.center
+  /// - "left top" / "top left" → Alignment(-1, -1)
+  /// - "50% 50%" → Alignment(0, 0)（百分比转 -1~1）
+  /// - null / 无法解析 → Alignment.center（默认居中，对齐多看默认值）
+  Alignment _resolveBgPosition(String? position) {
+    if (position == null || position.isEmpty) return Alignment.center;
+    final parts = position.trim().toLowerCase().split(RegExp(r'\s+'));
+    if (parts.isEmpty) return Alignment.center;
+
+    // 百分比解析：50% → 0.0，0% → -1.0，100% → 1.0
+    double? parsePercent(String token) {
+      if (token.endsWith('%')) {
+        final v = double.tryParse(token.substring(0, token.length - 1));
+        if (v != null) return (v - 50) / 50; // 50%→0, 0%→-1, 100%→1
+      }
+      return null;
+    }
+
+    double x = 0, y = 0;
+    if (parts.length == 1) {
+      // 单值：center / left / right / top / bottom / 50%
+      final p = parts[0];
+      final pct = parsePercent(p);
+      if (pct != null) {
+        x = pct;
+      } else if (p == 'left') {
+        x = -1;
+      } else if (p == 'right') {
+        x = 1;
+      } else if (p == 'top') {
+        y = -1;
+      } else if (p == 'bottom') {
+        y = 1;
+      } else if (p == 'center') {
+        x = 0; y = 0;
+      }
+    } else {
+      // 双值：horizontal vertical
+      for (final p in parts) {
+        final pct = parsePercent(p);
+        if (pct != null) {
+          // 百分比默认赋给 x（CSS 双值第一个是水平）
+          // 但如果另一个值是关键字，百分比赋给另一轴
+          if (x == 0 && parts.indexOf(p) == 0) {
+            x = pct;
+          } else {
+            y = pct;
+          }
+        } else if (p == 'left') {
+          x = -1;
+        } else if (p == 'right') {
+          x = 1;
+        } else if (p == 'top') {
+          y = -1;
+        } else if (p == 'bottom') {
+          y = 1;
+        } else if (p == 'center') {
+          // center 在水平位 → x=0，在垂直位 → y=0
+          if (parts.indexOf(p) == 0) {
+            x = 0;
+          } else {
+            y = 0;
+          }
+        }
+      }
+    }
+    return Alignment(x, y);
   }
 
   /// 是否有 gallery-title（原作者 .gallery-title 标签文本）
@@ -295,13 +380,21 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
         ? FontWeight.values[(style!.fontWeight! / 100).round().clamp(0, 8)]
         : FontWeight.bold;
     final height = style?.lineHeight ?? 1.2;
-    // margin: 2em auto → 上下各 2em（相对 baseFontSize）
-    const marginEm = 2.0;
+    // text-shadow：优先用提取的原作者值，缺失时用兜底（0 1 1px #fff 风格）
+    final shadows = _resolveTextShadows(style?.textShadow);
+
+    // margin 四值：优先用提取值，缺失时用兜底（2em auto → 上下 2em，左右 auto 由 Center 处理）
+    final mtEm = style?.marginTopEm ?? 2.0;
+    final mbEm = style?.marginBottomEm ?? 2.0;
+    final mlEm = style?.marginLeftEm; // null → 用 horizontal 兜底
+    final mrEm = style?.marginRightEm;
 
     return Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: DesignTokens.spacingMd,
-        vertical: marginEm * baseFontSize,
+      padding: EdgeInsets.only(
+        top: mtEm * baseFontSize,
+        bottom: mbEm * baseFontSize,
+        left: mlEm != null ? mlEm * baseFontSize : DesignTokens.spacingMd,
+        right: mrEm != null ? mrEm * baseFontSize : DesignTokens.spacingMd,
       ),
       child: Text(
         widget.chapterStyle!.galleryTitle!,
@@ -310,9 +403,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
           fontSize: fontSize,
           fontWeight: fontWeight,
           height: height,
-          shadows: const [
-            Shadow(offset: Offset(0, 1), blurRadius: 1, color: Colors.white54),
-          ],
+          shadows: shadows,
         ),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
@@ -347,13 +438,21 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
         ? FontWeight.values[(style!.fontWeight! / 100).round().clamp(0, 8)]
         : FontWeight.w400;
     final height = style?.lineHeight ?? 1.5;
-    // margin: 1em auto → 上下各 1em（相对 baseFontSize）
-    const marginEm = 1.0;
+    // text-shadow：优先用提取的原作者值，缺失时用兜底（0 1 1px #fff 风格）
+    final shadows = _resolveTextShadows(style?.textShadow);
+
+    // margin 四值：优先用提取值，缺失时用兜底（1em auto → 上下 1em，左右 auto 由 Center 处理）
+    final mtEm = style?.marginTopEm ?? 1.0;
+    final mbEm = style?.marginBottomEm ?? 1.0;
+    final mlEm = style?.marginLeftEm;
+    final mrEm = style?.marginRightEm;
 
     return Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: DesignTokens.spacingMd,
-        vertical: marginEm * baseFontSize,
+      padding: EdgeInsets.only(
+        top: mtEm * baseFontSize,
+        bottom: mbEm * baseFontSize,
+        left: mlEm != null ? mlEm * baseFontSize : DesignTokens.spacingMd,
+        right: mrEm != null ? mrEm * baseFontSize : DesignTokens.spacingMd,
       ),
       child: Text(
         widget.chapterStyle!.galleryTxt!,
@@ -362,9 +461,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
           fontSize: fontSize,
           fontWeight: fontWeight,
           height: height,
-          shadows: const [
-            Shadow(offset: Offset(0, 1), blurRadius: 1, color: Colors.white54),
-          ],
+          shadows: shadows,
         ),
         textAlign: _resolveTextAlign(style?.textAlign, TextAlign.center),
       ),
@@ -439,6 +536,24 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     }
     final em = style?.fontSizeEm ?? defaultEm;
     return em * baseFontSize;
+  }
+
+  /// 将提取的 text-shadow 解析为 Flutter Shadow 列表
+  ///
+  /// - 提取到 text-shadow：用原作者值（offset/blur/color 全部保留）
+  /// - 未提取到（null）：返回 null，TextStyle.shadows = null 表示无阴影
+  ///
+  /// 设计意图：原作者 CSS 明确写 text-shadow 时严格保留，未写时不强制加阴影
+  /// （避免深色背景下白色阴影反而降低可读性）
+  List<Shadow>? _resolveTextShadows(EpubGalleryTextShadow? ts) {
+    if (ts == null) return null;
+    return [
+      Shadow(
+        offset: Offset(ts.offsetX, ts.offsetY),
+        blurRadius: ts.blurRadius,
+        color: Color(ts.color),
+      ),
+    ];
   }
 
   /// 将 CSS text-align 值转为 Flutter TextAlign
@@ -604,10 +719,16 @@ class _GalleryImageItem extends StatelessWidget {
                 if (hasTitle) ...[
                   // maintitle：还原作者 margin: 1em auto -0.5em auto
                   // 上方间距 = marginTopEm * baseFontSize（兜底 1em，对齐原作者）
+                  // 左右间距 = marginLeftEm/Right * baseFontSize（对齐多看 margin 四值）
+                  // text-indent: 0em → 无首行缩进（多看用 duokan-text-indent 控制）
                   if (image.maintitle.isNotEmpty)
                     Padding(
                       padding: EdgeInsets.only(
                         top: (image.maintitleStyle?.marginTopEm ?? 1.0) *
+                            baseFontSize,
+                        left: (image.maintitleStyle?.marginLeftEm ?? 0.0) *
+                            baseFontSize,
+                        right: (image.maintitleStyle?.marginRightEm ?? 0.0) *
                             baseFontSize,
                       ),
                       child: Text(
@@ -656,48 +777,139 @@ class _GalleryImageItem extends StatelessWidget {
     // 兜底值对齐原作者 .duokan-image-gallery-cell 默认样式：
     // border-style: solid; border-width: 1px（无 border-color → currentColor 默认黑）
     // box-shadow: 5px 5px 5px #888888
+    // 分方向边框：优先用分方向值，缺失时回退到 shorthand 值
     final borderWidth = cs.cellBorderWidth ?? 1.0;
     final borderColor = cs.cellBorderColor ?? 0xFF000000; // currentColor 默认黑
     final borderStyle = cs.cellBorderStyle ?? 'solid';
+    final topW = cs.cellBorderTopWidth ?? borderWidth;
+    final rightW = cs.cellBorderRightWidth ?? borderWidth;
+    final bottomW = cs.cellBorderBottomWidth ?? borderWidth;
+    final leftW = cs.cellBorderLeftWidth ?? borderWidth;
+    final topC = cs.cellBorderTopColor ?? borderColor;
+    final rightC = cs.cellBorderRightColor ?? borderColor;
+    final bottomC = cs.cellBorderBottomColor ?? borderColor;
+    final leftC = cs.cellBorderLeftColor ?? borderColor;
+    final topS = cs.cellBorderTopStyle ?? borderStyle;
+    final rightS = cs.cellBorderRightStyle ?? borderStyle;
+    final bottomS = cs.cellBorderBottomStyle ?? borderStyle;
+    final leftS = cs.cellBorderLeftStyle ?? borderStyle;
+
     final shadowColor = cs.cellShadowColor ?? 0xFF888888;
     final shadowDx = cs.cellShadowDx ?? 5.0;
     final shadowDy = cs.cellShadowDy ?? 5.0;
     final shadowBlur = cs.cellShadowBlur ?? 5.0;
-    final hasBorder = borderWidth > 0;
-    final hasRadius = cs.cellBorderRadius != null && cs.cellBorderRadius! > 0;
+    final shadowSpread = cs.cellShadowSpread ?? 0.0;
+
+    // 四角圆角：优先用四角分写值，缺失时回退到 border-radius 单值
+    final radius = cs.cellBorderRadius ?? 0.0;
+    final tlR = cs.cellBorderTopLeftRadius ?? radius;
+    final trR = cs.cellBorderTopRightRadius ?? radius;
+    final brR = cs.cellBorderBottomRightRadius ?? radius;
+    final blR = cs.cellBorderBottomLeftRadius ?? radius;
+    final hasRadius = tlR > 0 || trR > 0 || brR > 0 || blR > 0;
+    final borderRadius = BorderRadius.only(
+      topLeft: Radius.circular(tlR),
+      topRight: Radius.circular(trR),
+      bottomRight: Radius.circular(brR),
+      bottomLeft: Radius.circular(blR),
+    );
+
+    // padding 四值（对齐多看 padding 支持）
+    final padTop = cs.cellPaddingTop ?? 0.0;
+    final padBottom = cs.cellPaddingBottom ?? 0.0;
+    final padLeft = cs.cellPaddingLeft ?? 0.0;
+    final padRight = cs.cellPaddingRight ?? 0.0;
+    final hasPadding = padTop > 0 || padBottom > 0 || padLeft > 0 || padRight > 0;
+
+    // 判断是否有可见边框（任一方向宽度 > 0 且样式非 none）
+    final hasBorder = (topW > 0 && topS != 'none') ||
+        (rightW > 0 && rightS != 'none') ||
+        (bottomW > 0 && bottomS != 'none') ||
+        (leftW > 0 && leftS != 'none');
+
+    // 构建分方向 Border（仅当四方向一致时用 Border.all 优化，否则用 Border.fromBorderSide）
+    Border? border;
+    if (hasBorder) {
+      final isUniform = topW == rightW &&
+          rightW == bottomW &&
+          bottomW == leftW &&
+          topC == rightC &&
+          rightC == bottomC &&
+          bottomC == leftC &&
+          topS == rightS &&
+          rightS == bottomS &&
+          bottomS == leftS;
+      if (isUniform) {
+        border = Border.all(
+          color: Color(topC),
+          width: topW,
+          style: _resolveBorderStyle(topS),
+        );
+      } else {
+        border = Border(
+          top: topW > 0 && topS != 'none'
+              ? BorderSide(color: Color(topC), width: topW, style: _resolveBorderStyle(topS))
+              : BorderSide.none,
+          right: rightW > 0 && rightS != 'none'
+              ? BorderSide(color: Color(rightC), width: rightW, style: _resolveBorderStyle(rightS))
+              : BorderSide.none,
+          bottom: bottomW > 0 && bottomS != 'none'
+              ? BorderSide(color: Color(bottomC), width: bottomW, style: _resolveBorderStyle(bottomS))
+              : BorderSide.none,
+          left: leftW > 0 && leftS != 'none'
+              ? BorderSide(color: Color(leftC), width: leftW, style: _resolveBorderStyle(leftS))
+              : BorderSide.none,
+        );
+      }
+    }
 
     // IntrinsicWidth 让 cell 宽度跟随图片实际渲染宽度（contain 后的宽度）
     // 配合外层 ConstrainedBox(maxHeight) 约束图片高度，图片宽度按比例自适应
-    return Center(
-      child: IntrinsicWidth(
-        child: Container(
-          // alignment 让图片在 cell 内居中
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            border: hasBorder
-                ? Border.all(
-                    color: Color(borderColor),
-                    width: borderWidth,
-                    style: _resolveBorderStyle(borderStyle),
-                  )
-                : null,
-            borderRadius:
-                hasRadius ? BorderRadius.circular(cs.cellBorderRadius!) : null,
-            boxShadow: [
-              BoxShadow(
-                color: Color(shadowColor).withValues(alpha: 0.5),
-                offset: Offset(shadowDx, shadowDy),
-                blurRadius: shadowBlur,
-              ),
-            ],
+    Widget cellContent = Container(
+      // alignment 让图片在 cell 内居中
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        border: border,
+        borderRadius: hasRadius ? borderRadius : null,
+        boxShadow: [
+          BoxShadow(
+            color: Color(shadowColor).withValues(alpha: 0.5),
+            offset: Offset(shadowDx, shadowDy),
+            blurRadius: shadowBlur,
+            spreadRadius: shadowSpread,
           ),
-          child: ClipRRect(
-            borderRadius:
-                hasRadius ? BorderRadius.circular(cs.cellBorderRadius!) : BorderRadius.zero,
-            child: _buildImage(),
-          ),
-        ),
+        ],
       ),
+      padding: hasPadding
+          ? EdgeInsets.only(top: padTop, bottom: padBottom, left: padLeft, right: padRight)
+          : null,
+      child: ClipRRect(
+        borderRadius: hasRadius ? borderRadius : BorderRadius.zero,
+        child: _buildImage(),
+      ),
+    );
+
+    // cell margin 四值（对齐多看 margin 四值支持）
+    // 外层 Padding 实现 margin，不影响 Container 的 decoration 计算
+    final marginTop = cs.cellMarginTop ?? cs.cellMargin ?? 0.0;
+    final marginBottom = cs.cellMarginBottom ?? cs.cellMargin ?? 0.0;
+    final marginLeft = cs.cellMarginLeft ?? 0.0;
+    final marginRight = cs.cellMarginRight ?? 0.0;
+    final hasMargin = marginTop > 0 || marginBottom > 0 || marginLeft > 0 || marginRight > 0;
+    if (hasMargin) {
+      cellContent = Padding(
+        padding: EdgeInsets.only(
+          top: marginTop,
+          bottom: marginBottom,
+          left: marginLeft,
+          right: marginRight,
+        ),
+        child: cellContent,
+      );
+    }
+
+    return Center(
+      child: IntrinsicWidth(child: cellContent),
     );
   }
 
@@ -742,12 +954,15 @@ class _GalleryImageItem extends StatelessWidget {
     );
     // 兜底：1.5（原作者 maintitle 未写 line-height，继承 p 的 1.5em）
     final height = style?.lineHeight ?? 1.5;
+    // text-shadow：提取值优先，null 时无阴影（maintitle 默认无 text-shadow）
+    final shadows = _resolveTextShadows(style?.textShadow);
 
     return TextStyle(
       color: color,
       fontSize: fontSize,
       fontWeight: fontWeight,
       height: height,
+      shadows: shadows,
     );
   }
 
@@ -777,12 +992,15 @@ class _GalleryImageItem extends StatelessWidget {
     );
     // 兜底：1.35（原作者 subtitle line-height: 1.35em）
     final height = style?.lineHeight ?? 1.35;
+    // text-shadow：提取值优先，null 时无阴影（subtitle 默认无 text-shadow）
+    final shadows = _resolveTextShadows(style?.textShadow);
 
     return TextStyle(
       color: color,
       fontSize: fontSize,
       fontWeight: fontWeight,
       height: height,
+      shadows: shadows,
     );
   }
 
@@ -841,14 +1059,23 @@ class _GalleryImageItem extends StatelessWidget {
     final maintitleMb = image.maintitleStyle?.marginBottomEm ?? -0.5;
     final subtitleMt = image.subtitleStyle?.marginTopEm ?? 0.5;
     final netOffsetEm = maintitleMb + subtitleMt;
+    // subtitle 左右 margin（对齐多看 margin 四值）
+    final mlEm = image.subtitleStyle?.marginLeftEm ?? 0.0;
+    final mrEm = image.subtitleStyle?.marginRightEm ?? 0.0;
 
-    final subtitleWidget = Text(
-      image.subtitle,
-      style: _buildSubtitleStyle(),
-      // 兜底 justify（原作者 .duokan-image-subtitle text-align: justify）
-      textAlign: _resolveTextAlign(
-        image.subtitleStyle?.textAlign,
-        TextAlign.justify,
+    final subtitleWidget = Padding(
+      padding: EdgeInsets.only(
+        left: mlEm * baseFontSize,
+        right: mrEm * baseFontSize,
+      ),
+      child: Text(
+        image.subtitle,
+        style: _buildSubtitleStyle(),
+        // 兜底 justify（原作者 .duokan-image-subtitle text-align: justify）
+        textAlign: _resolveTextAlign(
+          image.subtitleStyle?.textAlign,
+          TextAlign.justify,
+        ),
       ),
     );
 
@@ -863,6 +1090,24 @@ class _GalleryImageItem extends StatelessWidget {
       padding: EdgeInsets.only(top: netOffsetEm * baseFontSize),
       child: subtitleWidget,
     );
+  }
+
+  /// 将提取的 text-shadow 解析为 Flutter Shadow 列表
+  ///
+  /// - 提取到 text-shadow：用原作者值（offset/blur/color 全部保留）
+  /// - 未提取到（null）：返回 null，TextStyle.shadows = null 表示无阴影
+  ///
+  /// 设计意图：原作者 CSS 明确写 text-shadow 时严格保留，未写时不强制加阴影
+  /// （避免深色背景下白色阴影反而降低可读性）
+  List<Shadow>? _resolveTextShadows(EpubGalleryTextShadow? ts) {
+    if (ts == null) return null;
+    return [
+      Shadow(
+        offset: Offset(ts.offsetX, ts.offsetY),
+        blurRadius: ts.blurRadius,
+        color: Color(ts.color),
+      ),
+    ];
   }
 
   /// 将 CSS text-align 值转为 Flutter TextAlign
