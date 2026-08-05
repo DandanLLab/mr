@@ -204,7 +204,18 @@ class EpubGalleryImage {
 /// 让 Flutter 端渲染时尽量贴近原作者排版意图。
 class EpubGalleryTextStyle {
   /// 字号（em，相对单位，需乘以阅读器基础字号）
+  ///
+  /// 仅当原作者 CSS 用 em/% 单位时填充。渲染时：fontSizeEm * baseFontSize。
+  /// 若原作者用 px 单位，优先存 [fontSizePx]（绝对值，不跟随阅读器字号缩放）。
   final double? fontSizeEm;
+
+  /// 字号（px，绝对单位，直接使用不缩放）
+  ///
+  /// 原作者 CSS 用 px 单位时填充，优先级高于 [fontSizeEm]。
+  /// 设计意图：原作者明确写 px 字号属于「高优先级契约」，应严格保留原值，
+  /// 不被阅读器 baseFontSize 缩放篡改（如原作者写 16px，baseFontSize=18 时
+  /// 不应渲染成 18px）。
+  final double? fontSizePx;
 
   /// 字体颜色（ARGB int，如 0xFF336633）
   final int? color;
@@ -218,12 +229,28 @@ class EpubGalleryTextStyle {
   /// 行高（em）
   final double? lineHeight;
 
+  /// 字体族（CSS font-family 原始字符串，如 "DK-HEITI","ht",sans-serif）
+  /// Flutter 端无法直接使用多看字体，仅用于关键词识别（HEITI→粗体、KAITI→常规）
+  /// 以近似还原原作者字重意图
+  final String? fontFamily;
+
+  /// 上外边距（em，相对阅读器基础字号；负值表示向上重叠，如 maintitle 的 -0.5em）
+  /// null 表示未指定，调用方用兜底
+  final double? marginTopEm;
+
+  /// 下外边距（em）
+  final double? marginBottomEm;
+
   const EpubGalleryTextStyle({
     this.fontSizeEm,
+    this.fontSizePx,
     this.color,
     this.fontWeight,
     this.textAlign,
     this.lineHeight,
+    this.fontFamily,
+    this.marginTopEm,
+    this.marginBottomEm,
   });
 }
 
@@ -1539,12 +1566,19 @@ class EpubParser {
       final body = match.group(1) ?? '';
 
       double? fontSizeEm;
+      double? fontSizePx;
       int? color;
       int? fontWeight;
       String? textAlign;
       double? lineHeight;
+      String? fontFamily;
+      double? marginTopEm;
+      double? marginBottomEm;
 
-      // font-size: 0.9em / 14px / 90% → 统一转 em
+      // font-size: 0.9em / 14px / 90%
+      // - px：存 fontSizePx（绝对值，渲染时直接用，不被 baseFontSize 缩放）
+      //   原作者明确写 px 属于高优先级契约，严格保留原值
+      // - em/%：存 fontSizeEm（相对值，渲染时乘 baseFontSize）
       final fsMatch = RegExp(r'font-size\s*:\s*([\d.]+)(em|px|%)').firstMatch(body);
       if (fsMatch != null) {
         final value = double.tryParse(fsMatch.group(1) ?? '');
@@ -1553,8 +1587,8 @@ class EpubParser {
           if (unit == 'em') {
             fontSizeEm = value;
           } else if (unit == 'px') {
-            // 16px ≈ 1em（假设根字号 16px）
-            fontSizeEm = value / 16;
+            // px 直接保留绝对值，不转 em（避免被 baseFontSize 二次缩放）
+            fontSizePx = value;
           } else if (unit == '%') {
             fontSizeEm = value / 100;
           }
@@ -1562,7 +1596,8 @@ class EpubParser {
       }
 
       // color: #336633 / #336 / rgb(51,102,51) / red
-      final colorMatch = RegExp(r'color\s*:\s*(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|[a-zA-Z]+)').firstMatch(body);
+      // 注意：排除 background-color（前面带 - 前缀的不算 color）
+      final colorMatch = RegExp(r'(?<![a-z-])color\s*:\s*(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|[a-zA-Z]+)').firstMatch(body);
       if (colorMatch != null) {
         color = _parseCssColor(colorMatch.group(1) ?? '');
       }
@@ -1596,20 +1631,69 @@ class EpubParser {
         }
       }
 
+      // font-family: "DK-HEITI","ht",sans-serif → 保留原始字符串
+      // Flutter 端做关键词映射（HEITI→粗体、KAITI→常规）近似还原字重
+      final ffMatch = RegExp(r'font-family\s*:\s*([^;}]+)').firstMatch(body);
+      if (ffMatch != null) {
+        fontFamily = ffMatch.group(1)?.trim();
+      }
+
+      // margin: 1em auto -0.5em auto / 0.5em 0 / 2em auto
+      // 只提取 top/bottom 的 em 值（auto/0 不解析，左右由 Flutter textAlign 处理）
+      final marginMatch = RegExp(r'margin\s*:\s*([^;}]+)').firstMatch(body);
+      if (marginMatch != null) {
+        final parts = marginMatch.group(1)!.trim().split(RegExp(r'\s+'));
+        // 解析单个 margin 值为 em（仅 em/px/数值，auto 跳过）
+        double? parseEm(String token) {
+          if (token == 'auto' || token == '0') return null;
+          final emMatch = RegExp(r'^(-?[\d.]+)em$').firstMatch(token);
+          if (emMatch != null) return double.tryParse(emMatch.group(1)!);
+          final pxMatch = RegExp(r'^(-?[\d.]+)px$').firstMatch(token);
+          if (pxMatch != null) {
+            return (double.tryParse(pxMatch.group(1)!) ?? 0) / 16;
+          }
+          final numMatch = RegExp(r'^(-?[\d.]+)$').firstMatch(token);
+          if (numMatch != null) return double.tryParse(numMatch.group(1)!);
+          return null;
+        }
+
+        if (parts.length == 1) {
+          marginTopEm = parseEm(parts[0]);
+          marginBottomEm = marginTopEm;
+        } else if (parts.length == 2) {
+          marginTopEm = parseEm(parts[0]);
+          marginBottomEm = parseEm(parts[0]);
+        } else if (parts.length == 3) {
+          marginTopEm = parseEm(parts[0]);
+          marginBottomEm = parseEm(parts[2]);
+        } else if (parts.length >= 4) {
+          marginTopEm = parseEm(parts[0]);
+          marginBottomEm = parseEm(parts[2]);
+        }
+      }
+
       // 至少有一个属性才返回，否则 null（用兜底）
       if (fontSizeEm == null &&
+          fontSizePx == null &&
           color == null &&
           fontWeight == null &&
           textAlign == null &&
-          lineHeight == null) {
+          lineHeight == null &&
+          fontFamily == null &&
+          marginTopEm == null &&
+          marginBottomEm == null) {
         return null;
       }
       return EpubGalleryTextStyle(
         fontSizeEm: fontSizeEm,
+        fontSizePx: fontSizePx,
         color: color,
         fontWeight: fontWeight,
         textAlign: textAlign,
         lineHeight: lineHeight,
+        fontFamily: fontFamily,
+        marginTopEm: marginTopEm,
+        marginBottomEm: marginBottomEm,
       );
     } catch (_) {
       return null;

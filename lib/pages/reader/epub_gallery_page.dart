@@ -280,7 +280,12 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   Widget _buildGalleryTitle() {
     final style = widget.chapterStyle?.galleryTitleStyle;
     final baseFontSize = widget.baseFontSize;
-    final fontSizeEm = style?.fontSizeEm ?? 1.5;
+    // 字号优先级：fontSizePx（原作者 px 绝对值）> fontSizeEm > 兜底 1.5em
+    final fontSize = _resolveFontSize(
+      style,
+      baseFontSize: baseFontSize,
+      defaultEm: 1.5,
+    );
     // 浅色背景用深色文字，深色背景用浅色文字（兜底）
     final isLightBg = _isLightBg(widget.textColor);
     final color = style?.color != null
@@ -302,7 +307,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
         widget.chapterStyle!.galleryTitle!,
         style: TextStyle(
           color: color,
-          fontSize: fontSizeEm * baseFontSize,
+          fontSize: fontSize,
           fontWeight: fontWeight,
           height: height,
           shadows: const [
@@ -328,7 +333,12 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   Widget _buildGalleryTxt() {
     final style = widget.chapterStyle?.galleryTxtStyle;
     final baseFontSize = widget.baseFontSize;
-    final fontSizeEm = style?.fontSizeEm ?? 0.7;
+    // 字号优先级：fontSizePx（原作者 px 绝对值）> fontSizeEm > 兜底 0.7em
+    final fontSize = _resolveFontSize(
+      style,
+      baseFontSize: baseFontSize,
+      defaultEm: 0.7,
+    );
     final isLightBg = _isLightBg(widget.textColor);
     final color = style?.color != null
         ? Color(style!.color!)
@@ -349,7 +359,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
         widget.chapterStyle!.galleryTxt!,
         style: TextStyle(
           color: color,
-          fontSize: fontSizeEm * baseFontSize,
+          fontSize: fontSize,
           fontWeight: fontWeight,
           height: height,
           shadows: const [
@@ -408,6 +418,27 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
         }),
       ),
     );
+  }
+
+  /// 解析原作者 CSS 字号为 Flutter fontSize（px）
+  ///
+  /// 优先级（高 → 低）：
+  /// 1. fontSizePx（原作者明确写 px，绝对值直接用，不缩放）
+  /// 2. fontSizeEm * baseFontSize（em 相对单位，跟随阅读器字号）
+  /// 3. defaultEm * baseFontSize（兜底值）
+  ///
+  /// 设计意图：原作者明确设定的字号属于高优先级契约，应严格保留。
+  /// px 值不被 baseFontSize 二次缩放，避免 16px 被阅读器字号 18 渲染成 18px。
+  double _resolveFontSize(
+    EpubGalleryTextStyle? style, {
+    required double baseFontSize,
+    required double defaultEm,
+  }) {
+    if (style?.fontSizePx != null) {
+      return style!.fontSizePx!;
+    }
+    final em = style?.fontSizeEm ?? defaultEm;
+    return em * baseFontSize;
   }
 
   /// 将 CSS text-align 值转为 Flutter TextAlign
@@ -553,10 +584,10 @@ class _GalleryImageItem extends StatelessWidget {
       onTap: onTap,
       child: Padding(
         // cell 外边距：还原作者 .duokan-image-gallery-cell { margin: 10px 0 }
-        // 默认上下 10px，左右保留设计间距让图片不贴边
+        // 默认上下 10px（对齐原作者），左右保留设计间距让图片不贴边
         padding: EdgeInsets.symmetric(
           horizontal: DesignTokens.spacingMd,
-          vertical: chapterStyle?.cellMargin ?? DesignTokens.spacingSm,
+          vertical: chapterStyle?.cellMargin ?? 10.0,
         ),
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -570,38 +601,30 @@ class _GalleryImageItem extends StatelessWidget {
                   constraints: BoxConstraints(maxHeight: maxImgHeight),
                   child: _buildCellWithDecoration(),
                 ),
-                if (hasTitle)
-                  Padding(
-                    padding: const EdgeInsets.only(top: DesignTokens.spacingSm),
-                    child: Column(
-                      children: [
-                        if (image.maintitle.isNotEmpty)
-                          Text(
-                            image.maintitle,
-                            // 使用从 EPUB CSS 提取的原作者样式，
-                            // 缺失时用兜底样式（黑体风格、居中）
-                            style: _buildMaintitleStyle(),
-                            textAlign: _resolveTextAlign(
-                              image.maintitleStyle?.textAlign,
-                              TextAlign.center,
-                            ),
-                          ),
-                        if (image.subtitle.isNotEmpty) ...[
-                          const SizedBox(height: 6),
-                          Text(
-                            image.subtitle,
-                            // 使用从 EPUB CSS 提取的原作者样式，
-                            // 缺失时用兜底样式（细黑体风格、居中）
-                            style: _buildSubtitleStyle(),
-                            textAlign: _resolveTextAlign(
-                              image.subtitleStyle?.textAlign,
-                              TextAlign.center,
-                            ),
-                          ),
-                        ],
-                      ],
+                if (hasTitle) ...[
+                  // maintitle：还原作者 margin: 1em auto -0.5em auto
+                  // 上方间距 = marginTopEm * baseFontSize（兜底 1em，对齐原作者）
+                  if (image.maintitle.isNotEmpty)
+                    Padding(
+                      padding: EdgeInsets.only(
+                        top: (image.maintitleStyle?.marginTopEm ?? 1.0) *
+                            baseFontSize,
+                      ),
+                      child: Text(
+                        image.maintitle,
+                        style: _buildMaintitleStyle(),
+                        textAlign: _resolveTextAlign(
+                          image.maintitleStyle?.textAlign,
+                          TextAlign.center,
+                        ),
+                      ),
                     ),
-                  ),
+                  // subtitle：相对 maintitle 的净间距 = maintitleMarginBottom + subtitleMarginTop
+                  // 原作者 maintitle marginBottom=-0.5em + subtitle marginTop=0.5em(继承 p) → 净间距 0
+                  // 负净间距用 Transform.translate 视觉上移（重叠 maintitle 底部），
+                  // 正净间距用 Padding 顶间距
+                  if (image.subtitle.isNotEmpty) _buildSubtitleWithMargin(),
+                ],
               ],
             );
           },
@@ -613,21 +636,35 @@ class _GalleryImageItem extends StatelessWidget {
   /// 构建 cell 容器（带原作者 border + box-shadow 装饰）
   ///
   /// 原作者 CSS：.duokan-image-gallery-cell {
-  ///   margin: 10px 0; border: solid 1px; box-shadow: 5px 5px 5px #888 }
+  ///   margin: 10px 0; border-style: solid; border-width: 1px;
+  ///   box-shadow: 5px 5px 5px #888888 }
   /// .duokan-image-gallery { text-align: center } → cell 水平居中
+  ///
+  /// 兜底策略：chapterStyle 为 null（非画廊章节或提取失败）时不加装饰；
+  /// 否则用提取值，缺失字段用原作者默认值兜底（1px solid + 5px 5px 5px #888888）。
+  /// 原作者 cell 未写 border-color，CSS 默认 currentColor（黑色），故兜底用黑。
   ///
   /// 自适应方案：用 IntrinsicWidth 让 cell 宽度紧贴图片实际渲染宽度，
   /// 而不是撑满父容器宽度。这样边框和阴影紧贴图片，1:1 还原作者 cell 装饰。
   Widget _buildCellWithDecoration() {
     final cs = chapterStyle;
-    // 没有任何装饰配置时直接返回居中图片
-    if (cs == null ||
-        (cs.cellBorderWidth == null && cs.cellShadowColor == null)) {
+    // chapterStyle 为 null（非画廊章节或提取失败）时不加 cell 装饰
+    if (cs == null) {
       return Center(child: _buildImage());
     }
 
-    final hasBorder = cs.cellBorderWidth != null && cs.cellBorderWidth! > 0;
-    final hasShadow = cs.cellShadowColor != null;
+    // 兜底值对齐原作者 .duokan-image-gallery-cell 默认样式：
+    // border-style: solid; border-width: 1px（无 border-color → currentColor 默认黑）
+    // box-shadow: 5px 5px 5px #888888
+    final borderWidth = cs.cellBorderWidth ?? 1.0;
+    final borderColor = cs.cellBorderColor ?? 0xFF000000; // currentColor 默认黑
+    final borderStyle = cs.cellBorderStyle ?? 'solid';
+    final shadowColor = cs.cellShadowColor ?? 0xFF888888;
+    final shadowDx = cs.cellShadowDx ?? 5.0;
+    final shadowDy = cs.cellShadowDy ?? 5.0;
+    final shadowBlur = cs.cellShadowBlur ?? 5.0;
+    final hasBorder = borderWidth > 0;
+    final hasRadius = cs.cellBorderRadius != null && cs.cellBorderRadius! > 0;
 
     // IntrinsicWidth 让 cell 宽度跟随图片实际渲染宽度（contain 后的宽度）
     // 配合外层 ConstrainedBox(maxHeight) 约束图片高度，图片宽度按比例自适应
@@ -639,31 +676,24 @@ class _GalleryImageItem extends StatelessWidget {
           decoration: BoxDecoration(
             border: hasBorder
                 ? Border.all(
-                    color: Color(cs.cellBorderColor ?? 0xFF888888),
-                    width: cs.cellBorderWidth!,
-                    style: _resolveBorderStyle(cs.cellBorderStyle),
+                    color: Color(borderColor),
+                    width: borderWidth,
+                    style: _resolveBorderStyle(borderStyle),
                   )
                 : null,
             borderRadius:
-                cs.cellBorderRadius != null && cs.cellBorderRadius! > 0
-                    ? BorderRadius.circular(cs.cellBorderRadius!)
-                    : null,
-            boxShadow: hasShadow
-                ? [
-                    BoxShadow(
-                      color: Color(cs.cellShadowColor!).withValues(alpha: 0.5),
-                      offset:
-                          Offset(cs.cellShadowDx ?? 5, cs.cellShadowDy ?? 5),
-                      blurRadius: cs.cellShadowBlur ?? 5,
-                    ),
-                  ]
-                : null,
+                hasRadius ? BorderRadius.circular(cs.cellBorderRadius!) : null,
+            boxShadow: [
+              BoxShadow(
+                color: Color(shadowColor).withValues(alpha: 0.5),
+                offset: Offset(shadowDx, shadowDy),
+                blurRadius: shadowBlur,
+              ),
+            ],
           ),
           child: ClipRRect(
             borderRadius:
-                cs.cellBorderRadius != null && cs.cellBorderRadius! > 0
-                    ? BorderRadius.circular(cs.cellBorderRadius!)
-                    : BorderRadius.zero,
+                hasRadius ? BorderRadius.circular(cs.cellBorderRadius!) : BorderRadius.zero,
             child: _buildImage(),
           ),
         ),
@@ -687,57 +717,151 @@ class _GalleryImageItem extends StatelessWidget {
 
   /// 构建 maintitle 的 TextStyle
   ///
-  /// 优先使用从 EPUB CSS 提取的原作者样式（字号/颜色/字重/行高），
-  /// 缺失的属性用兜底值。字号 em 乘以基础字号 16px 得到实际 px。
+  /// 优先使用从 EPUB CSS 提取的原作者样式，缺失字段用兜底值（对齐原作者
+  /// .duokan-image-maintitle 默认样式：#336633 深绿、0.9em、DK-HEITI 黑体、居中）。
+  /// 字号优先级：fontSizePx（原作者 px 绝对值）> fontSizeEm > 兜底 0.9em。
   TextStyle _buildMaintitleStyle() {
     final style = image.maintitleStyle;
     final baseFontSize = this.baseFontSize;
-    // 兜底：0.9em（对齐多看 .duokan-image-maintitle 默认字号）
-    final fontSizeEm = style?.fontSizeEm ?? 0.9;
-    // 兜底：深色背景用阅读器 textColor，浅色背景用 #1F4150
+    // 字号：fontSizePx 优先（原作者 px 高优先级契约），否则 fontSizeEm，再否则兜底 0.9em
+    final fontSize = _resolveFontSize(
+      style,
+      baseFontSize: baseFontSize,
+      defaultEm: 0.9,
+    );
+    // 兜底：#336633（原作者 maintitle color: #336633，深绿色）
+    // 仅当 EPUB 未提取到 color 且阅读器为深色背景时，才用阅读器 textColor 保证可读性
     final color = style?.color != null
         ? Color(style!.color!)
         : (_isLightBg(textColor)
-            ? const Color(0xFF1F4150)
+            ? const Color(0xFF336633)
             : textColor);
-    // 兜底：w600（对齐黑体风格）
-    final fontWeight = style?.fontWeight != null
-        ? FontWeight.values[(style!.fontWeight! / 100).round().clamp(0, 8)]
-        : FontWeight.w600;
-    // 兜底：1.25
-    final height = style?.lineHeight ?? 1.25;
+    // 字重：提取值优先，否则按 font-family 关键词映射（DK-HEITI→w700），再否则兜底 w700
+    final fontWeight = _resolveFontWeight(
+      style?.fontWeight, style?.fontFamily, FontWeight.w700,
+    );
+    // 兜底：1.5（原作者 maintitle 未写 line-height，继承 p 的 1.5em）
+    final height = style?.lineHeight ?? 1.5;
 
     return TextStyle(
       color: color,
-      fontSize: fontSizeEm * baseFontSize,
+      fontSize: fontSize,
       fontWeight: fontWeight,
       height: height,
     );
   }
 
   /// 构建 subtitle 的 TextStyle
+  ///
+  /// 优先使用从 EPUB CSS 提取的原作者样式，缺失字段用兜底值（对齐原作者
+  /// .duokan-image-subtitle 默认样式：#333 深灰、0.9em、DK-KAITI 楷体、justify、1.35em 行高）
+  /// 字号优先级：fontSizePx（原作者 px 绝对值）> fontSizeEm > 兜底 0.9em。
   TextStyle _buildSubtitleStyle() {
     final style = image.subtitleStyle;
     final baseFontSize = this.baseFontSize;
-    // 兜底：0.7em（对齐多看 .duokan-image-subtitle 默认字号）
-    final fontSizeEm = style?.fontSizeEm ?? 0.7;
+    // 字号：fontSizePx 优先（原作者 px 高优先级契约），否则 fontSizeEm，再否则兜底 0.9em
+    final fontSize = _resolveFontSize(
+      style,
+      baseFontSize: baseFontSize,
+      defaultEm: 0.9,
+    );
+    // 兜底：#333333（原作者 subtitle color: #333，深灰色）
     final color = style?.color != null
         ? Color(style!.color!)
         : (_isLightBg(textColor)
-            ? const Color(0xFF3A3348)
-            : textColor.withValues(alpha: 0.7));
-    // 兜底：w400
-    final fontWeight = style?.fontWeight != null
-        ? FontWeight.values[(style!.fontWeight! / 100).round().clamp(0, 8)]
-        : FontWeight.w400;
-    // 兜底：1.5
-    final height = style?.lineHeight ?? 1.5;
+            ? const Color(0xFF333333)
+            : textColor.withValues(alpha: 0.85));
+    // 字重：提取值优先，否则按 font-family 映射（DK-KAITI→w400），再否则兜底 w400
+    final fontWeight = _resolveFontWeight(
+      style?.fontWeight, style?.fontFamily, FontWeight.w400,
+    );
+    // 兜底：1.35（原作者 subtitle line-height: 1.35em）
+    final height = style?.lineHeight ?? 1.35;
 
     return TextStyle(
       color: color,
-      fontSize: fontSizeEm * baseFontSize,
+      fontSize: fontSize,
       fontWeight: fontWeight,
       height: height,
+    );
+  }
+
+  /// 根据提取的 font-weight 和 font-family 解析 Flutter FontWeight
+  ///
+  /// 优先用提取的 font-weight；若未提取到，则按 font-family 关键词映射
+  /// （HEITI/黑体/BIAOSONG/标宋 → w700，KAITI/楷体 → w400），近似还原
+  /// 多看字体的视觉字重（Flutter 无法直接加载 DK-HEITI 等多看字体）。
+  FontWeight _resolveFontWeight(
+    int? fontWeight, String? fontFamily, FontWeight fallback,
+  ) {
+    if (fontWeight != null) {
+      return FontWeight.values[(fontWeight / 100).round().clamp(0, 8)];
+    }
+    final ff = fontFamily?.toUpperCase() ?? '';
+    if (ff.contains('HEITI') ||
+        ff.contains('黑体') ||
+        ff.contains('BIAOSONG') ||
+        ff.contains('标宋')) {
+      return FontWeight.w700;
+    }
+    if (ff.contains('KAITI') || ff.contains('楷体')) {
+      return FontWeight.w400;
+    }
+    return fallback;
+  }
+
+  /// 解析原作者 CSS 字号为 Flutter fontSize（px）
+  ///
+  /// 优先级（高 → 低）：
+  /// 1. fontSizePx（原作者明确写 px，绝对值直接用，不缩放）—— 高优先级契约
+  /// 2. fontSizeEm * baseFontSize（em 相对单位，跟随阅读器字号）
+  /// 3. defaultEm * baseFontSize（兜底值）
+  double _resolveFontSize(
+    EpubGalleryTextStyle? style, {
+    required double baseFontSize,
+    required double defaultEm,
+  }) {
+    if (style?.fontSizePx != null) {
+      return style!.fontSizePx!;
+    }
+    final em = style?.fontSizeEm ?? defaultEm;
+    return em * baseFontSize;
+  }
+
+  /// 构建 subtitle，并应用 maintitle 负下边距 + subtitle 上边距的净间距
+  ///
+  /// 还原作者 CSS margin 折叠效果：
+  /// - maintitle margin-bottom: -0.5em（负值，让下方元素上移重叠）
+  /// - subtitle margin-top: 0.5em（继承 p，正值）
+  /// - 净间距 = -0.5 + 0.5 = 0（maintitle 与 subtitle 紧贴）
+  ///
+  /// Flutter Padding 不支持负值，负净间距用 Transform.translate 视觉上移实现。
+  /// Transform.translate 负偏移让 subtitle 视觉重叠 maintitle 底部，符合原作者负 margin 意图。
+  Widget _buildSubtitleWithMargin() {
+    final maintitleMb = image.maintitleStyle?.marginBottomEm ?? -0.5;
+    final subtitleMt = image.subtitleStyle?.marginTopEm ?? 0.5;
+    final netOffsetEm = maintitleMb + subtitleMt;
+
+    final subtitleWidget = Text(
+      image.subtitle,
+      style: _buildSubtitleStyle(),
+      // 兜底 justify（原作者 .duokan-image-subtitle text-align: justify）
+      textAlign: _resolveTextAlign(
+        image.subtitleStyle?.textAlign,
+        TextAlign.justify,
+      ),
+    );
+
+    if (netOffsetEm < 0) {
+      // 负净间距：subtitle 视觉上移，重叠 maintitle 底部（还原负 margin 效果）
+      return Transform.translate(
+        offset: Offset(0, netOffsetEm * baseFontSize),
+        child: subtitleWidget,
+      );
+    }
+    return Padding(
+      padding: EdgeInsets.only(top: netOffsetEm * baseFontSize),
+      child: subtitleWidget,
     );
   }
 
@@ -976,6 +1100,8 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
           ),
           // 顶部：页码指示器 + 关闭按钮
           _buildTopBar(),
+          // 右下角：主标题 + 副标题信息面板（从下到上滑出动画）
+          _buildInfoPanel(),
         ],
       ),
     );
@@ -983,9 +1109,8 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
 
   /// 构建可缩放的单张图片（全屏预览）
   ///
-  /// 1:1 还原作者格式：图片 + 底部 maintitle/subtitle（用 _GalleryImageItem
-  /// 一样的样式，由原作者 CSS 决定字号/颜色/字重/行高）。
-  /// 不再自加黑色渐变背景的信息面板，让作者 CSS 接管显示。
+  /// 全屏预览只显示图片，标题/副标题由右下角自定义信息面板展示
+  /// （_buildInfoPanel），不复用原作者格式。
   ///
   /// - AutomaticKeepAliveClientMixin：保持页面状态，避免滑出视图后被销毁
   /// - GestureDetector 检测双击缩放
@@ -993,8 +1118,6 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
   /// - Hero 包裹当前页图片（tag: gallery_image_$index），与画廊页 Hero 配对
   ///   只有当前显示的页面才有 Hero，避免与画廊页多个 Hero tag 冲突
   Widget _buildZoomableImage(EpubGalleryImage image, int index) {
-    final hasTitle =
-        image.maintitle.isNotEmpty || image.subtitle.isNotEmpty;
     return _KeepAliveImage(
       child: GestureDetector(
         onDoubleTap: _onDoubleTap,
@@ -1015,88 +1138,95 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
             child: index == _currentIndex
                 ? Hero(
                     tag: 'gallery_image_$index',
-                    child: _buildFullScreenContent(image, hasTitle),
+                    child: _buildImage(image),
                   )
-                : _buildFullScreenContent(image, hasTitle),
+                : _buildImage(image),
           ),
         ),
       ),
     );
   }
 
-  /// 构建全屏预览内容：图片 + 底部 maintitle/subtitle（原作者格式）
+  /// 右下角信息面板：主标题 + 副标题，从下到上滑出动画
   ///
-  /// 复用 _GalleryImageItem 的样式构建逻辑，但全屏预览用黑底白字
-  /// （图片是 contain 居中，背景黑色，文字白色确保可见）。
-  /// maintitle/subtitle 的字号/字重/行高由原作者 CSS 决定。
-  Widget _buildFullScreenContent(EpubGalleryImage image, bool hasTitle) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Flexible(child: _buildImage(image)),
-        if (hasTitle)
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
+  /// 自定义样式（非原作者格式），全屏预览专用：
+  /// - 白色文字（确保在黑底图片上可见）
+  /// - 主标题（标题）：18px FontWeight.w600
+  /// - 副标题（详情信息）：13px FontWeight.w400 半透明
+  /// - 切换图片时面板重新从下方滑出（SlideTransition + FadeTransition）
+  /// - 半透明黑色背景圆角容器，右下角定位
+  Widget _buildInfoPanel() {
+    final image = widget.images[_currentIndex];
+    final hasTitle =
+        image.maintitle.isNotEmpty || image.subtitle.isNotEmpty;
+    if (!hasTitle) return const SizedBox.shrink();
+
+    return Positioned(
+      right: 16,
+      bottom: 16,
+      child: SafeArea(
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, animation) {
+            // 从下到上滑出 + 淡入（Offset(0,1) → Offset(0,0)）
+            final offset = Tween<Offset>(
+              begin: const Offset(0, 1),
+              end: Offset.zero,
+            ).animate(CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+            ));
+            return SlideTransition(
+              position: offset,
+              child: FadeTransition(
+                opacity: animation,
+                child: child,
+              ),
+            );
+          },
+          child: Container(
+            key: ValueKey(_currentIndex),
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.7,
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.6),
+              borderRadius: BorderRadius.circular(12),
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (image.maintitle.isNotEmpty)
                   Text(
                     image.maintitle,
-                    // 复用 _GalleryImageItem 的样式（原作者 CSS）
-                    style: _buildFullScreenTextStyle(
-                      image.maintitleStyle,
-                      defaultEm: 0.9,
-                      defaultColor: Colors.white,
-                      defaultWeight: FontWeight.w600,
-                    ),
-                    textAlign: _resolveTextAlign(
-                      image.maintitleStyle?.textAlign,
-                      TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      height: 1.3,
                     ),
                   ),
                 if (image.subtitle.isNotEmpty) ...[
-                  const SizedBox(height: 6),
+                  if (image.maintitle.isNotEmpty) const SizedBox(height: 4),
                   Text(
                     image.subtitle,
-                    style: _buildFullScreenTextStyle(
-                      image.subtitleStyle,
-                      defaultEm: 0.7,
-                      defaultColor: Colors.white.withValues(alpha: 0.85),
-                      defaultWeight: FontWeight.w400,
-                    ),
-                    textAlign: _resolveTextAlign(
-                      image.subtitleStyle?.textAlign,
-                      TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.7),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w400,
+                      height: 1.4,
                     ),
                   ),
                 ],
               ],
             ),
           ),
-      ],
-    );
-  }
-
-  /// 全屏预览文字样式：用阅读器字号作为 em 基准，保留原作者 CSS 属性
-  TextStyle _buildFullScreenTextStyle(
-    EpubGalleryTextStyle? style, {
-    required double defaultEm,
-    required Color defaultColor,
-    required FontWeight defaultWeight,
-  }) {
-    final baseFontSize = widget.baseFontSize;
-    final fontSizeEm = style?.fontSizeEm ?? defaultEm;
-    final fontWeight = style?.fontWeight != null
-        ? FontWeight.values[(style!.fontWeight! / 100).round().clamp(0, 8)]
-        : defaultWeight;
-    final height = style?.lineHeight ?? 1.3;
-    return TextStyle(
-      color: style?.color != null ? Color(style!.color!) : defaultColor,
-      fontSize: fontSizeEm * baseFontSize,
-      fontWeight: fontWeight,
-      height: height,
+        ),
+      ),
     );
   }
 
@@ -1198,22 +1328,6 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
       return base64Decode(dataUri.substring(commaIdx + 1));
     } catch (_) {
       return null;
-    }
-  }
-
-  /// 将 CSS text-align 值转为 Flutter TextAlign
-  TextAlign _resolveTextAlign(String? cssAlign, TextAlign fallback) {
-    switch (cssAlign) {
-      case 'left':
-        return TextAlign.left;
-      case 'right':
-        return TextAlign.right;
-      case 'justify':
-        return TextAlign.justify;
-      case 'center':
-        return TextAlign.center;
-      default:
-        return fallback;
     }
   }
 }
