@@ -140,6 +140,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
           return _GalleryFullScreenViewer(
             images: widget.images,
             initialIndex: initialIndex,
+            baseFontSize: widget.baseFontSize,
           );
         },
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -848,9 +849,13 @@ class _GalleryFullScreenViewer extends StatefulWidget {
   final List<EpubGalleryImage> images;
   final int initialIndex;
 
+  /// 阅读器基础字号（px），作为 EPUB CSS em 值的基准
+  final double baseFontSize;
+
   const _GalleryFullScreenViewer({
     required this.images,
     required this.initialIndex,
+    this.baseFontSize = 18.0,
   });
 
   @override
@@ -971,14 +976,16 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
           ),
           // 顶部：页码指示器 + 关闭按钮
           _buildTopBar(),
-          // 右下角：信息面板（AnimatedSwitcher 动画）
-          _buildInfoPanel(),
         ],
       ),
     );
   }
 
-  /// 构建可缩放的单张图片
+  /// 构建可缩放的单张图片（全屏预览）
+  ///
+  /// 1:1 还原作者格式：图片 + 底部 maintitle/subtitle（用 _GalleryImageItem
+  /// 一样的样式，由原作者 CSS 决定字号/颜色/字重/行高）。
+  /// 不再自加黑色渐变背景的信息面板，让作者 CSS 接管显示。
   ///
   /// - AutomaticKeepAliveClientMixin：保持页面状态，避免滑出视图后被销毁
   /// - GestureDetector 检测双击缩放
@@ -986,6 +993,8 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
   /// - Hero 包裹当前页图片（tag: gallery_image_$index），与画廊页 Hero 配对
   ///   只有当前显示的页面才有 Hero，避免与画廊页多个 Hero tag 冲突
   Widget _buildZoomableImage(EpubGalleryImage image, int index) {
+    final hasTitle =
+        image.maintitle.isNotEmpty || image.subtitle.isNotEmpty;
     return _KeepAliveImage(
       child: GestureDetector(
         onDoubleTap: _onDoubleTap,
@@ -1006,12 +1015,88 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
             child: index == _currentIndex
                 ? Hero(
                     tag: 'gallery_image_$index',
-                    child: _buildImage(image),
+                    child: _buildFullScreenContent(image, hasTitle),
                   )
-                : _buildImage(image),
+                : _buildFullScreenContent(image, hasTitle),
           ),
         ),
       ),
+    );
+  }
+
+  /// 构建全屏预览内容：图片 + 底部 maintitle/subtitle（原作者格式）
+  ///
+  /// 复用 _GalleryImageItem 的样式构建逻辑，但全屏预览用黑底白字
+  /// （图片是 contain 居中，背景黑色，文字白色确保可见）。
+  /// maintitle/subtitle 的字号/字重/行高由原作者 CSS 决定。
+  Widget _buildFullScreenContent(EpubGalleryImage image, bool hasTitle) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(child: _buildImage(image)),
+        if (hasTitle)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (image.maintitle.isNotEmpty)
+                  Text(
+                    image.maintitle,
+                    // 复用 _GalleryImageItem 的样式（原作者 CSS）
+                    style: _buildFullScreenTextStyle(
+                      image.maintitleStyle,
+                      defaultEm: 0.9,
+                      defaultColor: Colors.white,
+                      defaultWeight: FontWeight.w600,
+                    ),
+                    textAlign: _resolveTextAlign(
+                      image.maintitleStyle?.textAlign,
+                      TextAlign.center,
+                    ),
+                  ),
+                if (image.subtitle.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    image.subtitle,
+                    style: _buildFullScreenTextStyle(
+                      image.subtitleStyle,
+                      defaultEm: 0.7,
+                      defaultColor: Colors.white.withValues(alpha: 0.85),
+                      defaultWeight: FontWeight.w400,
+                    ),
+                    textAlign: _resolveTextAlign(
+                      image.subtitleStyle?.textAlign,
+                      TextAlign.center,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// 全屏预览文字样式：用阅读器字号作为 em 基准，保留原作者 CSS 属性
+  TextStyle _buildFullScreenTextStyle(
+    EpubGalleryTextStyle? style, {
+    required double defaultEm,
+    required Color defaultColor,
+    required FontWeight defaultWeight,
+  }) {
+    final baseFontSize = widget.baseFontSize;
+    final fontSizeEm = style?.fontSizeEm ?? defaultEm;
+    final fontWeight = style?.fontWeight != null
+        ? FontWeight.values[(style!.fontWeight! / 100).round().clamp(0, 8)]
+        : defaultWeight;
+    final height = style?.lineHeight ?? 1.3;
+    return TextStyle(
+      color: style?.color != null ? Color(style!.color!) : defaultColor,
+      fontSize: fontSizeEm * baseFontSize,
+      fontWeight: fontWeight,
+      height: height,
     );
   }
 
@@ -1073,86 +1158,6 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
     );
   }
 
-  /// 底部居中信息面板
-  ///
-  /// 对齐原作者意图：.duokan-image-maintitle { text-align: center }
-  /// .duokan-image-subtitle { text-align: justify }
-  /// 信息面板在屏幕底部居中显示（不是右下角），maintitle 居中、subtitle 居中。
-  /// 使用 AnimatedSwitcher 在切换图片时实现淡入淡出 + 上滑动画。
-  Widget _buildInfoPanel() {
-    final image = widget.images[_currentIndex];
-    final hasInfo =
-        image.maintitle.isNotEmpty || image.subtitle.isNotEmpty;
-    if (!hasInfo) return const SizedBox.shrink();
-
-    return Positioned(
-      left: 0,
-      right: 0,
-      bottom: 0,
-      child: SafeArea(
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.transparent,
-                Colors.black.withValues(alpha: 0.75),
-              ],
-            ),
-          ),
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 350),
-            // easeInOutCubicEmphasized：Material 3 推荐曲线，比 easeOutCubic 更柔和
-            switchInCurve: Curves.easeInOutCubicEmphasized,
-            switchOutCurve: Curves.easeInOutCubicEmphasized.flipped,
-            transitionBuilder: (child, animation) {
-              return FadeTransition(
-                opacity: animation,
-                child: SlideTransition(
-                  position: Tween<Offset>(
-                    begin: const Offset(0, 0.3),
-                    end: Offset.zero,
-                  ).animate(animation),
-                  child: child,
-                ),
-              );
-            },
-            child: Column(
-              key: ValueKey(_currentIndex),
-              crossAxisAlignment: CrossAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (image.maintitle.isNotEmpty)
-                  Text(
-                    image.maintitle,
-                    // 全屏预览用白色系（黑底），但保留原作者字号/字重/行高
-                    style: _buildFullScreenMaintitleStyle(image.maintitleStyle),
-                    textAlign: _resolveTextAlign(
-                      image.maintitleStyle?.textAlign,
-                      TextAlign.center,
-                    ),
-                  ),
-                if (image.subtitle.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    image.subtitle,
-                    style: _buildFullScreenSubtitleStyle(image.subtitleStyle),
-                    textAlign: _resolveTextAlign(
-                      image.subtitleStyle?.textAlign,
-                      TextAlign.center,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   /// 根据图片 src 类型选择渲染方式
   Widget _buildImage(EpubGalleryImage image) {
     final src = image.src;
@@ -1194,45 +1199,6 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
     } catch (_) {
       return null;
     }
-  }
-
-  /// 全屏预览的 maintitle 样式
-  ///
-  /// 黑底白字，但保留原作者的字号/字重/行高。
-  /// 字号放大 1.2 倍（全屏预览比画廊小图更大），上限 24px。
-  TextStyle _buildFullScreenMaintitleStyle(EpubGalleryTextStyle? style) {
-    const baseFontSize = 16.0;
-    final fontSizeEm = style?.fontSizeEm ?? 0.9;
-    // 全屏放大 1.2 倍，上限 24px
-    final fontSize = (fontSizeEm * baseFontSize * 1.2).clamp(14.0, 24.0);
-    final fontWeight = style?.fontWeight != null
-        ? FontWeight.values[(style!.fontWeight! / 100).round().clamp(0, 8)]
-        : FontWeight.w600;
-    final height = style?.lineHeight ?? 1.3;
-    return TextStyle(
-      color: Colors.white,
-      fontSize: fontSize,
-      fontWeight: fontWeight,
-      height: height,
-    );
-  }
-
-  /// 全屏预览的 subtitle 样式
-  TextStyle _buildFullScreenSubtitleStyle(EpubGalleryTextStyle? style) {
-    const baseFontSize = 16.0;
-    final fontSizeEm = style?.fontSizeEm ?? 0.7;
-    // 全屏放大 1.2 倍，上限 18px
-    final fontSize = (fontSizeEm * baseFontSize * 1.2).clamp(11.0, 18.0);
-    final fontWeight = style?.fontWeight != null
-        ? FontWeight.values[(style!.fontWeight! / 100).round().clamp(0, 8)]
-        : FontWeight.w400;
-    final height = style?.lineHeight ?? 1.5;
-    return TextStyle(
-      color: Colors.white.withValues(alpha: 0.85),
-      fontSize: fontSize,
-      fontWeight: fontWeight,
-      height: height,
-    );
   }
 
   /// 将 CSS text-align 值转为 Flutter TextAlign
