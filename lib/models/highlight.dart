@@ -47,6 +47,22 @@ class Highlight {
   final String? note;
   final DateTime createdAt;
   final DateTime? updatedAt;
+  // === Range+偏移序列化字段（schemaVersion=2）===
+  /// 数据版本：1=旧文本匹配 / 2=偏移+XPath
+  /// 旧数据无此字段，fromJson 默认 1，走文本匹配 fallback
+  final int schemaVersion;
+  /// 起始文本节点的 XPath（如 '/div[2]/p[3]/text()'）
+  /// 仅 schemaVersion=2 时有效
+  final String? startContainerXPath;
+  /// 结束文本节点的 XPath
+  final String? endContainerXPath;
+  /// 在 startContainer 内的偏移
+  final int? startOffset;
+  /// 在 endContainer 内的偏移
+  final int? endOffset;
+  /// 章节正文哈希（前 2000 字 FNV-1a），用于检测换源后内容变化
+  /// 不一致时降级到文本匹配
+  final String? chapterContentHash;
 
   Highlight({
     required this.id,
@@ -60,6 +76,12 @@ class Highlight {
     this.note,
     required this.createdAt,
     this.updatedAt,
+    this.schemaVersion = 1,
+    this.startContainerXPath,
+    this.endContainerXPath,
+    this.startOffset,
+    this.endOffset,
+    this.chapterContentHash,
   });
 
   factory Highlight.fromJson(Map<String, dynamic> json) {
@@ -77,6 +99,12 @@ class Highlight {
       updatedAt: json['updatedAt'] != null
           ? DateTime.parse(json['updatedAt'] as String)
           : null,
+      schemaVersion: json['schemaVersion'] as int? ?? 1,
+      startContainerXPath: json['startContainerXPath'] as String?,
+      endContainerXPath: json['endContainerXPath'] as String?,
+      startOffset: json['startOffset'] as int?,
+      endOffset: json['endOffset'] as int?,
+      chapterContentHash: json['chapterContentHash'] as String?,
     );
   }
 
@@ -93,6 +121,12 @@ class Highlight {
       if (note != null) 'note': note,
       'createdAt': createdAt.toIso8601String(),
       if (updatedAt != null) 'updatedAt': updatedAt!.toIso8601String(),
+      'schemaVersion': schemaVersion,
+      if (startContainerXPath != null) 'startContainerXPath': startContainerXPath,
+      if (endContainerXPath != null) 'endContainerXPath': endContainerXPath,
+      if (startOffset != null) 'startOffset': startOffset,
+      if (endOffset != null) 'endOffset': endOffset,
+      if (chapterContentHash != null) 'chapterContentHash': chapterContentHash,
     };
   }
 
@@ -108,6 +142,12 @@ class Highlight {
     String? note,
     DateTime? createdAt,
     DateTime? updatedAt,
+    int? schemaVersion,
+    String? startContainerXPath,
+    String? endContainerXPath,
+    int? startOffset,
+    int? endOffset,
+    String? chapterContentHash,
   }) {
     return Highlight(
       id: id ?? this.id,
@@ -121,6 +161,12 @@ class Highlight {
       note: note ?? this.note,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      schemaVersion: schemaVersion ?? this.schemaVersion,
+      startContainerXPath: startContainerXPath ?? this.startContainerXPath,
+      endContainerXPath: endContainerXPath ?? this.endContainerXPath,
+      startOffset: startOffset ?? this.startOffset,
+      endOffset: endOffset ?? this.endOffset,
+      chapterContentHash: chapterContentHash ?? this.chapterContentHash,
     );
   }
 }

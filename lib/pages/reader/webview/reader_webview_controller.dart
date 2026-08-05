@@ -1,4 +1,4 @@
-import 'dart:convert' show jsonEncode;
+import 'dart:convert' show jsonDecode, jsonEncode;
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../../../services/app_logger.dart';
@@ -53,12 +53,15 @@ class ReaderWebViewCallbacks {
   /// - action：'copy' / 'highlight' / 'lookup' / 'share'
   /// - text：选中的文字
   /// - rect：选区在 WebView 内的 rect
+  /// - removedIds：仅 action='removeHighlight' 时有效，被删除的 .sel-hl
+  ///   span 的 data-highlight-id 列表。Dart 侧按此列表精确删除持久化记录，
+  ///   避免 selectedText 重复时误删。其他 action 为空列表。
   ///
   /// action='copy' 时 JS 已自行用 Clipboard API 复制，Dart 此处兜底
   /// action='highlight' 时 Dart 应弹颜色选择器，保存 Highlight 并刷新 HTML
   /// action='lookup' 时 Dart 应弹查词对话框
   /// action='share' 时 Dart 应调用 Share.share
-  final void Function(String action, String text, Rect rect)? onSelectionAction;
+  final void Function(String action, String text, Rect rect, List<String> removedIds)? onSelectionAction;
 
   /// 文字选区菜单隐藏（选区被清除 / 滚动 / 视口变化时触发）
   final void Function()? onHideSelectionMenu;
@@ -330,15 +333,64 @@ class ReaderWebViewController {
   /// - [colorIndex]：颜色索引（0=黄/1=绿/2=蓝/3=粉/4=橙/5=紫）
   /// - [styleIndex]：样式索引（0=背景色/1=下划线/2=删除线/3=波浪线）
   ///
-  /// 返回 true 表示上色成功（JS 端返回 boolean）。
-  /// 失败原因可能：选区已失效（用户已点击别处清除选区）、选区跨段落且
-  /// execCommand 兜底也失败。
-  Future<bool> highlightSelection(int colorIndex, int styleIndex) async {
-    if (!_isReady) return false;
+  /// 返回 JSON 解析后的 Map：
+  /// - success：是否上色成功
+  /// - schemaVersion：1=文本匹配恢复 / 2=Range+offset 精确恢复
+  /// - selectedText：选中文本
+  /// - startContainerXPath / endContainerXPath / startOffset / endOffset /
+  ///   chapterContentHash：仅 schemaVersion=2 时有效
+  /// 失败时返回 null 或 Map{success:false}
+  Future<Map<String, dynamic>?> highlightSelection(
+      int colorIndex, int styleIndex) async {
+    if (!_isReady) return null;
     final result = await _webviewController?.evaluateJavascript(
       source: 'window.readerApi.highlightSelection($colorIndex, $styleIndex);',
     );
-    if (result == null) return false;
+    if (result == null) return null;
+    // JS 端返回 JSON 字符串
+    if (result is String) {
+      try {
+        final parsed = jsonDecode(result) as Map<String, dynamic>;
+        return parsed;
+      } catch (_) {
+        return null;
+      }
+    }
+    // 兼容旧版 boolean 返回（理论不会走到，JS 已改为返回 JSON）
+    if (result is bool) {
+      return {'success': result, 'schemaVersion': 1};
+    }
+    return null;
+  }
+
+  /// 按 data-highlight-id 删除视觉高亮（持久化由 Dart 侧处理）
+  ///
+  /// 用于精确删除单条高亮：Dart 侧删除 StorageService 记录后调用此方法
+  /// 让 JS 端把对应 .sel-hl span 的内容提到父级，移除 span。
+  /// 相比 removeHighlightByText 避免了 selectedText 重复时的误删。
+  Future<bool> removeHighlightById(String id) async {
+    if (!_isReady) return false;
+    final idJs = jsonEncode(id);
+    final result = await _webviewController?.evaluateJavascript(
+      source: 'window.readerApi.removeHighlightById($idJs);',
+    );
+    if (result is bool) return result;
+    if (result is String) return result == 'true';
+    if (result is num) return result != 0;
+    return false;
+  }
+
+  /// 给最近一次 surroundContents 创建的 .sel-hl span 设置 data-highlight-id
+  ///
+  /// 调用时机：Dart 端持久化高亮拿到 id 后立即调用，把 id 回写到 span，
+  /// 后续删除时可按 id 精确定位，避免 selectedText 重复误删。
+  /// 仅在 schemaVersion=2（单元素选区）时调用有效。
+  Future<bool> setLastHighlightId(String id) async {
+    if (!_isReady) return false;
+    final idJs = jsonEncode(id);
+    final result = await _webviewController?.evaluateJavascript(
+      source: 'window.readerApi.setLastHighlightId($idJs);',
+    );
     if (result is bool) return result;
     if (result is String) return result == 'true';
     if (result is num) return result != 0;
@@ -558,8 +610,9 @@ class ReaderWebViewController {
       },
     );
 
-    // 菜单项点击：action ∈ {copy, highlight, lookup, share}
+    // 菜单项点击：action ∈ {copy, highlight, lookup, share, removeHighlight, search}
     // action=copy 时 JS 已自行用 Clipboard API 复制，Dart 此处兜底
+    // action=removeHighlight 时第 7 个参数为被删除的 highlight id 列表 JSON
     controller.addJavaScriptHandler(
       handlerName: 'onSelectionAction',
       callback: (args) {
@@ -570,8 +623,18 @@ class ReaderWebViewController {
         final top = _toDouble(args[3]);
         final width = _toDouble(args[4]);
         final height = _toDouble(args[5]);
+        List<String> removedIds = const [];
+        if (args.length >= 7) {
+          try {
+            final idsJson = args[6]?.toString() ?? '[]';
+            final list = jsonDecode(idsJson) as List<dynamic>;
+            removedIds = list.map((e) => e.toString()).toList();
+          } catch (_) {
+            removedIds = const [];
+          }
+        }
         _callbacks?.onSelectionAction?.call(
-          action, text, Rect.fromLTWH(left, top, width, height));
+          action, text, Rect.fromLTWH(left, top, width, height), removedIds);
       },
     );
 

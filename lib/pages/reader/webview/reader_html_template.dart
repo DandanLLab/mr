@@ -1564,12 +1564,16 @@ window.readerApi = (function() {
     }
 
     // Phase 3.1：删除当前选区命中的 .sel-hl 元素
-    // - JS 端先移除视觉标记，再通知 Dart 删除持久化记录
+    // - JS 端先移除视觉标记（收集被删除 span 的 data-highlight-id），
+    //   再通知 Dart 删除持久化记录（按 ids 精确删除，避免 selectedText 重复误删）
     if (action === 'removeHighlight') {
-      removeHighlightInSelection();
+      var rmResultJson = removeHighlightInSelection();
+      var rmIds = [];
+      try { rmIds = JSON.parse(rmResultJson).ids || []; } catch (e) {}
       if (window.flutter_inappwebview) {
         window.flutter_inappwebview.callHandler(
-          'onSelectionAction', 'removeHighlight', text, rl, rt, rw, rh);
+          'onSelectionAction', 'removeHighlight', text, rl, rt, rw, rh,
+          JSON.stringify(rmIds));
       }
       var selRm = window.getSelection();
       if (selRm) selRm.removeAllRanges();
@@ -1625,22 +1629,30 @@ window.readerApi = (function() {
   //
   // 实现：
   // - 单元素选区：用 range.surroundContents 包到 <span class="sel-hl"> 里
+  //   此路径下精确记录 startContainer/endContainer 的 XPath 和 offset，
+  //   schemaVersion=2，重启后可按 XPath+offset 精确恢复
   // - 跨元素选区：surroundContents 会抛 DOMException，fallback 到
-  //   document.execCommand('hiliteColor')（兼容跨段落选区）
+  //   document.execCommand('hiliteColor')，仅做背景色
+  //   此路径无法记录精确位置，schemaVersion=1，重启后按 selectedText 文本匹配
   //
-  // 注：本函数仅做即时视觉标记，不会持久化到 StorageService（持久化需
-  // startIndex/endIndex，选区高亮系统将在后续迭代完善）。
-  // 重启 WebView 后 mark 标签丢失。
+  // 返回 JSON 字符串：
+  //   成功（单元素）：'{"success":true,"schemaVersion":2,"selectedText":"...",
+  //                   "startContainerXPath":"...","endContainerXPath":"...",
+  //                   "startOffset":N,"endOffset":N,"chapterContentHash":"..."}'
+  //   成功（跨元素）：'{"success":true,"schemaVersion":1,"selectedText":"..."}'
+  //   失败：'{"success":false}'
+  // Dart 侧 JSON 解析后按 schemaVersion 走不同持久化路径
   function highlightSelection(colorIndex, styleIndex) {
+    var failJson = '{"success":false}';
     var sel = window.getSelection();
     if (!sel || sel.rangeCount === 0) {
       hideSelectionMenu();
-      return false;
+      return failJson;
     }
     var range = sel.getRangeAt(0);
     if (range.collapsed) {
       hideSelectionMenu();
-      return false;
+      return failJson;
     }
 
     var colors = ['#FFF176', '#A5D6A7', '#90CAF9', '#F48FB1', '#FFCC80', '#CE93D8'];
@@ -1648,6 +1660,16 @@ window.readerApi = (function() {
     var textDecoration = styleIndex === 1
       ? 'underline'
       : (styleIndex === 2 ? 'line-through' : (styleIndex === 3 ? 'underline wavy' : ''));
+
+    // 在 surroundContents 之前抓取选区元数据（surroundContents 会修改 DOM 结构）
+    var startContainer = range.startContainer;
+    var endContainer = range.endContainer;
+    var startOffset = range.startOffset;
+    var endOffset = range.endOffset;
+    var selectedText = sel.toString();
+    var schemaVersion = 1;
+    var startXPath = null;
+    var endXPath = null;
 
     var success = false;
     try {
@@ -1661,12 +1683,20 @@ window.readerApi = (function() {
         mark.style.webkitTextDecorationColor = color;
       }
       try {
+        // 单元素选区：surroundContents 成功 → 记录 XPath + offset（v2）
         range.surroundContents(mark);
         success = true;
+        startXPath = getNodeXPath(startContainer);
+        endXPath = getNodeXPath(endContainer);
+        // XPath 计算成功才标记为 v2；否则降级 v1 走文本匹配
+        if (startXPath && endXPath) {
+          schemaVersion = 2;
+        }
       } catch (e) {
         // 跨元素选区（如跨段落）：surroundContents 会抛
         // DOMException: The boundary points of a Range are not valid
         // fallback 到 execCommand('hiliteColor')，仅做背景色
+        // 此路径无法精确恢复 → 保持 schemaVersion=1
         try { document.execCommand('styleWithCSS', false, true); } catch (e2) {}
         success = document.execCommand('hiliteColor', false, color);
       }
@@ -1678,7 +1708,165 @@ window.readerApi = (function() {
       sel.removeAllRanges();
       hideSelectionMenu();
     }
-    return success;
+
+    // 构造返回 JSON
+    var hash = computeChapterHash();
+    var result = {
+      success: success,
+      schemaVersion: schemaVersion,
+      selectedText: selectedText,
+      startContainerXPath: startXPath,
+      endContainerXPath: endXPath,
+      startOffset: startOffset,
+      endOffset: endOffset,
+      chapterContentHash: hash
+    };
+    return JSON.stringify(result);
+  }
+
+  // === Range+偏移序列化辅助函数（schemaVersion=2）===
+
+  // 计算文本节点相对于 contentA 的 XPath
+  // 返回形如 '/div[1]/p[3]/text()' 的路径；node 不在 contentA 内时返回 null
+  function getNodeXPath(node) {
+    if (!node || !contentA) return null;
+    var parts = [];
+    var cur = node;
+    while (cur && cur !== contentA) {
+      var parent = cur.parentNode;
+      if (!parent) return null;
+      // 计算同类型 + 同 nodeName 兄弟中的索引（XPath 标准：1-based）
+      var idx = 1;
+      var sibling = cur.previousSibling;
+      while (sibling) {
+        if (sibling.nodeType === cur.nodeType && sibling.nodeName === cur.nodeName) {
+          idx++;
+        }
+        sibling = sibling.previousSibling;
+      }
+      var part;
+      if (cur.nodeType === Node.TEXT_NODE) {
+        part = 'text()';
+      } else if (cur.nodeType === Node.ELEMENT_NODE) {
+        part = cur.nodeName.toLowerCase();
+      } else {
+        // 注释节点等不处理
+        return null;
+      }
+      parts.unshift(part + '[' + idx + ']');
+      cur = parent;
+    }
+    if (cur !== contentA) return null;
+    return '/' + parts.join('/');
+  }
+
+  // 按 XPath 在 contentA 下查找节点
+  // 支持 '/div[1]/p[3]/text()' 格式，找不到返回 null
+  function resolveXPath(xpath) {
+    if (!xpath || !contentA) return null;
+    if (xpath.charAt(0) !== '/') return null;
+    // 去掉开头的 '/'，按 '/' 分段
+    var parts = xpath.substring(1).split('/');
+    var cur = contentA;
+    for (var i = 0; i < parts.length; i++) {
+      if (!cur) return null;
+      var part = parts[i];
+      // 解析 'name[idx]' 或 'text()[idx]'
+      var m = part.match(/^([^\[]+)\[(\d+)\]$/);
+      if (!m) return null;
+      var name = m[1];
+      var idx = parseInt(m[2], 10);
+      var matched = 0;
+      var found = null;
+      var child = cur.firstChild;
+      while (child) {
+        var childName;
+        if (child.nodeType === Node.TEXT_NODE) {
+          childName = 'text()';
+        } else if (child.nodeType === Node.ELEMENT_NODE) {
+          childName = child.nodeName.toLowerCase();
+        } else {
+          child = child.nextSibling;
+          continue;
+        }
+        if (childName === name) {
+          matched++;
+          if (matched === idx) {
+            found = child;
+            break;
+          }
+        }
+        child = child.nextSibling;
+      }
+      if (!found) return null;
+      cur = found;
+    }
+    return cur;
+  }
+
+  // FNV-1a 32 位哈希
+  function fnv1a(str) {
+    var hash = 0x811c9dc5;
+    for (var i = 0; i < str.length; i++) {
+      hash ^= str.charCodeAt(i);
+      hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>> 0;
+    }
+    return hash.toString(16);
+  }
+
+  // 计算章节正文前 2000 字的 FNV-1a 哈希
+  // 用于换源后内容变化检测：哈希不一致时降级到文本匹配
+  function computeChapterHash() {
+    if (!contentA) return '';
+    var text = contentA.textContent || '';
+    if (text.length > 2000) text = text.substring(0, 2000);
+    return fnv1a(text);
+  }
+
+  // 按 Range+offset 恢复单条高亮（schemaVersion=2）
+  // 返回 true 表示恢复成功；失败时调用方应 fallback 到文本匹配
+  function restoreHighlightByRange(item) {
+    if (!contentA) return false;
+    if (!item.startContainerXPath || !item.endContainerXPath) return false;
+    var startNode = resolveXPath(item.startContainerXPath);
+    var endNode = resolveXPath(item.endContainerXPath);
+    if (!startNode || !endNode) return false;
+    if (startNode.nodeType !== Node.TEXT_NODE) return false;
+    if (endNode.nodeType !== Node.TEXT_NODE) return false;
+
+    var startOffset = item.startOffset || 0;
+    var endOffset = item.endOffset || 0;
+    // 边界检查（换源后内容可能变短）
+    if (startOffset > startNode.nodeValue.length) return false;
+    if (endOffset > endNode.nodeValue.length) return false;
+
+    var colors = ['#FFF176', '#A5D6A7', '#90CAF9', '#F48FB1', '#FFCC80', '#CE93D8'];
+    var colorIndex = item.color || 0;
+    var styleIndex = item.style || 0;
+    var color = colors[colorIndex] || colors[0];
+    var textDecoration = styleIndex === 1 ? 'underline'
+      : (styleIndex === 2 ? 'line-through' : (styleIndex === 3 ? 'underline wavy' : ''));
+
+    try {
+      var r = document.createRange();
+      r.setStart(startNode, startOffset);
+      r.setEnd(endNode, endOffset);
+      var mark = document.createElement('span');
+      mark.className = 'sel-hl';
+      if (item.id) mark.setAttribute('data-highlight-id', item.id);
+      mark.style.backgroundColor = styleIndex === 0 ? color : 'transparent';
+      if (textDecoration) {
+        mark.style.textDecoration = textDecoration;
+        mark.style.textDecorationColor = color;
+        mark.style.textDecorationThickness = '2px';
+        mark.style.webkitTextDecorationColor = color;
+      }
+      r.surroundContents(mark);
+      return true;
+    } catch (e) {
+      // surroundContents 失败（边界跨元素等），交回 fallback
+      return false;
+    }
   }
 
   // Phase 3.1：删除当前选区命中的 .sel-hl 元素
@@ -1688,12 +1876,16 @@ window.readerApi = (function() {
   // - 通过 range.intersectsNode 验证与当前选区有交集
   // - 把命中的 .sel-hl span 内容（文本节点）提到父级，移除 span
   //
-  // 返回：删除的 .sel-hl 数量（用于 SnackBar 提示，由 Dart 侧通过持久化查询确认）
+  // 返回 JSON 字符串：'{ "count": N, "ids": ["id1","id2",...] }'
+  // - count：删除的 .sel-hl 数量（用于 SnackBar 提示）
+  // - ids：被删除 span 的 data-highlight-id 列表（无 id 的不计入）
+  //   Dart 侧按 ids 精确删除持久化记录，避免 selectedText 重复误删
   function removeHighlightInSelection() {
+    var failJson = '{"count":0,"ids":[]}';
     var sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return 0;
+    if (!sel || sel.rangeCount === 0) return failJson;
     var range = sel.getRangeAt(0);
-    if (range.collapsed) return 0;
+    if (range.collapsed) return failJson;
 
     // 收集选区命中的 .sel-hl 元素
     var toRemove = [];
@@ -1707,28 +1899,34 @@ window.readerApi = (function() {
       }
     }
 
-    // 移除每个 .sel-hl span，把内部子节点提到父级
+    // 移除每个 .sel-hl span，把内部子节点提到父级；同时收集 id
+    var ids = [];
     for (var j = toRemove.length - 1; j >= 0; j--) {
       var m = toRemove[j];
+      var hid = m.getAttribute('data-highlight-id');
+      if (hid) ids.push(hid);
       var parent = m.parentNode;
       while (m.firstChild) {
         parent.insertBefore(m.firstChild, m);
       }
       parent.removeChild(m);
     }
-    return toRemove.length;
+    return JSON.stringify({ count: toRemove.length, ids: ids });
   }
 
   // Phase 3.2：恢复持久化高亮（Dart 在章节加载后传入 JSON 列表）
   //
-  // 参数 list: [{ id, selectedText, color, style, note, ... }]
-  // - 用 TreeWalker 遍历 #reader-content-a 文本节点，查找 selectedText 第一次出现位置
-  // - 用 range.surroundContents 包到 .sel-hl 里（跨段落匹配跳过，surroundContents 不支持）
+  // 参数 list: [{ id, selectedText, color, style, note, schemaVersion, ... }]
+  // - schemaVersion=2（新格式）：优先按 XPath+offset 精确恢复
+  //   失败时（节点找不到/offset 越界/哈希不一致）自动 fallback 到文本匹配
+  // - schemaVersion=1（旧格式 / 跨元素高亮）：按 selectedText 文本匹配
   // - 同时给 mark 加 data-highlight-id 属性，便于按 id 删除
   function restoreHighlights(list) {
     if (!list || !list.length) return;
     if (!contentA) return;
     var colors = ['#FFF176', '#A5D6A7', '#90CAF9', '#F48FB1', '#FFCC80', '#CE93D8'];
+    // 当前章节哈希（用于 v2 校验，不一致则 fallback）
+    var currentHash = computeChapterHash();
     list.forEach(function(item) {
       try {
         var text = item.selectedText;
@@ -1745,7 +1943,16 @@ window.readerApi = (function() {
           if (exists) return;
         }
 
-        // 用 TreeWalker 找文本节点中第一次匹配
+        // v2 路径：哈希一致 + XPath/offset 齐全 → 精确恢复
+        if (item.schemaVersion === 2
+            && item.startContainerXPath
+            && item.endContainerXPath
+            && (!item.chapterContentHash || item.chapterContentHash === currentHash)) {
+          if (restoreHighlightByRange(item)) return;
+          // 精确恢复失败 → fallback 到文本匹配
+        }
+
+        // v1 路径 / v2 fallback：用 TreeWalker 找文本节点中第一次匹配
         var walker = document.createTreeWalker(contentA, NodeFilter.SHOW_TEXT, null);
         var found = false;
         while (walker.nextNode() && !found) {
@@ -1778,7 +1985,40 @@ window.readerApi = (function() {
     });
   }
 
-  // Phase 3.2：按 selectedText 删除视觉高亮（持久化由 Dart 侧处理）
+  // 按 data-highlight-id 删除视觉高亮（持久化由 Dart 侧处理）
+  // - 精确匹配 id，避免 selectedText 重复时误删
+  // 返回 true 表示找到并删除了对应 span
+  function removeHighlightById(id) {
+    if (!id || !contentA) return false;
+    var mark = contentA.querySelector('.sel-hl[data-highlight-id="' + id + '"]');
+    if (!mark) return false;
+    var parent = mark.parentNode;
+    while (mark.firstChild) {
+      parent.insertBefore(mark.firstChild, mark);
+    }
+    parent.removeChild(mark);
+    return true;
+  }
+
+  // 给最近一次 surroundContents 创建的 .sel-hl span 设置 data-highlight-id
+  // 调用时机：Dart 端持久化高亮拿到 id 后立即调用，把 id 回写到 span
+  // 实现：找 contentA 内最后一个没有 data-highlight-id 的 .sel-hl，
+  //       设置 id（surroundContents 路径下单元素选区只产生一个 span）
+  // 返回 true 表示设置成功
+  function setLastHighlightId(id) {
+    if (!id || !contentA) return false;
+    var marks = contentA.querySelectorAll('.sel-hl');
+    for (var i = marks.length - 1; i >= 0; i--) {
+      var m = marks[i];
+      if (!m.getAttribute('data-highlight-id')) {
+        m.setAttribute('data-highlight-id', id);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Phase 3.2：按 selectedText 删除视觉高亮（旧路径，保留兼容）
   // - 遍历 #reader-content-a 下所有 .sel-hl
   // - textContent 完全匹配的移除 span（把内部子节点提到父级）
   function removeHighlightByText(text) {
@@ -2616,6 +2856,8 @@ window.readerApi = (function() {
     removeHighlightInSelection: removeHighlightInSelection,
     restoreHighlights: restoreHighlights,
     removeHighlightByText: removeHighlightByText,
+    removeHighlightById: removeHighlightById,
+    setLastHighlightId: setLastHighlightId,
     searchText: searchText,
     scrollToSearchResult: scrollToSearchResult
   };

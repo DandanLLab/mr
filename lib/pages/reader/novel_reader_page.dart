@@ -1749,19 +1749,28 @@ class _NovelReaderPageState extends State<NovelReaderPage>
 
   /// Phase 3.2：把当前选区高亮持久化到 StorageService
   ///
-  /// 简化方案：用 selectedText 作为唯一标识（重复文本可能误匹配，实际场景可接受）。
-  /// - startIndex/endIndex 暂用 0/length（不依赖偏移，JS 端用文本匹配）
-  /// - id 用 bookUrl + 时间戳保证唯一
+  /// 双路径持久化：
+  /// - [meta] 来自 JS highlightSelection 返回的元数据 Map：
+  ///   - schemaVersion=2（单元素选区）：填充 XPath/offset/hash 字段，
+  ///     重启后可按 Range+offset 精确恢复
+  ///   - schemaVersion=1（跨元素选区 / 旧路径）：仅持久化 selectedText，
+  ///     重启后走文本匹配 fallback
+  /// - startIndex/endIndex 始终用 0/length（兼容旧字段，新逻辑不依赖）
+  /// - id 用 bookUrl + 时间戳保证唯一，同时回写到 JS span 的 data-highlight-id
   Future<void> _persistHighlight({
     required String text,
     required int colorIndex,
     required int styleIndex,
+    required Map<String, dynamic>? meta,
     String? note,
   }) async {
     final book = _book;
     if (book == null) return;
+    final highlightId =
+        '${book.bookUrl}_${DateTime.now().millisecondsSinceEpoch}';
+    final schemaVersion = (meta?['schemaVersion'] as int?) ?? 1;
     final highlight = Highlight(
-      id: '${book.bookUrl}_${DateTime.now().millisecondsSinceEpoch}',
+      id: highlightId,
       bookUrl: book.bookUrl,
       chapterIndex: _currentChapterIndex,
       startIndex: 0,
@@ -1771,33 +1780,58 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       color: HighlightColor.values[colorIndex],
       note: note,
       createdAt: DateTime.now(),
+      schemaVersion: schemaVersion,
+      startContainerXPath: meta?['startContainerXPath'] as String?,
+      endContainerXPath: meta?['endContainerXPath'] as String?,
+      startOffset: meta?['startOffset'] as int?,
+      endOffset: meta?['endOffset'] as int?,
+      chapterContentHash: meta?['chapterContentHash'] as String?,
     );
     try {
       await StorageService.instance.saveHighlight(highlight.toJson());
+      // 把 id 回写到 JS span 上，便于后续按 id 精确删除
+      // 仅在 schemaVersion=2（单元素选区）时回写有效：跨元素选区的 mark
+      // 由 execCommand 创建，无法精确指定单个 span 加 data-highlight-id
+      if (schemaVersion == 2) {
+        await _readerWebViewController.setLastHighlightId(highlightId);
+      }
     } catch (e) {
       debugPrint('[NovelReader] 保存高亮失败: $e');
     }
   }
 
-  /// Phase 3.2：删除当前章节内匹配 text 的所有持久化高亮
+  /// Phase 3.2：按 ids 删除持久化高亮（精确删除）
   ///
-  /// JS 端已通过 removeHighlightInSelection 移除视觉标记，
-  /// Dart 侧同步删除 StorageService 中的记录。
-  Future<void> _removeHighlightByText(String text) async {
+  /// JS 端 removeHighlightInSelection 已移除视觉标记并返回被删除 span 的
+  /// data-highlight-id 列表。Dart 侧按 ids 精确删除 StorageService 记录。
+  /// - [removedIds]：JS 端收集的 id 列表
+  /// - [fallbackText]：ids 为空时（旧数据无 id）按 text 降级匹配
+  Future<void> _removeHighlightByIds(
+    List<String> removedIds, {
+    String? fallbackText,
+  }) async {
     final book = _book;
     if (book == null) return;
+    int removedCount = 0;
     try {
-      final highlights = StorageService.instance.getChapterHighlights(
-        book.bookUrl,
-        _currentChapterIndex,
-      );
-      int removedCount = 0;
-      for (final h in highlights) {
-        if (h['selectedText'] == text) {
-          final id = h['id'] as String?;
-          if (id != null) {
-            await StorageService.instance.deleteHighlight(id);
-            removedCount++;
+      if (removedIds.isNotEmpty) {
+        for (final id in removedIds) {
+          await StorageService.instance.deleteHighlight(id);
+          removedCount++;
+        }
+      } else if (fallbackText != null && fallbackText.isNotEmpty) {
+        // 降级：旧数据无 id，按 selectedText 匹配
+        final highlights = StorageService.instance.getChapterHighlights(
+          book.bookUrl,
+          _currentChapterIndex,
+        );
+        for (final h in highlights) {
+          if (h['selectedText'] == fallbackText) {
+            final id = h['id'] as String?;
+            if (id != null) {
+              await StorageService.instance.deleteHighlight(id);
+              removedCount++;
+            }
           }
         }
       }
@@ -1840,7 +1874,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   /// action 取值：
   /// - 'copy' / 'highlight' / 'lookup' / 'share'（原有 4 项）
   /// - 'removeHighlight' / 'search'（Phase 3.1 新增 2 项，select 由 JS 自处理）
-  void _onSelectionAction(String action, String text, Rect rect) {
+  ///
+  /// [removedIds] 仅 action='removeHighlight' 时有效：JS 端收集的被删除
+  /// .sel-hl span 的 data-highlight-id 列表，用于精确删除持久化记录。
+  void _onSelectionAction(String action, String text, Rect rect,
+      [List<String> removedIds = const []]) {
     if (!mounted) return;
     switch (action) {
       case 'copy':
@@ -1856,7 +1894,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         _onSelectionShare(text);
         break;
       case 'removeHighlight':
-        _removeHighlightByText(text);
+        _removeHighlightByIds(removedIds, fallbackText: text);
         break;
       case 'search':
         _showSearchSheet(text);
@@ -2038,17 +2076,21 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                         child: FilledButton(
                           onPressed: () async {
                             Navigator.pop(sheetContext);
-                            final success = await _readerWebViewController
+                            final meta = await _readerWebViewController
                                 .highlightSelection(
                               selectedColorIndex,
                               selectedStyleIndex,
                             );
+                            final success = meta != null &&
+                                meta['success'] == true;
                             if (success) {
                               // Phase 3.2：持久化到 StorageService（重启后可恢复）
+                              // meta 携带 schemaVersion / XPath / offset / hash
                               await _persistHighlight(
                                 text: text,
                                 colorIndex: selectedColorIndex,
                                 styleIndex: selectedStyleIndex,
+                                meta: meta,
                               );
                             }
                             if (!mounted) return;
