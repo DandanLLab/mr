@@ -694,10 +694,16 @@ body.reader-scroll #reader-content-b {
 }
 
 /* 4c. 针对 EPUB 常见的卷首图/序号表/版权页等特殊容器进一步优化：
-   flex 居中让内容垂直水平居中，整页显示 */
+   flex 居中让内容垂直水平居中，整页显示。
+   匹配规则：
+   - .volume-bg/.box-bg/.video-bg：原作者 class 标记的背景容器
+   - [style*="background"]：EpubParser 把 body bgcolor/style 转成 inline style，
+     copyright(白底) 和 foreword1(黑底) 等无 class 但有背景色的章节也能匹配。
+     正文章节 body 通常无背景属性，不受影响。 */
 #reader-content-a .epub-chapter-bg.volume-bg,
 #reader-content-a .epub-chapter-bg.box-bg,
-#reader-content-a .epub-chapter-bg.video-bg {
+#reader-content-a .epub-chapter-bg.video-bg,
+#reader-content-a .epub-chapter-bg[style*="background"] {
   display: flex;
   flex-direction: column;
   justify-content: center;
