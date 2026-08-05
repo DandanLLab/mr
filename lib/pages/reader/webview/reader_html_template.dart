@@ -42,11 +42,9 @@ class ReaderHtmlTemplate {
     required int pageModeIndex,
     required int chapterIndex,
     bool isRichHtml = false,
-    // isSinglePage：保留参数定义以兼容调用方，当前忽略（渲染统一走 column 分页，
-    // 不再做单页模式切分）。后续若需要可在此分支处理。
     bool isSinglePage = false,
   }) {
-    final css = _generateCss(provider, isScrollMode);
+    final css = _generateCss(provider, isScrollMode, isSinglePage);
     final js = _readerJs();
 
     // 富 HTML（EPUB）：解析 [[EPUB_CSS]]/[[EPUB_BODY]] 包裹格式
@@ -134,6 +132,7 @@ class ReaderHtmlTemplate {
         viewWidth: ${viewWidth.floor()},
         viewHeight: ${viewHeight.floor()},
         isScrollMode: $isScrollMode,
+        isSinglePage: $isSinglePage,
         /* 借鉴 lumina：固定 128px 列间距，与 CSS column-gap 保持一致。
            原值 0 会导致 getPageCount 算不准（scrollWidth 无 gap 时亚像素误差大），
            翻页 step 也算不准（step=columnWidth+gap=columnWidth，多列时偏移不足）。 */
@@ -223,7 +222,11 @@ class ReaderHtmlTemplate {
   /// - #reader-stage: relative + overflow:hidden，作为 a/b 的定位容器
   /// - .reader-content: absolute + column 布局，a/b 重叠在同一位置
   /// - #reader-content-b: 默认 visibility:hidden + pointer-events:none
-  static String _generateCss(ReaderProvider provider, bool isScrollMode) {
+  ///
+  /// [isSinglePage]：单页模式（fixedLayout/mediaPage）切换为
+  /// body.reader-single-page + flex 居中，column-width:auto 不切分。
+  /// 滚动模式优先级更高（isScrollMode=true 时忽略 isSinglePage）。
+  static String _generateCss(ReaderProvider provider, bool isScrollMode, bool isSinglePage) {
     final textColor = _colorToHex(provider.textColor);
     final bgColor = _colorToHex(provider.backgroundColor);
     final fontFamily = provider.fontFamily.isEmpty ? 'inherit' : provider.fontFamily;
@@ -551,6 +554,95 @@ body.reader-paged #reader-content-b.animating {
   visibility: visible;
   opacity: 1;
   pointer-events: auto;
+}
+
+/* ============ 单页模式（fixedLayout/mediaPage） ============
+ * 对齐 JRead EpubWebContentMode：画册/漫画/SVG/纯图片章节整页显示，不切分。
+ * - column-width:auto 不分栏，配合 width/height:100% 让单元素整页显示
+ * - flex 居中：图片/SVG 在内容区内居中，避免左上角对齐显得突兀
+ * - 满屏覆盖：#reader-content-a 撑满 #reader-stage，无 translate 翻页
+ * - 翻页手势由上层（ReaderPageView/NovelReaderPage）走「切下一章」逻辑
+ * 与 body.reader-paged 互斥；滚动模式优先级更高（isScrollMode=true 时不应用此 class）
+ */
+body.reader-single-page {
+  position: relative;
+  overflow: hidden;
+}
+
+/* 单页模式：html 清零全局 padding，让 #reader-root 满屏覆盖整个阅读器
+ * 对齐 JRead FixedLayout：html margin:0, padding:0, min-width:100%, min-height:100%
+ * 画册/漫画/纯图片章节应满屏显示，不受用户正文 padding 影响
+ *
+ * 实现方式：body 是 html 的子元素，无法用 CSS 选择器从 body 改 html 的 padding，
+ * 所以在 JS init 中同步给 html 加 `reader-single-page-root` class，这里用
+ * html.reader-single-page-root 覆盖全局 html padding
+ */
+html.reader-single-page-root {
+  padding: 0 !important;
+}
+
+body.reader-single-page #reader-root {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body.reader-single-page #reader-stage {
+  position: relative;
+  flex: 1 1 0;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  /* flex 居中容器：让 #reader-content-a 内的图片/SVG 居中显示 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+body.reader-single-page .reader-content {
+  /* 关键：不切分。column-width:auto 让浏览器按内容自然布局，
+     不强制分栏。配合 width:100% + height:100% 让单元素整页显示。 */
+  column-width: auto;
+  column-gap: 0;
+  column-fill: auto;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 不需要 transform 翻页，清除 will-change 避免合成层浪费 */
+  will-change: auto;
+  transform: none !important;
+}
+
+body.reader-single-page #reader-content-a {
+  pointer-events: auto;
+  /* 满屏容器：让内部的图片/SVG/画册撑满内容区 */
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 单页模式下图片/SVG/video 填满内容区但不溢出（对齐 JRead mediaPage 规则）
+ * - max-width/max-height:100% 保证不溢出
+ * - width/height:auto 保持原始宽高比
+ * - object-fit:contain 等比缩放
+ */
+body.reader-single-page #reader-content-a img,
+body.reader-single-page #reader-content-a svg,
+body.reader-single-page #reader-content-a video,
+body.reader-single-page #reader-content-a canvas {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
 }
 
 /* ============ 滚动模式 ============ */
@@ -995,7 +1087,7 @@ body.reader-scroll #reader-content-b {
 })();
 
 window.readerApi = (function() {
-  var config = { viewWidth: 0, viewHeight: 0, isScrollMode: false, columnGap: 0, pageAnimDurationMs: 0, pageModeIndex: 4 };
+  var config = { viewWidth: 0, viewHeight: 0, isScrollMode: false, isSinglePage: false, columnGap: 0, pageAnimDurationMs: 0, pageModeIndex: 4 };
   var body = document.body;
   var contentA = null;  // 主层（静态可交互）
   var contentB = null;  // 动画层（默认隐藏）
@@ -1021,7 +1113,22 @@ window.readerApi = (function() {
     animEnabled = (config.pageAnimDurationMs || 0) > 0 && (config.pageModeIndex !== 4);
     contentA = document.getElementById('reader-content-a');
     contentB = document.getElementById('reader-content-b');
-    body.classList.add(config.isScrollMode ? 'reader-scroll' : 'reader-paged');
+    // body class 三态互斥：
+    // - reader-scroll：滚动模式（优先级最高，永远不分页）
+    // - reader-single-page：单页模式（fixedLayout/mediaPage，不切分）
+    // - reader-paged：分页模式（reflowable，column-width 分栏翻页）
+    body.classList.remove('reader-scroll', 'reader-single-page', 'reader-paged');
+    // html class 同步：单页模式时加 reader-single-page-root 清零全局 padding
+    // （画册/漫画满屏显示，不受用户正文 padding 影响）
+    document.documentElement.classList.remove('reader-single-page-root');
+    if (config.isScrollMode) {
+      body.classList.add('reader-scroll');
+    } else if (config.isSinglePage) {
+      body.classList.add('reader-single-page');
+      document.documentElement.classList.add('reader-single-page-root');
+    } else {
+      body.classList.add('reader-paged');
+    }
 
     // overflow 完全由 CSS class 控制，不再用 inline style 强制设置：
     //   - html, body { overflow: hidden }（共用样式，防横向溢出）
@@ -1804,6 +1911,8 @@ window.readerApi = (function() {
   }
 
   function getPageCount() {
+    // 单页模式（fixedLayout/mediaPage）：固定 1 页，不切分
+    if (config.isSinglePage) return 1;
     if (config.isScrollMode) return 1;
     if (!contentA) return 1;
     var columnWidth = getColumnWidth();
@@ -1818,12 +1927,19 @@ window.readerApi = (function() {
 
   function getCurrentPage() {
     if (config.isScrollMode) return 0;
+    if (config.isSinglePage) return 0;
     return currentPage;
   }
 
   // ============ 翻页核心 ============
   // animate: true=带动画（用户翻页）, false=无动画（进度恢复/初始化）
   function jumpToPage(pageIndex, animate) {
+    // 单页模式：永远在第 0 页，不做任何 transform 翻页
+    // 翻页手势由上层 ReaderPageView/NovelReaderPage 走「切下一章」逻辑
+    if (config.isSinglePage) {
+      currentPage = 0;
+      return;
+    }
     if (config.isScrollMode) return;
     if (!contentA || !contentB) {
       console.log('[reader] jumpToPage skipped: contentA/B not ready');
@@ -2021,6 +2137,8 @@ window.readerApi = (function() {
       var sh = body.scrollHeight - body.clientHeight;
       return sh > 0 ? st / sh : 0;
     }
+    // 单页模式：永远在第 0 页，进度由上层按章节切换单独计算
+    if (config.isSinglePage) return 0;
     return getPageCount() > 0 ? currentPage / getPageCount() : 0;
   }
 
