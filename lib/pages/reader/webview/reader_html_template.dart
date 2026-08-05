@@ -669,11 +669,13 @@ body.reader-scroll #reader-content-b {
    - box-sizing: border-box 让 EPUB body 的 padding 包含在高度内，不溢出
    - break-inside: avoid 防止被分页切断（视频页/卷头页/序号页等整页显示）
    - background-attachment 的 fixed 已在 EpubParser 通用修正为 scroll
-   应用于任何承载 body 背景属性的章节容器 */
+   应用于任何承载 body 背景属性的章节容器
+   关键：column-break-inside:avoid 防止容器被 column 布局切分到多列（多页） */
 #reader-content-a .epub-chapter-bg {
   min-height: 100%;
   box-sizing: border-box;
   break-inside: avoid;
+  column-break-inside: avoid;
   page-break-inside: avoid;
 }
 
@@ -713,19 +715,28 @@ body.reader-scroll #reader-content-b {
   margin: 50vh 0 1em 0 !important;
 }
 
-/* 4c. EPUB 章节背景容器：min-height:100% 让背景色/背景图填满整页。
-   不用 flex 居中（会覆盖 4b 的 vh margin），保留正常文档流让内容按
-   原作者的 margin 值精确定位。
+/* 4c. EPUB 章节背景容器：width/height:100% 铺满 stage，让背景色/背景图覆盖
+   整个阅读器页面。不用 min-height（相对 column 容器，不够大），用 height:100%
+   相对 #reader-stage（absolute 定位的父容器）。
    匹配规则：
    - .volume-bg/.box-bg/.video-bg：原作者 class 标记的背景容器
    - [style*="background"]：EpubParser 把 body bgcolor/style 转成 inline style，
      copyright(白底) 和 foreword1(黑底) 等无 class 但有背景色的章节也能匹配。
-     正文章节 body 通常无背景属性，不受影响。 */
+     正文章节 body 通常无背景属性，不受影响。
+   关键修复：
+   - width:100% + height:100% 让背景容器尺寸 = stage 尺寸 = viewport
+   - background-size:cover 才能正确铺满（原 .video-bg 设了 cover）
+   - position:relative 让容器作为定位上下文，不参与 column 分栏切分
+   - break-inside:avoid 防止被分栏切断 */
 #reader-content-a .epub-chapter-bg.volume-bg,
 #reader-content-a .epub-chapter-bg.box-bg,
 #reader-content-a .epub-chapter-bg.video-bg,
 #reader-content-a .epub-chapter-bg[style*="background"] {
+  width: 100%;
+  height: 100%;
   min-height: 100%;
+  position: relative;
+  overflow: hidden;
 }
 
 /* 4d. EPUB 原作者用 width:35px/.content-matrix width:540px 等固定宽度做装饰。
