@@ -131,7 +131,10 @@ class ReaderHtmlTemplate {
         viewWidth: ${viewWidth.floor()},
         viewHeight: ${viewHeight.floor()},
         isScrollMode: $isScrollMode,
-        columnGap: 0,
+        /* 借鉴 lumina：固定 128px 列间距，与 CSS column-gap 保持一致。
+           原值 0 会导致 getPageCount 算不准（scrollWidth 无 gap 时亚像素误差大），
+           翻页 step 也算不准（step=columnWidth+gap=columnWidth，多列时偏移不足）。 */
+        columnGap: 128,
         pageAnimDurationMs: $pageAnimDurationMs,
         pageModeIndex: $pageModeIndex
       });
@@ -287,6 +290,14 @@ class ReaderHtmlTemplate {
   -webkit-touch-callout: default;
   -webkit-user-select: text;
   user-select: text;
+}
+
+/* 借鉴 lumina：全局排版优化，减少孤行寡行，改善分栏断行 */
+.reader-content {
+  orphans: 1;
+  widows: 1;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 /* 参考 lumina：html/body 统一 100%/100%，padding 放 html 上
@@ -483,7 +494,9 @@ body.reader-paged .reader-content {
   bottom: 0;
   left: 0;
   column-width: var(--reader-safe-width);
-  column-gap: 0;
+  /* 借鉴 lumina：固定 128px 列间距，消除亚像素误差，确保 getPageCount 算准。
+     必须与 JS config.columnGap 保持一致，否则翻页 step 与实际列宽不符。 */
+  column-gap: 128px;
   column-fill: auto;
   will-change: transform;
   backface-visibility: hidden;
@@ -567,12 +580,17 @@ body.reader-scroll #reader-content-b {
   display: none;
 }
 
-/* 图片样式 */
+/* 图片样式：借鉴 lumina 加 break-inside:avoid 防止图片被分栏切分到两页，
+   max-height 限制不超高内容区，object-fit:contain 等比缩放 */
 .reader-p img {
   max-width: 100%;
+  max-height: var(--reader-safe-height);
   height: auto;
+  object-fit: contain;
   display: block;
   margin: var(--reader-paragraph-spacing) auto;
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 /* 滚动条隐藏 */
@@ -621,13 +639,18 @@ body.reader-scroll #reader-content-b {
 
 /* 2. 所有图片/视频/SVG/canvas 响应式：最大宽度 100%，不溢出
    覆盖 EPUB 中固定 px 宽度的资源（EpubParser 已把 >300px 固定宽度改写为
-   max-width:100%，这里作为兜底确保万无一失） */
+   max-width:100%，这里作为兜底确保万无一失）
+   借鉴 lumina：加 break-inside:avoid 防止分栏切分，max-height 限制不超高内容区 */
 #reader-content-a img,
 #reader-content-a svg,
 #reader-content-a video,
 #reader-content-a canvas {
   max-width: 100%;
+  max-height: var(--reader-safe-height);
   height: auto;
+  object-fit: contain;
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 /* 3. SVG 封面图：填满容器（EPUB 常用 SVG 做矢量封面） */
@@ -1773,9 +1796,11 @@ window.readerApi = (function() {
     var gap = config.columnGap || 0;
     var scrollWidth = contentA.scrollWidth;
     if (columnWidth + gap <= 0) return 1;
-    // 用 ceil：内容哪怕只溢出第 2 列一点点，也是 2 页
-    // 减 1px 容差：避免浮点误差导致多算一个空白页
-    var pageCount = Math.ceil((scrollWidth - 1) / (columnWidth + gap));
+    /* 借鉴 lumina：用 Math.round 替代 Math.ceil，减少浮点误差。
+       ceil 在亚像素误差下会多算一个空白页（scrollWidth 比 N*(columnWidth+gap)
+       多 0.5px 时 ceil 进位成 N+1）；round 容差更好，配合 column-gap:128px
+       固定值，分页计算稳定。 */
+    var pageCount = Math.round((scrollWidth + gap) / (columnWidth + gap));
     return Math.max(1, pageCount);
   }
 
