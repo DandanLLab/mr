@@ -638,17 +638,14 @@ body.reader-scroll #reader-content-b {
     return '''
 /* === EPUB 富 HTML 兜底 CSS（通用，不依赖具体 class 名）=== */
 
-/* 1. 块级容器避免分页断开：尽量在一个页面内完整显示
-   - div/figure/blockquote/video/svg/table/pre 等盒子不分页
-   - h1-h6 标题、li 列表项、hr 分隔线也不分页
-   - 内容超过一页时浏览器自动降级允许分页（不会卡死）
-   - 三重保险：break-inside（通用）+ column-break-inside（CSS Multi-column 专用）
-     + page-break-inside（旧浏览器兼容）
-   - column-break-inside 是 CSS Multi-column Layout 的专用属性，
-     在分栏布局下比 break-inside 更可靠 */
-#reader-content-a div,
-#reader-content-a figure,
-#reader-content-a blockquote,
+/* 1. 不可切分元素：图片/视频/SVG/表格/pre 等不应被分栏切断
+   - 只对确实不可切分的元素设 break-inside:avoid
+   - 不对通用 div/figure/blockquote 设 break-inside:avoid：
+     这些元素可能包含超过一页的内容，break-inside:avoid 会阻止浏览器切分，
+     导致整个块被推到下一栏，当前栏留下空白缝隙，下一栏内容溢出
+   - h1-h6 标题不切分（避免标题与后续内容分离）
+   - 三重保险：break-inside + column-break-inside + page-break-inside */
+#reader-content-a img,
 #reader-content-a video,
 #reader-content-a svg,
 #reader-content-a table,
@@ -658,12 +655,28 @@ body.reader-scroll #reader-content-b {
 #reader-content-a h3,
 #reader-content-a h4,
 #reader-content-a h5,
-#reader-content-a h6,
-#reader-content-a li,
-#reader-content-a hr {
+#reader-content-a h6 {
   break-inside: avoid;
   column-break-inside: avoid;
   page-break-inside: avoid;
+}
+
+/* 1b. 防止子元素水平溢出 column：
+   - EPUB 原作者 CSS 可能给子元素设了固定 width（如 540px），
+     超过 column-width 时会溢出到相邻 column，导致"页面 2 溢出第一页"
+   - max-width:100% 限制子元素不超过 column 宽度
+   - 用 !important 确保覆盖 EPUB CSS 的固定宽度
+   - 不影响 .epub-chapter-bg 内部的装饰元素（它们有单独规则） */
+#reader-content-a p,
+#reader-content-a div,
+#reader-content-a figure,
+#reader-content-a blockquote,
+#reader-content-a section,
+#reader-content-a article,
+#reader-content-a li {
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 /* 2. 所有图片/视频/SVG/canvas 响应式：最大宽度 100%，不溢出
@@ -705,24 +718,22 @@ body.reader-scroll #reader-content-b {
    - background-attachment 的 fixed 已在 EpubParser 通用修正为 scroll
    关键：column-break-inside:avoid 防止容器被 column 布局切分到多列（多页） */
 
-/* 4-0. 关键修复：EPUB 模式下 HTML 结构是
+/* 4-0. EPUB 模式下 HTML 结构是
    #reader-content-a (column 容器)
      └ div[data-chapter-index] (column 直接子元素 ← 这里！)
-         └ div.epub-chapter-bg (孙子元素)
+         └ div.epub-chapter-bg (孙子元素) / p, h1, ... (正文)
 
-   CSS 的 break-inside / column-break-inside / min-height 只对 column
-   **直接子元素**生效。.epub-chapter-bg 是孙子元素，4a 设的 break-inside
-   和 min-height 对它无效——背景容器会被 column 布局切分，背景铺不满！
-
-   修复：给 column 直接子元素 div[data-chapter-index] 也加同样的
-   min-height + break-inside:avoid，让它成为不可切分的整页单元。
-   非 EPUB 模式下没有 [data-chapter-index] 包裹（段落直接是 column 子元素），
-   此选择器不匹配，无副作用。 */
+   关键修复：正文章节不设 break-inside:avoid 和 min-height
+   - 正文章节内容通常超过一页，break-inside:avoid 会阻止浏览器切分，
+     导致整个 wrapper 被推到下一栏，第一栏（第一页）留空白缝隙，
+     wrapper 高度 > 一页又溢出第二页 → "页面 2 切分不对，溢出"
+   - min-height 也不需要：正文不需要强制整页高度
+   - 只有 .epub-chapter-bg（特殊章节）才需要 break-inside:avoid + min-height，
+     在下方 4a 单独设置
+   - 滚动模式下此 wrapper 只用于 IntersectionObserver 监测，无需布局约束 */
 #reader-content-a > [data-chapter-index] {
-  min-height: var(--reader-safe-height);
-  break-inside: avoid;
-  column-break-inside: avoid;
-  page-break-inside: avoid;
+  /* 不设 break-inside:avoid，允许浏览器自由切分正文内容到多栏（多页） */
+  /* 不设 min-height，让内容自然展开 */
 }
 
 #reader-content-a .epub-chapter-bg {
