@@ -443,6 +443,7 @@ class LocalBookService {
         spineIndex: epubChapter.spineIndex,
         depth: epubChapter.depth,
         parentId: epubChapter.parentId,
+        isGallery: epubChapter.isGallery,
       );
     }).toList();
   }
@@ -488,6 +489,44 @@ class LocalBookService {
     // 退化为纯文本
     if (epubChapter.content == null) return null;
     return EpubParser.extractTextFromHtml(epubChapter.content!);
+  }
+
+  /// 获取 EPUB 画廊章节的图片列表
+  ///
+  /// 画廊章节（含 .duokan-image-gallery）由 Flutter PageView 接管渲染，
+  /// 不走 WebView。此方法返回解析时预提取的图片信息列表。
+  ///
+  /// 返回空列表表示该章节不是画廊页或无图片，调用方应回退到 WebView 渲染。
+  Future<List<EpubGalleryImage>> getEpubGalleryImages(
+    Book book,
+    Chapter chapter,
+  ) async {
+    var epubBook = _epubCache[book.bookUrl];
+
+    // Fallback: ensure epub data is loaded by reading from disk
+    if (epubBook == null) {
+      try {
+        final file = File(book.bookUrl);
+        if (!await file.exists()) return const [];
+
+        final bytes = await file.readAsBytes();
+        _epubBytesCache[book.bookUrl] = bytes;
+        final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
+        epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        if (epubBook != null) {
+          _epubCache[book.bookUrl] = epubBook;
+        }
+      } catch (e) {
+        return const [];
+      }
+    }
+
+    if (epubBook == null) return const [];
+    if (chapter.index < 0 || chapter.index >= epubBook.chapters.length) {
+      return const [];
+    }
+
+    return epubBook.chapters[chapter.index].galleryImages;
   }
 
   /// Returns the raw HTML content of an EPUB chapter (not stripped by extractTextFromHtml).

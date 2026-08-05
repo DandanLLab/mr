@@ -926,21 +926,10 @@ body.reader-scroll #reader-content-b {
   color: #ff00ff;
 }
 
-/* 5. 滑动看图容器（多看画廊 duokan-image-gallery）：
-   作为完整滚动单元，整页显示不分页
-   - max-height 限制在一页内（内容区高度 - 上下 margin）
-   - overflow-y: auto 实现内部滑动看图
-   - break-inside: avoid 防止被分页切断
-   - -webkit-overflow-scrolling: touch iOS 惯性滑动
-   原本是多看阅读的横向滑动画廊，标准 EPUB 阅读器无此功能，
-   降级为纵向滚动容器 */
-#reader-content-a .duokan-image-gallery {
-  max-height: calc(var(--reader-safe-height) - 4em);
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  break-inside: avoid;
-  page-break-inside: avoid;
-}
+/* 5. 多看画廊（duokan-image-gallery）：
+   画廊章节已由 Flutter EpubGalleryPage 接管渲染（PageView 横向滑动），
+   不再走 WebView。此处不再设置降级 CSS。
+   若画廊识别失败（cell < 2）仍走 WebView，按默认 column 分页处理。 */
 
 /* 6. 表格自适应：不溢出 */
 #reader-content-a table {

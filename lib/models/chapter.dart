@@ -28,6 +28,14 @@ class Chapter {
   /// 用于树状目录折叠/展开
   final int parentId;
 
+  // ===== EPUB 画廊章节支持字段 =====
+  // 仅 EPUB 本地书解析时填充，标识该章节是否为多看画廊页
+  // （含 .duokan-image-gallery 的章节），由 Flutter PageView 接管渲染
+
+  /// 是否为画廊章节（多看画廊 duokan-image-gallery）
+  /// true 时阅读器走 PageView 横向滑动渲染，不走 WebView
+  final bool isGallery;
+
   Chapter({
     required this.id,
     required this.bookId,
@@ -44,6 +52,7 @@ class Chapter {
     this.spineIndex = -1,
     this.depth = 0,
     this.parentId = -1,
+    this.isGallery = false,
   });
 
   Chapter copyWith({
@@ -62,6 +71,7 @@ class Chapter {
     int? spineIndex,
     int? depth,
     int? parentId,
+    bool? isGallery,
   }) {
     return Chapter(
       id: id ?? this.id,
@@ -79,6 +89,7 @@ class Chapter {
       spineIndex: spineIndex ?? this.spineIndex,
       depth: depth ?? this.depth,
       parentId: parentId ?? this.parentId,
+      isGallery: isGallery ?? this.isGallery,
     );
   }
 
@@ -99,6 +110,7 @@ class Chapter {
       'spineIndex': spineIndex,
       'depth': depth,
       'parentId': parentId,
+      'isGallery': isGallery,
     };
   }
 
@@ -121,6 +133,7 @@ class Chapter {
       spineIndex: json['spineIndex'] as int? ?? -1,
       depth: json['depth'] as int? ?? 0,
       parentId: json['parentId'] as int? ?? -1,
+      isGallery: json['isGallery'] as bool? ?? false,
     );
   }
 }

@@ -20,6 +20,7 @@ import '../../services/book_data_provider.dart';
 import '../../services/chapter_cache_service.dart';
 import '../../services/chapter_prefetch_service.dart';
 import '../../services/local_book/local_book_service.dart';
+import '../../services/local_book/epub_parser.dart';
 import '../../services/native/platform_channel.dart';
 import '../../services/reader_bookmark_service.dart';
 import '../../services/storage_service.dart';
@@ -32,6 +33,7 @@ import '../../routes/app_routes.dart';
 import '../../utils/design_tokens.dart';
 import '../../utils/chinese_converter.dart';
 import '../../utils/share_helper.dart';
+import 'epub_gallery_page.dart';
 import 'webview/reader_webview.dart';
 import 'webview/reader_webview_controller.dart';
 import 'webview/reader_html_template.dart';
@@ -85,6 +87,13 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   Book? _book;
   BookSource? _bookSource;
   List<Chapter> _chapters = [];
+
+  // EPUB 画廊章节：非空时由 EpubGalleryPage 接管渲染，不走 WebView
+  // 章节切换时清空（_loadChapterContent 入口处重置）
+  List<EpubGalleryImage> _galleryImages = const [];
+  // 画廊章节初始页是否定位到末尾（从下一章往前翻到本章最后一页时为 true）
+  // 由 _loadChapterContent 设置，_buildGalleryContent 读取后清空
+  bool _galleryInitialPageToEnd = false;
   BookDataProvider? _dataProvider;
   double _sliderValue = 0; // 滑动进度条的实时值
   int _chapterLoadToken = 0;
@@ -873,6 +882,44 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         _isLoading = false;
         _content = '章节不存在';
       });
+      return;
+    }
+
+    // EPUB 画廊章节：直接加载图片列表，由 EpubGalleryPage 渲染，不走 WebView
+    // 章节切换时先清空旧画廊数据，避免上一章画廊闪现
+    _galleryImages = const [];
+    _galleryInitialPageToEnd = false;
+    if (chapter.isGallery &&
+        _book!.originType == BookOriginType.local &&
+        LocalBookService.detectBookType(_book!.bookUrl) == LocalBookType.epub) {
+      try {
+        final images = await LocalBookService.instance.getEpubGalleryImages(
+          _book!,
+          chapter,
+        );
+        if (mounted &&
+            loadToken == _chapterLoadToken &&
+            chapterIndex == _currentChapterIndex) {
+          setState(() {
+            _chapterTitle = chapter.title;
+            _chapterUrl = chapter.url?.split(',{').first.trim();
+            _galleryImages = images;
+            _galleryInitialPageToEnd = pendingToLast && images.length > 1;
+            _content = ''; // 画廊章节无文本内容
+            _isLoading = false;
+          });
+          // 画廊章节进度保存（按图片索引）
+          final restorePos = pendingToLast ? images.length - 1 : 0;
+          unawaited(_saveCurrentProgress(chapter: chapter, pos: restorePos));
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _content = '画廊加载失败：$e';
+          });
+        }
+      }
       return;
     }
 
@@ -2472,12 +2519,38 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       return _buildChapterErrorWidget(provider);
     }
 
+    // EPUB 画廊章节：由 EpubGalleryPage 接管渲染，不走 WebView
+    // 横向滑动浏览图片，支持点击放大预览
+    if (_galleryImages.isNotEmpty) {
+      return _buildGalleryContent(provider);
+    }
+
     // 统一走 WebView 渲染：
     // - 滚动模式（scroll/none）：WebView 内部 body.reader-scroll + overflow-y:auto
     // - 分页模式（slide/cover/simulation）：WebView 内部 body.reader-paged + CSS column 分栏
     // 翻页交互由 _onPointerUp/_onPointerDown + _executeTapAction 处理，
     // 通过 _readerWebViewController.jumpToPage() 调用 JS 翻页
     return _buildWebViewContent(provider);
+  }
+
+  /// 构建 EPUB 画廊章节内容
+  ///
+  /// 由 EpubGalleryPage 接管渲染，PageView 横向滑动浏览图片。
+  /// 章节边界衔接：滑到首张继续往前 → _previousChapter，滑到末张继续往后 → _nextChapter
+  Widget _buildGalleryContent(ReaderProvider provider) {
+    final initialPageToEnd = _galleryInitialPageToEnd;
+    _galleryInitialPageToEnd = false; // 读取后清空，避免重复定位
+    return SafeArea(
+      child: EpubGalleryPage(
+        images: _galleryImages,
+        chapterTitle: _chapterTitle,
+        backgroundColor: provider.backgroundColor,
+        textColor: provider.textColor,
+        initialPageToEnd: initialPageToEnd,
+        onPreviousChapter: () => _previousChapter(),
+        onNextChapter: () => _nextChapter(),
+      ),
+    );
   }
 
   /// 章节加载失败检测

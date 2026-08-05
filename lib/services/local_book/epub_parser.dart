@@ -78,6 +78,18 @@ class EpubChapter {
   /// 扁平 chapters 中此字段为空，仅 tocTree 中的节点有 children
   final List<EpubChapter> children;
 
+  // ===== 画廊章节支持字段 =====
+  // 多看画廊（duokan-image-gallery）章节由 Flutter PageView 接管渲染
+  // 解析时识别并提取图片路径列表，阅读时直接传给 EpubGalleryPage
+
+  /// 是否为画廊章节（含 .duokan-image-gallery 的章节）
+  /// true 时阅读器走 PageView 横向滑动渲染，不走 WebView
+  bool isGallery;
+
+  /// 画廊图片信息列表（每项含 src、maintitle、subtitle）
+  /// 仅当 [isGallery] 为 true 时填充
+  List<EpubGalleryImage> galleryImages;
+
   EpubChapter({
     required this.index,
     required this.title,
@@ -93,6 +105,8 @@ class EpubChapter {
     this.depth = 0,
     this.parentId = -1,
     this.children = const [],
+    this.isGallery = false,
+    this.galleryImages = const [],
   });
 
   /// 把树状目录扁平化为列表（DFS 遍历顺序）
@@ -125,6 +139,8 @@ class EpubChapter {
         depth: node.depth,
         parentId: parentId,
         children: node.children,
+        isGallery: node.isGallery,
+        galleryImages: node.galleryImages,
       );
       result.add(newNode);
       for (final child in node.children) {
@@ -137,6 +153,30 @@ class EpubChapter {
     }
     return result;
   }
+}
+
+/// EPUB 画廊图片信息
+///
+/// 对应 `.duokan-image-gallery-cell` 内的一张图片及其标题/副标题。
+/// 由 [EpubParser.parseFromBytes] 在解析时提取，阅读时传给
+/// [EpubGalleryPage] 渲染。
+class EpubGalleryImage {
+  /// 图片 src（已解析为本地绝对路径或 data: URI）
+  /// - 解压模式：`<extractedBasePath>/OEBPS/Images/01.jpg`
+  /// - 内嵌模式：`data:image/jpeg;base64,...`
+  final String src;
+
+  /// 主标题（`p.duokan-image-maintitle` 文本，可能为空）
+  final String maintitle;
+
+  /// 副标题（`p.duokan-image-subtitle` 文本，可能为空）
+  final String subtitle;
+
+  const EpubGalleryImage({
+    required this.src,
+    this.maintitle = '',
+    this.subtitle = '',
+  });
 }
 
 class EpubBook {
@@ -442,7 +482,22 @@ class EpubParser {
           const wrapperEnd = '</div>';
           final wrappedBody = '$wrapperStart$richBody$wrapperEnd';
 
-          // 5. richContent 只包含 body HTML（不含 CSS）
+          // 5. 识别多看画廊章节（duokan-image-gallery）
+          //    画廊章节含横向滑动图片列表，WebView 的 column 分页无法正确处理，
+          //    改由 Flutter PageView 接管渲染。这里在解析时提取每个 cell 的
+          //    图片 src、主标题、副标题，阅读时直接传给 EpubGalleryPage。
+          //    识别后仍保留 richContent（兜底，便于调试或未来回退方案）。
+          final galleryImages = _extractGalleryImages(
+            richBody, extractedBasePath, chapterBasePath,
+          );
+          if (galleryImages.isNotEmpty) {
+            chapter.isGallery = true;
+            chapter.galleryImages = galleryImages;
+            debugPrint('[EPUB诊断] 章节${chapter.index}识别为画廊页，'
+                '共 ${galleryImages.length} 张图片');
+          }
+
+          // 6. richContent 只包含 body HTML（不含 CSS）
           //    CSS 由 LocalBookService._getEpubContent 在返回时拼接，
           //    避免每个章节都复制一份大 CSS
           chapter.richContent = '[[EPUB_BODY]]$wrappedBody[[/EPUB_BODY]]';
@@ -1212,6 +1267,109 @@ class EpubParser {
       (m) => '<image${m.group(1)}xlink:href="${rewriteSrc(m.group(2) ?? "")}"${m.group(3)}>',
     );
     return result;
+  }
+
+  /// 从 HTML 中提取多看画廊（duokan-image-gallery）的图片信息
+  ///
+  /// 在解析阶段识别画廊章节，提取每个 `.duokan-image-gallery-cell` 内的
+  /// 图片 src、主标题、副标题，用于 Flutter PageView 渲染。
+  ///
+  /// [richBody] 已经过资源路径改写的 body HTML（图片 src 已是绝对路径或 data URI）
+  /// [extractedBasePath] 解压模式时为根目录，内嵌模式时为空字符串
+  /// [chapterBasePath] 章节文件所在目录（用于解析相对路径，带末尾 `/`）
+  ///
+  /// 返回空列表表示该章节不是画廊页（无 cell 或 cell 数量 < 2）
+  static List<EpubGalleryImage> _extractGalleryImages(
+    String richBody,
+    String extractedBasePath,
+    String? chapterBasePath,
+  ) {
+    try {
+      final doc = html_parser.parse(richBody);
+      final cells = doc.querySelectorAll('.duokan-image-gallery-cell');
+
+      // 标准 multi-cell 画廊：每个 cell 含一张 img + 可选标题
+      // 单图不算画廊（按魔改阅读 markEpubGalleryPage 的 images.size < 2 判断）
+      if (cells.length < 2) {
+        // 兜底：cell 不足但有 .duokan-image-gallery 容器时，
+        // 尝试从容器内直接取所有 img（部分 EPUB 可能省略 cell wrapper）
+        final galleries = doc.querySelectorAll('.duokan-image-gallery');
+        final imgs = <dynamic>[];
+        for (final g in galleries) {
+          imgs.addAll(g.querySelectorAll('img'));
+        }
+        if (imgs.length < 2) return const [];
+        // 无 cell wrapper 时无标题信息，只提取图片
+        return imgs
+            .map((img) => EpubGalleryImage(
+                  src: _resolveGallerySrc(
+                    img.attributes['src'] ?? '',
+                    extractedBasePath,
+                    chapterBasePath,
+                  ),
+                ))
+            .where((e) => e.src.isNotEmpty)
+            .toList();
+      }
+
+      // 标准 multi-cell：每个 cell 提取 img + maintitle + subtitle
+      final result = <EpubGalleryImage>[];
+      for (final cell in cells) {
+        final img = cell.querySelector('img');
+        if (img == null) continue;
+        final src = _resolveGallerySrc(
+          img.attributes['src'] ??
+              img.attributes['data-src'] ??
+              img.attributes['data-original'] ??
+              img.attributes['xlink:href'] ??
+              '',
+          extractedBasePath,
+          chapterBasePath,
+        );
+        if (src.isEmpty) continue;
+
+        final maintitle =
+            cell.querySelector('.duokan-image-maintitle')?.text.trim() ?? '';
+        final subtitle =
+            cell.querySelector('.duokan-image-subtitle')?.text.trim() ?? '';
+
+        result.add(EpubGalleryImage(
+          src: src,
+          maintitle: maintitle,
+          subtitle: subtitle,
+        ));
+      }
+      return result.length >= 2 ? result : const [];
+    } catch (e) {
+      debugPrint('[EPUB诊断] 画廊图片提取失败: $e');
+      return const [];
+    }
+  }
+
+  /// 解析画廊图片 src 到可访问形式
+  ///
+  /// richBody 已经过资源路径改写，绝大多数 src 已是绝对路径或 data URI。
+  /// 这里只兜底处理极少数未被改写的情况（如 src 被其他逻辑覆盖）。
+  static String _resolveGallerySrc(
+    String src,
+    String extractedBasePath,
+    String? chapterBasePath,
+  ) {
+    if (src.isEmpty) return '';
+    // 已是 data URI / http / file:// / 已指向解压目录：直接返回
+    if (src.startsWith('data:') ||
+        src.startsWith('http') ||
+        src.startsWith('file://') ||
+        (extractedBasePath.isNotEmpty && src.startsWith(extractedBasePath))) {
+      return src;
+    }
+    // 兜底：相对路径解析后拼接解压目录
+    if (extractedBasePath.isNotEmpty) {
+      final epubPath = _resolveEpubImagePath(src, chapterBasePath);
+      return _joinPath(extractedBasePath, epubPath);
+    }
+    // 内嵌模式且未转 data URI（理论上不应发生）：返回原值
+    return src;
   }
 
   /// 拼接解压根目录和 EPUB 内路径，生成 WebView 可访问的绝对路径
