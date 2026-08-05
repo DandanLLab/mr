@@ -824,23 +824,36 @@ body.reader-scroll #reader-content-b {
    如"序列途径"4字竖排显示在带边框圆角的白色竖条里。
    1:1 还原原作者排版，不覆盖 width/padding。 */
 
-/* 4b-3. 特殊章节内容溢出修复：
+/* 4b-3. 特殊章节盒子宽度修复：
    A. illustration(.box-bg)：.box { margin: 0em 50% 0em 0em; padding: 3px }
-      margin-right:50% 让 .box 只占左半屏(200px)，内容挤在窄列高度增加→溢出。
-      修复：去掉 50% margin-right，改 margin 居中（0.1 safe-height 避免溢出）。
-      padding 还原原作者 3px（1:1 还原），保留 max-width:90% 防止过宽。
+      原作者 margin-right:50% 是让盒子只占左半屏（多看特殊处理）。
+      修复：用 width:fit-content 让盒子宽度由内容决定，margin:0 auto 居中。
+      padding 还原原作者 3px（1:1 还原）。
 
-   B. volume-bg：volume-pic img width:100% 高度可能很大
+   B. serial-num(.intro-box)：.intro-box { margin: 45% auto; padding: 8px }
+      原作者 .intro-box 是块级元素默认 width:100%（填满），但多看渲染时
+      会 shrink-to-fit 让宽度由内容（table.role）决定。
+      修复：用 width:fit-content 让盒子宽度由 table 决定，配合 margin auto 居中。
+      padding 还原原作者 8px。
+
+   C. volume-bg：volume-pic img width:100% 高度可能很大
       + volume-title margin-top 30%(210px) → 溢出。
       修复：volume-pic img max-height 限制为 50% safe-height，为 volume-title 留出空间。
 
-   C. gallery(.video-bg)：duokan-image-gallery margin:8em 0(128px)
+   D. gallery(.video-bg)：duokan-image-gallery margin:8em 0(128px)
       gallery-title margin:2em auto(32px)
       8em margin 在 gallery 容器外，与 title margin 累加导致整体偏下。
       修复：gallery margin-top 减小到 1em。 */
 #reader-content-a .epub-chapter-bg .box {
   margin: calc(var(--reader-safe-height) * 0.1) auto !important;
   padding: 3px !important;
+  width: fit-content !important;
+  max-width: 90% !important;
+}
+#reader-content-a .epub-chapter-bg .intro-box {
+  margin: calc(var(--reader-safe-height) * 0.1) auto !important;
+  padding: 8px !important;
+  width: fit-content !important;
   max-width: 90% !important;
 }
 #reader-content-a .epub-chapter-bg .volume-pic img {
@@ -849,15 +862,6 @@ body.reader-scroll #reader-content-b {
 }
 #reader-content-a .epub-chapter-bg .duokan-image-gallery {
   margin: 1em 0 0.5em 0 !important;
-}
-
-/* 4b-4. intro-box 还原原作者设定：
-   原作者 .intro-box { margin: 45% auto; padding: 8px }
-   4b 已将 margin 改为 safe-height * 0.1（解决溢出）。
-   padding 还原原作者 8px（1:1 还原），保留 max-width:85% 防止过宽。 */
-#reader-content-a .epub-chapter-bg .intro-box {
-  padding: 8px !important;
-  max-width: 85% !important;
 }
 
 /* 4b-5. book-title 字号还原原作者设定（copyright 页）：
