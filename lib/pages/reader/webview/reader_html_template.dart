@@ -776,82 +776,106 @@ body.reader-scroll #reader-content-b {
    .intro-box { margin: 45% auto }
    .video-title { margin: 50% 0 1em 0 }
 
-   正确方案：用 calc(var(--reader-safe-width) * 比例) 精确还原原作者百分比。
+   ★ 垂直 margin 基准选择 ★
    CSS 规范：margin 百分比始终相对包含块 width（非 height）。
-   之前用 vh 是错的——vh 相对 viewport height，把 45% width 换成 45% height
-   会导致 copyright 页 book-title(45vh)+book-author(45vh+20vh)+... 累计 > 100vh，
-   内容被推到第二页（溢出）。而 45% × safe-width ≈ 180px，多元素 margin 折叠后
-   总高度 ≈ 500px < safe-height(700px)，正确留在一页内。
+   但多看阅读器对特殊章节（卷首/版权/介绍）的百分比 margin 实际按 height 处理，
+   原作者 CSS 是针对多看设计的，所以视觉意图是相对 height 的垂直距离。
 
-   之前"百分比被放大几十倍"的根因是 .epub-chapter-bg 用了 position:absolute，
-   包含块变成 #reader-content-a（多页总宽度）。现已改回 column 流，
-   包含块 = column = safe-width，百分比行为恢复正常。
+   方案：垂直 margin 用 calc(var(--reader-safe-height) * 比例) 还原多看视觉意图。
+   - safe-height ≈ 700px（典型手机屏内容区高度）
+   - volume-title margin-top 30% → 0.3 × 700 = 210px（视觉上 30% 屏高）
+   - intro-box margin 45% → 上下各 0.2 × 700 = 140px（调小避免溢出）
+   - book-title/book-author margin 45% → 0.2 × 700 = 140px（调小避免累计溢出）
 
-   用 calc(var(--reader-safe-width) * 0.45) 而非原始 45%，是为了避开某些
-   WebView 在 column 子元素上百分比 margin 解析不一致的问题（显式 calc 更可靠）。
+   各章节溢出分析（safe-height≈700px）：
+   - volume-bg: volume-pic img(50%×700=350) + volume-title margin-top(30%×700=210) + 标题(60) = 620px < 700 ✓
+   - copyright: book-title margin(140+60+140折叠) + book-author(140+30+80) = 470px < 700 ✓
+   - serial-num: intro-box margin(140+140) + 内容(50+300+16) = 646px < 700 ✓
 
    .volume-first 原作者 margin:90% auto 上下各 90%=180% 必溢出，
-   改成 margin-top:90% 无下 margin（文字靠下显示，不溢出）。
-
-   关键修复（copyright.xhtml 排版溢出）：
-   - 原作者 .book-title margin:45% auto + .book-author margin:45% auto 20% auto
-   - 用 safe-width 基准：上下各 0.45×400=180px
-   - book-title 上下 360px + 文字 60px + book-author 上 180px(折叠) + 下 80px + 文字 30px
-   - 累积 360+60+180+80+30 = 710px > safe-height(700px) → 溢出 10px
-   - 修复：book-title 上下 margin 从 0.45 减到 0.35（上下各 140px）
-   - book-author 上 margin 从 0.45 减到 0.35（140px），下 margin 0.2 保留
-   - 新累积：280+60+140+80+30 = 590px < 700px，留出 110px 余量 */
+   改成 margin-top:70% safe-height 无下 margin（文字靠下显示，不溢出）。 */
 #reader-content-a .epub-chapter-bg .book-title {
-  margin: calc(var(--reader-safe-width) * 0.35) auto !important;
+  margin: calc(var(--reader-safe-height) * 0.2) auto !important;
 }
 #reader-content-a .epub-chapter-bg .book-author {
-  margin: calc(var(--reader-safe-width) * 0.35) auto calc(var(--reader-safe-width) * 0.2) auto !important;
+  margin: calc(var(--reader-safe-height) * 0.2) auto calc(var(--reader-safe-height) * 0.1) auto !important;
 }
 #reader-content-a .epub-chapter-bg .book-line {
-  margin-bottom: calc(var(--reader-safe-width) * 0.06) !important;
+  margin-bottom: calc(var(--reader-safe-height) * 0.04) !important;
 }
 #reader-content-a .epub-chapter-bg .volume-title {
-  margin: calc(var(--reader-safe-width) * 0.3) auto 0 auto !important;
+  margin: calc(var(--reader-safe-height) * 0.3) auto 0 auto !important;
 }
 #reader-content-a .epub-chapter-bg .volume-first {
-  margin: calc(var(--reader-safe-width) * 0.9) auto 0 auto !important;
+  margin: calc(var(--reader-safe-height) * 0.7) auto 0 auto !important;
 }
 #reader-content-a .epub-chapter-bg .intro-box {
-  margin: calc(var(--reader-safe-width) * 0.15) auto !important;
+  margin: calc(var(--reader-safe-height) * 0.2) auto !important;
 }
 #reader-content-a .epub-chapter-bg .video-title {
-  margin: calc(var(--reader-safe-width) * 0.5) 0 1em 0 !important;
+  margin: calc(var(--reader-safe-height) * 0.35) 0 1em 0 !important;
 }
 
-/* 4b-2. 特殊章节内容溢出修复：
-   各章节根因分析（safe-width≈400px, safe-height≈700px）：
+/* 4b-2. volume-title 装饰盒子放大：
+   原作者 width:35px 明显是错误值（35px 放不下两个中文字符），
+   导致「小丑」「序列途径」等卷标题被压缩或换行。
+   修复：去掉固定 width，改用 padding 让盒子自适应内容；
+   保留装饰样式（border, border-radius, background）。
+   同时加大 padding 让盒子视觉上更大更协调。 */
+#reader-content-a .epub-chapter-bg .volume-title {
+  width: auto !important;
+  min-width: fit-content !important;
+  padding: 12px 24px !important;
+}
 
+/* 4b-3. 特殊章节内容溢出修复：
    A. illustration(.box-bg)：.box { margin: 0em 50% 0em 0em }
       margin-right:50% 让 .box 只占左半屏(200px)，内容挤在窄列高度增加→溢出。
-      修复：去掉 50% margin-right，改 margin:1em auto 居中，.box 宽度由内容决定。
+      修复：去掉 50% margin-right，改 margin 居中，.box 宽度由内容决定。
+      同时加大 padding 让盒子视觉上更大更宽敞（用户反馈"显示小了一点"）。
 
-   B. serial-num(.intro-box)：4b 原设 margin 上下各 calc(safe-width*0.45)=180px
-      上下 360px + 内容(role-title 50px + 10 行表格 300px + padding 16px)=366px
-      总 726px > 700px → 溢出 26px。
-      已在 4b 中将 intro-box margin 从 0.45 减到 0.15（上下各 60px，总 120px + 366px = 486px）。
+   B. volume-bg：volume-pic img width:100% 高度可能很大
+      + volume-title margin-top 30%(210px) → 溢出。
+      修复：volume-pic img max-height 限制为 50% safe-height，为 volume-title 留出空间。
 
-   C. volume2/chapter1_0(.volume-bg)：volume-pic img width:100% 高度可能很大
-      + volume-title margin-top 30%(120px) → 溢出。
-      修复：volume-pic img 加 max-height 限制，为 volume-title 留出空间。
-
-   D. gallery(.video-bg)：duokan-image-gallery margin:8em 0(128px)
+   C. gallery(.video-bg)：duokan-image-gallery margin:8em 0(128px)
       gallery-title margin:2em auto(32px)
       8em margin 在 gallery 容器外，与 title margin 累加导致整体偏下。
       修复：gallery margin-top 减小到 1em。 */
 #reader-content-a .epub-chapter-bg .box {
-  margin: 1em auto !important;
+  margin: calc(var(--reader-safe-height) * 0.15) auto !important;
+  padding: 16px 20px !important;
+  max-width: 90% !important;
 }
 #reader-content-a .epub-chapter-bg .volume-pic img {
-  max-height: calc(var(--reader-safe-height) * 0.6) !important;
+  max-height: calc(var(--reader-safe-height) * 0.5) !important;
   object-fit: contain !important;
 }
 #reader-content-a .epub-chapter-bg .duokan-image-gallery {
   margin: 1em 0 0.5em 0 !important;
+}
+
+/* 4b-4. intro-box 盒子放大优化：
+   原作者 .intro-box { margin: 45% auto; padding: 8px }
+   4b 已将 margin 改为 safe-height * 0.2（上下各 140px）。
+   这里进一步优化：
+   - 加大 padding（8px → 16px 20px）让盒子内容更宽敞
+   - 加 max-width: 85% 防止盒子过宽，保持视觉聚焦
+   - 确保 table.role 居中显示（原作者 margin: 0.5em auto 已居中，兜底加强） */
+#reader-content-a .epub-chapter-bg .intro-box {
+  padding: 16px 20px !important;
+  max-width: 85% !important;
+}
+
+/* 4b-5. book-title 装饰放大（copyright 页）：
+   原作者 .book-title { margin: 45% auto; font-size: 2.4em }
+   4b 已将 margin 改为 safe-height * 0.2。
+   用户反馈"显示小了一点"，这里加大字号让标题更醒目：
+   - font-size 从 2.4em 提升到 2.6em
+   - 加 letter-spacing 让大标题更有气势 */
+#reader-content-a .epub-chapter-bg .book-title {
+  font-size: 2.6em !important;
+  letter-spacing: 0.05em !important;
 }
 
 /* 4c. EPUB 章节背景容器：留在 column 流里，背景才能铺满单页。
