@@ -624,23 +624,37 @@ body.reader-scroll #reader-content-b {
 
 /* 1. 块级容器避免分页断开：尽量在一个页面内完整显示
    - div/figure/blockquote/video/svg/table/pre 等盒子不分页
+   - h1-h6 标题、li 列表项、hr 分隔线也不分页
    - 内容超过一页时浏览器自动降级允许分页（不会卡死）
-   - 配合 CSS Multi-column Layout 的 break-inside 实现 */
+   - 三重保险：break-inside（通用）+ column-break-inside（CSS Multi-column 专用）
+     + page-break-inside（旧浏览器兼容）
+   - column-break-inside 是 CSS Multi-column Layout 的专用属性，
+     在分栏布局下比 break-inside 更可靠 */
 #reader-content-a div,
 #reader-content-a figure,
 #reader-content-a blockquote,
 #reader-content-a video,
 #reader-content-a svg,
 #reader-content-a table,
-#reader-content-a pre {
+#reader-content-a pre,
+#reader-content-a h1,
+#reader-content-a h2,
+#reader-content-a h3,
+#reader-content-a h4,
+#reader-content-a h5,
+#reader-content-a h6,
+#reader-content-a li,
+#reader-content-a hr {
   break-inside: avoid;
+  column-break-inside: avoid;
   page-break-inside: avoid;
 }
 
 /* 2. 所有图片/视频/SVG/canvas 响应式：最大宽度 100%，不溢出
    覆盖 EPUB 中固定 px 宽度的资源（EpubParser 已把 >300px 固定宽度改写为
    max-width:100%，这里作为兜底确保万无一失）
-   借鉴 lumina：加 break-inside:avoid 防止分栏切分，max-height 限制不超高内容区 */
+   借鉴 lumina：加 break-inside:avoid 防止分栏切分，max-height 限制不超高内容区
+   三重保险：break-inside + column-break-inside + page-break-inside */
 #reader-content-a img,
 #reader-content-a svg,
 #reader-content-a video,
@@ -650,6 +664,7 @@ body.reader-scroll #reader-content-b {
   height: auto;
   object-fit: contain;
   break-inside: avoid;
+  column-break-inside: avoid;
   page-break-inside: avoid;
 }
 
