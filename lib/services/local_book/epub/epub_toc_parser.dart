@@ -106,8 +106,13 @@ class EpubTocParser {
       if (title.isEmpty) continue;
 
       final hrefRaw = anchor.attributes['href'] ?? '';
-      final href =
-          hrefRaw.trim().isEmpty ? '' : EpubPath.resolve(baseHref, hrefRaw);
+      // 占位符判定：href 为空 / 仅 "#" / 仅 "#fragment"（纯 fragment 无路径）
+      // 这些都是卷标题占位符，不应 resolve 成 nav 文件本身路径
+      // 对齐 lumina：span 无 href 或 href="#" 作为卷头标记，href 留空
+      final isPlaceholder = hrefRaw.trim().isEmpty ||
+          hrefRaw.trim() == '#' ||
+          hrefRaw.trim().startsWith('#');
+      final href = isPlaceholder ? '' : EpubPath.resolve(baseHref, hrefRaw);
 
       // 递归处理嵌套 ol
       List<TocItem> children = [];
@@ -177,6 +182,11 @@ class EpubTocParser {
         break;
       }
     }
+    // 占位符判定：src 为空 / 仅 "#" / 仅 "#fragment"（纯 fragment 无路径）
+    // 对齐 lumina：NCX 中无 content src 或 src="#" 作为卷头标记，href 留空
+    final isPlaceholder = src.trim().isEmpty ||
+        src.trim() == '#' ||
+        src.trim().startsWith('#');
 
     // 递归子 navPoint
     final children = <TocItem>[];
@@ -187,8 +197,8 @@ class EpubTocParser {
 
     return TocItem(
       title: title,
-      href: src.trim().isEmpty ? '' : EpubPath.resolve(baseHref, src),
-      fragment: EpubPath.fragment(src),
+      href: isPlaceholder ? '' : EpubPath.resolve(baseHref, src),
+      fragment: isPlaceholder ? null : EpubPath.fragment(src),
       children: children,
     );
   }

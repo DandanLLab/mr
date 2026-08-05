@@ -735,11 +735,10 @@ body.reader-scroll #reader-content-b {
 
 /* 8b. 视频响应式宽高比：EPUB 原作者常用固定 width×height（如 540×360）
    做视频尺寸。EpubParser 已把 >300px 宽度改写为 max-width:100%，
-   但 height 仍是固定值，会导致视频变形。这里用 aspect-ratio 保持比例，
-   height:auto 让高度跟随宽度自适应。
-   16:9 是最常见的视频比例，作为兜底默认值 */
+   但 height 仍是固定值，会导致视频变形。
+   借鉴 lumina：用 max-width:100% 而非 width:100%!important，避免小视频被拉满 */
 #reader-content-a video {
-  width: 100% !important;
+  max-width: 100%;
   height: auto !important;
   max-height: calc(var(--reader-safe-height) - 2em);
   object-fit: contain;
