@@ -774,10 +774,41 @@ body.reader-scroll #reader-content-b {
   margin: calc(var(--reader-safe-width) * 0.9) auto 0 auto !important;
 }
 #reader-content-a .epub-chapter-bg .intro-box {
-  margin: calc(var(--reader-safe-width) * 0.45) auto !important;
+  margin: calc(var(--reader-safe-width) * 0.15) auto !important;
 }
 #reader-content-a .epub-chapter-bg .video-title {
   margin: calc(var(--reader-safe-width) * 0.5) 0 1em 0 !important;
+}
+
+/* 4b-2. 特殊章节内容溢出修复：
+   各章节根因分析（safe-width≈400px, safe-height≈700px）：
+
+   A. illustration(.box-bg)：.box { margin: 0em 50% 0em 0em }
+      margin-right:50% 让 .box 只占左半屏(200px)，内容挤在窄列高度增加→溢出。
+      修复：去掉 50% margin-right，改 margin:1em auto 居中，.box 宽度由内容决定。
+
+   B. serial-num(.intro-box)：4b 原设 margin 上下各 calc(safe-width*0.45)=180px
+      上下 360px + 内容(role-title 50px + 10 行表格 300px + padding 16px)=366px
+      总 726px > 700px → 溢出 26px。
+      已在 4b 中将 intro-box margin 从 0.45 减到 0.15（上下各 60px，总 120px + 366px = 486px）。
+
+   C. volume2/chapter1_0(.volume-bg)：volume-pic img width:100% 高度可能很大
+      + volume-title margin-top 30%(120px) → 溢出。
+      修复：volume-pic img 加 max-height 限制，为 volume-title 留出空间。
+
+   D. gallery(.video-bg)：duokan-image-gallery margin:8em 0(128px)
+      gallery-title margin:2em auto(32px)
+      8em margin 在 gallery 容器外，与 title margin 累加导致整体偏下。
+      修复：gallery margin-top 减小到 1em。 */
+#reader-content-a .epub-chapter-bg .box {
+  margin: 1em auto !important;
+}
+#reader-content-a .epub-chapter-bg .volume-pic img {
+  max-height: calc(var(--reader-safe-height) * 0.6) !important;
+  object-fit: contain !important;
+}
+#reader-content-a .epub-chapter-bg .duokan-image-gallery {
+  margin: 1em 0 0.5em 0 !important;
 }
 
 /* 4c. EPUB 章节背景容器：留在 column 流里，背景才能铺满单页。
