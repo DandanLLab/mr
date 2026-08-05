@@ -638,8 +638,8 @@ body.reader-scroll #reader-content-b {
     return '''
 /* === EPUB 富 HTML 兜底 CSS（通用，不依赖具体 class 名）=== */
 
-/* 1. 不可切分元素：图片/视频/SVG/表格/pre 等不应被分栏切断
-   - 只对确实不可切分的元素设 break-inside:avoid
+/* 1. 不可切分元素：图片/视频/SVG/标题 等不应被分栏切断
+   - 只对确实不可切分且通常不超过一页的元素设 break-inside:avoid
    - 不对通用 div/figure/blockquote 设 break-inside:avoid：
      这些元素可能包含超过一页的内容，break-inside:avoid 会阻止浏览器切分，
      导致整个块被推到下一栏，当前栏留下空白缝隙，下一栏内容溢出
@@ -648,8 +648,6 @@ body.reader-scroll #reader-content-b {
 #reader-content-a img,
 #reader-content-a video,
 #reader-content-a svg,
-#reader-content-a table,
-#reader-content-a pre,
 #reader-content-a h1,
 #reader-content-a h2,
 #reader-content-a h3,
@@ -659,6 +657,20 @@ body.reader-scroll #reader-content-b {
   break-inside: avoid;
   column-break-inside: avoid;
   page-break-inside: avoid;
+}
+
+/* 1a. table/pre：限制最大高度，超过则允许切分
+   - table 和 pre 可能包含超长内容（大表格、长代码块）
+   - max-height 限制为 safe-height 的 90%（留出 margin 空间）
+   - 不设 break-inside:avoid，允许浏览器自由切分大表格/长代码块
+   - 小表格/短代码块（< 90% safe-height）自然在一页内显示
+   - overflow-x:auto 让超宽表格横向滚动，不撑宽 column */
+#reader-content-a table,
+#reader-content-a pre {
+  max-width: 100%;
+  max-height: calc(var(--reader-safe-height) * 0.9);
+  overflow: auto;
+  /* 不设 break-inside:avoid，允许大表格/长代码块被切分到多页 */
 }
 
 /* 1b. 防止子元素水平溢出 column：
@@ -721,7 +733,8 @@ body.reader-scroll #reader-content-b {
 /* 4-0. EPUB 模式下 HTML 结构是
    #reader-content-a (column 容器)
      └ div[data-chapter-index] (column 直接子元素 ← 这里！)
-         └ div.epub-chapter-bg (孙子元素) / p, h1, ... (正文)
+         └ div.epub-chapter-bg (特殊章节) / div.epub-chapter-plain (正文章节)
+             └ p, h1, img, ... (EPUB 原作者 body innerHTML)
 
    关键修复：正文章节不设 break-inside:avoid 和 min-height
    - 正文章节内容通常超过一页，break-inside:avoid 会阻止浏览器切分，
@@ -734,6 +747,16 @@ body.reader-scroll #reader-content-b {
 #reader-content-a > [data-chapter-index] {
   /* 不设 break-inside:avoid，允许浏览器自由切分正文内容到多栏（多页） */
   /* 不设 min-height，让内容自然展开 */
+}
+
+/* 4-0a. 正文章节 wrapper（.epub-chapter-plain）布局约束
+   - max-width:100% 防止 wrapper 溢出 column 边界
+   - 不设 break-inside:avoid，允许浏览器自由切分正文到多栏（多页）
+   - 不设 min-height，让内容自然展开
+   - 与 .epub-chapter-bg（特殊章节）区分，后者需要整页显示 */
+#reader-content-a .epub-chapter-plain {
+  max-width: 100%;
+  /* 不设 break-inside:avoid，允许正文自由切分 */
 }
 
 #reader-content-a .epub-chapter-bg {

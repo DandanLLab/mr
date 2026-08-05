@@ -425,8 +425,13 @@ class EpubParser {
           //    背景容器，设置 min-height 让背景填满整页
           //    智能合并 class：若 bodyAttrs 已有 class，追加 epub-chapter-bg；
           //    否则单独加 class="epub-chapter-bg"
+          //
+          //    正文章节（body 无 class/style/bgcolor）加 class="epub-chapter-plain"：
+          //    - 让 reader 兜底 CSS 能区分特殊章节（.epub-chapter-bg）和正文
+          //    - 便于对正文 wrapper 精确应用布局约束（如 max-width:100%）
+          //    - 不影响 IntersectionObserver 的 [data-chapter-index] 监测
           final wrapperAttrs = inlinedBodyAttrs.isEmpty
-              ? ''
+              ? 'class="epub-chapter-plain"'
               : (inlinedBodyAttrs.contains('class="')
                   ? inlinedBodyAttrs.replaceAllMapped(
                       RegExp(r'class="([^"]*)"'),
@@ -1637,17 +1642,25 @@ class EpubParser {
   static String? _rewriteCssValueForReader(String name, String value) {
     final lowerValue = value.toLowerCase();
 
-    // 1. 百分比 margin-top/bottom/padding-top/bottom → calc(safe-height)
-    //    CSS 规范：百分比 margin-top/bottom 基于容器宽度，不是高度。
-    //    EPUB 原作者假设"一页 = 一屏"，用 45% 做垂直居中（基于页面高度）。
-    //    reader column 容器宽度 = 一栏宽度（窄），45% 算出来很小，垂直定位失效。
-    //    修正：替换为 calc(var(--reader-safe-height) * N / 100)，还原垂直定位意图。
+    // 1. 百分比 margin-top/bottom/padding-top/bottom → calc(safe-width)
+    //    CSS 规范：百分比 margin/padding 相对包含块 width（不是 height）。
+    //    EPUB 原作者假设"一页 = 一屏"，用 45% 做垂直占位（基于页面宽度，
+    //    在原 EPUB 单页布局里页面宽度 ≈ 页面高度，所以 45% width ≈ 45% height）。
+    //    reader column 容器宽度 = 一栏宽度 = safe-width，
+    //    用 safe-width 作为基准符合 CSS 规范，且与原作者意图一致。
+    //
+    //    之前用 safe-height 是错的：
+    //    - safe-height(700px) 比 safe-width(400px) 大，45% safe-height = 315px
+    //      而作者意图 45% width ≈ 180px，差了近一倍
+    //    - 多个百分比 margin 累积（如 book-title 45% + book-author 45% + 20%）
+    //      用 safe-height 会超过 safe-height 导致溢出第二页
+    //    - safe-width 基准下 45%+45%+20% = 110% × 400px = 440px < 700px，不溢出
     if ((name == 'margin-top' || name == 'margin-bottom' ||
          name == 'padding-top' || name == 'padding-bottom') &&
         lowerValue.contains('%')) {
       return value.replaceAllMapped(
         RegExp(r'(\d+(?:\.\d+)?)\s*%'),
-        (m) => 'calc(var(--reader-safe-height)*${m.group(1)}/100)',
+        (m) => 'calc(var(--reader-safe-width)*${m.group(1)}/100)',
       );
     }
 
@@ -1668,6 +1681,49 @@ class EpubParser {
         if (px > 200) {
           return 'auto';
         } else if (px < 100 && px > 0) {
+          return 'auto';
+        }
+      }
+      // 3b. width: 100vw / 100% → auto
+      //     100vw 在 InAppWebView 中 = 设备屏幕宽度（非 widget 宽度），可能 > column 宽度
+      //     100% 在 EPUB 原作者意图是相对页面宽度，column 里相对包含块 = column 宽度，
+      //     但若元素是 .epub-chapter-bg 的子元素，包含块可能解析异常
+      //     改为 auto 让 reader 框架的 max-width:100% 兜底
+      if (RegExp(r'^100(vw|vh|svh|dvh|lvh|%)$', caseSensitive: false)
+          .hasMatch(value.trim())) {
+        return 'auto';
+      }
+    }
+
+    // 3c. min-width: Npx (N > 200) → auto
+    //     min-width 优先级高于 max-width 和 width，reader 框架的 max-width:100% 无法覆盖
+    //     大 min-width 会撑宽 column，导致 scrollWidth 异常、pageCount 算多、翻页对不齐
+    //     小 min-width（<=200px）保留，不影响布局
+    if (name == 'min-width') {
+      final match = RegExp(r'^(\d+(?:\.\d+)?)px$').firstMatch(value.trim());
+      if (match != null) {
+        final px = double.tryParse(match.group(1) ?? '0') ?? 0;
+        if (px > 200) {
+          return 'auto';
+        }
+      }
+      // min-width: 100vw/100% 也改为 auto
+      if (RegExp(r'^100(vw|%)$', caseSensitive: false).hasMatch(value.trim())) {
+        return 'auto';
+      }
+    }
+
+    // 3d. height: Npx (N > safe-height 的 80%) → auto
+    //     固定大高度元素会溢出单页 column 高度，被推到下一页，当前页留空白
+    //     阈值用 80% safe-height 留出 margin 空间
+    //     小高度（<=560px，约 80% × 700px）保留
+    if (name == 'height') {
+      final match = RegExp(r'^(\d+(?:\.\d+)?)px$').firstMatch(value.trim());
+      if (match != null) {
+        final px = double.tryParse(match.group(1) ?? '0') ?? 0;
+        // 560px = 80% × 700px（safe-height 典型值）
+        // 用固定值而非 calc，因为 _rewriteCssValueForReader 无法访问运行时变量
+        if (px > 560) {
           return 'auto';
         }
       }
