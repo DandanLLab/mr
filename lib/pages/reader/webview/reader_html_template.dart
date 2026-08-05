@@ -791,12 +791,21 @@ body.reader-scroll #reader-content-b {
    WebView 在 column 子元素上百分比 margin 解析不一致的问题（显式 calc 更可靠）。
 
    .volume-first 原作者 margin:90% auto 上下各 90%=180% 必溢出，
-   改成 margin-top:90% 无下 margin（文字靠下显示，不溢出）。 */
+   改成 margin-top:90% 无下 margin（文字靠下显示，不溢出）。
+
+   关键修复（copyright.xhtml 排版溢出）：
+   - 原作者 .book-title margin:45% auto + .book-author margin:45% auto 20% auto
+   - 用 safe-width 基准：上下各 0.45×400=180px
+   - book-title 上下 360px + 文字 60px + book-author 上 180px(折叠) + 下 80px + 文字 30px
+   - 累积 360+60+180+80+30 = 710px > safe-height(700px) → 溢出 10px
+   - 修复：book-title 上下 margin 从 0.45 减到 0.35（上下各 140px）
+   - book-author 上 margin 从 0.45 减到 0.35（140px），下 margin 0.2 保留
+   - 新累积：280+60+140+80+30 = 590px < 700px，留出 110px 余量 */
 #reader-content-a .epub-chapter-bg .book-title {
-  margin: calc(var(--reader-safe-width) * 0.45) auto !important;
+  margin: calc(var(--reader-safe-width) * 0.35) auto !important;
 }
 #reader-content-a .epub-chapter-bg .book-author {
-  margin: calc(var(--reader-safe-width) * 0.45) auto calc(var(--reader-safe-width) * 0.2) auto !important;
+  margin: calc(var(--reader-safe-width) * 0.35) auto calc(var(--reader-safe-width) * 0.2) auto !important;
 }
 #reader-content-a .epub-chapter-bg .book-line {
   margin-bottom: calc(var(--reader-safe-width) * 0.06) !important;
