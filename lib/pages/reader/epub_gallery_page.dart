@@ -80,24 +80,38 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
 
   /// 生成完整 HTML 文档
   ///
-  /// 结构 1:1 对齐原作者 gallery.xhtml + 多看阅读器渲染模板：
+  /// ★ 1:1 对齐多看阅读器渲染架构 ★
+  ///
+  /// 原作者 gallery.xhtml 是普通竖向块级布局，多看 CBookRender::RenderGallery
+  /// + CGalleryHtmlSnippetOutputSystem 把它转换成横向滑动画廊：
+  ///
+  /// 多看二进制提取的结构（0x4d7435-0x4d7522）：
   /// ```
-  /// <body class="video-bg">
-  ///   <h3 class="gallery-title">画廊图</h3>
-  ///   <div class="duokan-image-gallery gallery-pic">...cells...</div>
-  ///   <p class="gallery-txt">滑动切换，点击放大</p>
-  ///   <div class="dotted">...点点点...</div>  ← body 最后一个 flex item
-  /// </body>
+  /// <div class="slider" style="position: absolute; left:%dpx; top:%dpx;
+  ///                            width:%dpx; height:%dpx;">
+  ///   <div class="slide_group">
+  ///     <div class="dotted" style="position: absolute; ...">
+  ///       <span></span>
+  ///       <span class="active"></span>
+  ///     </div>
+  ///     <div class="btn btn_l">left</div>
+  ///     <div class="btn btn_r">right</div>
+  ///   </div>
+  ///   <div class="slide">
+  ///     <div class="msg" style="position: absolute; ...">...</div>
+  ///   </div>
+  /// </div>
   /// ```
   ///
+  /// 多看 IsFullScreenImage 判定：
+  /// - 全屏图片：占满整个 slide（object-fit: contain 保持比例）
+  /// - 非全屏图片：在 cell 内，保留原作 border + box-shadow
+  ///
   /// CSS 分四层（仅覆盖布局，保留原作视觉样式）：
-  /// 1. html { font-size } — 阅读器基准字号，让 rawCss 的 em 跟随阅读器
-  /// 2. rawCss — 原作者原始 CSS（原样内联，浏览器原生渲染所有视觉属性：
-  ///    color/font-family/font-size/margin/border/box-shadow/text-shadow 等）
-  /// 3. 布局覆盖 — scroll-snap 横向滑动 + flex 布局
-  ///    （仅用 !important 覆盖影响横向滑动布局的 display/overflow/flex/margin，
-  ///    保留原作的 border/box-shadow/color/font 等视觉样式）
-  /// 4. 点点点指示器 — body 最后一个 flex item（和排版在一起，非 fixed 浮动）
+  /// 1. html { font-size } — 阅读器基准字号
+  /// 2. rawCss — 原作者原始 CSS（原样内联，保留所有视觉样式）
+  /// 3. 布局覆盖 — slider/slide 结构 + scroll-snap 横向滑动
+  /// 4. dotted 指示器 — 跟随 textColor 变色
   String _buildGalleryHtml() {
     final cs = widget.chapterStyle;
     final rawCss = cs?.rawCss ?? '';
@@ -246,14 +260,24 @@ body {
   box-sizing: border-box !important;
   margin: 0 !important;
 }
-/* img: 覆盖原作 .gallery-pic img { width: 100% }
-   横向滑动模式下图片应按比例缩放到适合 cell 的尺寸，而非占满宽度 */
+/* img: 全屏图片对齐多看 IsFullScreenImage
+   图片按比例缩放到适合 slide 的尺寸，object-fit: contain 保持比例
+   max-height 用百分比（不依赖 vh），让图片在 slide 内自适应 */
 .duokan-image-gallery-cell img {
   max-width: 90% !important;
-  max-height: 70vh !important;
+  max-height: 80% !important;
   width: auto !important;
   height: auto !important;
   object-fit: contain !important;
+  flex: 0 0 auto !important;
+}
+/* maintitle/subtitle: 跟随图片显示在 slide 内
+   保留原作 color/font-family/font-size/margin/text-align */
+.duokan-image-maintitle,
+.duokan-image-subtitle {
+  flex: 0 0 auto !important;
+  max-width: 90% !important;
+  overflow: hidden !important;
 }
 /* 隐藏滚动条 */
 .duokan-image-gallery::-webkit-scrollbar { display: none; }

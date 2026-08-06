@@ -690,30 +690,57 @@ class EpubCssProcessor {
   // ============ 常量 ============
 
   /// 支持的 CSS 属性白名单
+  /// ★ 1:1 对齐多看阅读器 libddlayoutkit.so 支持的 CSS 属性清单 ★
   ///
-  /// 参考 JRead/Legado EpubCss.kt supportedProperties，涵盖：
-  /// - 文本：color, text-*, line-height, letter-spacing, word-spacing, white-space
-  /// - 字体：font-*, font-family
-  /// - 背景：background-color, background-image, background-repeat
-  /// - 边框：border-*-width/style/color/radius
-  /// - 盒模型：margin-*, padding-*, width, height, max-*, min-*
-  /// - 列表：list-style-*
-  /// - 其他：display, vertical-align, text-indent, opacity
+  /// 多看二进制中提取到的完整 CSS 属性集合（87 个标准属性 + 1 个 EPUB 归一化属性）。
+  /// 逆向来源：libddlayoutkit.so 的 .rodata 段 CSS 属性名字符串表。
+  /// 多看阅读器原生支持这些属性，WebView 也全部原生支持，无需特殊处理。
+  ///
+  /// 分类（按多看二进制中的字符串顺序）：
+  /// - 文本：color/text-align/text-indent/text-decoration/text-shadow/
+  ///   text-transform/text-overflow/text-justify/text-wrap
+  /// - 字体：font/font-family/font-size/font-style/font-weight
+  /// - 行距字距：line-height/letter-spacing/word-spacing/word-break/word-wrap/
+  ///   overflow-wrap/hyphens/tab-size
+  /// - 背景：background/background-color/background-image/background-repeat/
+  ///   background-position/background-size/background-attachment/background-clip/
+  ///   background-origin
+  /// - 边框：border/border-*/border-radius/border-collapse/border-spacing
+  /// - 盒模型：margin/margin-*/padding/padding-*/width/height/min-*/max-*/
+  ///   box-shadow/box-sizing/box-model
+  /// - 定位：position/top/right/bottom/left/z-index/clear/float/vertical-align
+  /// - 溢出：overflow/overflow-x/overflow-y
+  /// - 显示：display/visibility/opacity/overflow
+  /// - 分页：page-break-before/page-break-after/page-break-inside/
+  ///   break-before/break-after/break-inside
+  /// - 多栏：column-count/column-gap/column-width/column-rule
+  /// - 弹性盒：flex/flex-direction/flex-wrap/flex-flow/justify-content/
+  ///   align-items/align-content/align-self/order/flex-grow/flex-shrink/flex-basis
+  /// - 列表：list-style/list-style-type/list-style-position/list-style-image
+  /// - 表格：table-layout/caption-side/empty-cells
+  /// - 轮廓：outline/outline-width/outline-style/outline-color
+  /// - 内容：content/quotes/counter-reset/counter-increment
+  /// - 变换：transform/transform-origin/transition
+  /// - 书写方向：direction/unicode-bidi/writing-mode
+  /// - 滚动捕捉：scroll-snap-type/scroll-snap-align
+  /// - 对象适配：object-fit/object-position
+  /// - 其他：cursor
   static const _supportedProperties = {
-    // 文本
+    // === 文本 ===
     'color', 'text-align', 'text-decoration', 'text-decoration-line',
-    'text-indent', 'text-transform', 'text-shadow', 'line-height',
-    'letter-spacing', 'word-spacing', 'word-break', 'word-wrap',
-    'overflow-wrap', 'white-space', 'vertical-align', 'direction',
-    'unicode-bidi', 'writing-mode',
-    // 字体
+    'text-indent', 'text-transform', 'text-shadow', 'text-overflow',
+    'text-justify', 'text-wrap',
+    // === 字体 ===
     'font', 'font-family', 'font-size', 'font-style', 'font-weight',
     'font-variant', 'font-stretch',
-    // 背景
+    // === 行距字距 ===
+    'line-height', 'letter-spacing', 'word-spacing', 'word-break',
+    'word-wrap', 'overflow-wrap', 'hyphens', 'tab-size',
+    // === 背景 ===
     'background', 'background-color', 'background-image',
     'background-repeat', 'background-position', 'background-size',
-    'background-attachment',
-    // 边框
+    'background-attachment', 'background-clip', 'background-origin',
+    // === 边框 ===
     'border', 'border-top', 'border-right', 'border-bottom', 'border-left',
     'border-width', 'border-style', 'border-color',
     'border-top-width', 'border-top-style', 'border-top-color',
@@ -722,15 +749,47 @@ class EpubCssProcessor {
     'border-left-width', 'border-left-style', 'border-left-color',
     'border-radius', 'border-top-left-radius', 'border-top-right-radius',
     'border-bottom-left-radius', 'border-bottom-right-radius',
-    // 盒模型
+    'border-collapse', 'border-spacing',
+    // === 盒模型 ===
     'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
     'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
     'width', 'height', 'max-width', 'max-height', 'min-width', 'min-height',
-    // 列表
+    'box-shadow', 'box-sizing', 'box-model',
+    // === 定位 ===
+    'position', 'top', 'right', 'bottom', 'left', 'z-index',
+    'clear', 'float', 'vertical-align',
+    // === 溢出 ===
+    'overflow', 'overflow-x', 'overflow-y',
+    // === 显示 ===
+    'display', 'visibility', 'opacity',
+    // === 分页 ===
+    'page-break-before', 'page-break-after', 'page-break-inside',
+    'break-before', 'break-after', 'break-inside',
+    // === 多栏 ===
+    'column-count', 'column-gap', 'column-width', 'column-rule',
+    // === 弹性盒 ===
+    'flex', 'flex-direction', 'flex-wrap', 'flex-flow',
+    'justify-content', 'align-items', 'align-content', 'align-self',
+    'order', 'flex-grow', 'flex-shrink', 'flex-basis',
+    // === 列表 ===
     'list-style', 'list-style-type', 'list-style-position', 'list-style-image',
-    // 其他
-    'display', 'opacity', 'box-shadow', 'visibility',
-    // EPUB 特有（已归一化）
+    // === 表格 ===
+    'table-layout', 'caption-side', 'empty-cells',
+    // === 轮廓 ===
+    'outline', 'outline-width', 'outline-style', 'outline-color',
+    // === 内容 ===
+    'content', 'quotes', 'counter-reset', 'counter-increment',
+    // === 变换 ===
+    'transform', 'transform-origin', 'transition',
+    // === 书写方向 ===
+    'direction', 'unicode-bidi', 'writing-mode',
+    // === 滚动捕捉 ===
+    'scroll-snap-type', 'scroll-snap-align',
+    // === 对象适配 ===
+    'object-fit', 'object-position',
+    // === 其他 ===
+    'cursor',
+    // === EPUB 特有（已归一化） ===
     'duokan-text-indent',
   };
 
