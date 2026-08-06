@@ -80,22 +80,24 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
 
   /// 生成完整 HTML 文档
   ///
-  /// 结构对齐原作者 gallery.xhtml：
+  /// 结构 1:1 对齐原作者 gallery.xhtml + 多看阅读器渲染模板：
   /// ```
   /// <body class="video-bg">
   ///   <h3 class="gallery-title">画廊图</h3>
   ///   <div class="duokan-image-gallery gallery-pic">...cells...</div>
   ///   <p class="gallery-txt">滑动切换，点击放大</p>
-  ///   <div class="dotted">...点点点...</div>
+  ///   <div class="dotted">...点点点...</div>  ← body 最后一个 flex item
   /// </body>
   /// ```
   ///
-  /// CSS 分四层：
+  /// CSS 分四层（仅覆盖布局，保留原作视觉样式）：
   /// 1. html { font-size } — 阅读器基准字号，让 rawCss 的 em 跟随阅读器
-  /// 2. rawCss — 原作者原始 CSS（原样内联，浏览器原生渲染）
-  /// 3. 覆盖 CSS — scroll-snap 横向滑动 + flex 布局 + 滚动条隐藏
-  ///    （用 !important 覆盖 rawCss 中影响画廊布局的 margin/overflow 等）
-  /// 4. 点点点指示器 CSS — fixed 定位底部，跟随 textColor 变色
+  /// 2. rawCss — 原作者原始 CSS（原样内联，浏览器原生渲染所有视觉属性：
+  ///    color/font-family/font-size/margin/border/box-shadow/text-shadow 等）
+  /// 3. 布局覆盖 — scroll-snap 横向滑动 + flex 布局
+  ///    （仅用 !important 覆盖影响横向滑动布局的 display/overflow/flex/margin，
+  ///    保留原作的 border/box-shadow/color/font 等视觉样式）
+  /// 4. 点点点指示器 — body 最后一个 flex item（和排版在一起，非 fixed 浮动）
   String _buildGalleryHtml() {
     final cs = widget.chapterStyle;
     final rawCss = cs?.rawCss ?? '';
@@ -178,18 +180,20 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="format-detection" content="telephone=no, email=no, address=no">
 <style>
-/* === 阅读器基准字号（让 rawCss 的 em 单位跟随阅读器字号）=== */
+/* === 1. 阅读器基准字号（让 rawCss 的 em 单位跟随阅读器字号）=== */
 html {
   font-size: ${widget.baseFontSize}px;
 }
 
-/* === 原作者原始 CSS（原样内联，让浏览器原生渲染所有 CSS 属性）=== */
+/* === 2. 原作者原始 CSS（原样内联，浏览器原生渲染所有视觉属性）=== */
+/* 保留原作的 color/font-family/font-size/margin/border/box-shadow/
+   text-shadow/text-align/line-height/text-indent 等全部视觉样式 */
 $rawCss
 
-/* === 画廊横向滑动 scroll-snap + 布局覆盖 === */
+/* === 3. 布局覆盖（仅覆盖影响横向滑动布局的属性，保留视觉样式）=== */
 html, body {
   margin: 0 !important;
-  padding: 0 !important;
+  padding: 0 !important;  /* 覆盖原作 body { padding: 0.5em } */
   height: 100vh !important;
   width: 100vw !important;
   overflow: hidden !important;
@@ -202,16 +206,20 @@ body {
   flex-direction: column !important;
   box-sizing: border-box !important;
   color: $textColor;
+  /* 背景属性：chapterStyle 提取值兜底，!important 确保覆盖 rawCss 中的
+     .video-bg（因 rawCss 的 url() 是相对路径，需 bodyBgStyle 内联纠正）*/
   background-color: $bgColor !important;
   background-size: $bgSize !important;
   background-position: $bgPosition !important;
   background-repeat: $bgRepeat !important;
-  /* 底部留空给 dotted 指示器 + 安全区域 */
-  padding-bottom: calc(28px + env(safe-area-inset-bottom)) !important;
 }
+/* gallery-title: 保留原作 margin: 2em auto, 仅加 flex 标记 */
 .gallery-title {
   flex: 0 0 auto !important;
 }
+/* duokan-image-gallery: 横向滑动容器
+   覆盖原作 margin: 8em 0 0.5em 0（8em 顶部 margin 在 flex 布局中会
+   占用大量空间，让 gallery 被挤压；横向滑动模式下不需要这个间距）*/
 .duokan-image-gallery {
   flex: 1 1 auto !important;
   min-height: 0 !important;
@@ -222,6 +230,10 @@ body {
   -webkit-overflow-scrolling: touch;
   margin: 0 !important;
 }
+/* cell: 横向滑动项
+   保留原作 border-style: solid; border-width: 1px; box-shadow: 5px 5px 5px #888
+   覆盖原作 margin: 10px 0（cell 在 flex 布局中是 100% 高度，
+   margin 会导致超出容器）*/
 .duokan-image-gallery-cell {
   scroll-snap-align: center !important;
   flex: 0 0 100% !important;
@@ -232,7 +244,10 @@ body {
   align-items: center !important;
   justify-content: center !important;
   box-sizing: border-box !important;
+  margin: 0 !important;
 }
+/* img: 覆盖原作 .gallery-pic img { width: 100% }
+   横向滑动模式下图片应按比例缩放到适合 cell 的尺寸，而非占满宽度 */
 .duokan-image-gallery-cell img {
   max-width: 90% !important;
   max-height: 70vh !important;
@@ -243,21 +258,21 @@ body {
 /* 隐藏滚动条 */
 .duokan-image-gallery::-webkit-scrollbar { display: none; }
 .duokan-image-gallery { -ms-overflow-style: none; scrollbar-width: none; }
+/* gallery-txt: 保留原作 margin: 1em auto, 仅加 flex 标记 */
 .gallery-txt {
   flex: 0 0 auto !important;
 }
 
-/* === 点点点指示器（HTML 渲染，跟随 textColor，对齐多看 text-shadow 风格）=== */
+/* === 4. 点点点指示器（body 最后一个 flex item, 和排版在一起）=== */
+/* 对齐多看阅读器渲染：dotted 在 slide_group 内部，和排版流一起
+   （非 position:fixed 浮动），作为 body 最后一个 flex item */
 .dotted {
-  position: fixed;
-  bottom: calc(12px + env(safe-area-inset-bottom));
-  left: 0;
-  right: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 100;
-  pointer-events: none; /* 不拦截触摸事件 */
+  flex: 0 0 auto !important;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  padding: 8px 0 !important;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom)) !important;
 }
 .dotted span {
   display: inline-block;

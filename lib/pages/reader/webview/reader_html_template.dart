@@ -822,7 +822,20 @@ body.reader-scroll #reader-content-b {
    width:35px 是故意的！35px 宽度下中文字符会每行1字垂直排列，
    配合 border+border-radius+background 形成竖条盒子装饰。
    如"序列途径"4字竖排显示在带边框圆角的白色竖条里。
-   1:1 还原原作者排版，不覆盖 width/padding。 */
+   1:1 还原原作者排版，不覆盖 width/padding。
+
+   ★ 字号固定 15px（对齐多看渲染）★
+   多看阅读器 libddlayoutkit.so 二进制中不含 writing-mode /
+   vertical-rl / text-orientation 等 CSS 竖排属性字符串，说明多看
+   用 C++ layout 引擎直接绘制竖排（每字独立定位、固定字号），
+   不走 CSS writing-mode，也不跟随阅读器字号。
+   原作者 font-size:1.3em 相对阅读器字号（18px 基准下 = 23.4px），
+   盒子过长且字号变化时竖排视觉效果不稳定。
+   固定 15px 对齐多看固定字号渲染：35px 宽 - 5px*2 padding - 3px*2 border
+   = 19px 内容宽度，15px 中文字符正好每行1字，盒子紧凑美观。 */
+#reader-content-a .epub-chapter-bg .volume-title {
+  font-size: 15px !important;
+}
 
 /* 4b-3. 特殊章节盒子宽度修复：
    A. illustration(.box-bg)：.box { margin: 0em 50% 0em 0em; padding: 3px }
