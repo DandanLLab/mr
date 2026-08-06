@@ -76,7 +76,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
 
   /// 生成完整 HTML 文档
   ///
-  /// ★ 1:1 对齐多看阅读器渲染架构 ★
+  /// ★ 1:1 对齐多看阅读器渲染架构（基于 libddlayoutkit.so 反汇编）★
   ///
   /// 原作者 gallery.xhtml 是普通竖向块级布局，多看 CBookRender::RenderGallery
   /// + CGalleryHtmlSnippetOutputSystem 把它转换成横向滑动画廊：
@@ -90,11 +90,29 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   ///       <span></span>
   ///       <span class="active"></span>
   ///     </div>
-  ///     <div class="btn btn_l">left</div>
-  ///     <div class="btn btn_r">right</div>
+  ///     <div class="btn btn_l">left</div>   ← 原生按钮，已删除
+  ///     <div class="btn btn_r">right</div>  ← 原生按钮，已删除
   ///   </div>
   ///   <div class="slide">
   ///     <div class="msg" style="position: absolute; ...">...</div>
+  ///   </div>
+  /// </div>
+  /// ```
+  ///
+  /// 我们的 HTML 结构对齐多看（class 名完全一致）：
+  /// ```
+  /// <div class="slider">           ← position:relative + flex 占满
+  ///   <div class="slide_group">    ← position:absolute 覆盖层（pointer-events:none）
+  ///     <div class="dotted">       ← position:absolute 底部居中
+  ///       <span></span><span class="active"></span>
+  ///     </div>
+  ///   </div>
+  ///   <div class="slide">          ← position:absolute 图片滑动层
+  ///     <div class="duokan-image-gallery gallery-pic">  ← 原作 class，rawCss 生效
+  ///       <div class="duokan-image-gallery-cell">       ← 原作 class，rawCss 生效
+  ///         <img/><p class="duokan-image-maintitle"/>...
+  ///       </div>
+  ///     </div>
   ///   </div>
   /// </div>
   /// ```
@@ -106,7 +124,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   /// CSS 分四层（仅覆盖布局，保留原作视觉样式）：
   /// 1. html { font-size } — 阅读器基准字号
   /// 2. rawCss — 原作者原始 CSS（原样内联，保留所有视觉样式）
-  /// 3. 布局覆盖 — slider/slide 结构 + scroll-snap 横向滑动
+  /// 3. 布局覆盖 — slider/slide_group/slide 结构 + scroll-snap 横向滑动
   /// 4. dotted 指示器 — 跟随 textColor 变色
   String _buildGalleryHtml({bool isFullscreen = false, int? fullscreenInitialIndex}) {
     final cs = widget.chapterStyle;
@@ -207,9 +225,10 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
         : '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">';
 
     // 全屏预览时隐藏 dotted 指示器（全屏只需图片 + 缩放）
+    // ★ class 名对齐多看 <div class="dotted"> ★
     final dottedHtml = isFullscreen
         ? ''
-        : '<div class="dk-dotted" id="dotted">\n      $dotsHtml\n    </div>';
+        : '<div class="dotted" id="dotted">\n      $dotsHtml\n    </div>';
     // ★ 删除左右翻页按钮 ★
     // 多看画廊的 btn_l/btn_r 是原生 Java 按钮，不是 EPUB HTML 的一部分。
     // WebView 渲染时加这些按钮多余，用户直接横向滑动切换图片即可。
@@ -265,17 +284,42 @@ body {
 }
 
 /* === slider 容器（对齐多看 <div class="slider"> 结构）===
-   包含 slide_group（dotted + btn_l + btn_r）和 slide（gallery）
-   用 position:relative 让内部 absolute 元素相对 slider 定位 */
-.dk-slider {
+   包含 slide_group（dotted）和 slide（gallery）
+   用 position:relative 让内部 absolute 元素相对 slider 定位
+   多看 .slider 用 position:absolute + 精确像素，我们用 relative + flex 占满 */
+.slider {
   flex: 1 1 auto !important;
   min-height: 0 !important;
   position: relative !important;
   overflow: hidden !important;
 }
-/* duokan-image-gallery: 横向滑动容器（多看的 slide）
-   覆盖原作 margin: 8em 0 0.5em 0（横向滑动模式下不需要这个间距）*/
+
+/* === slide_group（对齐多看 <div class="slide_group"> 结构）===
+   覆盖层，放 dotted 指示器，不拦截触摸事件
+   多看 .slide_group 内有 dotted + btn_l + btn_r（原生按钮）
+   我们只放 dotted，按钮已删除 */
+.slide_group {
+  position: absolute !important;
+  inset: 0 !important;
+  pointer-events: none !important;
+  z-index: 10 !important;
+}
+
+/* === slide（对齐多看 <div class="slide"> 结构）===
+   图片滑动层，占满 slider
+   多看 .slide 内是 .msg（每张图片），我们用 duokan-image-gallery 作为滑动容器 */
+.slide {
+  position: absolute !important;
+  inset: 0 !important;
+  overflow: hidden !important;
+}
+
+/* duokan-image-gallery: 横向滑动容器（多看 slide 内的 msg 集合）
+   覆盖原作 margin: 8em 0 0.5em 0（横向滑动模式下不需要这个间距）
+   ★ 用 absolute 定位占满 slide，对齐多看 .msg 的 position:absolute ★ */
 .duokan-image-gallery {
+  position: absolute !important;
+  inset: 0 !important;
   width: 100% !important;
   height: 100% !important;
   display: flex !important;
@@ -287,10 +331,11 @@ body {
   /* 保留原作 text-align: center（让 cell 内文字居中） */
 }
 /* cell: 横向滑动项（多看 slide 内的 msg）
-   ★ 保留原作 border + box-shadow + margin（作为每张图的装饰边框）★
+   ★ 保留原作 border + box-shadow（作为每张图的装饰边框）★
    多看 CGalleryHtmlSnippetOutputSystem 保留原作的视觉装饰
    仅覆盖布局属性：flex 占满 + scroll-snap + 居中
-   ★ 对齐多看：border 贴 cell 边缘，不加额外 padding（原作 border 即装饰）★ */
+   ★ 对齐多看 .msg 的 position:absolute + width:%dpx + height:%dpx ★
+   多看 C++ 计算精确像素填入，我们用 flex: 0 0 100% 让浏览器自动占满 */
 .duokan-image-gallery-cell {
   scroll-snap-align: center !important;
   flex: 0 0 100% !important;
@@ -346,12 +391,11 @@ body {
   flex: 0 0 auto !important;
 }
 
-/* === 4. slide_group 内部元素（对齐多看 <div class="slide_group"> 结构）===
-   dotted + btn_l + btn_r 在 slider 内部 absolute 定位 */
-
-/* 点点点指示器：absolute 定位在 slider 底部居中
-   对齐多看 <div class="dotted" style="position: absolute; ..."> */
-.dk-dotted {
+/* === dotted 指示器（对齐多看 <div class="dotted"> 在 slide_group 内底部 absolute）===
+   多看 .dotted 用 position:absolute + 精确像素定位在 slide_group 内底部居中
+   我们用 bottom + left/right:0 + flex justify-content:center 模拟
+   ★ class 名对齐多看 .dotted ★ */
+.dotted {
   position: absolute !important;
   bottom: calc(12px + env(safe-area-inset-bottom)) !important;
   left: 0 !important;
@@ -359,10 +403,9 @@ body {
   display: flex !important;
   justify-content: center !important;
   align-items: center !important;
-  z-index: 10 !important;
   pointer-events: none !important;
 }
-.dk-dotted span {
+.dotted span {
   display: inline-block;
   width: 6px;
   height: 6px;
@@ -371,7 +414,7 @@ body {
   background-color: $dotInactiveColor;
   box-shadow: 0 1px 1px rgba(255,255,255,0.5);
 }
-.dk-dotted span.active {
+.dotted span.active {
   background-color: $dotActiveColor;
 }
 
@@ -395,11 +438,15 @@ body.dk-fullscreen .duokan-image-gallery-cell {
 </head>
 <body class="${isFullscreen ? 'dk-fullscreen' : 'video-bg'}" style="$bodyBgStyle">
   $galleryTitleHtml
-  <div class="dk-slider${widget.images.length <= 1 ? ' single' : ''}">
-    <div class="duokan-image-gallery gallery-pic">
-      $cellsHtml
+  <div class="slider">
+    <div class="slide_group">
+      $dottedHtml
     </div>
-    $dottedHtml
+    <div class="slide">
+      <div class="duokan-image-gallery gallery-pic">
+        $cellsHtml
+      </div>
+    </div>
   </div>
   $galleryTxtHtml
   <script>
