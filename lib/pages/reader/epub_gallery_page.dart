@@ -3,11 +3,10 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../../services/local_book/epub_parser.dart';
 
-/// EPUB 多看画廊页面渲染器
+/// EPUB 多看画廊页面渲染器（Flutter 原生实现）
 ///
 /// ★ 基于多看阅读器反汇编全面移植 ★
 ///
@@ -17,11 +16,10 @@ import '../../services/local_book/epub_parser.dart';
 /// 2. UI 层（dex）：DocImagesView 横向滑动翻页；点击图片进入
 ///    DocImageWatchingView（ZoomView + MultiTouchImageView）全屏预览
 ///
-/// 我们的移植方案：
-/// - 非全屏画廊：InAppWebView 加载对齐多看 HTML snippet 的页面
-///   （slider > slide_group(dotted + btn_l + btn_r) + slide(msg)）
-/// - 全屏预览：Flutter 原生 PageView + InteractiveViewer
-///   （对应多看 ZoomView + MultiTouchImageView 的双指/双击缩放）
+/// 我们的移植方案（Flutter 原生，避开 WebView CSS 兼容性问题）：
+/// - 非全屏画廊：PageView 横向滑动翻页（对应多看 slider/slide/msg）
+/// - 全屏预览：PageView + InteractiveViewer（对应 ZoomView + MultiTouchImageView）
+/// - 原作视觉样式：从 rawCss 解析关键字段，用 Flutter 手动应用
 class EpubGalleryPage extends StatefulWidget {
   final List<EpubGalleryImage> images;
   final String chapterTitle;
@@ -61,452 +59,133 @@ class EpubGalleryPage extends StatefulWidget {
 }
 
 class _EpubGalleryPageState extends State<EpubGalleryPage> {
-  late final String _html;
-  late final WebUri? _baseUrl;
+  late final PageController _pageController;
+  late final _GalleryCellStyle _cellStyle;
+  late final _GalleryTitleStyle _titleStyle;
+  late final _GalleryTxtStyle _txtStyle;
+  int _currentIndex = 0;
   bool _isNavigating = false;
 
   @override
   void initState() {
     super.initState();
-    _html = _buildGalleryHtml();
-    _baseUrl = _computeBaseUrl();
-  }
-
-  /// 生成非全屏画廊 HTML
-  ///
-  /// ★ 1:1 对齐多看 CGalleryHtmlSnippetOutputSystem 生成的 HTML snippet ★
-  ///
-  /// 反汇编 0x1d65c0-0x1d6dd8 证实多看生成的 HTML 结构：
-  /// ```html
-  /// <div class="slider" style="position: absolute; left:%dpx; top:%dpx;
-  ///                            width:%dpx; height:%dpx;">
-  ///   <div class="slide_group">
-  ///     <div class="dotted" style="position: absolute; ...">
-  ///       <span></span>  × N（N = 图片数量）
-  ///     </div>
-  ///     <div class="btn btn_l">left</div>
-  ///     <div class="btn btn_r">right</div>
-  ///   </div>
-  ///   <div class="slide">
-  ///     <div class="msg" style="position: absolute; ...">
-  ///       <img/> + maintitle + subtitle
-  ///     </div>
-  ///     ...
-  ///   </div>
-  /// </div>
-  /// ```
-  ///
-  /// 我们用 `position: relative` + `flex` 让 slider 占满可用空间，
-  /// 多看用 `position: absolute` + 精确像素，效果一致。
-  ///
-  /// msg 内部保留原作的 `duokan-image-gallery-cell` / `gallery-pic` class，
-  /// 让原作 CSS（border/box-shadow/img width）原样生效。
-  String _buildGalleryHtml() {
-    final cs = widget.chapterStyle;
-    final rawCss = cs?.rawCss ?? '';
-
-    // 背景色：优先用 chapterStyle.backgroundColor，否则用阅读器背景色
-    final bgColor = cs?.backgroundColor != null
-        ? _argbIntToCss(cs!.backgroundColor!)
-        : _colorToCss(widget.backgroundColor);
-
-    // 默认文字色（被 rawCss 的 class 规则覆盖）
-    final textColor = _colorToCss(widget.textColor);
-
-    // 点点点颜色：跟随 textColor
-    final textRgb = _colorToRgb(widget.textColor);
-    final dotInactiveColor = 'rgba($textRgb, 0.3)';
-    final dotActiveColor = 'rgba($textRgb, 0.9)';
-
-    // 背景图
-    final bgSize = cs?.backgroundSize ?? 'cover';
-    final bgPosition = cs?.backgroundPosition ?? 'center center';
-    final bgRepeat = cs?.backgroundRepeat ?? 'no-repeat';
-    String bodyBgStyle = '';
-    final bgSrc = cs?.backgroundImageSrc;
-    if (bgSrc != null && bgSrc.isNotEmpty) {
-      final url = _srcToWebViewUrl(bgSrc);
-      bodyBgStyle = 'background-image: url("$url");';
-    }
-
-    // 画廊标题
-    final galleryTitleHtml = (cs?.galleryTitle != null &&
-            cs!.galleryTitle!.isNotEmpty)
-        ? '<h3 class="gallery-title">${_escapeHtml(cs.galleryTitle!)}</h3>'
-        : '';
-
-    // slide 内的 msg HTML（每张图片一个 msg）
-    final msgsHtml = widget.images.asMap().entries.map((entry) {
-      final i = entry.key;
-      final img = entry.value;
-      final src = _srcToWebViewUrl(img.src);
-      final maintitleHtml = img.maintitle.isNotEmpty
-          ? '<p class="duokan-image-maintitle">${_escapeHtml(img.maintitle)}</p>'
-          : '';
-      final subtitleHtml = img.subtitle.isNotEmpty
-          ? '<p class="duokan-image-subtitle">${_escapeHtml(img.subtitle)}</p>'
-          : '';
-      return '''
-      <div class="msg duokan-image-gallery-cell gallery-pic" data-index="$i">
-        <img alt="" src="$src"/>
-        $maintitleHtml
-        $subtitleHtml
-      </div>''';
-    }).join('\n');
-
-    // 底部提示
-    final galleryTxtHtml = (cs?.galleryTxt != null && cs!.galleryTxt!.isNotEmpty)
-        ? '<p class="gallery-txt">${_escapeHtml(cs.galleryTxt!)}</p>'
-        : '';
-
-    // 初始 index
     final initialIdx =
         widget.initialPageToEnd ? widget.images.length - 1 : 0;
-    final initialPageToEndJs = widget.initialPageToEnd ? 'true' : 'false';
-
-    // 点点点 HTML（N 张图 N 个 span，initialIdx 时初始 active）
-    final dotsHtml = widget.images.isEmpty
-        ? ''
-        : List.generate(widget.images.length, (i) {
-            return i == initialIdx
-                ? '<span class="active"></span>'
-                : '<span></span>';
-          }).join('');
-
-    return '''
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="format-detection" content="telephone=no, email=no, address=no">
-<style>
-/* === 1. 阅读器基准字号（让 rawCss 的 em 单位跟随阅读器字号）=== */
-html {
-  font-size: ${widget.baseFontSize}px;
-}
-
-/* === 2. 原作者原始 CSS（原样内联，浏览器原生渲染所有视觉属性）=== */
-$rawCss
-
-/* === 3. 布局覆盖（对齐多看 slider/slide_group/slide/msg 结构）===
-   反汇编 CGalleryHtmlSnippetOutputSystem 证实多看生成的 HTML：
-   - 所有元素 position: absolute + overflow: hidden
-   - slider 是容器，slide_group 是覆盖层（dotted + btn），slide 是图片层
-   - 我们用 relative + flex 让 slider 占满，内部用 absolute + scroll-snap */
-
-html, body {
-  margin: 0 !important;
-  padding: 0 !important;
-  height: 100vh !important;
-  width: 100vw !important;
-  overflow: hidden !important;
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
-}
-body {
-  display: flex !important;
-  flex-direction: column !important;
-  box-sizing: border-box !important;
-  color: $textColor;
-  background-color: $bgColor !important;
-  background-size: $bgSize !important;
-  background-position: $bgPosition !important;
-  background-repeat: $bgRepeat !important;
-}
-.gallery-title {
-  flex: 0 0 auto !important;
-}
-.gallery-txt {
-  flex: 0 0 auto !important;
-}
-
-/* === slider 容器（对齐多看 <div class="slider">）===
-   多看用 position:absolute + 精确像素，我们用 relative + flex 占满 */
-.slider {
-  flex: 1 1 auto !important;
-  min-height: 0 !important;
-  position: relative !important;
-  overflow: hidden !important;
-}
-
-/* === slide_group 覆盖层（对齐多看 <div class="slide_group">）===
-   放 dotted + btn，不拦截触摸 */
-.slide_group {
-  position: absolute !important;
-  inset: 0 !important;
-  pointer-events: none !important;
-  z-index: 10 !important;
-}
-
-/* === dotted 指示器（对齐多看 <div class="dotted">）===
-   反汇编 setGalleryScrollRect 证实：dotted 用 position:absolute 定位 */
-.dotted {
-  position: absolute !important;
-  bottom: calc(12px + env(safe-area-inset-bottom)) !important;
-  left: 0 !important;
-  right: 0 !important;
-  display: flex !important;
-  justify-content: center !important;
-  align-items: center !important;
-  pointer-events: none !important;
-}
-.dotted span {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  margin: 0 3px;
-  background-color: $dotInactiveColor;
-  box-shadow: 0 1px 1px rgba(255,255,255,0.5);
-}
-.dotted span.active {
-  background-color: $dotActiveColor;
-}
-
-/* === btn_l/btn_r（对齐多看 HTML 生成，但 CSS 隐藏）===
-   反汇编 0x4d7499 证实多看确实生成这两个按钮的 HTML
-   但截图里看不到，说明 CSS 隐藏了，我们也隐藏 */
-.btn {
-  display: none !important;
-}
-
-/* === slide 图片滑动层（对齐多看 <div class="slide">）=== */
-.slide {
-  position: absolute !important;
-  inset: 0 !important;
-  overflow-x: auto !important;
-  overflow-y: hidden !important;
-  scroll-snap-type: x mandatory !important;
-  -webkit-overflow-scrolling: touch;
-  display: flex !important;
-}
-.slide::-webkit-scrollbar { display: none; }
-.slide { -ms-overflow-style: none; scrollbar-width: none; }
-
-/* === msg 单张图片容器（对齐多看 <div class="msg">）===
-   反汇编 endOutputGallery 证实 msg 用 position:absolute + 精确像素
-   我们用 flex: 0 0 100% + scroll-snap 让每张图占满一屏
-   ★ 保留原作 duokan-image-gallery-cell class（border/box-shadow 生效）
-   ★ 保留原作 gallery-pic class（.gallery-pic img { width:100% } 生效）*/
-.msg {
-  scroll-snap-align: center !important;
-  flex: 0 0 100% !important;
-  width: 100% !important;
-  height: 100% !important;
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  justify-content: center !important;
-  box-sizing: border-box !important;
-  /* 覆盖原作 margin: 10px 0（flex 子项不需要）*/
-  margin: 0 !important;
-  /* 保留原作 border-style: solid; border-width: 1px; box-shadow: 5px 5px 5px #888 */
-  overflow: hidden !important;
-  padding: 0 !important;
-  position: relative !important;
-}
-
-/* === img（对齐多看 IsFullScreenImage 非全屏路径）===
-   原作 .gallery-pic img { width: 100% } 让图片占满 cell 宽度
-   多看全屏判定：0.601 < ratio < 0.799（反汇编 0x1d13bc）
-   画廊图片通常不满足这个比例，走非全屏路径，保留原作装饰 */
-.msg img {
-  width: 100% !important;
-  max-width: 100% !important;
-  max-height: 100% !important;
-  height: auto !important;
-  object-fit: contain !important;
-  flex: 1 1 auto !important;
-  min-height: 0 !important;
-}
-
-/* === maintitle/subtitle（保留原作样式）===
-   ★ 不覆盖 margin/font/color，让原作 CSS 生效 ★
-   仅覆盖 flex 让标题固定在底部 */
-.duokan-image-maintitle,
-.duokan-image-subtitle {
-  flex: 0 0 auto !important;
-  max-width: 100% !important;
-  overflow: hidden !important;
-}
-</style>
-</head>
-<body class="video-bg" style="$bodyBgStyle">
-  $galleryTitleHtml
-  <div class="slider">
-    <div class="slide_group">
-      <div class="dotted" id="dotted">
-        $dotsHtml
-      </div>
-      <div class="btn btn_l">left</div>
-      <div class="btn btn_r">right</div>
-    </div>
-    <div class="slide" id="slide">
-      $msgsHtml
-    </div>
-  </div>
-  $galleryTxtHtml
-  <script>
-    (function() {
-      var slide = document.getElementById('slide');
-      var dotted = document.getElementById('dotted');
-      if (!slide) return;
-
-      var total = slide.children.length;
-      var isFullscreen = false;
-
-      function callHandler(name, arg) {
-        try {
-          if (window.flutter_inappwebview) {
-            window.flutter_inappwebview.callHandler(name, arg);
-          }
-        } catch(e) {}
-      }
-
-      function getCurrentIndex() {
-        return Math.round(slide.scrollLeft / slide.clientWidth);
-      }
-
-      function updateDotted() {
-        if (!dotted) return;
-        var idx = getCurrentIndex();
-        var dots = dotted.querySelectorAll('span');
-        for (var i = 0; i < dots.length; i++) {
-          dots[i].classList.toggle('active', i === idx);
-        }
-      }
-
-      // 滚动监听（rAF 节流）
-      var rafId = 0;
-      slide.addEventListener('scroll', function() {
-        if (rafId) return;
-        rafId = requestAnimationFrame(function() {
-          rafId = 0;
-          updateDotted();
-        });
-      }, {passive: true});
-
-      // 图片点击 → 全屏预览
-      var msgs = slide.querySelectorAll('.msg');
-      for (var i = 0; i < msgs.length; i++) {
-        (function(index) {
-          msgs[index].addEventListener('click', function(e) {
-            e.preventDefault();
-            callHandler('onGalleryImageTap', index);
-          });
-        })(i);
-      }
-
-      // 边界章节切换
-      var touchStartX = 0;
-      var touchStartY = 0;
-      document.addEventListener('touchstart', function(e) {
-        if (e.touches.length > 0) {
-          touchStartX = e.touches[0].clientX;
-          touchStartY = e.touches[0].clientY;
-        }
-      }, {passive: true});
-      document.addEventListener('touchend', function(e) {
-        var maxScroll = slide.scrollWidth - slide.clientWidth;
-        var dx = 0, dy = 0;
-        if (e.changedTouches.length > 0) {
-          dx = e.changedTouches[0].clientX - touchStartX;
-          dy = e.changedTouches[0].clientY - touchStartY;
-        }
-        if (Math.abs(dx) <= Math.abs(dy)) return;
-        if (Math.abs(dx) < 50) return;
-        if (slide.scrollLeft <= 0 && dx > 0) {
-          callHandler('onGalleryPreviousChapter', null);
-          return;
-        }
-        if (slide.scrollLeft >= maxScroll - 1 && dx < 0) {
-          callHandler('onGalleryNextChapter', null);
-          return;
-        }
-      }, {passive: true});
-
-      // 初始化
-      window.addEventListener('load', function() {
-        if ($initialPageToEndJs) {
-          slide.scrollLeft = slide.scrollWidth - slide.clientWidth;
-        }
-        updateDotted();
-      });
-    })();
-  </script>
-</body>
-</html>
-''';
+    _currentIndex = initialIdx;
+    _pageController = PageController(initialPage: initialIdx);
+    final rawCss = widget.chapterStyle?.rawCss ?? '';
+    _cellStyle = _parseCellStyle(rawCss);
+    _titleStyle = _parseTitleStyle(rawCss);
+    _txtStyle = _parseTxtStyle(rawCss);
   }
 
-  /// 计算 WebView 加载用的 baseUrl（解析 rawCss 中的相对 url()）
-  WebUri? _computeBaseUrl() {
-    final bgSrc = widget.chapterStyle?.backgroundImageSrc;
-    if (bgSrc == null || bgSrc.isEmpty) return null;
-    if (bgSrc.startsWith('data:')) return null;
-    final normalized = bgSrc.replaceAll('\\', '/');
-    final lastSlash = normalized.lastIndexOf('/');
-    if (lastSlash < 0) return null;
-    final dir = normalized.substring(0, lastSlash + 1);
-    if (dir.startsWith('/')) {
-      return WebUri('file://$dir');
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  /// 从 rawCss 解析 .duokan-image-gallery-cell 的视觉样式
+  ///
+  /// 原作 CSS（style.css）：
+  /// ```css
+  /// .duokan-image-gallery-cell {
+  ///     margin: 10px 0;
+  ///     border-style: solid;
+  ///     border-width: 1px;
+  ///     box-shadow: 5px 5px 5px #888888;
+  /// }
+  /// ```
+  _GalleryCellStyle _parseCellStyle(String rawCss) {
+    final cellBlock = _extractRuleBlock(rawCss, 'duokan-image-gallery-cell');
+    return _GalleryCellStyle(
+      borderWidth: _parseFloat(cellBlock, 'border-width') ?? 1.0,
+      borderColor: _parseColor(cellBlock, 'border-color'),
+      boxShadowDx: _parseBoxShadow(cellBlock)?.dx ?? 5.0,
+      boxShadowDy: _parseBoxShadow(cellBlock)?.dy ?? 5.0,
+      boxShadowBlur: _parseBoxShadow(cellBlock)?.blur ?? 5.0,
+      boxShadowColor: _parseBoxShadow(cellBlock)?.color ?? const Color(0xFF888888),
+      maintitleColor: _parseColor(
+        _extractRuleBlock(rawCss, 'duokan-image-maintitle'),
+        'color',
+      ) ?? const Color(0xFF336633),
+      subtitleColor: _parseColor(
+        _extractRuleBlock(rawCss, 'duokan-image-subtitle'),
+        'color',
+      ) ?? const Color(0xFF333333),
+    );
+  }
+
+  _GalleryTitleStyle _parseTitleStyle(String rawCss) {
+    final block = _extractRuleBlock(rawCss, 'gallery-title');
+    return _GalleryTitleStyle(
+      fontSize: _parseFloat(block, 'font-size') ?? 1.5,
+      bold: _containsKeyword(block, 'bold') || _containsKeyword(block, '700'),
+      color: _parseColor(block, 'color'),
+    );
+  }
+
+  _GalleryTxtStyle _parseTxtStyle(String rawCss) {
+    final block = _extractRuleBlock(rawCss, 'gallery-txt');
+    return _GalleryTxtStyle(
+      fontSize: _parseFloat(block, 'font-size') ?? 0.7,
+      color: _parseColor(block, 'color'),
+    );
+  }
+
+  /// 提取 CSS class 规则块内容
+  String? _extractRuleBlock(String css, String className) {
+    final pattern = RegExp(
+      '\\.$className\\s*\\{([^}]*)\\}',
+      multiLine: true,
+    );
+    return pattern.firstMatch(css)?.group(1);
+  }
+
+  /// 从 CSS 块中解析数值属性（如 font-size: 1.5em → 1.5）
+  double? _parseFloat(String? block, String prop) {
+    if (block == null) return null;
+    final match = RegExp('$prop\\s*:\\s*([0-9.]+)').firstMatch(block);
+    if (match == null) return null;
+    return double.tryParse(match.group(1)!);
+  }
+
+  /// 从 CSS 块中解析颜色（如 color: #336633 → Color(0xFF336633)）
+  Color? _parseColor(String? block, String prop) {
+    if (block == null) return null;
+    final match = RegExp('$prop\\s*:\\s*#([0-9a-fA-F]{3,8})').firstMatch(block);
+    if (match == null) return null;
+    final hex = match.group(1)!;
+    if (hex.length == 6) {
+      return Color(int.parse('FF$hex', radix: 16));
     }
-    if (RegExp(r'^[A-Za-z]:/').hasMatch(dir)) {
-      return WebUri('file:///$dir');
+    if (hex.length == 3) {
+      final r = hex[0] * 2;
+      final g = hex[1] * 2;
+      final b = hex[2] * 2;
+      return Color(int.parse('FF$r$g$b', radix: 16));
     }
     return null;
   }
 
-  /// 将图片 src 转为 WebView 可访问的 URL
-  String _srcToWebViewUrl(String src) {
-    if (src.startsWith('data:')) return src;
-    if (src.startsWith('file://')) return src;
-    final normalized = src.replaceAll('\\', '/');
-    if (normalized.startsWith('/')) {
-      return 'file://$normalized';
-    }
-    if (RegExp(r'^[A-Za-z]:/').hasMatch(normalized)) {
-      return 'file:///$normalized';
-    }
-    return src;
+  /// 解析 box-shadow: dx dy blur color
+  _BoxShadow? _parseBoxShadow(String? block) {
+    if (block == null) return null;
+    final match = RegExp(
+      r'box-shadow\s*:\s*([0-9.]+)px\s+([0-9.]+)px\s+([0-9.]+)px\s+#([0-9a-fA-F]{6})',
+    ).firstMatch(block);
+    if (match == null) return null;
+    return _BoxShadow(
+      dx: double.parse(match.group(1)!),
+      dy: double.parse(match.group(2)!),
+      blur: double.parse(match.group(3)!),
+      color: Color(int.parse('FF${match.group(4)}', radix: 16)),
+    );
   }
 
-  String _colorToCss(Color c) {
-    final argb = c.toARGB32();
-    final r = (argb >> 16) & 0xFF;
-    final g = (argb >> 8) & 0xFF;
-    final b = argb & 0xFF;
-    return '#${r.toRadixString(16).padLeft(2, '0')}'
-        '${g.toRadixString(16).padLeft(2, '0')}'
-        '${b.toRadixString(16).padLeft(2, '0')}';
-  }
-
-  String _argbIntToCss(int argb) {
-    final r = (argb >> 16) & 0xFF;
-    final g = (argb >> 8) & 0xFF;
-    final b = argb & 0xFF;
-    return '#${r.toRadixString(16).padLeft(2, '0')}'
-        '${g.toRadixString(16).padLeft(2, '0')}'
-        '${b.toRadixString(16).padLeft(2, '0')}';
-  }
-
-  String _colorToRgb(Color c) {
-    final argb = c.toARGB32();
-    final r = (argb >> 16) & 0xFF;
-    final g = (argb >> 8) & 0xFF;
-    final b = argb & 0xFF;
-    return '$r, $g, $b';
-  }
-
-  String _escapeHtml(String text) {
-    return text
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
+  bool _containsKeyword(String? block, String keyword) {
+    if (block == null) return false;
+    return block.toLowerCase().contains(keyword.toLowerCase());
   }
 
   Color _resolveBgColor() {
@@ -515,34 +194,74 @@ body {
     return widget.backgroundColor;
   }
 
-  void _setupJsHandlers(InAppWebViewController controller) {
-    controller.addJavaScriptHandler(
-      handlerName: 'onGalleryImageTap',
-      callback: (args) {
-        if (args.isNotEmpty && args[0] is num) {
-          final idx = (args[0] as num).toInt();
-          if (idx >= 0 && idx < widget.images.length && mounted) {
-            _showFullScreenPreview(idx);
-          }
-        }
-      },
+  /// 构建背景装饰（含背景图）
+  Decoration? _buildBackgroundDecoration() {
+    final bgSrc = widget.chapterStyle?.backgroundImageSrc;
+    if (bgSrc == null || bgSrc.isEmpty) return null;
+
+    final isDataUri = bgSrc.startsWith('data:');
+    final imageProvider = isDataUri
+        ? MemoryImage(_parseDataUri(bgSrc))
+        : FileImage(File(bgSrc));
+
+    final bgSize = widget.chapterStyle?.backgroundSize ?? 'cover';
+    final bgPosition = widget.chapterStyle?.backgroundPosition ?? 'center';
+    final bgRepeat = widget.chapterStyle?.backgroundRepeat ?? 'no-repeat';
+
+    return BoxDecoration(
+      color: _resolveBgColor(),
+      image: DecorationImage(
+        image: imageProvider as ImageProvider,
+        fit: bgSize == 'cover' ? BoxFit.cover : BoxFit.contain,
+        alignment: _parseAlignment(bgPosition),
+        repeat: bgRepeat == 'repeat'
+            ? ImageRepeat.repeat
+            : bgRepeat == 'repeat-x'
+                ? ImageRepeat.repeatX
+                : bgRepeat == 'repeat-y'
+                    ? ImageRepeat.repeatY
+                    : ImageRepeat.noRepeat,
+      ),
     );
-    controller.addJavaScriptHandler(
-      handlerName: 'onGalleryPreviousChapter',
-      callback: (args) {
-        if (_isNavigating) return;
+  }
+
+  Alignment _parseAlignment(String position) {
+    final p = position.toLowerCase();
+    if (p.contains('top')) {
+      if (p.contains('left')) return Alignment.topLeft;
+      if (p.contains('right')) return Alignment.topRight;
+      return Alignment.topCenter;
+    }
+    if (p.contains('bottom')) {
+      if (p.contains('left')) return Alignment.bottomLeft;
+      if (p.contains('right')) return Alignment.bottomRight;
+      return Alignment.bottomCenter;
+    }
+    if (p.contains('left')) return Alignment.centerLeft;
+    if (p.contains('right')) return Alignment.centerRight;
+    return Alignment.center;
+  }
+
+  void _onPageChanged(int index) {
+    setState(() => _currentIndex = index);
+    _isNavigating = false;
+  }
+
+  /// 边界章节切换：在第一页继续往前 → 上一章，最后页继续往后 → 下一章
+  void _handleEdgeScroll(ScrollNotification notification) {
+    if (_isNavigating) return;
+
+    if (notification is OverscrollNotification &&
+        notification.metrics.axis == Axis.horizontal) {
+      if (notification.overscroll < 0 && _currentIndex == 0) {
         _isNavigating = true;
         widget.onPreviousChapter();
-      },
-    );
-    controller.addJavaScriptHandler(
-      handlerName: 'onGalleryNextChapter',
-      callback: (args) {
-        if (_isNavigating) return;
+      } else if (notification.overscroll > 0 &&
+          _currentIndex == widget.images.length - 1) {
         _isNavigating = true;
         widget.onNextChapter();
-      },
-    );
+      }
+    }
   }
 
   /// 点击图片弹出全屏预览
@@ -553,13 +272,6 @@ body {
   /// - ZoomView（Matrix + 状态机 IDLE/PINCH/SMOOTH）支持双指缩放
   /// - MultiTouchImageView 支持双击缩放（setDoubleTap）
   /// - 横向滑动翻页（mWatchingAdapter 管理多张图片）
-  /// - 下拉关闭（setPullingDown）
-  ///
-  /// 我们用 Flutter 原生实现：
-  /// - PageView 横向滑动翻页（对应 mWatchingAdapter）
-  /// - InteractiveViewer 双指缩放（对应 ZoomView）
-  /// - GestureDetector 双击缩放（对应 MultiTouchImageView.setDoubleTap）
-  /// - 黑色背景（对应 reading__large_image_view__image_bg）
   void _showFullScreenPreview(int initialIndex) {
     Navigator.of(context).push(
       PageRouteBuilder<void>(
@@ -572,7 +284,6 @@ body {
             images: widget.images,
             initialIndex: initialIndex,
             backgroundColor: Colors.black,
-            textColor: widget.textColor,
           );
         },
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -592,38 +303,272 @@ body {
       );
     }
 
-    return Stack(
-      children: [
-        Positioned.fill(child: ColoredBox(color: _resolveBgColor())),
-        Positioned.fill(
-          child: InAppWebView(
-            initialData: InAppWebViewInitialData(
-              data: _html,
-              mimeType: 'text/html',
-              encoding: 'utf-8',
-              baseUrl: _baseUrl ?? WebUri('about:blank'),
+    final hasBgImage = widget.chapterStyle?.backgroundImageSrc != null &&
+        widget.chapterStyle!.backgroundImageSrc!.isNotEmpty;
+
+    return Container(
+      color: hasBgImage ? null : _resolveBgColor(),
+      decoration: hasBgImage ? _buildBackgroundDecoration() : null,
+      child: SafeArea(
+        child: Column(
+          children: [
+            _buildGalleryTitle(),
+            Expanded(
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (notification) {
+                  _handleEdgeScroll(notification);
+                  return false;
+                },
+                child: PageView.builder(
+                  controller: _pageController,
+                  itemCount: widget.images.length,
+                  onPageChanged: _onPageChanged,
+                  allowImplicitScrolling: true,
+                  itemBuilder: (context, index) {
+                    return _GalleryCell(
+                      image: widget.images[index],
+                      style: _cellStyle,
+                      baseFontSize: widget.baseFontSize,
+                      textColor: widget.textColor,
+                      onTap: () => _showFullScreenPreview(index),
+                    );
+                  },
+                ),
+              ),
             ),
-            initialSettings: InAppWebViewSettings(
-              transparentBackground: true,
-              useHybridComposition: false,
-              supportZoom: false,
-              builtInZoomControls: false,
-              displayZoomControls: false,
-              javaScriptEnabled: true,
-              allowFileAccessFromFileURLs: true,
-              allowUniversalAccessFromFileURLs: true,
-              disableVerticalScroll: true,
-              disableHorizontalScroll: false,
-              verticalScrollBarEnabled: false,
-              horizontalScrollBarEnabled: false,
-              overScrollMode: OverScrollMode.NEVER,
+            _buildDottedIndicator(),
+            _buildGalleryTxt(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 画廊标题（对齐原作 .gallery-title）
+  Widget _buildGalleryTitle() {
+    final title = widget.chapterStyle?.galleryTitle;
+    if (title == null || title.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: EdgeInsets.symmetric(
+        vertical: widget.baseFontSize * 1.0,
+        horizontal: 16,
+      ),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: widget.baseFontSize * _titleStyle.fontSize,
+          fontWeight: _titleStyle.bold ? FontWeight.bold : FontWeight.normal,
+          color: _titleStyle.color ?? widget.textColor,
+          decoration: TextDecoration.none,
+        ),
+        textAlign: TextAlign.center,
+      ),
+    );
+  }
+
+  /// 底部提示文本（对齐原作 .gallery-txt）
+  Widget _buildGalleryTxt() {
+    final txt = widget.chapterStyle?.galleryTxt;
+    if (txt == null || txt.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: EdgeInsets.symmetric(
+        vertical: widget.baseFontSize * 0.5,
+        horizontal: 16,
+      ),
+      child: Text(
+        txt,
+        style: TextStyle(
+          fontSize: widget.baseFontSize * _txtStyle.fontSize,
+          color: _txtStyle.color ?? widget.textColor,
+          decoration: TextDecoration.none,
+        ),
+        textAlign: TextAlign.center,
+      ),
+    );
+  }
+
+  /// 点点点指示器（对齐多看 .dotted > span）
+  Widget _buildDottedIndicator() {
+    if (widget.images.length <= 1) return const SizedBox.shrink();
+
+    final textRgb = widget.textColor.toARGB32();
+    final r = (textRgb >> 16) & 0xFF;
+    final g = (textRgb >> 8) & 0xFF;
+    final b = textRgb & 0xFF;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: List.generate(widget.images.length, (i) {
+          final isActive = i == _currentIndex;
+          return Container(
+            width: 6,
+            height: 6,
+            margin: const EdgeInsets.symmetric(horizontal: 3),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isActive
+                  ? Color.fromARGB(230, r, g, b)
+                  : Color.fromARGB(77, r, g, b),
             ),
-            onWebViewCreated: (controller) {
-              _setupJsHandlers(controller);
-            },
+          );
+        }),
+      ),
+    );
+  }
+}
+
+/// 单张图片单元格（对齐多看 .msg > .duokan-image-gallery-cell）
+///
+/// 原作 CSS：
+/// ```css
+/// .duokan-image-gallery-cell {
+///     margin: 10px 0;
+///     border-style: solid;
+///     border-width: 1px;
+///     box-shadow: 5px 5px 5px #888888;
+/// }
+/// .gallery-pic img { width: 100%; }
+/// .duokan-image-maintitle {
+///     margin: 1em auto -0.5em auto;
+///     color: #336633;
+///     text-align: center;
+/// }
+/// .duokan-image-subtitle {
+///     color: #333;
+///     line-height: 1.35em;
+///     text-align: justify;
+/// }
+/// ```
+class _GalleryCell extends StatelessWidget {
+  final EpubGalleryImage image;
+  final _GalleryCellStyle style;
+  final double baseFontSize;
+  final Color textColor;
+  final VoidCallback onTap;
+
+  const _GalleryCell({
+    required this.image,
+    required this.style,
+    required this.baseFontSize,
+    required this.textColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        child: Container(
+          // 原作 .duokan-image-gallery-cell 的 border + box-shadow
+          decoration: BoxDecoration(
+            border: Border.all(
+              width: style.borderWidth,
+              color: style.borderColor ?? const Color(0xFF000000),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: style.boxShadowColor ?? const Color(0xFF888888),
+                offset: Offset(style.boxShadowDx, style.boxShadowDy),
+                blurRadius: style.boxShadowBlur,
+              ),
+            ],
+          ),
+          child: ClipRect(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 图片（对齐 .gallery-pic img { width: 100% }）
+                Flexible(
+                  fit: FlexFit.loose,
+                  child: _buildImage(),
+                ),
+                // maintitle（对齐 .duokan-image-maintitle）
+                if (image.maintitle.isNotEmpty)
+                  Padding(
+                    padding: EdgeInsets.only(
+                      top: baseFontSize * 0.5,
+                      bottom: 0,
+                      left: 12,
+                      right: 12,
+                    ),
+                    child: Text(
+                      image.maintitle,
+                      style: TextStyle(
+                        fontSize: baseFontSize * 0.9,
+                        color: style.maintitleColor,
+                        decoration: TextDecoration.none,
+                        height: 1.2,
+                      ),
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                // subtitle（对齐 .duokan-image-subtitle）
+                if (image.subtitle.isNotEmpty)
+                  Padding(
+                    padding: EdgeInsets.only(
+                      top: baseFontSize * 0.25,
+                      bottom: baseFontSize * 0.5,
+                      left: 12,
+                      right: 12,
+                    ),
+                    child: Text(
+                      image.subtitle,
+                      style: TextStyle(
+                        fontSize: baseFontSize * 0.9,
+                        color: style.subtitleColor,
+                        height: 1.35,
+                        decoration: TextDecoration.none,
+                      ),
+                      textAlign: TextAlign.justify,
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
-      ],
+      ),
+    );
+  }
+
+  Widget _buildImage() {
+    final src = image.src;
+    if (src.startsWith('data:')) {
+      return Image.memory(
+        _parseDataUri(src),
+        fit: BoxFit.contain,
+        width: double.infinity,
+        gaplessPlayback: true,
+        errorBuilder: (context, error, stackTrace) =>
+            _buildErrorWidget(),
+      );
+    }
+    return Image.file(
+      File(src),
+      fit: BoxFit.contain,
+      width: double.infinity,
+      gaplessPlayback: true,
+      errorBuilder: (context, error, stackTrace) =>
+          _buildErrorWidget(),
+    );
+  }
+
+  Widget _buildErrorWidget() {
+    return Container(
+      height: 200,
+      alignment: Alignment.center,
+      child: Icon(
+        Icons.broken_image_outlined,
+        color: textColor.withValues(alpha: 0.5),
+        size: 64,
+      ),
     );
   }
 }
@@ -631,31 +576,15 @@ body {
 /// 全屏预览查看器（Flutter 原生实现）
 ///
 /// ★ 对齐多看 DocImageWatchingView（ZoomView + MultiTouchImageView）★
-///
-/// 反汇编 dex 报告证实多看全屏预览的交互：
-/// - ZoomView：Matrix 变换 + IDLE/PINCH/SMOOTH 状态机 + 双指缩放
-/// - MultiTouchImageView：setDoubleTap 双击缩放 + setScale 手势
-/// - PageAnimationMode：FADE_IN/HSCROLL/VSCROLL/OVERLAP/THREE_DIMEN/NONE
-/// - setPullingDown：下拉关闭
-/// - reading__large_image_view__image_bg：黑色背景
-/// - reading__seek_page_view__page_num：页码指示器
-///
-/// Flutter 移植：
-/// - PageView：横向滑动翻页（对应 HSCROLL + mWatchingAdapter）
-/// - InteractiveViewer：双指缩放 + 平移（对应 ZoomView）
-/// - GestureDetector 双击：切换 1x/2.5x 缩放（对应 setDoubleTap）
-/// - 黑色背景 + 顶部页码指示器 + 关闭按钮
 class _GalleryFullScreenViewer extends StatefulWidget {
   final List<EpubGalleryImage> images;
   final int initialIndex;
   final Color backgroundColor;
-  final Color textColor;
 
   const _GalleryFullScreenViewer({
     required this.images,
     required this.initialIndex,
     required this.backgroundColor,
-    required this.textColor,
   });
 
   @override
@@ -696,7 +625,6 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
               controller: _pageController,
               itemCount: widget.images.length,
               onPageChanged: _onPageChanged,
-              // 允许预加载相邻页（对应多看 reading__large_image_view_newer/older）
               allowImplicitScrolling: true,
               itemBuilder: (context, index) {
                 return _FullScreenImage(
@@ -708,7 +636,7 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
           ),
           // 顶部：页码指示器 + 关闭按钮
           _buildTopBar(),
-          // 底部：图片描述（如果有的话）
+          // 底部：图片描述
           if (widget.images[_currentIndex].maintitle.isNotEmpty ||
               widget.images[_currentIndex].subtitle.isNotEmpty)
             _buildBottomDescription(),
@@ -745,6 +673,7 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
                       color: Colors.white,
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
+                      decoration: TextDecoration.none,
                     ),
                   ),
                 ),
@@ -800,6 +729,7 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
                       color: Colors.white,
                       fontSize: 14,
                       fontWeight: FontWeight.w500,
+                      decoration: TextDecoration.none,
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -821,6 +751,7 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
                       color: Colors.white70,
                       fontSize: 12,
                       height: 1.4,
+                      decoration: TextDecoration.none,
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -837,8 +768,8 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
 /// 全屏单张图片查看器（支持双指缩放 + 双击缩放）
 ///
 /// ★ 对齐多看 MultiTouchImageView ★
-/// - setDoubleTap(MotionEvent) → 我们用 GestureDetector.onDoubleTap
-/// - setScale(ScaleGestureDetector) → InteractiveViewer 自动处理
+/// - setDoubleTap(MotionEvent) → GestureDetector.onDoubleTap
+/// - setScale(ScaleGestureDetector) → InteractiveViewer
 /// - PageScaleType.MATCH_INSIDE → BoxFit.contain
 class _FullScreenImage extends StatefulWidget {
   final EpubGalleryImage image;
@@ -883,7 +814,6 @@ class _FullScreenImageState extends State<_FullScreenImage>
   /// 双击切换缩放（对应多看 MultiTouchImageView.setDoubleTap）
   void _handleDoubleTap() {
     if (_isZoomed) {
-      // 缩回 1x
       _scaleAnimation = Matrix4Tween(
         begin: _controller.value,
         end: Matrix4.identity(),
@@ -894,7 +824,6 @@ class _FullScreenImageState extends State<_FullScreenImage>
       _animController.forward(from: 0);
       _isZoomed = false;
     } else {
-      // 放大到 2.5x
       _scaleAnimation = Matrix4Tween(
         begin: _controller.value,
         end: Matrix4.diagonal3Values(2.5, 2.5, 1.0),
@@ -914,14 +843,11 @@ class _FullScreenImageState extends State<_FullScreenImage>
       onDoubleTap: _handleDoubleTap,
       child: InteractiveViewer(
         transformationController: _controller,
-        // 对齐多看 ZoomView 的缩放范围
         minScale: 1.0,
         maxScale: 4.0,
-        // 对齐多看 PageScaleType.MATCH_INSIDE（contain）
         boundaryMargin: const EdgeInsets.all(double.infinity),
         clipBehavior: Clip.none,
         onInteractionEnd: (details) {
-          // 缩放结束后更新状态
           final scale = _controller.value.getMaxScaleOnAxis();
           _isZoomed = scale > 1.01;
         },
@@ -935,17 +861,14 @@ class _FullScreenImageState extends State<_FullScreenImage>
   Widget _buildImage() {
     final src = widget.image.src;
     if (src.startsWith('data:')) {
-      // data: URI
       return Image.memory(
         _parseDataUri(src),
         fit: BoxFit.contain,
         gaplessPlayback: true,
       );
     }
-    // 本地文件路径
-    final file = File(src);
     return Image.file(
-      file,
+      File(src),
       fit: BoxFit.contain,
       gaplessPlayback: true,
       errorBuilder: (context, error, stackTrace) {
@@ -957,13 +880,71 @@ class _FullScreenImageState extends State<_FullScreenImage>
       },
     );
   }
+}
 
-  /// 解析 data: URI 为 Uint8List
-  Uint8List _parseDataUri(String dataUri) {
-    // data:image/jpeg;base64,XXXX
-    final commaIdx = dataUri.indexOf(',');
-    if (commaIdx < 0) return Uint8List(0);
-    final base64Str = dataUri.substring(commaIdx + 1);
-    return base64Decode(base64Str);
-  }
+// === 辅助类 ===
+
+class _BoxShadow {
+  final double dx;
+  final double dy;
+  final double blur;
+  final Color color;
+  const _BoxShadow({
+    required this.dx,
+    required this.dy,
+    required this.blur,
+    required this.color,
+  });
+}
+
+class _GalleryCellStyle {
+  final double borderWidth;
+  final Color? borderColor;
+  final double boxShadowDx;
+  final double boxShadowDy;
+  final double boxShadowBlur;
+  final Color? boxShadowColor;
+  final Color maintitleColor;
+  final Color subtitleColor;
+
+  const _GalleryCellStyle({
+    this.borderWidth = 1.0,
+    this.borderColor,
+    this.boxShadowDx = 5.0,
+    this.boxShadowDy = 5.0,
+    this.boxShadowBlur = 5.0,
+    this.boxShadowColor,
+    this.maintitleColor = const Color(0xFF336633),
+    this.subtitleColor = const Color(0xFF333333),
+  });
+}
+
+class _GalleryTitleStyle {
+  final double fontSize;
+  final bool bold;
+  final Color? color;
+
+  const _GalleryTitleStyle({
+    this.fontSize = 1.5,
+    this.bold = true,
+    this.color,
+  });
+}
+
+class _GalleryTxtStyle {
+  final double fontSize;
+  final Color? color;
+
+  const _GalleryTxtStyle({
+    this.fontSize = 0.7,
+    this.color,
+  });
+}
+
+/// 解析 data: URI 为 Uint8List
+Uint8List _parseDataUri(String dataUri) {
+  final commaIdx = dataUri.indexOf(',');
+  if (commaIdx < 0) return Uint8List(0);
+  final base64Str = dataUri.substring(commaIdx + 1);
+  return base64Decode(base64Str);
 }
