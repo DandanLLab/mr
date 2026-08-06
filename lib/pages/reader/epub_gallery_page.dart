@@ -1,7 +1,3 @@
-import 'dart:convert';
-import 'dart:io';
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
@@ -112,7 +108,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   /// 2. rawCss — 原作者原始 CSS（原样内联，保留所有视觉样式）
   /// 3. 布局覆盖 — slider/slide 结构 + scroll-snap 横向滑动
   /// 4. dotted 指示器 — 跟随 textColor 变色
-  String _buildGalleryHtml() {
+  String _buildGalleryHtml({bool isFullscreen = false, int? fullscreenInitialIndex}) {
     final cs = widget.chapterStyle;
     final rawCss = cs?.rawCss ?? '';
 
@@ -172,26 +168,58 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
             ? '<p class="gallery-txt">${_escapeHtml(cs.galleryTxt!)}</p>'
             : '';
 
-    // 点点点 HTML（N 张图 N 个 span，initialPageToEnd 时初始 active 是最后一个）
-    final initialActiveIndex =
-        widget.initialPageToEnd ? widget.images.length - 1 : 0;
+    // 初始 index：全屏预览用 fullscreenInitialIndex，非全屏用 initialPageToEnd 逻辑
+    final initialIdx = isFullscreen
+        ? (fullscreenInitialIndex ?? 0)
+        : (widget.initialPageToEnd ? widget.images.length - 1 : 0);
+    // 点点点 HTML（N 张图 N 个 span，initialIdx 时初始 active）
     final dotsHtml = widget.images.isEmpty
         ? ''
         : List.generate(widget.images.length, (i) {
-            return i == initialActiveIndex
+            return i == initialIdx
                 ? '<span class="active"></span>'
                 : '<span></span>';
           }).join('');
 
-    // initialPageToEnd 的 JS 布尔字面量
+    // initialPageToEnd 的 JS 布尔字面量（保留向后兼容，非全屏用）
     final initialPageToEndJs = widget.initialPageToEnd ? 'true' : 'false';
+
+    // 初始滚动位置 JS：全屏用 initialIdx，非全屏用 initialPageToEnd 逻辑
+    final initialScrollJs = isFullscreen
+        ? 'gallery.scrollLeft = $initialIdx * gallery.clientWidth;'
+        : 'if ($initialPageToEndJs) { gallery.scrollLeft = gallery.scrollWidth - gallery.clientWidth; }';
+
+    // 全屏预览时允许缩放（maximum-scale=4.0, user-scalable=yes）
+    // 非全屏时禁止缩放（对齐阅读器无缩放设定）
+    final viewportMeta = isFullscreen
+        ? '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=4.0, minimum-scale=1.0, user-scalable=yes, viewport-fit=cover">'
+        : '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">';
+
+    // 全屏预览时隐藏 dotted 指示器和翻页按钮（全屏只需图片 + 缩放）
+    final dottedHtml = isFullscreen
+        ? ''
+        : '<div class="dk-dotted" id="dotted">\n      $dotsHtml\n    </div>';
+    final btnHtml = isFullscreen
+        ? ''
+        : '''<div class="dk-btn dk-btn-l" id="btnPrev">
+      <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+    </div>
+    <div class="dk-btn dk-btn-r" id="btnNext">
+      <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+    </div>''';
+
+    // JS：全屏时点击图片关闭，非全屏时点击图片触发全屏预览
+    final imageTapHandler = isFullscreen ? 'onGalleryClose' : 'onGalleryImageTap';
+
+    // isFullscreen 的 JS 布尔字面量
+    final isFullscreenJs = isFullscreen ? 'true' : 'false';
 
     return '''
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
+$viewportMeta
 <meta name="format-detection" content="telephone=no, email=no, address=no">
 <style>
 /* === 1. 阅读器基准字号（让 rawCss 的 em 单位跟随阅读器字号）=== */
@@ -249,11 +277,13 @@ body {
   scroll-snap-type: x mandatory !important;
   -webkit-overflow-scrolling: touch;
   margin: 0 !important;
+  /* 保留原作 text-align: center（让 cell 内文字居中） */
 }
 /* cell: 横向滑动项（多看 slide 内的 msg）
-   ★ 去掉原作 border + box-shadow + margin ★
-   横向滑动模式下 slide 占满全屏，border 会画在 slide 边缘 → 框框位置错误
-   多看 CGalleryHtmlSnippetOutputSystem 也不保留这些装饰 */
+   ★ 保留原作 border + box-shadow + margin（作为每张图的装饰边框）★
+   多看 CGalleryHtmlSnippetOutputSystem 保留原作的视觉装饰
+   仅覆盖布局属性：flex 占满 + scroll-snap + 居中
+   ★ 对齐多看：border 贴 cell 边缘，不加额外 padding（原作 border 即装饰）★ */
 .duokan-image-gallery-cell {
   scroll-snap-align: center !important;
   flex: 0 0 100% !important;
@@ -264,40 +294,43 @@ body {
   align-items: center !important;
   justify-content: center !important;
   box-sizing: border-box !important;
+  /* 保留原作 margin: 10px 0（在 flex 容器内改为 0，避免占用高度） */
   margin: 0 !important;
-  border: none !important;
-  border-style: none !important;
-  border-width: 0 !important;
-  box-shadow: none !important;
+  /* 保留原作 border-style: solid; border-width: 1px; box-shadow: 5px 5px 5px #888 */
+  /* 不覆盖 border/box-shadow，让原作装饰边框生效 */
   overflow: hidden !important;
+  /* ★ 去掉 padding：让原作 border 直接贴 cell 边缘，对齐多看 msg 渲染 ★
+     多看 slide 内 msg 用 absolute 定位，border 是图片装饰边框，
+     不需要额外 padding 让 border 内缩。padding 会让图片变小且偏离中心。 */
+  padding: 0 !important;
 }
-/* img: 全屏图片对齐多看 IsFullScreenImage
-   ★ 覆盖原作 .gallery-pic img { width: 100% } ★
-   横向滑动模式下图片按比例缩放到适合 slide 的尺寸
-   object-fit: contain 保持比例，不变形 */
+/* img: 对齐多看 IsFullScreenImage
+   ★ 保留原作 .gallery-pic img { width: 100% } ★
+   原作图片宽度占满 cell，浏览器自动按比例计算高度
+   ★ flex: 1 1 auto 让图片占据剩余空间，标题在底部自动留位 ★
+   min-height: 0 让 flex 子项可缩小，防止竖图撑爆 cell
+   max-height: 100% 不硬限制比例，让图片尽可能大（对齐多看大图渲染） */
 .duokan-image-gallery-cell img {
-  max-width: 90% !important;
-  max-height: 80% !important;
-  width: auto !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
   height: auto !important;
   object-fit: contain !important;
-  flex: 0 0 auto !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
 }
 /* maintitle/subtitle: 跟随图片显示在 slide 内
-   ★ 覆盖原作 maintitle 的 margin: 1em auto -0.5em auto ★
-   原作负 margin (-0.5em) 是竖向排版下让标题叠到图片上的效果
-   横向滑动模式下标题在图片下方，不需要叠到图片上 → margin-bottom: 0
-   保留原作 color/font-family/font-size/text-align */
+   ★ 保留原作 maintitle 的 margin: 1em auto -0.5em auto ★
+   原作负 margin (-0.5em) 让标题紧贴图片下方（非叠到图片上），
+   在 flex column 布局中负 margin 让标题向上靠近图片
+   保留原作 color/font-family/font-size/text-align/line-height
+   ★ flex: 0 0 auto 让标题不缩小，固定高度在底部 ★ */
 .duokan-image-maintitle,
 .duokan-image-subtitle {
   flex: 0 0 auto !important;
-  max-width: 90% !important;
+  max-width: 100% !important;
   overflow: hidden !important;
-  margin-top: 0 !important;
-  margin-bottom: 0 !important;
-}
-.duokan-image-maintitle {
-  margin-top: 1em !important;
+  /* 保留原作 margin，不覆盖 */
 }
 /* 隐藏滚动条 */
 .duokan-image-gallery::-webkit-scrollbar { display: none; }
@@ -380,15 +413,8 @@ body {
     <div class="duokan-image-gallery gallery-pic">
       $cellsHtml
     </div>
-    <div class="dk-dotted" id="dotted">
-      $dotsHtml
-    </div>
-    <div class="dk-btn dk-btn-l" id="btnPrev">
-      <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
-    </div>
-    <div class="dk-btn dk-btn-r" id="btnNext">
-      <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
-    </div>
+    $dottedHtml
+    $btnHtml
   </div>
   $galleryTxtHtml
   <script>
@@ -440,15 +466,31 @@ body {
         });
       }, {passive: true});
 
-      // 图片点击 → 全屏预览
+      // 图片点击 → 全屏预览（非全屏）/ 关闭（全屏）
       var imgs = gallery.querySelectorAll('.duokan-image-gallery-cell img');
       for (var i = 0; i < imgs.length; i++) {
         (function(index) {
           imgs[index].addEventListener('click', function(e) {
             e.preventDefault();
-            callHandler('onGalleryImageTap', index);
+            callHandler('$imageTapHandler', index);
           });
         })(i);
+      }
+
+      // 全屏预览时：滚动变化回调 Flutter 更新页码指示器
+      if ($isFullscreenJs) {
+        var lastIdx = getCurrentIndex();
+        gallery.addEventListener('scroll', function() {
+          if (rafId) return;
+          rafId = requestAnimationFrame(function() {
+            rafId = 0;
+            var idx = getCurrentIndex();
+            if (idx !== lastIdx) {
+              lastIdx = idx;
+              callHandler('onGalleryPageChanged', idx);
+            }
+          });
+        }, {passive: true});
       }
 
       // 左右翻页按钮（对齐多看 btn_l/btn_r）
@@ -512,11 +554,9 @@ body {
         }
       }, {passive: true});
 
-      // 加载完成后初始化：initialPageToEnd 时滚动到最后一张，并更新点点点
+      // 加载完成后初始化：滚动到初始位置，并更新点点点
       window.addEventListener('load', function() {
-        if ($initialPageToEndJs) {
-          gallery.scrollLeft = gallery.scrollWidth - gallery.clientWidth;
-        }
+        $initialScrollJs
         updateDotted();
       });
     })();
@@ -657,9 +697,17 @@ body {
 
   /// 点击图片弹出全屏预览
   ///
-  /// 进入动画：ScaleTransition(0.92→1.0) + FadeTransition，
-  /// 全屏预览支持横向滑动切换、双指缩放、双击切换缩放、Hero 动画。
+  /// ★ 全屏预览也用 WebView 渲染（与非全屏一致）★
+  /// 复用 _buildGalleryHtml(isFullscreen: true) 生成相同 HTML+CSS，
+  /// 隐藏 dotted/btn，允许缩放，点击图片关闭。
+  /// 这样全屏和非全屏渲染完全一致，都对齐多看。
+  ///
+  /// 进入动画：ScaleTransition(0.92→1.0) + FadeTransition
   void _showFullScreenPreview(int initialIndex) {
+    final fullscreenHtml = _buildGalleryHtml(
+      isFullscreen: true,
+      fullscreenInitialIndex: initialIndex,
+    );
     Navigator.of(context).push(
       PageRouteBuilder<void>(
         opaque: false,
@@ -670,7 +718,10 @@ body {
           return _GalleryFullScreenViewer(
             images: widget.images,
             initialIndex: initialIndex,
-            baseFontSize: widget.baseFontSize,
+            html: fullscreenHtml,
+            baseUrl: _baseUrl,
+            backgroundColor: _resolveBgColor(),
+            textColor: widget.textColor,
           );
         },
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -745,30 +796,38 @@ body {
   }
 }
 
-/// 全屏预览查看器
+/// 全屏预览查看器（WebView 渲染，与非全屏一致）
 ///
-/// 支持多图横向滑动切换 + 双指缩放 + 拖动查看细节。
-///
-/// 交互设计：
-/// - PageView 横向滑动切换图片（scale == 1.0 时启用）
-///   - BouncingScrollPhysics：iOS 风格弹性滑动，更顺滑
-///   - 预加载相邻图片：initState 中 precacheImage 前后图片
-///   - KeepAlive：子页面保持状态，避免重建和重新解码
-/// - InteractiveViewer 双指缩放（1-4x）+ 拖动查看细节（scale > 1.0 时）
-/// - 双击切换缩放（1.0 ↔ 2.5x），缩放后双击复位
-/// - 右下角信息面板（AnimatedSwitcher 淡入淡出 + 上滑动画）
-/// - 顶部页码指示器 + 关闭按钮
+/// ★ 用 InAppWebView 加载相同的 gallery HTML，保证全屏和非全屏渲染完全一致 ★
+/// - 复用 _buildGalleryHtml(isFullscreen: true) 生成的 HTML+CSS
+/// - 隐藏 dotted 指示器和翻页按钮
+/// - 允许双指缩放（supportZoom + builtInZoomControls）
+/// - 横向滑动切换图片（scroll-snap）
+/// - 点击图片关闭（onGalleryClose handler）
+/// - 顶部页码指示器 + 关闭按钮（Flutter 覆盖在 WebView 上）
 class _GalleryFullScreenViewer extends StatefulWidget {
   final List<EpubGalleryImage> images;
   final int initialIndex;
 
-  /// 阅读器基础字号（px），作为 EPUB CSS em 值的基准
-  final double baseFontSize;
+  /// 全屏预览的 HTML（由 _buildGalleryHtml(isFullscreen: true) 生成）
+  final String html;
+
+  /// WebView baseUrl（解析相对 url()）
+  final WebUri baseUrl;
+
+  /// 背景色（WebView 加载前兜底）
+  final Color backgroundColor;
+
+  /// 文字色
+  final Color textColor;
 
   const _GalleryFullScreenViewer({
     required this.images,
     required this.initialIndex,
-    this.baseFontSize = 18.0,
+    required this.html,
+    required this.baseUrl,
+    required this.backgroundColor,
+    required this.textColor,
   });
 
   @override
@@ -777,92 +836,35 @@ class _GalleryFullScreenViewer extends StatefulWidget {
 }
 
 class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
-  late PageController _pageController;
-  late TransformationController _transformCtrl;
   int _currentIndex = 0;
-  double _currentScale = 1.0;
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
-    _pageController = PageController(initialPage: _currentIndex);
-    _transformCtrl = TransformationController();
-    // 预加载相邻图片，避免滑动时白屏等待
-    _precacheAdjacentImages(_currentIndex);
   }
 
-  @override
-  void dispose() {
-    _pageController.dispose();
-    _transformCtrl.dispose();
-    super.dispose();
-  }
-
-  /// 预加载相邻图片（前一张和后一张）
-  ///
-  /// 在切换页面前预先解码图片，滑动时直接显示已缓存的图片，
-  /// 避免白屏等待。
-  void _precacheAdjacentImages(int index) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final context = this.context;
-      // 前一张
-      if (index > 0) {
-        final provider = _getImageProvider(widget.images[index - 1]);
-        if (provider != null) {
-          precacheImage(provider, context);
+  /// 注册 JS handler（JS → Dart 回调）
+  void _setupJsHandlers(InAppWebViewController controller) {
+    // 点击图片 → 关闭全屏预览
+    controller.addJavaScriptHandler(
+      handlerName: 'onGalleryClose',
+      callback: (args) {
+        if (mounted) Navigator.of(context).pop();
+      },
+    );
+    // 横向滑动切换图片 → 更新顶部页码指示器
+    controller.addJavaScriptHandler(
+      handlerName: 'onGalleryPageChanged',
+      callback: (args) {
+        if (args.isNotEmpty && args[0] is num && mounted) {
+          final idx = (args[0] as num).toInt();
+          if (idx != _currentIndex) {
+            setState(() => _currentIndex = idx);
+          }
         }
-      }
-      // 后一张
-      if (index < widget.images.length - 1) {
-        final provider = _getImageProvider(widget.images[index + 1]);
-        if (provider != null) {
-          precacheImage(provider, context);
-        }
-      }
-    });
-  }
-
-  /// 根据图片 src 获取 ImageProvider（用于 precacheImage）
-  ImageProvider? _getImageProvider(EpubGalleryImage image) {
-    final src = image.src;
-    if (src.startsWith('data:')) {
-      final bytes = _decodeDataUri(src);
-      if (bytes != null) return MemoryImage(bytes);
-      return null;
-    }
-    final filePath = src.startsWith('file://') ? src.substring(7) : src;
-    if (filePath.contains('/') || filePath.contains('\\')) {
-      return FileImage(File(filePath));
-    }
-    return NetworkImage(src);
-  }
-
-  /// 重置缩放到 1.0
-  void _resetZoom() {
-    _transformCtrl.value = Matrix4.identity();
-    if (_currentScale != 1.0) {
-      setState(() => _currentScale = 1.0);
-    }
-  }
-
-  /// 双击切换缩放
-  void _onDoubleTap() {
-    if (_currentScale > 1.05) {
-      _resetZoom();
-    } else {
-      _transformCtrl.value = Matrix4.diagonal3Values(2.5, 2.5, 1.0);
-      setState(() => _currentScale = 2.5);
-    }
-  }
-
-  void _onPageChanged(int index) {
-    // 切换页时重置缩放，避免上一页的缩放状态影响下一页
-    _resetZoom();
-    setState(() => _currentIndex = index);
-    // 预加载新的相邻图片
-    _precacheAdjacentImages(index);
+      },
+    );
   }
 
   @override
@@ -871,149 +873,43 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // 主体：PageView 横向滑动 + InteractiveViewer 缩放
-          PageView.builder(
-            controller: _pageController,
-            itemCount: widget.images.length,
-            onPageChanged: _onPageChanged,
-            // scale > 1.0 时禁用 PageView 滑动，让 InteractiveViewer 处理拖动
-            // scale == 1.0 时启用 PageView 滑动切换图片
-            physics: _currentScale > 1.05
-                ? const NeverScrollableScrollPhysics()
-                : const PageScrollPhysics(),
-            itemBuilder: (context, index) {
-              return _buildZoomableImage(widget.images[index], index);
-            },
+          // 背景兜底（WebView CSS 加载前可见，避免白屏闪烁）
+          Positioned.fill(child: ColoredBox(color: widget.backgroundColor)),
+          // WebView 主体：加载全屏 gallery HTML（与非全屏相同 HTML+CSS）
+          // 横向滑动切换图片、双指缩放、点击关闭全部由 HTML+CSS+JS 渲染处理
+          Positioned.fill(
+            child: InAppWebView(
+              initialData: InAppWebViewInitialData(
+                data: widget.html,
+                mimeType: 'text/html',
+                encoding: 'utf-8',
+                baseUrl: widget.baseUrl,
+              ),
+              initialSettings: InAppWebViewSettings(
+                transparentBackground: true,
+                useHybridComposition: false,
+                // ★ 全屏预览允许缩放（对齐多看全屏缩放交互）★
+                supportZoom: true,
+                builtInZoomControls: true,
+                displayZoomControls: false,
+                javaScriptEnabled: true,
+                allowFileAccessFromFileURLs: true,
+                allowUniversalAccessFromFileURLs: true,
+                // 全屏允许横向滑动切换图片，禁用纵向滚动
+                disableVerticalScroll: true,
+                disableHorizontalScroll: false,
+                verticalScrollBarEnabled: false,
+                horizontalScrollBarEnabled: false,
+                overScrollMode: OverScrollMode.NEVER,
+              ),
+              onWebViewCreated: (controller) {
+                _setupJsHandlers(controller);
+              },
+            ),
           ),
-          // 顶部：标题栏（对齐多看 FullScreenActivity 的 TitleBar）
+          // 顶部：页码指示器 + 关闭按钮（Flutter 覆盖在 WebView 上）
           _buildTopBar(),
-          // 底部：副标题栏（对齐多看 setSubTitle 的 bottom subtitle）
-          _buildBottomSubtitle(),
         ],
-      ),
-    );
-  }
-
-  /// 构建可缩放的单张图片（全屏预览）
-  ///
-  /// 全屏预览只显示图片，标题/副标题由右下角自定义信息面板展示。
-  /// - AutomaticKeepAliveClientMixin：保持页面状态，避免滑出视图后被销毁
-  /// - GestureDetector 检测双击缩放
-  /// - InteractiveViewer 处理双指缩放和拖动
-  Widget _buildZoomableImage(EpubGalleryImage image, int index) {
-    return _KeepAliveImage(
-      child: GestureDetector(
-        onDoubleTap: _onDoubleTap,
-        behavior: HitTestBehavior.opaque,
-        child: Center(
-          child: InteractiveViewer(
-            transformationController: _transformCtrl,
-            minScale: 1.0,
-            maxScale: 4.0,
-            boundaryMargin: const EdgeInsets.all(double.infinity),
-            onInteractionEnd: (_) {
-              final scale = _transformCtrl.value.getMaxScaleOnAxis();
-              if ((scale - _currentScale).abs() > 0.01) {
-                setState(() => _currentScale = scale);
-              }
-            },
-            child: _buildImage(image),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// 底部副标题栏（对齐多看 FullScreenActivity 的 setSubTitle）
-  ///
-  /// 多看全屏预览的标题/副标题由 Java 层 TitleBar/SubTitle 控件渲染，
-  /// 不是原作者 EPUB CSS。样式特征（从 dex 字符串推断）：
-  /// - 位置：底部居中
-  /// - 字色：白色（深色背景保证可读）
-  /// - 背景：半透明黑底渐变（保证文字在任何图片上都可读）
-  /// - maintitle：稍大字号 + 粗体
-  /// - subtitle：稍小字号 + 常规字重 + 半透明
-  ///
-  /// 切换图片时面板淡入淡出过渡（对齐多看 setSubTitle 的动画过渡）
-  Widget _buildBottomSubtitle() {
-    final image = widget.images[_currentIndex];
-    final hasTitle =
-        image.maintitle.isNotEmpty || image.subtitle.isNotEmpty;
-    if (!hasTitle) return const SizedBox.shrink();
-
-    return Positioned(
-      left: 0,
-      right: 0,
-      bottom: 0,
-      child: SafeArea(
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 250),
-          switchInCurve: Curves.easeOut,
-          switchOutCurve: Curves.easeIn,
-          transitionBuilder: (child, animation) {
-            return FadeTransition(
-              opacity: animation,
-              child: SlideTransition(
-                position: Tween<Offset>(
-                  begin: const Offset(0, 0.3),
-                  end: Offset.zero,
-                ).animate(CurvedAnimation(
-                  parent: animation,
-                  curve: Curves.easeOut,
-                )),
-                child: child,
-              ),
-            );
-          },
-          child: Container(
-            key: ValueKey(_currentIndex),
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.transparent,
-                  Colors.black.withValues(alpha: 0.7),
-                ],
-              ),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                if (image.maintitle.isNotEmpty)
-                  Text(
-                    image.maintitle,
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      height: 1.3,
-                    ),
-                  ),
-                if (image.subtitle.isNotEmpty) ...[
-                  if (image.maintitle.isNotEmpty) const SizedBox(height: 4),
-                  Text(
-                    image.subtitle,
-                    textAlign: TextAlign.center,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.85),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w400,
-                      height: 1.4,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }
@@ -1074,73 +970,5 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
         ),
       ),
     );
-  }
-
-  /// 根据图片 src 类型选择渲染方式
-  Widget _buildImage(EpubGalleryImage image) {
-    final src = image.src;
-    if (src.startsWith('data:')) {
-      final bytes = _decodeDataUri(src);
-      if (bytes != null) {
-        return Image.memory(
-          bytes,
-          fit: BoxFit.contain,
-          gaplessPlayback: true,
-        );
-      }
-      return const Icon(Icons.broken_image, color: Colors.white54, size: 64);
-    }
-    final filePath = src.startsWith('file://') ? src.substring(7) : src;
-    if (filePath.contains('/') || filePath.contains('\\')) {
-      return Image.file(
-        File(filePath),
-        fit: BoxFit.contain,
-        gaplessPlayback: true,
-        errorBuilder: (_, __, ___) =>
-            const Icon(Icons.broken_image, color: Colors.white54, size: 64),
-      );
-    }
-    return Image.network(
-      src,
-      fit: BoxFit.contain,
-      gaplessPlayback: true,
-      errorBuilder: (_, __, ___) =>
-          const Icon(Icons.broken_image, color: Colors.white54, size: 64),
-    );
-  }
-
-  Uint8List? _decodeDataUri(String dataUri) {
-    try {
-      final commaIdx = dataUri.indexOf(',');
-      if (commaIdx < 0) return null;
-      return base64Decode(dataUri.substring(commaIdx + 1));
-    } catch (_) {
-      return null;
-    }
-  }
-}
-
-/// 保持 PageView 子页面状态的包装组件
-///
-/// AutomaticKeepAliveClientMixin 让 PageView 子页面在滑出视图后不被销毁，
-/// 避免重新构建和重新解码图片。这对大图画廊尤为重要，能显著提升滑动流畅度。
-class _KeepAliveImage extends StatefulWidget {
-  final Widget child;
-
-  const _KeepAliveImage({required this.child});
-
-  @override
-  State<_KeepAliveImage> createState() => _KeepAliveImageState();
-}
-
-class _KeepAliveImageState extends State<_KeepAliveImage>
-    with AutomaticKeepAliveClientMixin {
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    return widget.child;
   }
 }

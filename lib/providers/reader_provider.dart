@@ -47,7 +47,7 @@ double readerParagraphIndentCount(String indent) {
 
 class ReaderProvider extends ChangeNotifier {
   PageMode _pageMode = PageMode.simulation;
-  double _fontSize = 20.0;
+  double _fontSize = 15.0;
   double _lineHeight = 1.6;
   Color _backgroundColor = const Color(0xFFFFF8E1);
   Color _textColor = Colors.black87;
@@ -168,7 +168,7 @@ class ReaderProvider extends ChangeNotifier {
     if (_initialized) return;
     final config = StorageService.instance.getReaderConfig();
     if (config != null) {
-      _fontSize = (config['fontSize'] as num?)?.toDouble() ?? 20.0;
+      _fontSize = (config['fontSize'] as num?)?.toDouble() ?? 15.0;
       _lineHeight = (config['lineHeight'] as num?)?.toDouble() ?? 1.6;
       _brightness = (config['brightness'] as num?)?.toDouble() ?? 1.0;
       _isNightMode = config['isNightMode'] as bool? ?? false;
