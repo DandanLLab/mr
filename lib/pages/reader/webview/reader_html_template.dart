@@ -43,7 +43,7 @@ class ReaderHtmlTemplate {
     required int chapterIndex,
     bool isRichHtml = false,
   }) {
-    final css = _generateCss(provider, isScrollMode);
+    final css = _generateCss(provider, isScrollMode, isRichHtml);
     final js = _readerJs();
 
     // 富 HTML（EPUB）：解析 [[EPUB_CSS]]/[[EPUB_BODY]] 包裹格式
@@ -220,7 +220,7 @@ class ReaderHtmlTemplate {
   /// - #reader-stage: relative + overflow:hidden，作为 a/b 的定位容器
   /// - .reader-content: absolute + column 布局，a/b 重叠在同一位置
   /// - #reader-content-b: 默认 visibility:hidden + pointer-events:none
-  static String _generateCss(ReaderProvider provider, bool isScrollMode) {
+  static String _generateCss(ReaderProvider provider, bool isScrollMode, bool isRichHtml) {
     final textColor = _colorToHex(provider.textColor);
     final bgColor = _colorToHex(provider.backgroundColor);
     final fontFamily = provider.fontFamily.isEmpty ? 'inherit' : provider.fontFamily;
@@ -330,10 +330,16 @@ html, body {
   height: var(--reader-vh);
   background-color: var(--reader-bg-color);
   color: var(--reader-text-color);
-  font-family: var(--reader-font-family);
+  /* ★ EPUB 模式：让作者字体样式优先 ★
+     - font-size 保留：作为 EPUB em 单位的基准（作者 1.3em 相对此字号）
+     - font-family/line-height/letter-spacing 不设：
+       让 EPUB 作者的 body/class 设定完全生效，不被阅读器默认值覆盖
+       作者没设的元素继承 html 的系统默认字体
+     - 非 EPUB 模式：全部设为阅读器配置值 */
   font-size: var(--reader-font-size);
-  line-height: var(--reader-line-height);
-  letter-spacing: var(--reader-letter-spacing);
+  ${isRichHtml ? '' : 'font-family: var(--reader-font-family);'}
+  ${isRichHtml ? '' : 'line-height: var(--reader-line-height);'}
+  ${isRichHtml ? '' : 'letter-spacing: var(--reader-letter-spacing);'}
   -webkit-text-size-adjust: none;
   text-size-adjust: none;
   overflow: hidden;
