@@ -476,6 +476,11 @@ class EpubGalleryChapterStyle {
   /// 底部提示文本样式（从 .gallery-txt CSS 提取）
   final EpubGalleryTextStyle? galleryTxtStyle;
 
+  /// 原始 CSS 全文（从 EPUB style.css 提取，未经拆解）
+  /// 用于 WebView 渲染模式：直接内联到 <style> 标签，让浏览器原生渲染所有 CSS 属性，
+  /// 实现 1:1 还原作者排版（对齐多看/当当阅读器的 HTML snippet 渲染机制）
+  final String? rawCss;
+
   const EpubGalleryChapterStyle({
     this.backgroundImageSrc,
     this.backgroundColor,
@@ -522,6 +527,7 @@ class EpubGalleryChapterStyle {
     this.cellBorderBottomLeftRadius,
     this.galleryTxt,
     this.galleryTxtStyle,
+    this.rawCss,
   });
 }
 
@@ -2525,6 +2531,7 @@ class EpubParser {
         cellBorderBottomLeftRadius: cellBorderBottomLeftRadius,
         galleryTxt: galleryTxt,
         galleryTxtStyle: galleryTxtStyle,
+        rawCss: epubCss,
       );
     } catch (e) {
       debugPrint('[EPUB诊断] 画廊章节样式提取失败: $e');
