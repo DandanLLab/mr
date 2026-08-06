@@ -113,12 +113,18 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     final rawCss = cs?.rawCss ?? '';
 
     // 背景色：优先用 chapterStyle.backgroundColor，否则用阅读器背景色
-    final bgColor = cs?.backgroundColor != null
-        ? _argbIntToCss(cs!.backgroundColor!)
-        : _colorToCss(widget.backgroundColor);
+    // 全屏预览时强制黑色背景（对齐多看全屏预览的纯黑背景）
+    final bgColor = isFullscreen
+        ? '#000000'
+        : (cs?.backgroundColor != null
+            ? _argbIntToCss(cs!.backgroundColor!)
+            : _colorToCss(widget.backgroundColor));
 
     // 默认文字色（element 级，被 rawCss 的 class 规则覆盖）
-    final textColor = _colorToCss(widget.textColor);
+    // 全屏预览时文字色用白色（对齐多看全屏预览的白色文字）
+    final textColor = isFullscreen
+        ? '#ffffff'
+        : _colorToCss(widget.textColor);
 
     // 点点点颜色：跟随 textColor（深色背景→浅色点，浅色背景→深色点）
     // 用 rgba(r,g,b,alpha) 形式：未激活 30% 透明，激活 90% 透明
@@ -132,18 +138,22 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     final bgRepeat = cs?.backgroundRepeat ?? 'no-repeat';
 
     // body 内联背景图（最高优先级，覆盖 rawCss 的 url() 相对路径）
+    // 全屏预览时不显示背景图（纯黑背景，对齐多看全屏预览）
     String bodyBgStyle = '';
-    final bgSrc = cs?.backgroundImageSrc;
-    if (bgSrc != null && bgSrc.isNotEmpty) {
-      final url = _srcToWebViewUrl(bgSrc);
-      bodyBgStyle = 'background-image: url("$url");';
+    if (!isFullscreen) {
+      final bgSrc = cs?.backgroundImageSrc;
+      if (bgSrc != null && bgSrc.isNotEmpty) {
+        final url = _srcToWebViewUrl(bgSrc);
+        bodyBgStyle = 'background-image: url("$url");';
+      }
     }
 
-    // 画廊标题 HTML
-    final galleryTitleHtml =
-        (cs?.galleryTitle != null && cs!.galleryTitle!.isNotEmpty)
-            ? '<h3 class="gallery-title">${_escapeHtml(cs.galleryTitle!)}</h3>'
-            : '';
+    // 画廊标题 HTML（全屏预览时不显示章节级标题，只显示图片）
+    final galleryTitleHtml = (!isFullscreen &&
+            cs?.galleryTitle != null &&
+            cs!.galleryTitle!.isNotEmpty)
+        ? '<h3 class="gallery-title">${_escapeHtml(cs.galleryTitle!)}</h3>'
+        : '';
 
     // 画廊 cells HTML（每个 cell：图片 + maintitle + subtitle）
     final cellsHtml = widget.images.map((img) {
@@ -162,11 +172,12 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
       </div>''';
     }).join('\n');
 
-    // 底部提示 HTML
-    final galleryTxtHtml =
-        (cs?.galleryTxt != null && cs!.galleryTxt!.isNotEmpty)
-            ? '<p class="gallery-txt">${_escapeHtml(cs.galleryTxt!)}</p>'
-            : '';
+    // 底部提示 HTML（全屏预览时不显示）
+    final galleryTxtHtml = (!isFullscreen &&
+            cs?.galleryTxt != null &&
+            cs!.galleryTxt!.isNotEmpty)
+        ? '<p class="gallery-txt">${_escapeHtml(cs.galleryTxt!)}</p>'
+        : '';
 
     // 初始 index：全屏预览用 fullscreenInitialIndex，非全屏用 initialPageToEnd 逻辑
     final initialIdx = isFullscreen
@@ -405,9 +416,22 @@ body {
 .dk-slider.single .dk-btn {
   display: none !important;
 }
+
+/* === 5. 全屏预览专用 CSS ===
+   全屏预览时隐藏装饰元素，只显示纯图片（对齐多看全屏预览）：
+   - cell border/box-shadow 清除（全屏纯图片展示）
+   - cell padding 清除（图片最大化）
+   - gallery-title/gallery-txt 已在 HTML 层不生成
+   - 背景图已在 HTML 层不注入 */
+body.dk-fullscreen .duokan-image-gallery-cell {
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
 </style>
 </head>
-<body class="video-bg" style="$bodyBgStyle">
+<body class="${isFullscreen ? 'dk-fullscreen' : 'video-bg'}" style="$bodyBgStyle">
   $galleryTitleHtml
   <div class="dk-slider${widget.images.length <= 1 ? ' single' : ''}">
     <div class="duokan-image-gallery gallery-pic">
@@ -424,9 +448,12 @@ body {
       var dotted = document.getElementById('dotted');
       var btnPrev = document.getElementById('btnPrev');
       var btnNext = document.getElementById('btnNext');
-      if (!gallery || !dotted) return;
+      // ★ 修复：gallery 必须存在，dotted 在全屏模式下可能为 null（不生成）
+      // 之前 !dotted 会导致 JS early return，全屏预览所有功能失效
+      if (!gallery) return;
 
       var total = gallery.children.length;
+      var isFullscreen = $isFullscreenJs;
 
       function callHandler(name, arg) {
         try {
@@ -441,8 +468,9 @@ body {
         return Math.round(gallery.scrollLeft / gallery.clientWidth);
       }
 
-      // 更新点点点指示器的 active 状态
+      // 更新点点点指示器的 active 状态（仅非全屏，dotted 存在时）
       function updateDotted() {
+        if (!dotted) return;
         var idx = getCurrentIndex();
         var dots = dotted.querySelectorAll('span');
         for (var i = 0; i < dots.length; i++) {
@@ -457,12 +485,22 @@ body {
       }
 
       // 滚动监听（rAF 节流，避免高频 scroll 事件刷屏）
+      // ★ 合并非全屏 updateDotted 和全屏 onGalleryPageChanged 回调，共用一个 rafId
       var rafId = 0;
+      var lastIdx = getCurrentIndex();
       gallery.addEventListener('scroll', function() {
         if (rafId) return;
         rafId = requestAnimationFrame(function() {
           rafId = 0;
           updateDotted();
+          // 全屏预览时：页码变化回调 Flutter 更新顶部页码指示器
+          if (isFullscreen) {
+            var idx = getCurrentIndex();
+            if (idx !== lastIdx) {
+              lastIdx = idx;
+              callHandler('onGalleryPageChanged', idx);
+            }
+          }
         });
       }, {passive: true});
 
@@ -475,22 +513,6 @@ body {
             callHandler('$imageTapHandler', index);
           });
         })(i);
-      }
-
-      // 全屏预览时：滚动变化回调 Flutter 更新页码指示器
-      if ($isFullscreenJs) {
-        var lastIdx = getCurrentIndex();
-        gallery.addEventListener('scroll', function() {
-          if (rafId) return;
-          rafId = requestAnimationFrame(function() {
-            rafId = 0;
-            var idx = getCurrentIndex();
-            if (idx !== lastIdx) {
-              lastIdx = idx;
-              callHandler('onGalleryPageChanged', idx);
-            }
-          });
-        }, {passive: true});
       }
 
       // 左右翻页按钮（对齐多看 btn_l/btn_r）
