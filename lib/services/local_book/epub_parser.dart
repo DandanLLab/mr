@@ -167,9 +167,7 @@ class EpubChapter {
 /// 由 [EpubParser.parseFromBytes] 在解析时提取，阅读时传给
 /// [EpubGalleryPage] 渲染。
 ///
-/// 标题样式由 [EpubGalleryTextStyle] 承载，从 EPUB 自带 CSS 中提取
-/// `.duokan-image-maintitle` / `.duokan-image-subtitle` 的样式规则。
-/// 不同作者可能用不同字号/颜色/字体，这里保留原作样式而非硬编码。
+/// 标题样式由 rawCss 原样内联，浏览器原生渲染，无需拆解字段。
 class EpubGalleryImage {
   /// 图片 src（已解析为本地绝对路径或 data: URI）
   /// - 解压模式：`<extractedBasePath>/OEBPS/Images/01.jpg`
@@ -182,152 +180,26 @@ class EpubGalleryImage {
   /// 副标题（`p.duokan-image-subtitle` 文本，可能为空）
   final String subtitle;
 
-  /// 主标题样式（从 EPUB CSS 提取，null 时用兜底样式）
-  final EpubGalleryTextStyle? maintitleStyle;
-
-  /// 副标题样式（从 EPUB CSS 提取，null 时用兜底样式）
-  final EpubGalleryTextStyle? subtitleStyle;
-
   const EpubGalleryImage({
     required this.src,
     this.maintitle = '',
     this.subtitle = '',
-    this.maintitleStyle,
-    this.subtitleStyle,
-  });
-}
-
-/// 画廊标题样式（从 EPUB CSS 提取）
-///
-/// 不同 EPUB 作者对 `.duokan-image-maintitle` / `.duokan-image-subtitle`
-/// 可能用不同字号、颜色、字体、对齐方式。这里保留原作样式规则，
-/// 让 Flutter 端渲染时尽量贴近原作者排版意图。
-class EpubGalleryTextStyle {
-  /// 字号（em，相对单位，需乘以阅读器基础字号）
-  ///
-  /// 仅当原作者 CSS 用 em/% 单位时填充。渲染时：fontSizeEm * baseFontSize。
-  /// 若原作者用 px 单位，优先存 [fontSizePx]（绝对值，不跟随阅读器字号缩放）。
-  final double? fontSizeEm;
-
-  /// 字号（px，绝对单位，直接使用不缩放）
-  ///
-  /// 原作者 CSS 用 px 单位时填充，优先级高于 [fontSizeEm]。
-  /// 设计意图：原作者明确写 px 字号属于「高优先级契约」，应严格保留原值，
-  /// 不被阅读器 baseFontSize 缩放篡改（如原作者写 16px，baseFontSize=18 时
-  /// 不应渲染成 18px）。
-  final double? fontSizePx;
-
-  /// 字体颜色（ARGB int，如 0xFF336633）
-  final int? color;
-
-  /// 字重（CSS font-weight：100-900，常见 400=regular/700=bold）
-  final int? fontWeight;
-
-  /// 文字对齐（left/center/right/justify）
-  final String? textAlign;
-
-  /// 行高（em）
-  final double? lineHeight;
-
-  /// 字体族（CSS font-family 原始字符串，如 "DK-HEITI","ht",sans-serif）
-  /// Flutter 端无法直接使用多看字体，仅用于关键词识别（HEITI→粗体、KAITI→常规）
-  /// 以近似还原原作者字重意图
-  final String? fontFamily;
-
-  /// 上外边距（em，相对阅读器基础字号；负值表示向上重叠，如 maintitle 的 -0.5em）
-  /// null 表示未指定，调用方用兜底
-  final double? marginTopEm;
-
-  /// 下外边距（em）
-  final double? marginBottomEm;
-
-  /// 左外边距（em）— 对齐多看完整 margin 四值支持
-  final double? marginLeftEm;
-
-  /// 右外边距（em）
-  final double? marginRightEm;
-
-  /// 文字阴影（CSS text-shadow 解析结果）
-  /// 原作者常用 `text-shadow: 0 1 1px #fff`，null 表示无阴影
-  final EpubGalleryTextShadow? textShadow;
-
-  /// 首行缩进（em，相对字号）— 对齐多看 text-indent / duokan-text-indent
-  /// 原作者常用 `text-indent: 0em` 取消默认缩进，null 表示未指定
-  final double? textIndentEm;
-
-  /// 上内边距（em）— 对齐多看 padding 支持
-  final double? paddingTopEm;
-
-  /// 下内边距（em）
-  final double? paddingBottomEm;
-
-  /// 左内边距（em）
-  final double? paddingLeftEm;
-
-  /// 右内边距（em）
-  final double? paddingRightEm;
-
-  /// 换行规则（break-all/break-word/normal）— 对齐多看 word-break
-  final String? wordBreak;
-
-  /// 文本两端对齐方式（inter-ideograph/auto/none）— 对齐多看 text-justify
-  final String? textJustify;
-
-  const EpubGalleryTextStyle({
-    this.fontSizeEm,
-    this.fontSizePx,
-    this.color,
-    this.fontWeight,
-    this.textAlign,
-    this.lineHeight,
-    this.fontFamily,
-    this.marginTopEm,
-    this.marginBottomEm,
-    this.marginLeftEm,
-    this.marginRightEm,
-    this.textShadow,
-    this.textIndentEm,
-    this.paddingTopEm,
-    this.paddingBottomEm,
-    this.paddingLeftEm,
-    this.paddingRightEm,
-    this.wordBreak,
-    this.textJustify,
-  });
-}
-
-/// CSS text-shadow 解析结果
-///
-/// 支持原作 `text-shadow: 0 1 1px #fff` 语法（offset-x offset-y blur color）
-/// 多个阴影只取第一个（Flutter Text.shadows 支持数组，但原作通常单阴影）
-class EpubGalleryTextShadow {
-  /// X 轴偏移（px）
-  final double offsetX;
-
-  /// Y 轴偏移（px）
-  final double offsetY;
-
-  /// 模糊半径（px）
-  final double blurRadius;
-
-  /// 阴影颜色（ARGB int）
-  final int color;
-
-  const EpubGalleryTextShadow({
-    required this.offsetX,
-    required this.offsetY,
-    required this.blurRadius,
-    required this.color,
   });
 }
 
 /// 画廊章节级样式（从 EPUB CSS + body 提取）
 ///
-/// 承载 .video-bg 背景图、.gallery-title、.duokan-image-gallery-cell 边框阴影、
-/// .gallery-txt 等章节级样式，让 Flutter EpubGalleryPage 还原原作者排版。
+/// 承载画廊章节级样式，让 EpubGalleryPage 还原原作者排版。
 ///
-/// 不同 EPUB 作者可能用不同背景图、cell 装饰、标题字体，这里保留原作样式
-/// 而非硬编码，确保 1:1 还原原作者排版意图。
+/// ★ 多看渲染架构：HTML snippet + WebView 原生渲染 ★
+/// 多看画廊本质是作者写 HTML+CSS，多看 C++ 层只转成横向滑动 snippet，
+/// 浏览器原生渲染所有 CSS 属性。我们用 rawCss 原样内联到 <style> 即可
+/// 1:1 对齐多看，无需拆解 CSS 字段再重新拼装。
+///
+/// 因此本类只承载 WebView 无法直接处理的部分：
+/// - rawCss：原样内联（让浏览器原生渲染所有视觉样式）
+/// - 背景图：rawCss 里 url() 是相对路径，需提取解析为绝对路径再 !important 覆盖
+/// - galleryTitle/galleryTxt：文本内容（HTML 层重新生成标签）
 class EpubGalleryChapterStyle {
   /// 背景图 src（已解析为本地绝对路径或 data URI）
   /// 从 .video-bg / .box-bg / .volume-bg 等的 background-image: url(...) 提取
@@ -347,138 +219,23 @@ class EpubGalleryChapterStyle {
   /// 默认 cover（铺满整屏）
   final String? backgroundSize;
 
+  /// 背景图位置（如 "top center" / "left top" / "50% 50%"）
+  final String? backgroundPosition;
+
+  /// 背景图是否固定（fixed/scroll）
+  final String? backgroundAttachment;
+
   /// 章节标题文本（如 "画廊图"），从 .gallery-title 标签的文本内容提取
   /// null 表示无章节标题
   final String? galleryTitle;
-
-  /// 章节标题样式（从 .gallery-title CSS 提取）
-  final EpubGalleryTextStyle? galleryTitleStyle;
-
-  /// cell 边框宽度（px），null 表示无边框
-  final double? cellBorderWidth;
-
-  /// cell 边框颜色（ARGB int），null 表示无边框
-  final int? cellBorderColor;
-
-  /// cell 边框样式（solid / dashed / dotted），默认 solid
-  final String? cellBorderStyle;
-
-  /// cell 圆角半径（px），默认 0
-  final double? cellBorderRadius;
-
-  /// cell 外边距（px，上下左右相同），默认 10
-  final double? cellMargin;
-
-  /// cell 上外边距（px）— 对齐多看完整 margin 四值支持
-  /// null 时回退到 [cellMargin]
-  final double? cellMarginTop;
-
-  /// cell 下外边距（px）
-  final double? cellMarginBottom;
-
-  /// cell 左外边距（px）
-  final double? cellMarginLeft;
-
-  /// cell 右外边距（px）
-  final double? cellMarginRight;
-
-  /// cell 内边距（px，上下左右相同）— 对齐多看 padding 支持
-  final double? cellPadding;
-
-  /// cell 上内边距（px）
-  final double? cellPaddingTop;
-
-  /// cell 下内边距（px）
-  final double? cellPaddingBottom;
-
-  /// cell 左内边距（px）
-  final double? cellPaddingLeft;
-
-  /// cell 右内边距（px）
-  final double? cellPaddingRight;
-
-  /// cell 阴影颜色（ARGB int），null 表示无阴影
-  final int? cellShadowColor;
-
-  /// cell 阴影水平偏移（px），默认 5
-  final double? cellShadowDx;
-
-  /// cell 阴影垂直偏移（px），默认 5
-  final double? cellShadowDy;
-
-  /// cell 阴影模糊半径（px），默认 5
-  final double? cellShadowBlur;
-
-  /// cell 阴影扩散半径（px）— 对齐多看 box-shadow 四值语法（含 spread）
-  final double? cellShadowSpread;
-
-  /// cell 上边框宽度（px）— 对齐多看 border-top/right/bottom/left 分方向支持
-  /// null 时回退到 [cellBorderWidth]
-  final double? cellBorderTopWidth;
-
-  /// cell 右边框宽度（px）
-  final double? cellBorderRightWidth;
-
-  /// cell 下边框宽度（px）
-  final double? cellBorderBottomWidth;
-
-  /// cell 左边框宽度（px）
-  final double? cellBorderLeftWidth;
-
-  /// cell 上边框颜色（ARGB int）— null 时回退到 [cellBorderColor]
-  final int? cellBorderTopColor;
-
-  /// cell 右边框颜色（ARGB int）
-  final int? cellBorderRightColor;
-
-  /// cell 下边框颜色（ARGB int）
-  final int? cellBorderBottomColor;
-
-  /// cell 左边框颜色（ARGB int）
-  final int? cellBorderLeftColor;
-
-  /// cell 上边框样式（solid/dashed/dotted）— null 时回退到 [cellBorderStyle]
-  final String? cellBorderTopStyle;
-
-  /// cell 右边框样式
-  final String? cellBorderRightStyle;
-
-  /// cell 下边框样式
-  final String? cellBorderBottomStyle;
-
-  /// cell 左边框样式
-  final String? cellBorderLeftStyle;
-
-  /// cell 左上圆角（px）— 对齐多看 border-top-left-radius 等四角分写
-  /// null 时回退到 [cellBorderRadius]
-  final double? cellBorderTopLeftRadius;
-
-  /// cell 右上圆角（px）
-  final double? cellBorderTopRightRadius;
-
-  /// cell 右下圆角（px）
-  final double? cellBorderBottomRightRadius;
-
-  /// cell 左下圆角（px）
-  final double? cellBorderBottomLeftRadius;
-
-  /// 背景图位置（如 "top center" / "left top" / "50% 50%"）
-  /// 对齐多看 background-position 支持
-  final String? backgroundPosition;
-
-  /// 背景图是否固定（fixed/scroll）— 对齐多看 background-attachment
-  final String? backgroundAttachment;
 
   /// 底部提示文本（如 "滑动切换，点击放大"），从 .gallery-txt 标签的文本内容提取
   /// null 表示无底部提示
   final String? galleryTxt;
 
-  /// 底部提示文本样式（从 .gallery-txt CSS 提取）
-  final EpubGalleryTextStyle? galleryTxtStyle;
-
   /// 原始 CSS 全文（从 EPUB style.css 提取，未经拆解）
-  /// 用于 WebView 渲染模式：直接内联到 <style> 标签，让浏览器原生渲染所有 CSS 属性，
-  /// 实现 1:1 还原作者排版（对齐多看/当当阅读器的 HTML snippet 渲染机制）
+  /// 直接内联到 <style> 标签，让浏览器原生渲染所有 CSS 属性，
+  /// 实现 1:1 还原作者排版（对齐多看 HTML snippet 渲染机制）
   final String? rawCss;
 
   const EpubGalleryChapterStyle({
@@ -489,44 +246,7 @@ class EpubGalleryChapterStyle {
     this.backgroundPosition,
     this.backgroundAttachment,
     this.galleryTitle,
-    this.galleryTitleStyle,
-    this.cellBorderWidth,
-    this.cellBorderColor,
-    this.cellBorderStyle,
-    this.cellBorderRadius,
-    this.cellMargin,
-    this.cellMarginTop,
-    this.cellMarginBottom,
-    this.cellMarginLeft,
-    this.cellMarginRight,
-    this.cellPadding,
-    this.cellPaddingTop,
-    this.cellPaddingBottom,
-    this.cellPaddingLeft,
-    this.cellPaddingRight,
-    this.cellShadowColor,
-    this.cellShadowDx,
-    this.cellShadowDy,
-    this.cellShadowBlur,
-    this.cellShadowSpread,
-    this.cellBorderTopWidth,
-    this.cellBorderRightWidth,
-    this.cellBorderBottomWidth,
-    this.cellBorderLeftWidth,
-    this.cellBorderTopColor,
-    this.cellBorderRightColor,
-    this.cellBorderBottomColor,
-    this.cellBorderLeftColor,
-    this.cellBorderTopStyle,
-    this.cellBorderRightStyle,
-    this.cellBorderBottomStyle,
-    this.cellBorderLeftStyle,
-    this.cellBorderTopLeftRadius,
-    this.cellBorderTopRightRadius,
-    this.cellBorderBottomRightRadius,
-    this.cellBorderBottomLeftRadius,
     this.galleryTxt,
-    this.galleryTxtStyle,
     this.rawCss,
   });
 }
@@ -838,16 +558,15 @@ class EpubParser {
           //    画廊章节含横向滑动图片列表，WebView 的 column 分页无法正确处理，
           //    改由 Flutter PageView 接管渲染。这里在解析时提取每个 cell 的
           //    图片 src、主标题、副标题，阅读时直接传给 EpubGalleryPage。
-          //    同时从 EPUB CSS 提取 .duokan-image-maintitle/.duokan-image-subtitle
-          //    的样式规则，让 Flutter 端渲染时贴近原作者排版（不同作者样式不同）。
+          //    标题样式由章节级 rawCss 原样内联到 WebView，浏览器原生渲染。
           //    识别后仍保留 richContent（兜底，便于调试或未来回退方案）。
           final galleryImages = _extractGalleryImages(
-            richBody, extractedBasePath, chapterBasePath, epubCss,
+            richBody, extractedBasePath, chapterBasePath,
           );
           if (galleryImages.isNotEmpty) {
             chapter.isGallery = true;
             chapter.galleryImages = galleryImages;
-            // 同步提取画廊章节级样式（背景图、gallery-title、cell 边框阴影、gallery-txt）
+            // 同步提取画廊章节级样式（背景图、gallery-title、gallery-txt）
             // 让 Flutter EpubGalleryPage 1:1 还原原作者排版
             chapter.galleryChapterStyle = _extractGalleryChapterStyle(
               richBody,
@@ -1637,32 +1356,22 @@ class EpubParser {
   /// 在解析阶段识别画廊章节，提取每个 `.duokan-image-gallery-cell` 内的
   /// 图片 src、主标题、副标题，用于 Flutter PageView 渲染。
   ///
+  /// 标题样式不再单独拆解，由章节级 rawCss 原样内联到 WebView，
+  /// 浏览器原生渲染所有 CSS 属性。
+  ///
   /// [richBody] 已经过资源路径改写的 body HTML（图片 src 已是绝对路径或 data URI）
   /// [extractedBasePath] 解压模式时为根目录，内嵌模式时为空字符串
   /// [chapterBasePath] 章节文件所在目录（用于解析相对路径，带末尾 `/`）
-  ///
-  /// [epubCss] 为 EPUB 自带 CSS（已结构化处理），用于提取
-  /// `.duokan-image-maintitle` / `.duokan-image-subtitle` 的样式规则，
-  /// 让 Flutter 端渲染时贴近原作者排版（不同作者样式不同）。
   ///
   /// 返回空列表表示该章节不是画廊页（无 cell 或 cell 数量 < 2）
   static List<EpubGalleryImage> _extractGalleryImages(
     String richBody,
     String extractedBasePath,
     String? chapterBasePath,
-    String epubCss,
   ) {
     try {
       final doc = html_parser.parse(richBody);
       final cells = doc.querySelectorAll('.duokan-image-gallery-cell');
-
-      // 从 EPUB CSS 提取标题样式（所有 cell 共享同一套类样式）
-      final maintitleStyle = _extractGalleryTextStyle(
-        epubCss, '.duokan-image-maintitle',
-      );
-      final subtitleStyle = _extractGalleryTextStyle(
-        epubCss, '.duokan-image-subtitle',
-      );
 
       // 标准 multi-cell 画廊：每个 cell 含一张 img + 可选标题
       // 单图不算画廊（按魔改阅读 markEpubGalleryPage 的 images.size < 2 判断）
@@ -1713,8 +1422,6 @@ class EpubParser {
           src: src,
           maintitle: maintitle,
           subtitle: subtitle,
-          maintitleStyle: maintitleStyle,
-          subtitleStyle: subtitleStyle,
         ));
       }
       return result.length >= 2 ? result : const [];
@@ -1724,353 +1431,18 @@ class EpubParser {
     }
   }
 
-  /// 从 EPUB CSS 中提取指定选择器的文字样式
-  ///
-  /// 解析 `.duokan-image-maintitle` / `.duokan-image-subtitle` 等类选择器
-  /// 的 font-size / color / font-weight / text-align / line-height 规则，
-  /// 用于 Flutter 端 Text 渲染。
-  ///
-  /// 示例 CSS：
-  /// ```
-  /// .duokan-image-maintitle {
-  ///   margin: 1em auto -0.5em auto;
-  ///   font-family: "DK-HEITI","ht",sans-serif;
-  ///   font-size: 0.9em;
-  ///   color: #336633;
-  ///   text-align: center;
-  /// }
-  /// ```
-  ///
-  /// 返回 null 表示未找到该选择器或解析失败，调用方用兜底样式。
-  static EpubGalleryTextStyle? _extractGalleryTextStyle(
-    String css, String selector,
-  ) {
-    try {
-      // 匹配 selector { ... } 块（支持选择器后有空格/换行）
-      final blockPattern = RegExp(
-        RegExp.escape(selector) + r'\s*\{([^}]*)\}',
-      );
-      final match = blockPattern.firstMatch(css);
-      if (match == null) return null;
-      final body = match.group(1) ?? '';
-
-      double? fontSizeEm;
-      double? fontSizePx;
-      int? color;
-      int? fontWeight;
-      String? textAlign;
-      double? lineHeight;
-      String? fontFamily;
-      double? marginTopEm;
-      double? marginBottomEm;
-      double? marginLeftEm;
-      double? marginRightEm;
-      EpubGalleryTextShadow? textShadow;
-      double? textIndentEm;
-      double? paddingTopEm;
-      double? paddingBottomEm;
-      double? paddingLeftEm;
-      double? paddingRightEm;
-      String? wordBreak;
-      String? textJustify;
-
-      // font-size: 0.9em / 14px / 90%
-      // - px：存 fontSizePx（绝对值，渲染时直接用，不被 baseFontSize 缩放）
-      //   原作者明确写 px 属于高优先级契约，严格保留原值
-      // - em/%：存 fontSizeEm（相对值，渲染时乘 baseFontSize）
-      final fsMatch = RegExp(r'font-size\s*:\s*([\d.]+)(em|px|%)').firstMatch(body);
-      if (fsMatch != null) {
-        final value = double.tryParse(fsMatch.group(1) ?? '');
-        final unit = fsMatch.group(2);
-        if (value != null && unit != null) {
-          if (unit == 'em') {
-            fontSizeEm = value;
-          } else if (unit == 'px') {
-            // px 直接保留绝对值，不转 em（避免被 baseFontSize 二次缩放）
-            fontSizePx = value;
-          } else if (unit == '%') {
-            fontSizeEm = value / 100;
-          }
-        }
-      }
-
-      // color: #336633 / #336 / rgb(51,102,51) / red
-      // 注意：排除 background-color（前面带 - 前缀的不算 color）
-      final colorMatch = RegExp(r'(?<![a-z-])color\s*:\s*(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|[a-zA-Z]+)').firstMatch(body);
-      if (colorMatch != null) {
-        color = _parseCssColor(colorMatch.group(1) ?? '');
-      }
-
-      // font-weight: bold / 400 / 700
-      final fwMatch = RegExp(r'font-weight\s*:\s*(bold|normal|\d{3})').firstMatch(body);
-      if (fwMatch != null) {
-        final fw = fwMatch.group(1);
-        if (fw == 'bold') {
-          fontWeight = 700;
-        } else if (fw == 'normal') {
-          fontWeight = 400;
-        } else {
-          fontWeight = int.tryParse(fw ?? '');
-        }
-      }
-
-      // text-align: center / left / right / justify
-      final taMatch = RegExp(r'text-align\s*:\s*(left|center|right|justify)').firstMatch(body);
-      if (taMatch != null) {
-        textAlign = taMatch.group(1);
-      }
-
-      // line-height: 1.35em / 1.5 / 24px
-      final lhMatch = RegExp(r'line-height\s*:\s*([\d.]+)(em|px)?').firstMatch(body);
-      if (lhMatch != null) {
-        final value = double.tryParse(lhMatch.group(1) ?? '');
-        if (value != null) {
-          // 无单位或 em 都按 em 处理（无单位时值本身就是倍数）
-          lineHeight = value;
-        }
-      }
-
-      // font-family: "DK-HEITI","ht",sans-serif → 保留原始字符串
-      // Flutter 端做关键词映射（HEITI→粗体、KAITI→常规）近似还原字重
-      final ffMatch = RegExp(r'font-family\s*:\s*([^;}]+)').firstMatch(body);
-      if (ffMatch != null) {
-        fontFamily = ffMatch.group(1)?.trim();
-      }
-
-      // margin: 1em auto -0.5em auto / 0.5em 0 / 2em auto / 10px 0 10px 0
-      // 提取 top/right/bottom/left 四值（auto/0 不解析为 null，调用方用兜底）
-      final marginMatch = RegExp(r'margin\s*:\s*([^;}]+)').firstMatch(body);
-      if (marginMatch != null) {
-        final parts = marginMatch.group(1)!.trim().split(RegExp(r'\s+'));
-        // 解析单个 margin 值为 em（仅 em/px/数值，auto 跳过）
-        double? parseEm(String token) {
-          if (token == 'auto' || token == '0') return null;
-          final emMatch = RegExp(r'^(-?[\d.]+)em$').firstMatch(token);
-          if (emMatch != null) return double.tryParse(emMatch.group(1)!);
-          final pxMatch = RegExp(r'^(-?[\d.]+)px$').firstMatch(token);
-          if (pxMatch != null) {
-            return (double.tryParse(pxMatch.group(1)!) ?? 0) / 16;
-          }
-          final numMatch = RegExp(r'^(-?[\d.]+)$').firstMatch(token);
-          if (numMatch != null) return double.tryParse(numMatch.group(1)!);
-          return null;
-        }
-
-        if (parts.length == 1) {
-          // margin: a → 上下左右都是 a
-          marginTopEm = parseEm(parts[0]);
-          marginBottomEm = marginTopEm;
-          marginLeftEm = marginTopEm;
-          marginRightEm = marginTopEm;
-        } else if (parts.length == 2) {
-          // margin: a b → 上下 a，左右 b
-          marginTopEm = parseEm(parts[0]);
-          marginBottomEm = parseEm(parts[0]);
-          marginLeftEm = parseEm(parts[1]);
-          marginRightEm = parseEm(parts[1]);
-        } else if (parts.length == 3) {
-          // margin: a b c → 上 a，左右 b，下 c
-          marginTopEm = parseEm(parts[0]);
-          marginBottomEm = parseEm(parts[2]);
-          marginLeftEm = parseEm(parts[1]);
-          marginRightEm = parseEm(parts[1]);
-        } else if (parts.length >= 4) {
-          // margin: a b c d → 上 a 右 b 下 c 左 d
-          marginTopEm = parseEm(parts[0]);
-          marginRightEm = parseEm(parts[1]);
-          marginBottomEm = parseEm(parts[2]);
-          marginLeftEm = parseEm(parts[3]);
-        }
-      }
-
-      // margin-top/bottom/left/right 分写（覆盖 shorthand）
-      final mtMatch = RegExp(r'margin-top\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
-      if (mtMatch != null) {
-        final v = double.tryParse(mtMatch.group(1)!);
-        final u = mtMatch.group(2);
-        marginTopEm = v != null && u == 'em' ? v : (v != null && u == 'px' ? v / 16 : marginTopEm);
-      }
-      final mbMatch = RegExp(r'margin-bottom\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
-      if (mbMatch != null) {
-        final v = double.tryParse(mbMatch.group(1)!);
-        final u = mbMatch.group(2);
-        marginBottomEm = v != null && u == 'em' ? v : (v != null && u == 'px' ? v / 16 : marginBottomEm);
-      }
-      final mlMatch = RegExp(r'margin-left\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
-      if (mlMatch != null) {
-        final v = double.tryParse(mlMatch.group(1)!);
-        final u = mlMatch.group(2);
-        marginLeftEm = v != null && u == 'em' ? v : (v != null && u == 'px' ? v / 16 : marginLeftEm);
-      }
-      final mrMatch = RegExp(r'margin-right\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
-      if (mrMatch != null) {
-        final v = double.tryParse(mrMatch.group(1)!);
-        final u = mrMatch.group(2);
-        marginRightEm = v != null && u == 'em' ? v : (v != null && u == 'px' ? v / 16 : marginRightEm);
-      }
-
-      // text-shadow: 0 1 1px #fff / 2px 2px 4px gray
-      // 语法：offset-x offset-y blur-radius? color
-      final tsMatch = RegExp(
-        r'text-shadow\s*:\s*(-?[\d.]+)(px)?\s+(-?[\d.]+)(px)?(?:\s+(-?[\d.]+)(px)?)?\s+(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|[a-zA-Z]+)',
-      ).firstMatch(body);
-      if (tsMatch != null) {
-        final ox = double.tryParse(tsMatch.group(1) ?? '0') ?? 0;
-        final oy = double.tryParse(tsMatch.group(3) ?? '0') ?? 0;
-        // blur 可选，默认 0
-        final blur = double.tryParse(tsMatch.group(5) ?? '0') ?? 0;
-        final clrStr = tsMatch.group(7);
-        final clr = clrStr != null ? (_parseCssColor(clrStr) ?? 0xFF000000) : 0xFF000000;
-        textShadow = EpubGalleryTextShadow(
-          offsetX: ox,
-          offsetY: oy,
-          blurRadius: blur,
-          color: clr,
-        );
-      }
-
-      // text-indent: 0em / 2em / 16px（含 duokan-text-indent 多看私有属性）
-      // 对齐多看 text-indent / duokan-text-indent 双属性支持
-      final tiMatch = RegExp(r'(?:duokan-)?text-indent\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
-      if (tiMatch != null) {
-        final v = double.tryParse(tiMatch.group(1)!);
-        final u = tiMatch.group(2);
-        if (v != null) {
-          textIndentEm = u == 'em' ? v : (u == 'px' ? v / 16 : v);
-        }
-      }
-
-      // padding: 3px / 0px 10px / 5px 10px 5px 10px
-      // 四值语法（同 margin），em/px 都转 em
-      final padMatch = RegExp(r'padding\s*:\s*([^;}]+)').firstMatch(body);
-      if (padMatch != null) {
-        final parts = padMatch.group(1)!.trim().split(RegExp(r'\s+'));
-        double? parsePadEm(String token) {
-          final pxM = RegExp(r'^(-?[\d.]+)px$').firstMatch(token);
-          if (pxM != null) return (double.tryParse(pxM.group(1)!) ?? 0) / 16;
-          final emM = RegExp(r'^(-?[\d.]+)em$').firstMatch(token);
-          if (emM != null) return double.tryParse(emM.group(1)!);
-          return null;
-        }
-
-        if (parts.length == 1) {
-          paddingTopEm = parsePadEm(parts[0]);
-          paddingBottomEm = paddingTopEm;
-          paddingLeftEm = paddingTopEm;
-          paddingRightEm = paddingTopEm;
-        } else if (parts.length == 2) {
-          paddingTopEm = parsePadEm(parts[0]);
-          paddingBottomEm = parsePadEm(parts[0]);
-          paddingLeftEm = parsePadEm(parts[1]);
-          paddingRightEm = parsePadEm(parts[1]);
-        } else if (parts.length == 3) {
-          paddingTopEm = parsePadEm(parts[0]);
-          paddingBottomEm = parsePadEm(parts[2]);
-          paddingLeftEm = parsePadEm(parts[1]);
-          paddingRightEm = parsePadEm(parts[1]);
-        } else if (parts.length >= 4) {
-          paddingTopEm = parsePadEm(parts[0]);
-          paddingRightEm = parsePadEm(parts[1]);
-          paddingBottomEm = parsePadEm(parts[2]);
-          paddingLeftEm = parsePadEm(parts[3]);
-        }
-      }
-
-      // padding-top/bottom/left/right 分写（覆盖 shorthand）
-      final ptMatch = RegExp(r'padding-top\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
-      if (ptMatch != null) {
-        final v = double.tryParse(ptMatch.group(1)!);
-        final u = ptMatch.group(2);
-        paddingTopEm = v != null && u == 'em' ? v : (v != null && u == 'px' ? v / 16 : paddingTopEm);
-      }
-      final pbMatch = RegExp(r'padding-bottom\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
-      if (pbMatch != null) {
-        final v = double.tryParse(pbMatch.group(1)!);
-        final u = pbMatch.group(2);
-        paddingBottomEm = v != null && u == 'em' ? v : (v != null && u == 'px' ? v / 16 : paddingBottomEm);
-      }
-      final plMatch = RegExp(r'padding-left\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
-      if (plMatch != null) {
-        final v = double.tryParse(plMatch.group(1)!);
-        final u = plMatch.group(2);
-        paddingLeftEm = v != null && u == 'em' ? v : (v != null && u == 'px' ? v / 16 : paddingLeftEm);
-      }
-      final prMatch = RegExp(r'padding-right\s*:\s*(-?[\d.]+)(em|px)').firstMatch(body);
-      if (prMatch != null) {
-        final v = double.tryParse(prMatch.group(1)!);
-        final u = prMatch.group(2);
-        paddingRightEm = v != null && u == 'em' ? v : (v != null && u == 'px' ? v / 16 : paddingRightEm);
-      }
-
-      // word-break: break-all / break-word / normal
-      final wbMatch = RegExp(r'word-break\s*:\s*(break-all|break-word|normal|keep-all)').firstMatch(body);
-      if (wbMatch != null) {
-        wordBreak = wbMatch.group(1);
-      }
-
-      // text-justify: inter-ideograph / auto / none / distribute
-      final tjMatch = RegExp(r'text-justify\s*:\s*(inter-ideograph|auto|none|distribute|inter-character)').firstMatch(body);
-      if (tjMatch != null) {
-        textJustify = tjMatch.group(1);
-      }
-
-      // 至少有一个属性才返回，否则 null（用兜底）
-      if (fontSizeEm == null &&
-          fontSizePx == null &&
-          color == null &&
-          fontWeight == null &&
-          textAlign == null &&
-          lineHeight == null &&
-          fontFamily == null &&
-          marginTopEm == null &&
-          marginBottomEm == null &&
-          marginLeftEm == null &&
-          marginRightEm == null &&
-          textShadow == null &&
-          textIndentEm == null &&
-          paddingTopEm == null &&
-          paddingBottomEm == null &&
-          paddingLeftEm == null &&
-          paddingRightEm == null &&
-          wordBreak == null &&
-          textJustify == null) {
-        return null;
-      }
-      return EpubGalleryTextStyle(
-        fontSizeEm: fontSizeEm,
-        fontSizePx: fontSizePx,
-        color: color,
-        fontWeight: fontWeight,
-        textAlign: textAlign,
-        lineHeight: lineHeight,
-        fontFamily: fontFamily,
-        marginTopEm: marginTopEm,
-        marginBottomEm: marginBottomEm,
-        marginLeftEm: marginLeftEm,
-        marginRightEm: marginRightEm,
-        textShadow: textShadow,
-        textIndentEm: textIndentEm,
-        paddingTopEm: paddingTopEm,
-        paddingBottomEm: paddingBottomEm,
-        paddingLeftEm: paddingLeftEm,
-        paddingRightEm: paddingRightEm,
-        wordBreak: wordBreak,
-        textJustify: textJustify,
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// 提取画廊章节级样式（背景图、gallery-title、cell 边框阴影、gallery-txt）
+  /// 提取画廊章节级样式（背景图、背景属性、gallery-title、gallery-txt）
   ///
   /// 从 EPUB CSS + body 属性中提取章节级样式，让 Flutter EpubGalleryPage
   /// 1:1 还原原作者排版。提取内容：
   /// - 背景图：从 .video-bg/.box-bg 等的 background-image: url(...) 提取
   ///   路径用 _resolveGallerySrc 解析为绝对路径或 data URI
-  /// - gallery-title：从 HTML 中 .gallery-title 标签的文本提取 + CSS 样式
-  /// - cell 边框阴影：从 .duokan-image-gallery-cell CSS 提取 border/box-shadow/margin
-  /// - gallery-txt：从 HTML 中 .gallery-txt 标签的文本提取 + CSS 样式
+  /// - 背景属性：background-repeat/size/position/attachment
+  /// - gallery-title：从 HTML 中 .gallery-title 标签的文本提取
+  /// - gallery-txt：从 HTML 中 .gallery-txt 标签的文本提取
+  ///
+  /// cell 边框/阴影/margin/padding 等视觉样式不再拆解，由 rawCss 原样
+  /// 内联到 WebView，浏览器原生渲染所有 CSS 属性。
   ///
   /// [richBody] body HTML（图片路径已改写）
   /// [inlinedBodyAttrs] body 属性字符串（含 class/style/bgcolor，可能已改写 url）
@@ -2166,10 +1538,10 @@ class EpubParser {
         }
       }
 
-      // 2. 提取 gallery-title 文本 + 样式
+      // 2. 提取 gallery-title 文本
       //    HTML: <h3 class="gallery-title">画廊图</h3>
+      //    样式由 rawCss 原样内联到 WebView，浏览器原生渲染，无需拆解
       String? galleryTitle;
-      EpubGalleryTextStyle? galleryTitleStyle;
       try {
         final doc = html_parser.parse(richBody);
         final titleEl = doc.querySelector('.gallery-title');
@@ -2180,299 +1552,11 @@ class EpubParser {
       } catch (_) {
         // HTML 解析失败时只跳过标题文本提取
       }
-      galleryTitleStyle = _extractGalleryTextStyle(epubCss, '.gallery-title');
 
-      // 3. 提取 cell 边框/阴影/margin/padding 样式（完整四值 + 分方向支持）
-      //    .duokan-image-gallery-cell { margin: 10px 0; padding: 3px;
-      //      border: 2px solid #20F2f0; border-radius: 10px;
-      //      box-shadow: 5px 5px 5px #888888 }
-      final cellBlock = _extractCssBlock(epubCss, '.duokan-image-gallery-cell');
-      double? cellBorderWidth;
-      int? cellBorderColor;
-      String? cellBorderStyle;
-      double? cellBorderRadius;
-      double? cellMargin;
-      double? cellMarginTop;
-      double? cellMarginBottom;
-      double? cellMarginLeft;
-      double? cellMarginRight;
-      double? cellPadding;
-      double? cellPaddingTop;
-      double? cellPaddingBottom;
-      double? cellPaddingLeft;
-      double? cellPaddingRight;
-      int? cellShadowColor;
-      double? cellShadowDx;
-      double? cellShadowDy;
-      double? cellShadowBlur;
-      double? cellShadowSpread;
-      // 分方向边框（对齐多看 border-top/right/bottom/left 支持）
-      double? cellBorderTopWidth;
-      double? cellBorderRightWidth;
-      double? cellBorderBottomWidth;
-      double? cellBorderLeftWidth;
-      int? cellBorderTopColor;
-      int? cellBorderRightColor;
-      int? cellBorderBottomColor;
-      int? cellBorderLeftColor;
-      String? cellBorderTopStyle;
-      String? cellBorderRightStyle;
-      String? cellBorderBottomStyle;
-      String? cellBorderLeftStyle;
-      // 四角圆角（对齐多看 border-top-left-radius 等支持）
-      double? cellBorderTopLeftRadius;
-      double? cellBorderTopRightRadius;
-      double? cellBorderBottomRightRadius;
-      double? cellBorderBottomLeftRadius;
-
-      if (cellBlock != null) {
-        // border: solid 1px / border: 1px solid #888
-        final borderMatch = RegExp(
-          r'border\s*:\s*(?:([a-zA-Z]+)\s+)?(\d+(?:\.\d+)?px)?\s*(?:([a-zA-Z]+)\s+)?(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|[a-zA-Z]+)?',
-        ).firstMatch(cellBlock);
-        if (borderMatch != null) {
-          // 解析 border shorthand：可能是 solid 1px / 1px solid #888 / solid 1px #888
-          final style1 = borderMatch.group(1);
-          final width = borderMatch.group(2);
-          final style2 = borderMatch.group(3);
-          final color = borderMatch.group(4);
-          if (style1 != null) cellBorderStyle = style1;
-          if (style2 != null) cellBorderStyle = style2;
-          if (width != null) {
-            cellBorderWidth = double.tryParse(width.replaceAll('px', ''));
-          }
-          if (color != null) {
-            cellBorderColor = _parseCssColor(color);
-          }
-        }
-        // border-width / border-style / border-color 分写
-        final bwMatch = RegExp(r'border-width\s*:\s*(\d+(?:\.\d+)?px)').firstMatch(cellBlock);
-        if (bwMatch != null) {
-          cellBorderWidth = double.tryParse(bwMatch.group(1)!.replaceAll('px', ''));
-        }
-        final bsMatch = RegExp(r'border-style\s*:\s*([a-zA-Z]+)').firstMatch(cellBlock);
-        if (bsMatch != null) {
-          cellBorderStyle = bsMatch.group(1);
-        }
-        final bcMatch = RegExp(r'border-color\s*:\s*(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|[a-zA-Z]+)').firstMatch(cellBlock);
-        if (bcMatch != null) {
-          cellBorderColor = _parseCssColor(bcMatch.group(1)!);
-        }
-
-        // border-top/right/bottom/left 分方向（对齐多看 4 方向边框）
-        // 每个方向支持 shorthand：border-top: 2px solid #888 / border-top: 1px
-        for (final dir in ['top', 'right', 'bottom', 'left']) {
-          final dirMatch = RegExp(
-            r'border-' + dir + r'\s*:\s*(?:([a-zA-Z]+)\s+)?(\d+(?:\.\d+)?px)?\s*(?:([a-zA-Z]+)\s+)?(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|[a-zA-Z]+)?',
-          ).firstMatch(cellBlock);
-          if (dirMatch != null) {
-            final style1 = dirMatch.group(1);
-            final width = dirMatch.group(2);
-            final style2 = dirMatch.group(3);
-            final color = dirMatch.group(4);
-            final w = width != null ? double.tryParse(width.replaceAll('px', '')) : null;
-            final c = color != null ? _parseCssColor(color) : null;
-            final s = style1 ?? style2;
-            switch (dir) {
-              case 'top':
-                if (w != null) cellBorderTopWidth = w;
-                if (c != null) cellBorderTopColor = c;
-                if (s != null) cellBorderTopStyle = s;
-                break;
-              case 'right':
-                if (w != null) cellBorderRightWidth = w;
-                if (c != null) cellBorderRightColor = c;
-                if (s != null) cellBorderRightStyle = s;
-                break;
-              case 'bottom':
-                if (w != null) cellBorderBottomWidth = w;
-                if (c != null) cellBorderBottomColor = c;
-                if (s != null) cellBorderBottomStyle = s;
-                break;
-              case 'left':
-                if (w != null) cellBorderLeftWidth = w;
-                if (c != null) cellBorderLeftColor = c;
-                if (s != null) cellBorderLeftStyle = s;
-                break;
-            }
-          }
-        }
-
-        // border-radius（单值 + 四角分写）
-        final brMatch = RegExp(r'border-radius\s*:\s*(\d+(?:\.\d+)?px)').firstMatch(cellBlock);
-        if (brMatch != null) {
-          cellBorderRadius = double.tryParse(brMatch.group(1)!.replaceAll('px', ''));
-        }
-        // border-top-left/right-radius / border-bottom-left/right-radius
-        final btlrMatch = RegExp(r'border-top-left-radius\s*:\s*(\d+(?:\.\d+)?px)').firstMatch(cellBlock);
-        if (btlrMatch != null) {
-          cellBorderTopLeftRadius = double.tryParse(btlrMatch.group(1)!.replaceAll('px', ''));
-        }
-        final btrrMatch = RegExp(r'border-top-right-radius\s*:\s*(\d+(?:\.\d+)?px)').firstMatch(cellBlock);
-        if (btrrMatch != null) {
-          cellBorderTopRightRadius = double.tryParse(btrrMatch.group(1)!.replaceAll('px', ''));
-        }
-        final bbrrMatch = RegExp(r'border-bottom-right-radius\s*:\s*(\d+(?:\.\d+)?px)').firstMatch(cellBlock);
-        if (bbrrMatch != null) {
-          cellBorderBottomRightRadius = double.tryParse(bbrrMatch.group(1)!.replaceAll('px', ''));
-        }
-        final bblrMatch = RegExp(r'border-bottom-left-radius\s*:\s*(\d+(?:\.\d+)?px)').firstMatch(cellBlock);
-        if (bblrMatch != null) {
-          cellBorderBottomLeftRadius = double.tryParse(bblrMatch.group(1)!.replaceAll('px', ''));
-        }
-
-        // margin: 10px 0 / margin: 10px 0 10px 0（四值完整解析）
-        final marginMatch = RegExp(r'margin\s*:\s*([^;}]+)').firstMatch(cellBlock);
-        if (marginMatch != null) {
-          final parts = marginMatch.group(1)!.trim().split(RegExp(r'\s+'));
-          double? parseMarginPx(String token) {
-            final pxM = RegExp(r'^(-?[\d.]+)px$').firstMatch(token);
-            if (pxM != null) return double.tryParse(pxM.group(1)!);
-            final emM = RegExp(r'^(-?[\d.]+)em$').firstMatch(token);
-            if (emM != null) {
-              // em 转 px（基准 16，cell 通常是 px 但兼容 em）
-              return (double.tryParse(emM.group(1)!) ?? 0) * 16;
-            }
-            return null;
-          }
-
-          if (parts.length == 1) {
-            cellMargin = parseMarginPx(parts[0]);
-            cellMarginTop = cellMargin;
-            cellMarginBottom = cellMargin;
-            cellMarginLeft = cellMargin;
-            cellMarginRight = cellMargin;
-          } else if (parts.length == 2) {
-            cellMarginTop = parseMarginPx(parts[0]);
-            cellMarginBottom = cellMarginTop;
-            cellMarginLeft = parseMarginPx(parts[1]);
-            cellMarginRight = cellMarginLeft;
-            cellMargin = cellMarginTop; // 兜底取上
-          } else if (parts.length == 3) {
-            cellMarginTop = parseMarginPx(parts[0]);
-            cellMarginBottom = parseMarginPx(parts[2]);
-            cellMarginLeft = parseMarginPx(parts[1]);
-            cellMarginRight = cellMarginLeft;
-            cellMargin = cellMarginTop;
-          } else if (parts.length >= 4) {
-            cellMarginTop = parseMarginPx(parts[0]);
-            cellMarginRight = parseMarginPx(parts[1]);
-            cellMarginBottom = parseMarginPx(parts[2]);
-            cellMarginLeft = parseMarginPx(parts[3]);
-            cellMargin = cellMarginTop;
-          }
-        }
-        // margin-top/bottom/left/right 分写（覆盖 shorthand）
-        final cmtMatch = RegExp(r'margin-top\s*:\s*(-?[\d.]+)(px|em)').firstMatch(cellBlock);
-        if (cmtMatch != null) {
-          final v = double.tryParse(cmtMatch.group(1)!);
-          final u = cmtMatch.group(2);
-          cellMarginTop = v != null ? (u == 'em' ? v * 16 : v) : cellMarginTop;
-        }
-        final cmbMatch = RegExp(r'margin-bottom\s*:\s*(-?[\d.]+)(px|em)').firstMatch(cellBlock);
-        if (cmbMatch != null) {
-          final v = double.tryParse(cmbMatch.group(1)!);
-          final u = cmbMatch.group(2);
-          cellMarginBottom = v != null ? (u == 'em' ? v * 16 : v) : cellMarginBottom;
-        }
-        final cmlMatch = RegExp(r'margin-left\s*:\s*(-?[\d.]+)(px|em)').firstMatch(cellBlock);
-        if (cmlMatch != null) {
-          final v = double.tryParse(cmlMatch.group(1)!);
-          final u = cmlMatch.group(2);
-          cellMarginLeft = v != null ? (u == 'em' ? v * 16 : v) : cellMarginLeft;
-        }
-        final cmrMatch = RegExp(r'margin-right\s*:\s*(-?[\d.]+)(px|em)').firstMatch(cellBlock);
-        if (cmrMatch != null) {
-          final v = double.tryParse(cmrMatch.group(1)!);
-          final u = cmrMatch.group(2);
-          cellMarginRight = v != null ? (u == 'em' ? v * 16 : v) : cellMarginRight;
-        }
-
-        // padding: 3px / padding: 5px 10px（四值完整解析，对齐多看 padding 支持）
-        final padMatch = RegExp(r'padding\s*:\s*([^;}]+)').firstMatch(cellBlock);
-        if (padMatch != null) {
-          final parts = padMatch.group(1)!.trim().split(RegExp(r'\s+'));
-          double? parsePadPx(String token) {
-            final pxM = RegExp(r'^(-?[\d.]+)px$').firstMatch(token);
-            if (pxM != null) return double.tryParse(pxM.group(1)!);
-            final emM = RegExp(r'^(-?[\d.]+)em$').firstMatch(token);
-            if (emM != null) return (double.tryParse(emM.group(1)!) ?? 0) * 16;
-            return null;
-          }
-
-          if (parts.length == 1) {
-            cellPadding = parsePadPx(parts[0]);
-            cellPaddingTop = cellPadding;
-            cellPaddingBottom = cellPadding;
-            cellPaddingLeft = cellPadding;
-            cellPaddingRight = cellPadding;
-          } else if (parts.length == 2) {
-            cellPaddingTop = parsePadPx(parts[0]);
-            cellPaddingBottom = cellPaddingTop;
-            cellPaddingLeft = parsePadPx(parts[1]);
-            cellPaddingRight = cellPaddingLeft;
-            cellPadding = cellPaddingTop;
-          } else if (parts.length == 3) {
-            cellPaddingTop = parsePadPx(parts[0]);
-            cellPaddingBottom = parsePadPx(parts[2]);
-            cellPaddingLeft = parsePadPx(parts[1]);
-            cellPaddingRight = cellPaddingLeft;
-            cellPadding = cellPaddingTop;
-          } else if (parts.length >= 4) {
-            cellPaddingTop = parsePadPx(parts[0]);
-            cellPaddingRight = parsePadPx(parts[1]);
-            cellPaddingBottom = parsePadPx(parts[2]);
-            cellPaddingLeft = parsePadPx(parts[3]);
-            cellPadding = cellPaddingTop;
-          }
-        }
-        // padding-top/bottom/left/right 分写
-        final cptMatch = RegExp(r'padding-top\s*:\s*(-?[\d.]+)(px|em)').firstMatch(cellBlock);
-        if (cptMatch != null) {
-          final v = double.tryParse(cptMatch.group(1)!);
-          final u = cptMatch.group(2);
-          cellPaddingTop = v != null ? (u == 'em' ? v * 16 : v) : cellPaddingTop;
-        }
-        final cpbMatch = RegExp(r'padding-bottom\s*:\s*(-?[\d.]+)(px|em)').firstMatch(cellBlock);
-        if (cpbMatch != null) {
-          final v = double.tryParse(cpbMatch.group(1)!);
-          final u = cpbMatch.group(2);
-          cellPaddingBottom = v != null ? (u == 'em' ? v * 16 : v) : cellPaddingBottom;
-        }
-        final cplMatch = RegExp(r'padding-left\s*:\s*(-?[\d.]+)(px|em)').firstMatch(cellBlock);
-        if (cplMatch != null) {
-          final v = double.tryParse(cplMatch.group(1)!);
-          final u = cplMatch.group(2);
-          cellPaddingLeft = v != null ? (u == 'em' ? v * 16 : v) : cellPaddingLeft;
-        }
-        final cprMatch = RegExp(r'padding-right\s*:\s*(-?[\d.]+)(px|em)').firstMatch(cellBlock);
-        if (cprMatch != null) {
-          final v = double.tryParse(cprMatch.group(1)!);
-          final u = cprMatch.group(2);
-          cellPaddingRight = v != null ? (u == 'em' ? v * 16 : v) : cellPaddingRight;
-        }
-
-        // box-shadow: dx dy blur [spread] color（支持四值 + spread，对齐多看完整语法）
-        final shadowMatch = RegExp(
-          r'box-shadow\s*:\s*(-?[\d.]+)(px)?\s+(-?[\d.]+)(px)?\s+(-?[\d.]+)(px)?(?:\s+(-?[\d.]+)(px)?)?\s+(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|[a-zA-Z]+)',
-        ).firstMatch(cellBlock);
-        if (shadowMatch != null) {
-          cellShadowDx = double.tryParse(shadowMatch.group(1) ?? '0');
-          cellShadowDy = double.tryParse(shadowMatch.group(3) ?? '0');
-          cellShadowBlur = double.tryParse(shadowMatch.group(5) ?? '0');
-          // spread 可选（第 7 组），默认 0
-          cellShadowSpread = double.tryParse(shadowMatch.group(7) ?? '0');
-          final clrStr = shadowMatch.group(9);
-          if (clrStr != null) {
-            cellShadowColor = _parseCssColor(clrStr);
-          }
-        }
-      }
-
-      // 4. 提取 gallery-txt 文本 + 样式
+      // 3. 提取 gallery-txt 文本
       //    HTML: <p class="gallery-txt">滑动切换，点击放大</p>
+      //    样式由 rawCss 原样内联到 WebView，浏览器原生渲染，无需拆解
       String? galleryTxt;
-      EpubGalleryTextStyle? galleryTxtStyle;
       try {
         final doc = html_parser.parse(richBody);
         final txtEl = doc.querySelector('.gallery-txt');
@@ -2483,7 +1567,6 @@ class EpubParser {
       } catch (_) {
         // HTML 解析失败时只跳过文本提取
       }
-      galleryTxtStyle = _extractGalleryTextStyle(epubCss, '.gallery-txt');
 
       return EpubGalleryChapterStyle(
         backgroundImageSrc: backgroundImageSrc?.isNotEmpty == true ? backgroundImageSrc : null,
@@ -2493,44 +1576,7 @@ class EpubParser {
         backgroundPosition: backgroundPosition,
         backgroundAttachment: backgroundAttachment,
         galleryTitle: galleryTitle,
-        galleryTitleStyle: galleryTitleStyle,
-        cellBorderWidth: cellBorderWidth,
-        cellBorderColor: cellBorderColor,
-        cellBorderStyle: cellBorderStyle,
-        cellBorderRadius: cellBorderRadius,
-        cellMargin: cellMargin,
-        cellMarginTop: cellMarginTop,
-        cellMarginBottom: cellMarginBottom,
-        cellMarginLeft: cellMarginLeft,
-        cellMarginRight: cellMarginRight,
-        cellPadding: cellPadding,
-        cellPaddingTop: cellPaddingTop,
-        cellPaddingBottom: cellPaddingBottom,
-        cellPaddingLeft: cellPaddingLeft,
-        cellPaddingRight: cellPaddingRight,
-        cellShadowColor: cellShadowColor,
-        cellShadowDx: cellShadowDx,
-        cellShadowDy: cellShadowDy,
-        cellShadowBlur: cellShadowBlur,
-        cellShadowSpread: cellShadowSpread,
-        cellBorderTopWidth: cellBorderTopWidth,
-        cellBorderRightWidth: cellBorderRightWidth,
-        cellBorderBottomWidth: cellBorderBottomWidth,
-        cellBorderLeftWidth: cellBorderLeftWidth,
-        cellBorderTopColor: cellBorderTopColor,
-        cellBorderRightColor: cellBorderRightColor,
-        cellBorderBottomColor: cellBorderBottomColor,
-        cellBorderLeftColor: cellBorderLeftColor,
-        cellBorderTopStyle: cellBorderTopStyle,
-        cellBorderRightStyle: cellBorderRightStyle,
-        cellBorderBottomStyle: cellBorderBottomStyle,
-        cellBorderLeftStyle: cellBorderLeftStyle,
-        cellBorderTopLeftRadius: cellBorderTopLeftRadius,
-        cellBorderTopRightRadius: cellBorderTopRightRadius,
-        cellBorderBottomRightRadius: cellBorderBottomRightRadius,
-        cellBorderBottomLeftRadius: cellBorderBottomLeftRadius,
         galleryTxt: galleryTxt,
-        galleryTxtStyle: galleryTxtStyle,
         rawCss: epubCss,
       );
     } catch (e) {
