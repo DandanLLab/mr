@@ -206,18 +206,14 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
         ? '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=4.0, minimum-scale=1.0, user-scalable=yes, viewport-fit=cover">'
         : '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">';
 
-    // 全屏预览时隐藏 dotted 指示器和翻页按钮（全屏只需图片 + 缩放）
+    // 全屏预览时隐藏 dotted 指示器（全屏只需图片 + 缩放）
     final dottedHtml = isFullscreen
         ? ''
         : '<div class="dk-dotted" id="dotted">\n      $dotsHtml\n    </div>';
-    final btnHtml = isFullscreen
-        ? ''
-        : '''<div class="dk-btn dk-btn-l" id="btnPrev">
-      <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
-    </div>
-    <div class="dk-btn dk-btn-r" id="btnNext">
-      <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
-    </div>''';
+    // ★ 删除左右翻页按钮 ★
+    // 多看画廊的 btn_l/btn_r 是原生 Java 按钮，不是 EPUB HTML 的一部分。
+    // WebView 渲染时加这些按钮多余，用户直接横向滑动切换图片即可。
+    // 边界继续滑动触发章节切换由 touchstart/touchend 检测处理。
 
     // JS：全屏时点击图片关闭，非全屏时点击图片触发全屏预览
     final imageTapHandler = isFullscreen ? 'onGalleryClose' : 'onGalleryImageTap';
@@ -379,43 +375,9 @@ body {
   background-color: $dotActiveColor;
 }
 
-/* 左右翻页按钮：对齐多看 <div class="btn btn_l">left</div> <div class="btn btn_r">right</div>
-   多看是左右翻页按钮（触摸 + 按钮双交互方式）
-   absolute 定位在 slider 两侧垂直居中，半透明圆形按钮 */
-.dk-btn {
-  position: absolute !important;
-  top: 50% !important;
-  transform: translateY(-50%) !important;
-  width: 44px !important;
-  height: 44px !important;
-  border-radius: 50% !important;
-  background-color: rgba(0, 0, 0, 0.35) !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  z-index: 20 !important;
-  cursor: pointer !important;
-  -webkit-tap-highlight-color: transparent !important;
-  transition: background-color 0.2s !important;
-}
-.dk-btn:active {
-  background-color: rgba(0, 0, 0, 0.55) !important;
-}
-.dk-btn-l {
-  left: 12px !important;
-}
-.dk-btn-r {
-  right: 12px !important;
-}
-.dk-btn svg {
-  width: 18px !important;
-  height: 18px !important;
-  fill: rgba(255, 255, 255, 0.85) !important;
-}
-/* 单张图时隐藏按钮（无翻页目标） */
-.dk-slider.single .dk-btn {
-  display: none !important;
-}
+/* ★ 删除左右翻页按钮 CSS ★
+   多看画廊的 btn_l/btn_r 是原生 Java 按钮，不是 EPUB HTML 的一部分。
+   WebView 渲染时不生成这些按钮，用户直接横向滑动切换图片。 */
 
 /* === 5. 全屏预览专用 CSS ===
    全屏预览时隐藏装饰元素，只显示纯图片（对齐多看全屏预览）：
@@ -438,16 +400,12 @@ body.dk-fullscreen .duokan-image-gallery-cell {
       $cellsHtml
     </div>
     $dottedHtml
-    $btnHtml
   </div>
   $galleryTxtHtml
   <script>
     (function() {
-      var slider = document.querySelector('.dk-slider');
       var gallery = document.querySelector('.duokan-image-gallery');
       var dotted = document.getElementById('dotted');
-      var btnPrev = document.getElementById('btnPrev');
-      var btnNext = document.getElementById('btnNext');
       // ★ 修复：gallery 必须存在，dotted 在全屏模式下可能为 null（不生成）
       // 之前 !dotted 会导致 JS early return，全屏预览所有功能失效
       if (!gallery) return;
@@ -476,12 +434,6 @@ body.dk-fullscreen .duokan-image-gallery-cell {
         for (var i = 0; i < dots.length; i++) {
           dots[i].classList.toggle('active', i === idx);
         }
-      }
-
-      // 平滑滚动到指定页
-      function scrollToIndex(idx) {
-        idx = Math.max(0, Math.min(idx, total - 1));
-        gallery.scrollTo({ left: idx * gallery.clientWidth, behavior: 'smooth' });
       }
 
       // 滚动监听（rAF 节流，避免高频 scroll 事件刷屏）
@@ -515,33 +467,9 @@ body.dk-fullscreen .duokan-image-gallery-cell {
         })(i);
       }
 
-      // 左右翻页按钮（对齐多看 btn_l/btn_r）
-      if (btnPrev) {
-        btnPrev.addEventListener('click', function(e) {
-          e.preventDefault();
-          e.stopPropagation();
-          var idx = getCurrentIndex();
-          if (idx <= 0) {
-            // 已在第一张，触发上一章
-            callHandler('onGalleryPreviousChapter', null);
-          } else {
-            scrollToIndex(idx - 1);
-          }
-        });
-      }
-      if (btnNext) {
-        btnNext.addEventListener('click', function(e) {
-          e.preventDefault();
-          e.stopPropagation();
-          var idx = getCurrentIndex();
-          if (idx >= total - 1) {
-            // 已在最后一张，触发下一章
-            callHandler('onGalleryNextChapter', null);
-          } else {
-            scrollToIndex(idx + 1);
-          }
-        });
-      }
+      // ★ 删除左右翻页按钮逻辑 ★
+      // 多看画廊的 btn_l/btn_r 是原生 Java 按钮，不是 EPUB HTML 的一部分。
+      // 用户直接横向滑动切换图片，边界继续滑动触发章节切换。
 
       // 边界章节切换（touchstart/touchend 检测边界拖动意图）
       // 在最左边界继续向右滑 → 上一章；最右边界继续向左滑 → 下一章
