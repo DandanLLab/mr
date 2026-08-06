@@ -207,7 +207,7 @@ $rawCss
 /* === 3. 布局覆盖（仅覆盖影响横向滑动布局的属性，保留视觉样式）=== */
 html, body {
   margin: 0 !important;
-  padding: 0 !important;  /* 覆盖原作 body { padding: 0.5em } */
+  padding: 0 !important;
   height: 100vh !important;
   width: 100vw !important;
   overflow: hidden !important;
@@ -220,23 +220,29 @@ body {
   flex-direction: column !important;
   box-sizing: border-box !important;
   color: $textColor;
-  /* 背景属性：chapterStyle 提取值兜底，!important 确保覆盖 rawCss 中的
-     .video-bg（因 rawCss 的 url() 是相对路径，需 bodyBgStyle 内联纠正）*/
   background-color: $bgColor !important;
   background-size: $bgSize !important;
   background-position: $bgPosition !important;
   background-repeat: $bgRepeat !important;
 }
-/* gallery-title: 保留原作 margin: 2em auto, 仅加 flex 标记 */
 .gallery-title {
   flex: 0 0 auto !important;
 }
-/* duokan-image-gallery: 横向滑动容器
-   覆盖原作 margin: 8em 0 0.5em 0（8em 顶部 margin 在 flex 布局中会
-   占用大量空间，让 gallery 被挤压；横向滑动模式下不需要这个间距）*/
-.duokan-image-gallery {
+
+/* === slider 容器（对齐多看 <div class="slider"> 结构）===
+   包含 slide_group（dotted + btn_l + btn_r）和 slide（gallery）
+   用 position:relative 让内部 absolute 元素相对 slider 定位 */
+.dk-slider {
   flex: 1 1 auto !important;
   min-height: 0 !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+/* duokan-image-gallery: 横向滑动容器（多看的 slide）
+   覆盖原作 margin: 8em 0 0.5em 0（横向滑动模式下不需要这个间距）*/
+.duokan-image-gallery {
+  width: 100% !important;
+  height: 100% !important;
   display: flex !important;
   overflow-x: auto !important;
   overflow-y: hidden !important;
@@ -244,10 +250,10 @@ body {
   -webkit-overflow-scrolling: touch;
   margin: 0 !important;
 }
-/* cell: 横向滑动项
-   保留原作 border-style: solid; border-width: 1px; box-shadow: 5px 5px 5px #888
-   覆盖原作 margin: 10px 0（cell 在 flex 布局中是 100% 高度，
-   margin 会导致超出容器）*/
+/* cell: 横向滑动项（多看 slide 内的 msg）
+   ★ 去掉原作 border + box-shadow + margin ★
+   横向滑动模式下 slide 占满全屏，border 会画在 slide 边缘 → 框框位置错误
+   多看 CGalleryHtmlSnippetOutputSystem 也不保留这些装饰 */
 .duokan-image-gallery-cell {
   scroll-snap-align: center !important;
   flex: 0 0 100% !important;
@@ -259,10 +265,16 @@ body {
   justify-content: center !important;
   box-sizing: border-box !important;
   margin: 0 !important;
+  border: none !important;
+  border-style: none !important;
+  border-width: 0 !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
 }
 /* img: 全屏图片对齐多看 IsFullScreenImage
-   图片按比例缩放到适合 slide 的尺寸，object-fit: contain 保持比例
-   max-height 用百分比（不依赖 vh），让图片在 slide 内自适应 */
+   ★ 覆盖原作 .gallery-pic img { width: 100% } ★
+   横向滑动模式下图片按比例缩放到适合 slide 的尺寸
+   object-fit: contain 保持比例，不变形 */
 .duokan-image-gallery-cell img {
   max-width: 90% !important;
   max-height: 80% !important;
@@ -272,33 +284,45 @@ body {
   flex: 0 0 auto !important;
 }
 /* maintitle/subtitle: 跟随图片显示在 slide 内
-   保留原作 color/font-family/font-size/margin/text-align */
+   ★ 覆盖原作 maintitle 的 margin: 1em auto -0.5em auto ★
+   原作负 margin (-0.5em) 是竖向排版下让标题叠到图片上的效果
+   横向滑动模式下标题在图片下方，不需要叠到图片上 → margin-bottom: 0
+   保留原作 color/font-family/font-size/text-align */
 .duokan-image-maintitle,
 .duokan-image-subtitle {
   flex: 0 0 auto !important;
   max-width: 90% !important;
   overflow: hidden !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+.duokan-image-maintitle {
+  margin-top: 1em !important;
 }
 /* 隐藏滚动条 */
 .duokan-image-gallery::-webkit-scrollbar { display: none; }
 .duokan-image-gallery { -ms-overflow-style: none; scrollbar-width: none; }
-/* gallery-txt: 保留原作 margin: 1em auto, 仅加 flex 标记 */
 .gallery-txt {
   flex: 0 0 auto !important;
 }
 
-/* === 4. 点点点指示器（body 最后一个 flex item, 和排版在一起）=== */
-/* 对齐多看阅读器渲染：dotted 在 slide_group 内部，和排版流一起
-   （非 position:fixed 浮动），作为 body 最后一个 flex item */
-.dotted {
-  flex: 0 0 auto !important;
+/* === 4. slide_group 内部元素（对齐多看 <div class="slide_group"> 结构）===
+   dotted + btn_l + btn_r 在 slider 内部 absolute 定位 */
+
+/* 点点点指示器：absolute 定位在 slider 底部居中
+   对齐多看 <div class="dotted" style="position: absolute; ..."> */
+.dk-dotted {
+  position: absolute !important;
+  bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+  left: 0 !important;
+  right: 0 !important;
   display: flex !important;
   justify-content: center !important;
   align-items: center !important;
-  padding: 8px 0 !important;
-  padding-bottom: calc(8px + env(safe-area-inset-bottom)) !important;
+  z-index: 10 !important;
+  pointer-events: none !important;
 }
-.dotted span {
+.dk-dotted span {
   display: inline-block;
   width: 6px;
   height: 6px;
@@ -307,25 +331,76 @@ body {
   background-color: $dotInactiveColor;
   box-shadow: 0 1px 1px rgba(255,255,255,0.5);
 }
-.dotted span.active {
+.dk-dotted span.active {
   background-color: $dotActiveColor;
+}
+
+/* 左右翻页按钮：对齐多看 <div class="btn btn_l">left</div> <div class="btn btn_r">right</div>
+   多看是左右翻页按钮（触摸 + 按钮双交互方式）
+   absolute 定位在 slider 两侧垂直居中，半透明圆形按钮 */
+.dk-btn {
+  position: absolute !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  width: 44px !important;
+  height: 44px !important;
+  border-radius: 50% !important;
+  background-color: rgba(0, 0, 0, 0.35) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 20 !important;
+  cursor: pointer !important;
+  -webkit-tap-highlight-color: transparent !important;
+  transition: background-color 0.2s !important;
+}
+.dk-btn:active {
+  background-color: rgba(0, 0, 0, 0.55) !important;
+}
+.dk-btn-l {
+  left: 12px !important;
+}
+.dk-btn-r {
+  right: 12px !important;
+}
+.dk-btn svg {
+  width: 18px !important;
+  height: 18px !important;
+  fill: rgba(255, 255, 255, 0.85) !important;
+}
+/* 单张图时隐藏按钮（无翻页目标） */
+.dk-slider.single .dk-btn {
+  display: none !important;
 }
 </style>
 </head>
 <body class="video-bg" style="$bodyBgStyle">
   $galleryTitleHtml
-  <div class="duokan-image-gallery gallery-pic">
-    $cellsHtml
+  <div class="dk-slider${widget.images.length <= 1 ? ' single' : ''}">
+    <div class="duokan-image-gallery gallery-pic">
+      $cellsHtml
+    </div>
+    <div class="dk-dotted" id="dotted">
+      $dotsHtml
+    </div>
+    <div class="dk-btn dk-btn-l" id="btnPrev">
+      <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+    </div>
+    <div class="dk-btn dk-btn-r" id="btnNext">
+      <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+    </div>
   </div>
   $galleryTxtHtml
-  <div class="dotted" id="dotted">
-    $dotsHtml
-  </div>
   <script>
     (function() {
+      var slider = document.querySelector('.dk-slider');
       var gallery = document.querySelector('.duokan-image-gallery');
       var dotted = document.getElementById('dotted');
+      var btnPrev = document.getElementById('btnPrev');
+      var btnNext = document.getElementById('btnNext');
       if (!gallery || !dotted) return;
+
+      var total = gallery.children.length;
 
       function callHandler(name, arg) {
         try {
@@ -335,14 +410,24 @@ body {
         } catch(e) {}
       }
 
+      // 获取当前页索引
+      function getCurrentIndex() {
+        return Math.round(gallery.scrollLeft / gallery.clientWidth);
+      }
+
       // 更新点点点指示器的 active 状态
-      // idx = 当前页索引（scrollLeft / cellWidth 四舍五入）
       function updateDotted() {
-        var idx = Math.round(gallery.scrollLeft / gallery.clientWidth);
+        var idx = getCurrentIndex();
         var dots = dotted.querySelectorAll('span');
         for (var i = 0; i < dots.length; i++) {
           dots[i].classList.toggle('active', i === idx);
         }
+      }
+
+      // 平滑滚动到指定页
+      function scrollToIndex(idx) {
+        idx = Math.max(0, Math.min(idx, total - 1));
+        gallery.scrollTo({ left: idx * gallery.clientWidth, behavior: 'smooth' });
       }
 
       // 滚动监听（rAF 节流，避免高频 scroll 事件刷屏）
@@ -364,6 +449,34 @@ body {
             callHandler('onGalleryImageTap', index);
           });
         })(i);
+      }
+
+      // 左右翻页按钮（对齐多看 btn_l/btn_r）
+      if (btnPrev) {
+        btnPrev.addEventListener('click', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          var idx = getCurrentIndex();
+          if (idx <= 0) {
+            // 已在第一张，触发上一章
+            callHandler('onGalleryPreviousChapter', null);
+          } else {
+            scrollToIndex(idx - 1);
+          }
+        });
+      }
+      if (btnNext) {
+        btnNext.addEventListener('click', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          var idx = getCurrentIndex();
+          if (idx >= total - 1) {
+            // 已在最后一张，触发下一章
+            callHandler('onGalleryNextChapter', null);
+          } else {
+            scrollToIndex(idx + 1);
+          }
+        });
       }
 
       // 边界章节切换（touchstart/touchend 检测边界拖动意图）
@@ -772,10 +885,10 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
               return _buildZoomableImage(widget.images[index], index);
             },
           ),
-          // 顶部：页码指示器 + 关闭按钮
+          // 顶部：标题栏（对齐多看 FullScreenActivity 的 TitleBar）
           _buildTopBar(),
-          // 右下角：主标题 + 副标题信息面板（从下到上滑出动画）
-          _buildInfoPanel(),
+          // 底部：副标题栏（对齐多看 setSubTitle 的 bottom subtitle）
+          _buildBottomSubtitle(),
         ],
       ),
     );
@@ -811,63 +924,73 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
     );
   }
 
-  /// 右下角信息面板：主标题 + 副标题，从下到上滑出动画
+  /// 底部副标题栏（对齐多看 FullScreenActivity 的 setSubTitle）
   ///
-  /// 自定义样式（非原作者格式），全屏预览专用：
-  /// - 白色文字（确保在黑底图片上可见）
-  /// - 主标题：18px FontWeight.w600
-  /// - 副标题：13px FontWeight.w400 半透明
-  /// - 切换图片时面板重新从下方滑出（SlideTransition + FadeTransition）
-  Widget _buildInfoPanel() {
+  /// 多看全屏预览的标题/副标题由 Java 层 TitleBar/SubTitle 控件渲染，
+  /// 不是原作者 EPUB CSS。样式特征（从 dex 字符串推断）：
+  /// - 位置：底部居中
+  /// - 字色：白色（深色背景保证可读）
+  /// - 背景：半透明黑底渐变（保证文字在任何图片上都可读）
+  /// - maintitle：稍大字号 + 粗体
+  /// - subtitle：稍小字号 + 常规字重 + 半透明
+  ///
+  /// 切换图片时面板淡入淡出过渡（对齐多看 setSubTitle 的动画过渡）
+  Widget _buildBottomSubtitle() {
     final image = widget.images[_currentIndex];
     final hasTitle =
         image.maintitle.isNotEmpty || image.subtitle.isNotEmpty;
     if (!hasTitle) return const SizedBox.shrink();
 
     return Positioned(
-      right: 16,
-      bottom: 16,
+      left: 0,
+      right: 0,
+      bottom: 0,
       child: SafeArea(
         child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 300),
-          switchInCurve: Curves.easeOutCubic,
-          switchOutCurve: Curves.easeInCubic,
+          duration: const Duration(milliseconds: 250),
+          switchInCurve: Curves.easeOut,
+          switchOutCurve: Curves.easeIn,
           transitionBuilder: (child, animation) {
-            final offset = Tween<Offset>(
-              begin: const Offset(0, 1),
-              end: Offset.zero,
-            ).animate(CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeOutCubic,
-            ));
-            return SlideTransition(
-              position: offset,
-              child: FadeTransition(
-                opacity: animation,
+            return FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0, 0.3),
+                  end: Offset.zero,
+                ).animate(CurvedAnimation(
+                  parent: animation,
+                  curve: Curves.easeOut,
+                )),
                 child: child,
               ),
             );
           },
           child: Container(
             key: ValueKey(_currentIndex),
-            constraints: BoxConstraints(
-              maxWidth: MediaQuery.of(context).size.width * 0.7,
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
             decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.6),
-              borderRadius: BorderRadius.circular(12),
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.transparent,
+                  Colors.black.withValues(alpha: 0.7),
+                ],
+              ),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 if (image.maintitle.isNotEmpty)
                   Text(
                     image.maintitle,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 18,
+                      fontSize: 16,
                       fontWeight: FontWeight.w600,
                       height: 1.3,
                     ),
@@ -876,8 +999,11 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
                   if (image.maintitle.isNotEmpty) const SizedBox(height: 4),
                   Text(
                     image.subtitle,
+                    textAlign: TextAlign.center,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.7),
+                      color: Colors.white.withValues(alpha: 0.85),
                       fontSize: 13,
                       fontWeight: FontWeight.w400,
                       height: 1.4,
