@@ -147,3 +147,33 @@ CI 不跑测试与 lint。
 - 删除文件时同步清理 barrel export（`source_engine.dart` 等）
 - 异步操作后使用 `BuildContext` 前必须检查 `mounted`
 - 空值断言 `!` 应替换为局部变量 + null 检查（类型提升）
+
+## 编译与发送
+
+### Flutter SDK 路径
+
+本机 Flutter SDK 安装在 `D:\flutter_windows_3.41.7-stable\flutter`（git clone stable）。编译前需设置环境变量：
+
+```powershell
+cmd /c "set FLUTTER_ROOT=D:\flutter_windows_3.41.7-stable\flutter&& set PUB_HOSTED_URL=https://pub.flutter-io.cn&& set FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn&& set ANDROID_HOME=D:\Android\SDK&& set ANDROID_SDK_ROOT=D:\Android\SDK&& D:\flutter_windows_3.41.7-stable\flutter\bin\flutter.bat build apk --release"
+```
+
+### Gradle JDK 配置
+
+`android/gradle.properties` 已配置使用本地 JDK，禁止 foojay 自动下载（`ucrtbase.dll` 权限冲突）：
+
+```properties
+org.gradle.java.installations.paths=E:/gradle/jdks/jdk-22.0.2,D:/Java/jdk-21.0.10,D:/Java/jdk-17.0.8.1+1
+org.gradle.java.installations.auto-download=false
+```
+
+首次编译会自动安装 Android SDK Platform 31 + CMake 3.22.1 + NDK。Gradle daemon 内存占用大（~1GB），编译耗时 5-12 分钟。
+
+### 发送 APK
+
+```powershell
+# 通过 cc-connect 发送文件给当前会话
+& "C:\Users\sunqintao\AppData\Roaming\npm\node_modules\cc-connect\bin\cc-connect.exe" send --file "E:\SVN\mr\build\app\outputs\flutter-apk\app-release.apk"
+```
+
+`cc-connect send` 支持 `-m <text>`（发文本）、`--stdin`（发标准输入）、`--file <path>`（发文件）。

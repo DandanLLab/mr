@@ -513,7 +513,7 @@ class EpubParser {
           // 3. 处理 body 中的所有资源引用：
           // - extractedBasePath 非空：转绝对路径（推荐，内存低）
           // - extractedBasePath 为空：转 base64 data URI（回退）
-          final String richBody;
+          String richBody;
           final String inlinedBodyAttrs;
           if (extractedBasePath.isNotEmpty) {
             richBody = _rewriteHtmlResourcesToPath(
@@ -531,6 +531,12 @@ class EpubParser {
                 _inlineStyleUrls(bodyAttrs, files, chapterBasePath);
           }
 
+          // 3-0. 封面 SVG 全屏适配（两种模式统一处理）：
+          // 把全屏封面 svg（width/height 100% + image）的 preserveAspectRatio
+          // 从 meet 改写为 slice，配合 reader_html_template 的 svg 填满整页
+          // CSS 实现封面图全屏
+          richBody = _rewriteCoverSvgToSlice(richBody);
+
           // 4. 用 wrapper div 包裹 body 内容，把 body 的 class/style 应用到 div
           //    这样 CSS 中 .video-bg / .volume-bg 等选择器才能生效
           //    加 epub-chapter-bg 标记 class，让 reader 兜底 CSS 能精确匹配
@@ -542,7 +548,16 @@ class EpubParser {
           //    - 让 reader 兜底 CSS 能区分特殊章节（.epub-chapter-bg）和正文
           //    - 便于对正文 wrapper 精确应用布局约束（如 max-width:100%）
           //    - 不影响 IntersectionObserver 的 [data-chapter-index] 监测
-          final wrapperAttrs = inlinedBodyAttrs.isEmpty
+          //
+          //    封面特判：body 无属性但内容是全屏 SVG 封面（width/height=100% + image）
+          //    时，wrapper 标 "epub-chapter-bg epub-cover" 双 class：
+          //    - epub-chapter-bg：触发 reader 的 padding 清零 + 背景容器规则，
+          //      让封面铺满整屏（无阅读器边距）
+          //    - epub-cover：reader 模板 CSS 固定一屏高 + svg cover 铺满 +
+          //      break-inside:avoid，保证封面绝不跨屏
+          //    否则封面 wrapper 是 plain，reader 的封面规则（依赖 epub-chapter-bg）
+          //    不生效，封面显示成"宽满高不足"或跨屏
+          var wrapperAttrs = inlinedBodyAttrs.isEmpty
               ? 'class="epub-chapter-plain"'
               : (inlinedBodyAttrs.contains('class="')
                   ? inlinedBodyAttrs.replaceAllMapped(
@@ -550,6 +565,13 @@ class EpubParser {
                       (m) => 'class="epub-chapter-bg ${m.group(1)}"',
                     )
                   : 'class="epub-chapter-bg" $inlinedBodyAttrs');
+          if (inlinedBodyAttrs.isEmpty &&
+              RegExp(
+                r'<svg\b(?=[^>]*\bwidth="100%")(?=[^>]*\bheight="100%")[^>]*>[\s\S]*?<image\b',
+                caseSensitive: false,
+              ).hasMatch(richBody)) {
+            wrapperAttrs = 'class="epub-chapter-bg epub-cover"';
+          }
           final wrapperStart = '<div $wrapperAttrs>';
           const wrapperEnd = '</div>';
           final wrappedBody = '$wrapperStart$richBody$wrapperEnd';
@@ -1782,6 +1804,50 @@ class EpubParser {
     return result;
   }
 
+  /// 封面 SVG 全屏适配：把全屏封面 svg 的 preserveAspectRatio 从 meet 改写为 slice
+  ///
+  /// EPUB 封面章常见结构（本仓库 诡秘之主 cover.xhtml 同款）：
+  /// ```html
+  /// <svg height="100%" preserveAspectRatio="xMidYMid meet" viewBox="0 0 1000 1333"
+  ///      width="100%" xmlns:xlink="...">
+  ///   <image width="1000" height="1333" xlink:href="../Images/cover.jpg"/>
+  /// </svg>
+  /// ```
+  ///
+  /// 原样渲染时 preserveAspectRatio=meet 会按 viewBox 等比缩放，
+  /// 手机屏幕比例与封面（约 3:4）不一致时上下留白（letterbox），
+  /// 封面不能铺满整屏。改写为 xMidYMid slice 后等比放大裁边铺满，
+  /// 配合 reader_html_template 的 svg 填满整页 CSS 实现封面全屏。
+  ///
+  /// 仅匹配「width/height 均为 100% + 内含 <image>」的全屏封面 svg，
+  /// 不影响正文中的普通 svg 装饰/图标。
+  static String _rewriteCoverSvgToSlice(String html) {
+    return html.replaceAllMapped(
+      RegExp(r'<svg\b([^>]*)>([\s\S]*?)</svg>', caseSensitive: false),
+      (m) {
+        final attrs = m.group(1) ?? '';
+        final inner = m.group(2) ?? '';
+        final isCoverSvg =
+            RegExp(r'\bwidth="100%"', caseSensitive: false).hasMatch(attrs) &&
+            RegExp(r'\bheight="100%"', caseSensitive: false).hasMatch(attrs) &&
+            RegExp(r'<image\b', caseSensitive: false).hasMatch(inner);
+        if (!isCoverSvg) return m.group(0)!;
+        final newAttrs = attrs.contains('preserveAspectRatio')
+            ? attrs.replaceAllMapped(
+                RegExp(
+                  r'preserveAspectRatio\s*=\s*"([^"]*)"',
+                  caseSensitive: false,
+                ),
+                (am) => (am.group(1) ?? '').contains('slice')
+                    ? am.group(0)!
+                    : 'preserveAspectRatio="xMidYMid slice"',
+              )
+            : '$attrs preserveAspectRatio="xMidYMid slice"';
+        return '<svg$newAttrs>$inner</svg>';
+      },
+    );
+  }
+
   /// 把 SVG 中 `<image xlink:href="...">` 替换为 base64 data URI
   ///
   /// EPUB 封面常用 SVG image 标签引用图片：
@@ -2034,6 +2100,15 @@ class EpubParser {
     var s = selector.trim();
     if (s.isEmpty) return null;
 
+    // body 的 class 已被解析器搬到章节 wrapper div 上
+    // （wrapper = `<div class="epub-chapter-bg {bodyClass}">`），所以：
+    // - `body.qmp000` → `.epub-chapter-bg.qmp000`（wrapper 同时有这两个 class）
+    // - `html body.qmp000` → `.epub-chapter-bg.qmp000`（同上）
+    // 必须先处理带 class 的 body，否则 ^body\b 会先匹配掉 "body"
+    s = s.replaceAllMapped(
+      RegExp(r'^(?:html\s+)?body\.'),
+      (m) => '.epub-chapter-bg.',
+    );
     // html body → #reader-content-a
     s = s.replaceAllMapped(
       RegExp(r'^html\s+body\b'),
