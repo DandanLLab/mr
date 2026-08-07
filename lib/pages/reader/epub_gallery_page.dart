@@ -464,32 +464,42 @@ class _GalleryCell extends StatelessWidget {
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-        child: Container(
-          // 原作 .duokan-image-gallery-cell 的 border + box-shadow
-          decoration: BoxDecoration(
-            border: Border.all(
-              width: style.borderWidth,
-              color: style.borderColor ?? const Color(0xFF000000),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: style.boxShadowColor ?? const Color(0xFF888888),
-                offset: Offset(style.boxShadowDx, style.boxShadowDy),
-                blurRadius: style.boxShadowBlur,
-              ),
-            ],
-          ),
-          child: ClipRect(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // 图片（对齐 .gallery-pic img { width: 100% }）
-                Flexible(
-                  fit: FlexFit.loose,
-                  child: _buildImage(),
+        // ★ Center 松约束：PageView 页面是 tight 约束，若不加 Center，
+        //   Column 子元素会被强制撑满页面宽度，边框/阴影框比图片大。
+        //   加 Center 后约束变 loose，边框容器收缩到图片实际渲染宽度，
+        //   修复「画廊 cell 外层框被放大」（f4eec31 回归丢失 3fdcbe2 修复）
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 图片（对齐 .gallery-pic img { width: 100% }，等比缩放）
+              // 边框+阴影容器放 Flexible 内：宽度跟随图片实际渲染宽度，
+              // 高度受剩余空间约束（FlexFit.loose），与 3fdcbe2 的
+              // IntrinsicWidth 方案等价但更稳健（不依赖图片 intrinsic 计算）
+              Flexible(
+                fit: FlexFit.loose,
+                child: Container(
+                  // 原作 .duokan-image-gallery-cell 的 border + box-shadow
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      width: style.borderWidth,
+                      color: style.borderColor ?? const Color(0xFF000000),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: style.boxShadowColor ?? const Color(0xFF888888),
+                        offset: Offset(style.boxShadowDx, style.boxShadowDy),
+                        blurRadius: style.boxShadowBlur,
+                      ),
+                    ],
+                  ),
+                  child: ClipRect(
+                    child: _buildImage(),
+                  ),
                 ),
-                // maintitle（对齐 .duokan-image-maintitle）
-                if (image.maintitle.isNotEmpty)
+              ),
+              // maintitle（对齐 .duokan-image-maintitle）
+              if (image.maintitle.isNotEmpty)
                   Padding(
                     padding: EdgeInsets.only(
                       top: baseFontSize * 0.5,
@@ -530,8 +540,7 @@ class _GalleryCell extends StatelessWidget {
                       textAlign: TextAlign.justify,
                     ),
                   ),
-              ],
-            ),
+            ],
           ),
         ),
       ),
@@ -540,11 +549,14 @@ class _GalleryCell extends StatelessWidget {
 
   Widget _buildImage() {
     final src = image.src;
+    // ★ 不能设 width: double.infinity：会把图片强制拉满父容器宽度，
+    //   导致边框框比图片大（外层框放大）。不设宽度时 Image 按
+    //   RenderImage._sizeForConstraints 以自然尺寸渲染，受外层
+    //   loose 约束（maxWidth/maxHeight）等比缩放，边框框紧贴图片。
     if (src.startsWith('data:')) {
       return Image.memory(
         _parseDataUri(src),
         fit: BoxFit.contain,
-        width: double.infinity,
         gaplessPlayback: true,
         errorBuilder: (context, error, stackTrace) =>
             _buildErrorWidget(),
@@ -553,7 +565,6 @@ class _GalleryCell extends StatelessWidget {
     return Image.file(
       File(src),
       fit: BoxFit.contain,
-      width: double.infinity,
       gaplessPlayback: true,
       errorBuilder: (context, error, stackTrace) =>
           _buildErrorWidget(),
@@ -562,6 +573,7 @@ class _GalleryCell extends StatelessWidget {
 
   Widget _buildErrorWidget() {
     return Container(
+      width: double.infinity,
       height: 200,
       alignment: Alignment.center,
       child: Icon(

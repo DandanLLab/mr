@@ -92,11 +92,37 @@ class EpubCssProcessor {
       final end = _findMatchingBrace(cleanCss, start);
       if (end < 0) break;
 
+      final selectorText = cleanCss.substring(index, start).trim();
+
+      // @keyframes 等：含嵌套块，parseDeclarations 无法处理，跳过
+      // （之前被 _expandSupportedAtRules 丢弃，此处保持不处理）
+      if (selectorText.startsWith('@keyframes') ||
+          selectorText.startsWith('@-webkit-keyframes') ||
+          selectorText.startsWith('@font-feature-values')) {
+        index = end + 1;
+        continue;
+      }
+
+      // @font-face：保留全部声明（含 src，不在白名单中），跳过选择器净化
+      if (selectorText.startsWith('@font-face')) {
+        final declarations = _parseDeclarations(cleanCss.substring(start + 1, end));
+        if (declarations.isNotEmpty) {
+          rules.add(EpubCssRule(
+            selector: selectorText,
+            declarations: declarations,
+            specificity: 0,
+            order: order,
+          ));
+          order++;
+        }
+        index = end + 1;
+        continue;
+      }
+
       final declarations = _parseDeclarations(cleanCss.substring(start + 1, end))
           .where((d) => _supportedProperties.contains(d.name))
           .toList();
       if (declarations.isNotEmpty) {
-        final selectorText = cleanCss.substring(index, start);
         for (final selector in selectorText.split(',')) {
           final trimmed = selector.trim();
           final supported = _toSupportedSelector(trimmed);
@@ -218,8 +244,13 @@ class EpubCssProcessor {
       // media/supports：展开内部规则到顶层
       if (name == 'media' || name == 'supports') {
         buf.write(css.substring(blockStart + 1, blockEnd));
+      } else if (name == 'font-face' || name == 'keyframes' ||
+          name == 'font-feature-values') {
+        // @font-face / @keyframes / @font-feature-values：原样保留
+        // 这些 at-rule 含特殊声明（src/font-family 等），不能被白名单过滤
+        buf.write(css.substring(at, blockEnd + 1));
+        buf.write('\n');
       }
-      // @font-face / @keyframes 等：原样保留（不在本方法处理）
       // @page：跳过（reader 无效）
       // @import：在 EpubPublisherStyles 中处理
 
@@ -243,10 +274,23 @@ class EpubCssProcessor {
   }
 
   /// 剥离不支持的选择器伪类（:hover, :nth-child 等）
+  ///
+  /// 保留 ::before / ::after / :before / :after 伪元素（WebView 原生支持，
+  /// 配合 content 属性实现装饰文字、首字下沉等效果）。
+  /// 保留 :first-child / :last-child / :first-of-type / :last-of-type /
+  /// :only-child / :only-of-type（WebView 原生支持，用于首尾段间距控制）。
   static String _dropUnsupportedPseudo(String selector) {
     final buf = StringBuffer();
     var index = 0;
     var bracketDepth = 0;
+
+    /// WebView 原生支持的伪类/伪元素白名单
+    const supportedPseudos = {
+      'before', 'after', 'first-line', 'first-letter',
+      'first-child', 'last-child', 'first-of-type', 'last-of-type',
+      'only-child', 'only-of-type', 'root', 'empty',
+      'placeholder', 'selection',
+    };
 
     while (index < selector.length) {
       final char = selector[index];
@@ -259,16 +303,31 @@ class EpubCssProcessor {
         buf.write(char);
         index++;
       } else if (char == ':' && bracketDepth == 0) {
-        // 跳过伪类名
-        index++;
-        while (index < selector.length &&
-            (RegExp(r'[a-zA-Z0-9\-_]').hasMatch(selector[index]))) {
-          index++;
+        // 检查是否为双冒号伪元素 ::before
+        final isDoubleColon = index + 1 < selector.length &&
+            selector[index + 1] == ':';
+        final nameStart = isDoubleColon ? index + 2 : index + 1;
+        var nameEnd = nameStart;
+        while (nameEnd < selector.length &&
+            RegExp(r'[a-zA-Z0-9\-_]').hasMatch(selector[nameEnd])) {
+          nameEnd++;
         }
-        // 跳过伪类参数 (...)
-        if (index < selector.length && selector[index] == '(') {
-          final end = _findMatchingParen(selector, index);
-          index = end >= 0 ? end + 1 : selector.length;
+        final pseudoName = selector
+            .substring(nameStart, nameEnd)
+            .toLowerCase();
+        if (supportedPseudos.contains(pseudoName)) {
+          // 保留支持的伪类/伪元素
+          buf.write(isDoubleColon ? '::' : ':');
+          buf.write(selector.substring(nameStart, nameEnd));
+          index = nameEnd;
+        } else {
+          // 跳过不支持的伪类名
+          index = nameEnd;
+          // 跳过伪类参数 (...)
+          if (index < selector.length && selector[index] == '(') {
+            final end = _findMatchingParen(selector, index);
+            index = end >= 0 ? end + 1 : selector.length;
+          }
         }
       } else {
         buf.write(char);
@@ -298,6 +357,10 @@ class EpubCssProcessor {
   // ============ shorthand 展开 ============
 
   /// 展开 font shorthand
+  ///
+  /// CSS font shorthand 语法：
+  /// `font: font-style font-variant font-weight font-stretch font-size/line-height font-family`
+  /// 旧实现只展开 style/weight/size/line-height/family，丢失 variant/stretch。
   static List<EpubCssDeclaration> _expandFontShorthand(EpubCssDeclaration decl) {
     final expanded = [decl];
     if (decl.name != 'font') return expanded;
@@ -310,12 +373,22 @@ class EpubCssProcessor {
       if (lower == 'italic' || lower == 'oblique') {
         expanded.add(decl.copyWith(
             name: 'font-style', value: lower, order: expanded.length));
+      } else if (lower == 'small-caps' ||
+          lower == 'all-small-caps' || lower == 'petite-caps' ||
+          lower == 'all-petite-caps' || lower == 'unicase' ||
+          lower == 'titling-caps') {
+        expanded.add(decl.copyWith(
+            name: 'font-variant', value: lower, order: expanded.length));
       } else if (lower == 'bold' ||
           lower == 'bolder' ||
           lower == 'lighter' ||
+          lower == 'normal' ||
           int.tryParse(lower) != null) {
         expanded.add(decl.copyWith(
             name: 'font-weight', value: lower, order: expanded.length));
+      } else if (_fontStretchKeywords.contains(lower)) {
+        expanded.add(decl.copyWith(
+            name: 'font-stretch', value: lower, order: expanded.length));
       } else if (sizeIndex < 0 && _containsFontSizeToken(lower)) {
         sizeIndex = i;
         final parts = lower.split('/');
@@ -337,6 +410,12 @@ class EpubCssProcessor {
 
     return expanded;
   }
+
+  static const _fontStretchKeywords = {
+    'ultra-condensed', 'extra-condensed', 'condensed',
+    'semi-condensed', 'normal', 'semi-expanded', 'expanded',
+    'extra-expanded', 'ultra-expanded',
+  };
 
   /// 展开 margin/padding shorthand → top/right/bottom/left
   static List<EpubCssDeclaration> _expandBoxShorthand(EpubCssDeclaration decl) {
@@ -463,12 +542,62 @@ class EpubCssProcessor {
     }
 
     final tokens = _splitValueList(decl.value);
-    for (final token in tokens) {
+
+    // 处理 position / size（CSS3 background shorthand: "position / size"）
+    // 例：background: url(...) center/cover → position=center, size=cover
+    for (var i = 0; i < tokens.length; i++) {
+      final token = tokens[i];
+      if (token.contains('/')) {
+        final parts = token.split('/');
+        if (parts.length == 2) {
+          expanded.add(decl.copyWith(
+              name: 'background-position',
+              value: parts[0].trim(),
+              order: expanded.length));
+          if (parts[1].isNotEmpty) {
+            expanded.add(decl.copyWith(
+                name: 'background-size',
+                value: parts[1].trim(),
+                order: expanded.length));
+          }
+          continue;
+        }
+      }
       if (_backgroundRepeatTokens.contains(token.toLowerCase())) {
         expanded.add(decl.copyWith(
             name: 'background-repeat',
             value: token,
             order: expanded.length));
+      } else if (_backgroundSizeTokens.contains(token.toLowerCase())) {
+        expanded.add(decl.copyWith(
+            name: 'background-size',
+            value: token,
+            order: expanded.length));
+      } else if (_backgroundAttachmentTokens.contains(token.toLowerCase())) {
+        expanded.add(decl.copyWith(
+            name: 'background-attachment',
+            value: token,
+            order: expanded.length));
+      } else if (_backgroundPositionTokens.contains(token.toLowerCase())) {
+        // 单个 position keyword（center/top/bottom/left/right）
+        expanded.add(decl.copyWith(
+            name: 'background-position',
+            value: token,
+            order: expanded.length));
+      }
+    }
+
+    // 检测相邻的 position keyword 对（如 "top center" / "left top"）
+    for (var i = 0; i < tokens.length - 1; i++) {
+      final t1 = tokens[i].toLowerCase();
+      final t2 = tokens[i + 1].toLowerCase();
+      if (_backgroundPositionTokens.contains(t1) &&
+          _backgroundPositionTokens.contains(t2)) {
+        expanded.add(decl.copyWith(
+            name: 'background-position',
+            value: '${tokens[i]} ${tokens[i + 1]}',
+            order: expanded.length));
+        break;
       }
     }
 
@@ -728,13 +857,15 @@ class EpubCssProcessor {
   static const _supportedProperties = {
     // === 文本 ===
     'color', 'text-align', 'text-decoration', 'text-decoration-line',
+    'text-decoration-color', 'text-decoration-style', 'text-decoration-thickness',
     'text-indent', 'text-transform', 'text-shadow', 'text-overflow',
-    'text-justify', 'text-wrap',
+    'text-justify', 'text-wrap', 'white-space', 'word-spacing',
     // === 字体 ===
     'font', 'font-family', 'font-size', 'font-style', 'font-weight',
-    'font-variant', 'font-stretch',
+    'font-variant', 'font-stretch', 'font-feature-settings', 'font-kerning',
+    'font-variant-ligatures', 'font-variant-caps', 'font-variant-numeric',
     // === 行距字距 ===
-    'line-height', 'letter-spacing', 'word-spacing', 'word-break',
+    'line-height', 'letter-spacing', 'word-break',
     'word-wrap', 'overflow-wrap', 'hyphens', 'tab-size',
     // === 背景 ===
     'background', 'background-color', 'background-image',
@@ -790,7 +921,7 @@ class EpubCssProcessor {
     // === 其他 ===
     'cursor',
     // === EPUB 特有（已归一化） ===
-    'duokan-text-indent',
+    'duokan-text-indent', 'src', 'unicode-range',
   };
 
   static const _borderStyles = {
@@ -802,6 +933,18 @@ class EpubCssProcessor {
 
   static const _backgroundRepeatTokens = {
     'repeat', 'no-repeat', 'repeat-x', 'repeat-y',
+  };
+
+  static const _backgroundSizeTokens = {
+    'cover', 'contain', 'auto',
+  };
+
+  static const _backgroundAttachmentTokens = {
+    'fixed', 'scroll', 'local',
+  };
+
+  static const _backgroundPositionTokens = {
+    'left', 'right', 'top', 'bottom', 'center',
   };
 
   static const _listStylePositions = {'inside', 'outside'};

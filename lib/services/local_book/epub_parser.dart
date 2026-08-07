@@ -513,7 +513,7 @@ class EpubParser {
           // 3. 处理 body 中的所有资源引用：
           // - extractedBasePath 非空：转绝对路径（推荐，内存低）
           // - extractedBasePath 为空：转 base64 data URI（回退）
-          final String richBody;
+          String richBody;
           final String inlinedBodyAttrs;
           if (extractedBasePath.isNotEmpty) {
             richBody = _rewriteHtmlResourcesToPath(
@@ -530,6 +530,12 @@ class EpubParser {
             inlinedBodyAttrs =
                 _inlineStyleUrls(bodyAttrs, files, chapterBasePath);
           }
+
+          // 3-0. 封面 SVG 全屏适配（两种模式统一处理）：
+          // 把全屏封面 svg（width/height 100% + image）的 preserveAspectRatio
+          // 从 meet 改写为 slice，配合 reader_html_template 的 svg 填满整页
+          // CSS 实现封面图全屏
+          richBody = _rewriteCoverSvgToSlice(richBody);
 
           // 4. 用 wrapper div 包裹 body 内容，把 body 的 class/style 应用到 div
           //    这样 CSS 中 .video-bg / .volume-bg 等选择器才能生效
@@ -1780,6 +1786,50 @@ class EpubParser {
     );
 
     return result;
+  }
+
+  /// 封面 SVG 全屏适配：把全屏封面 svg 的 preserveAspectRatio 从 meet 改写为 slice
+  ///
+  /// EPUB 封面章常见结构（本仓库 诡秘之主 cover.xhtml 同款）：
+  /// ```html
+  /// <svg height="100%" preserveAspectRatio="xMidYMid meet" viewBox="0 0 1000 1333"
+  ///      width="100%" xmlns:xlink="...">
+  ///   <image width="1000" height="1333" xlink:href="../Images/cover.jpg"/>
+  /// </svg>
+  /// ```
+  ///
+  /// 原样渲染时 preserveAspectRatio=meet 会按 viewBox 等比缩放，
+  /// 手机屏幕比例与封面（约 3:4）不一致时上下留白（letterbox），
+  /// 封面不能铺满整屏。改写为 xMidYMid slice 后等比放大裁边铺满，
+  /// 配合 reader_html_template 的 svg 填满整页 CSS 实现封面全屏。
+  ///
+  /// 仅匹配「width/height 均为 100% + 内含 <image>」的全屏封面 svg，
+  /// 不影响正文中的普通 svg 装饰/图标。
+  static String _rewriteCoverSvgToSlice(String html) {
+    return html.replaceAllMapped(
+      RegExp(r'<svg\b([^>]*)>([\s\S]*?)</svg>', caseSensitive: false),
+      (m) {
+        final attrs = m.group(1) ?? '';
+        final inner = m.group(2) ?? '';
+        final isCoverSvg =
+            RegExp(r'\bwidth="100%"', caseSensitive: false).hasMatch(attrs) &&
+            RegExp(r'\bheight="100%"', caseSensitive: false).hasMatch(attrs) &&
+            RegExp(r'<image\b', caseSensitive: false).hasMatch(inner);
+        if (!isCoverSvg) return m.group(0)!;
+        final newAttrs = attrs.contains('preserveAspectRatio')
+            ? attrs.replaceAllMapped(
+                RegExp(
+                  r'preserveAspectRatio\s*=\s*"([^"]*)"',
+                  caseSensitive: false,
+                ),
+                (am) => (am.group(1) ?? '').contains('slice')
+                    ? am.group(0)!
+                    : 'preserveAspectRatio="xMidYMid slice"',
+              )
+            : '$attrs preserveAspectRatio="xMidYMid slice"';
+        return '<svg$newAttrs>$inner</svg>';
+      },
+    );
   }
 
   /// 把 SVG 中 `<image xlink:href="...">` 替换为 base64 data URI

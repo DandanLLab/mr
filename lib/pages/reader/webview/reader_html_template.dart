@@ -287,13 +287,11 @@ class ReaderHtmlTemplate {
 /* 3-9. EPUB 特殊章节全屏背景：当章节含 .epub-chapter-bg 背景容器时，
    覆盖 padding 变量为 0，让 --reader-safe-width = viewport width，
    #reader-root/#reader-stage 铺满 viewport，背景图/背景色铺满全屏。
-   - 正文章节无 .epub-chapter-bg（或无背景属性），不受影响，保留阅读器 padding
-   - :has() 在 Chrome/WebView 105+ 支持，低版本不生效但不会比现在更差
-   - 覆盖变量而非直接 padding，让 --reader-safe-width 自动重算 = vw */
-html:has(.epub-chapter-bg.volume-bg),
-html:has(.epub-chapter-bg.box-bg),
-html:has(.epub-chapter-bg.video-bg),
-html:has(.epub-chapter-bg[style*="background"]) {
+   - 正文章节（.epub-chapter-plain）不受影响，保留阅读器 padding
+   - 所有 .epub-chapter-bg 都零 padding：body 有 class/style/bgcolor 才会被
+     标记为 .epub-chapter-bg，说明原作者需要特殊布局，padding=0 让背景铺满
+   - :has() 在 Chrome/WebView 105+ 支持，低版本不生效但不会比现在更差 */
+html:has(.epub-chapter-bg) {
   --reader-padding-top: 0px;
   --reader-padding-bottom: 0px;
   --reader-padding-left: 0px;
@@ -644,16 +642,11 @@ body.reader-scroll #reader-content-b {
     return '''
 /* === EPUB 富 HTML 兜底 CSS（通用，不依赖具体 class 名）=== */
 
-/* 1. 不可切分元素：图片/视频/SVG/标题 等不应被分栏切断
-   - 只对确实不可切分且通常不超过一页的元素设 break-inside:avoid
-   - 不对通用 div/figure/blockquote 设 break-inside:avoid：
-     这些元素可能包含超过一页的内容，break-inside:avoid 会阻止浏览器切分，
-     导致整个块被推到下一栏，当前栏留下空白缝隙，下一栏内容溢出
-   - h1-h6 标题不切分（避免标题与后续内容分离）
-   - 三重保险：break-inside + column-break-inside + page-break-inside */
-#reader-content-a img,
-#reader-content-a video,
-#reader-content-a svg,
+/* 1. 标题不切分：h1-h6 不应被分栏切断（避免标题与后续内容分离）
+    - 图片/视频/SVG 不设 break-inside:avoid：
+      大图片 + 文字混合时 break-inside:avoid 会把图片推到下一栏，
+      若图片高度接近 safe-height 则无栏可放 → 图片消失
+    - 三重保险：break-inside + column-break-inside + page-break-inside */
 #reader-content-a h1,
 #reader-content-a h2,
 #reader-content-a h3,
@@ -700,19 +693,17 @@ body.reader-scroll #reader-content-b {
 /* 2. 所有图片/视频/SVG/canvas 响应式：最大宽度 100%，不溢出
    覆盖 EPUB 中固定 px 宽度的资源（EpubParser 已把 >300px 固定宽度改写为
    max-width:100%，这里作为兜底确保万无一失）
-   借鉴 lumina：加 break-inside:avoid 防止分栏切分，max-height 限制不超高内容区
-   三重保险：break-inside + column-break-inside + page-break-inside */
+   - 不设 object-fit：让 EPUB 原作者的 img CSS（如 width:100%）正常生效，
+     object-fit:contain 会让图片在容器内居中且留白，破坏原作者排版
+   - 不设 break-inside:avoid：大图片+文字混合时 break-inside:avoid 会把
+     图片推到下一栏，若图片高度接近 safe-height 则无栏可放 → 图片消失
+   - max-height 限制图片不超高内容区，但允许和文字一起被分栏切分 */
 #reader-content-a img,
-#reader-content-a svg,
 #reader-content-a video,
 #reader-content-a canvas {
   max-width: 100%;
   max-height: var(--reader-safe-height);
   height: auto;
-  object-fit: contain;
-  break-inside: avoid;
-  column-break-inside: avoid;
-  page-break-inside: avoid;
 }
 
 /* 3. SVG 封面图：填满容器（EPUB 常用 SVG 做矢量封面） */
@@ -723,6 +714,29 @@ body.reader-scroll #reader-content-b {
 #reader-content-a svg image {
   width: 100%;
   height: auto;
+}
+
+/* 3a. 封面图全屏：EPUB 封面章常见结构
+   <svg width="100%" height="100%" viewBox="0 0 1000 1333"
+        preserveAspectRatio="xMidYMid meet"><image .../></svg>
+   - :has(svg[width="100%"][height="100%"]) 给背景容器显式 height：
+     svg height:100% 才能解析成整页高度（仅 min-height 不参与百分比基准，
+     会退回 auto 导致 svg 高度按 viewBox 比例算，封面不能铺满整屏）
+   - preserveAspectRatio 已由 EpubParser 从 meet 改写为 slice：
+     meet 会等比缩放留白（letterbox），slice 等比放大裁边铺满整屏
+   - 显式 height + slice 组合实现封面图全屏（cover 裁掉左右少量边）
+   - 仅命中全屏封面 svg，不影响正文内普通 svg */
+#reader-content-a .epub-chapter-bg:has(svg[width="100%"][height="100%"]) {
+  height: var(--reader-safe-height);
+}
+#reader-content-a .epub-chapter-bg svg[width="100%"][height="100%"] {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: none !important;
+}
+#reader-content-a .epub-chapter-bg svg[width="100%"][height="100%"] image {
+  width: 100% !important;
+  height: 100% !important;
 }
 
 /* 4. 章节级背景容器（EPUB body class/style 的 wrapper div，由 EpubParser
@@ -876,6 +890,11 @@ body.reader-scroll #reader-content-b {
 #reader-content-a .epub-chapter-bg .volume-pic img {
   max-height: calc(var(--reader-safe-height) * 0.5) !important;
   object-fit: contain !important;
+  /* 置顶：原作 .volume-pic 有 duokan-bleed:lefttopright（贴左/上/右边），
+     但 duokan-bleed 是多看私有属性不在 CSS 白名单内被丢弃。
+     通用 img 规则（section 15）的 margin-top:1em 会在图片上方留 1em 缝隙，
+     阻碍卷头图贴顶显示。这里 margin-top:0 还原多看 bleed:top 的贴顶意图 */
+  margin-top: 0 !important;
 }
 #reader-content-a .epub-chapter-bg .duokan-image-gallery {
   margin: 1em 0 0.5em 0 !important;
@@ -909,14 +928,7 @@ body.reader-scroll #reader-content-b {
    - [style*="background"]：EpubParser 把 body bgcolor/style 转成 inline style，
      copyright(白底 #fff) 和 foreword1(黑底 #000) 等无 class 但有背景色的章节也能匹配。
      正文章节 body 通常无背景属性，不受影响。 */
-#reader-content-a .epub-chapter-bg.volume-bg,
-#reader-content-a .epub-chapter-bg.box-bg,
-#reader-content-a .epub-chapter-bg.video-bg,
-#reader-content-a .epub-chapter-bg[style*="background"] {
-  /* 不用 position:absolute，留在 column 流里才能让 width = 单页宽度。
-     overflow:hidden 既防止内部内容溢出导致背景超出单页，
-     又创建 BFC 阻止 4b 的 calc margin 穿透到 .epub-chapter-bg 外面
-     （否则 .book-title 的 margin-top 会"顶"到容器外，背景色从 margin 处才开始）。 */
+#reader-content-a .epub-chapter-bg {
   overflow: hidden;
 }
 
@@ -1095,6 +1107,26 @@ body.reader-scroll #reader-content-b {
   padding: 0.5em;
   background-color: rgba(128, 128, 128, 0.1);
   border-radius: 4px;
+}
+
+/* 15. 强制所有图片全屏、取消圆形裁切、与顶部留距离：
+   - 原 EPUB 图片若未设 width，浏览器按原始尺寸显示，可能超出或过小
+   - 强制 width:100% 铺满内容区宽度，display:block 去掉行内间隙
+   - 取消可能的 border-radius 圆形裁切（部分主题/阅读器会加）
+   - float:none 防止原作者浮动布局导致图片重叠/错位
+   - margin-top 让图片与上一内容保持间距 */
+#reader-content-a img {
+  width: 100% !important;
+  border-radius: 0 !important;
+  float: none !important;
+  display: block;
+  margin-top: 1em;
+  margin-bottom: 1em;
+}
+/* 图片容器居中（若作者用 div 包裹图片，文字也居中，
+   但仅对直接包含 img 的容器生效，避免干扰正文段落） */
+#reader-content-a div:has(> img) {
+  text-align: center;
 }
 ''';
   }
