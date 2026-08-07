@@ -548,7 +548,16 @@ class EpubParser {
           //    - 让 reader 兜底 CSS 能区分特殊章节（.epub-chapter-bg）和正文
           //    - 便于对正文 wrapper 精确应用布局约束（如 max-width:100%）
           //    - 不影响 IntersectionObserver 的 [data-chapter-index] 监测
-          final wrapperAttrs = inlinedBodyAttrs.isEmpty
+          //
+          //    封面特判：body 无属性但内容是全屏 SVG 封面（width/height=100% + image）
+          //    时，wrapper 标 "epub-chapter-bg epub-cover" 双 class：
+          //    - epub-chapter-bg：触发 reader 的 padding 清零 + 背景容器规则，
+          //      让封面铺满整屏（无阅读器边距）
+          //    - epub-cover：reader 模板 CSS 固定一屏高 + svg cover 铺满 +
+          //      break-inside:avoid，保证封面绝不跨屏
+          //    否则封面 wrapper 是 plain，reader 的封面规则（依赖 epub-chapter-bg）
+          //    不生效，封面显示成"宽满高不足"或跨屏
+          var wrapperAttrs = inlinedBodyAttrs.isEmpty
               ? 'class="epub-chapter-plain"'
               : (inlinedBodyAttrs.contains('class="')
                   ? inlinedBodyAttrs.replaceAllMapped(
@@ -556,6 +565,13 @@ class EpubParser {
                       (m) => 'class="epub-chapter-bg ${m.group(1)}"',
                     )
                   : 'class="epub-chapter-bg" $inlinedBodyAttrs');
+          if (inlinedBodyAttrs.isEmpty &&
+              RegExp(
+                r'<svg\b(?=[^>]*\bwidth="100%")(?=[^>]*\bheight="100%")[^>]*>[\s\S]*?<image\b',
+                caseSensitive: false,
+              ).hasMatch(richBody)) {
+            wrapperAttrs = 'class="epub-chapter-bg epub-cover"';
+          }
           final wrapperStart = '<div $wrapperAttrs>';
           const wrapperEnd = '</div>';
           final wrappedBody = '$wrapperStart$richBody$wrapperEnd';
@@ -2084,6 +2100,15 @@ class EpubParser {
     var s = selector.trim();
     if (s.isEmpty) return null;
 
+    // body 的 class 已被解析器搬到章节 wrapper div 上
+    // （wrapper = `<div class="epub-chapter-bg {bodyClass}">`），所以：
+    // - `body.qmp000` → `.epub-chapter-bg.qmp000`（wrapper 同时有这两个 class）
+    // - `html body.qmp000` → `.epub-chapter-bg.qmp000`（同上）
+    // 必须先处理带 class 的 body，否则 ^body\b 会先匹配掉 "body"
+    s = s.replaceAllMapped(
+      RegExp(r'^(?:html\s+)?body\.'),
+      (m) => '.epub-chapter-bg.',
+    );
     // html body → #reader-content-a
     s = s.replaceAllMapped(
       RegExp(r'^html\s+body\b'),

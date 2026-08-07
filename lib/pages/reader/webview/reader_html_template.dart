@@ -787,6 +787,35 @@ body.reader-scroll #reader-content-b {
   page-break-inside: avoid;
 }
 
+/* 4a-1. 封面章节（EpubParser 标记 epub-chapter-bg epub-cover）：
+   - 固定一屏高（height 而非 min-height），svg cover 铺满整屏
+   - break-inside: avoid + overflow: hidden 双保险，封面绝不跨屏
+   - 不依赖 :has() 选择器（低版本 WebView 也生效）
+   - html:has(.epub-chapter-bg) 已把 padding 清零，safe-height = 视口高 */
+#reader-content-a .epub-cover {
+  position: relative; /* svg absolute 定位基准 */
+  height: var(--reader-safe-height);
+  box-sizing: border-box;
+  overflow: hidden;
+  break-inside: avoid;
+  column-break-inside: avoid;
+  page-break-inside: avoid;
+}
+/* svg 直接父级是内层 div（如 <div style="text-align:center">），高度 auto，
+   svg height:100% 相对它无效 → 用 absolute 相对 wrapper 铺满整屏 */
+#reader-content-a .epub-cover svg[width="100%"][height="100%"] {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100% !important;
+  height: 100% !important;
+  max-height: none !important;
+}
+#reader-content-a .epub-cover svg[width="100%"][height="100%"] image {
+  width: 100% !important;
+  height: 100% !important;
+}
+
 /* 4b. EPUB 特殊章节原作者 CSS 用百分比 margin 做垂直占位：
    .book-title { margin: 45% auto }
    .book-author { margin: 45% auto 20% auto }
