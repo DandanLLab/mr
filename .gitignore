@@ -31,3 +31,6 @@ reference/
 
 # 测试书源文件（不提交）
 test_sources/
+
+# epub 书籍文件（不提交，仅本地保留）
+*.epub
