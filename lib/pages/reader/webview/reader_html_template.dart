@@ -1694,6 +1694,13 @@ window.readerApi = (function() {
     // - 让 UI 章节标题/进度条实时跟随用户滚动更新
     initChapterObserver();
 
+    // ★ CSS polyfill（移植自 lumina CssPolyfillManager）★
+    // 对齐 lumina 的 CSS 后处理，补全 EPUB 原作 CSS 的三类兼容问题：
+    // 1. font-size/line-height px 值 → 注入 var(--reader-font-size) 主题驱动
+    // 2. background-color → 注入 var(--reader-bg-color, 原值) 夜间模式适配
+    // 3. break-before/after → webkit-column-break 兼容（旧 WebView 不支持 CSS3 break-*）
+    polyfillEpubCss();
+
     // 等待 DOM 渲染完成后通知 Dart 侧
     // 首次通知：rAF 双帧后立即通知，让 Dart 尽快拿到初步 pageCount 启动渲染
     // （避免首次通知延迟导致首屏白屏）
@@ -3112,6 +3119,162 @@ window.readerApi = (function() {
     nearEndNotified = false; // 重置以允许下次触发
     console.log('[reader] appendChapter: idx=' + chapterIndex +
       ' title=' + title + ' appendedCount=' + appendedChapterCount);
+  }
+
+  // ★ CSS polyfill（移植自 lumina CssPolyfillManager）★
+  //
+  // 对齐 lumina 的 CSS 后处理机制，补全 EPUB 原作 CSS 的三类兼容问题：
+  //
+  // 1. font-size/line-height px 值缩放：
+  //    EPUB 原作常写 `font-size: 16px` / `line-height: 1.5`，固定 px 不随用户
+  //    字号设置变化。lumina 用 calc(value * var(--lumina-zoom)) polyfill，
+  //    咱们改成注入 var(--reader-font-size) 让用户字号生效。
+  //    - font-size: Npx → var(--reader-font-size)（完全由用户字号驱动）
+  //    - line-height: N（无单位）保留（相对值，不破坏作者行距意图）
+  //    - line-height: Npx → calc(Npx * 1em)（随字号等比缩放）
+  //
+  // 2. background-color 主题适配：
+  //    EPUB 原作写 `background-color: #fff` 破坏夜间模式。lumina 注入
+  //    var(--lumina-surface-container-color, 原值)，咱们用
+  //    var(--reader-bg-color, 原值) 让夜间模式背景色覆盖原作。
+  //    - 透明色（transparent / rgba(0,0,0,0)）不处理（保留作者意图）
+  //    - 已含 var(--reader-...) 的不重复处理
+  //
+  // 3. break-before/after → webkit-column-break 兼容：
+  //    旧版 Android WebView 不支持 CSS3 break-before/after，
+  //    需转换为 -webkit-column-break-before/after。
+  //    - page/right/left → always
+  //    - avoid → avoid
+  //    - auto → auto
+  //
+  // 注意：只处理 EPUB 富 HTML 模式（纯文本模式无原作 CSS，无需 polyfill）
+  function polyfillEpubCss() {
+    var doc = document;
+    var sheets = doc.styleSheets;
+    if (!sheets) return;
+
+    // 判断是否需要背景色覆盖（夜间模式或用户自定义背景色时启用）
+    // 对齐 lumina shouldOverrideTextColor 逻辑：用户设置了背景色就覆盖原作背景
+    var bgOverrideEnabled = true;
+
+    for (var i = 0; i < sheets.length; i++) {
+      var sheet = sheets[i];
+      var rules;
+      try {
+        rules = sheet.cssRules || sheet.rules;
+      } catch (e) {
+        // 跨域样式表无法访问 cssRules，跳过（lumina 同样处理）
+        console.warn('[reader] polyfill: stylesheet ' + i + ' blocked: ' + e);
+        continue;
+      }
+      if (!rules) continue;
+
+      for (var j = 0; j < rules.length; j++) {
+        var rule = rules[j];
+        if (rule.type !== 1) continue; // 只处理 CSSStyleRule (type=1)
+        var style = rule.style;
+        if (!style) continue;
+
+        // 1. font-size polyfill
+        polyfillFontSize(style);
+
+        // 2. line-height polyfill
+        polyfillLineHeight(style);
+
+        // 3. background-color polyfill
+        if (bgOverrideEnabled) {
+          polyfillBackgroundColor(style);
+        }
+
+        // 4. break-before/after → webkit-column-break 兼容
+        polyfillBreakRules(style);
+      }
+    }
+    console.log('[reader] polyfillEpubCss done, sheets=' + sheets.length);
+  }
+
+  // font-size px 值 → var(--reader-font-size)
+  function polyfillFontSize(style) {
+    var val = style.getPropertyValue('font-size');
+    if (!val || val.indexOf('calc') !== -1 || val.indexOf('var(') !== -1) return;
+    var match = val.trim().toLowerCase().match(/^(\d+(?:\.\d+)?)(px|pt)$/);
+    if (match) {
+      // 原作 px/pt 字号 → 由用户字号变量驱动
+      style.setProperty('font-size', 'var(--reader-font-size)',
+        style.getPropertyPriority('font-size'));
+    }
+    // em/rem/百分比/关键字（small/medium 等）保留原值（相对值，尊重作者意图）
+  }
+
+  // line-height px 值 → calc(Npx * 1em)（随字号缩放）
+  function polyfillLineHeight(style) {
+    var val = style.getPropertyValue('line-height');
+    if (!val || val.indexOf('calc') !== -1 || val.indexOf('var(') !== -1) return;
+    var match = val.trim().toLowerCase().match(/^(\d+(?:\.\d+)?)(px|pt)$/);
+    if (match) {
+      var num = match[1];
+      var unit = match[2];
+      // px/pt 固定行距 → 转为 em 相对值，随字号缩放
+      style.setProperty('line-height', 'calc(' + num + unit + ' * 1em)',
+        style.getPropertyPriority('line-height'));
+    }
+    // 无单位数字（如 1.5）保留（相对值，作者意图）
+  }
+
+  // background-color → var(--reader-bg-color, 原值)
+  function polyfillBackgroundColor(style) {
+    var val = style.getPropertyValue('background-color');
+    if (!val) return;
+    var lower = val.trim().toLowerCase();
+    // 透明色不处理（保留作者意图，如叠加效果）
+    if (lower === 'transparent' || lower === 'rgba(0, 0, 0, 0)') return;
+    // 已含 var(--reader-...) 不重复处理
+    if (lower.indexOf('var(--reader-') !== -1) return;
+    // 注入 var(--reader-bg-color, 原值)，让夜间模式背景色生效，原值作 fallback
+    style.setProperty('background-color',
+      'var(--reader-bg-color, ' + val + ')',
+      style.getPropertyPriority('background-color'));
+  }
+
+  // break-before/after → -webkit-column-break-before/after
+  function polyfillBreakRules(style) {
+    var wk = style;
+    // break-before
+    var breakBefore = style.getPropertyValue('break-before');
+    if (breakBefore) {
+      wk.webkitColumnBreakBefore = convertToColumnBreak(breakBefore);
+    } else {
+      var pageBreakBefore = style.getPropertyValue('page-break-before');
+      if (pageBreakBefore) {
+        wk.webkitColumnBreakBefore = convertToColumnBreak(pageBreakBefore);
+      }
+    }
+    // break-after
+    var breakAfter = style.getPropertyValue('break-after');
+    if (breakAfter && breakAfter !== 'auto') {
+      wk.webkitColumnBreakAfter = convertToColumnBreak(breakAfter);
+    } else {
+      var pageBreakAfter = style.getPropertyValue('page-break-after');
+      if (pageBreakAfter && pageBreakAfter !== 'auto') {
+        wk.webkitColumnBreakAfter = convertToColumnBreak(pageBreakAfter);
+      }
+    }
+  }
+
+  // break-* 值 → webkit-column-break 值
+  function convertToColumnBreak(value) {
+    var v = value.trim().toLowerCase();
+    switch (v) {
+      case 'page':
+      case 'right':
+      case 'left':
+        return 'always';
+      case 'avoid':
+        return 'avoid';
+      case 'auto':
+      default:
+        return 'auto';
+    }
   }
 
   // 章节观察器：监听 [data-chapter-index] 元素，进入屏幕中部 20% 区域时
