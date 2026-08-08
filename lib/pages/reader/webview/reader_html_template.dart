@@ -3456,6 +3456,19 @@ window.readerApi = (function() {
         polyfillBreakRules(style);
       }
     }
+
+    // ★ 也处理 inline style 的 background-color（对齐 lumina）★
+    // styleSheets 只覆盖 CSS 文件规则，不覆盖 HTML 标签上的
+    // style="background-color:#fff"。EPUB 作者常用 inline style 设背景色
+    // （如 <div style="background-color:#000">），夜间模式下这些白色/黑色
+    // 背景不会被覆盖，破坏主题适配。遍历所有带 style 的元素做同样改写。
+    if (bgOverrideEnabled) {
+      var styledEls = doc.querySelectorAll('[style]');
+      for (var n = 0; n < styledEls.length; n++) {
+        polyfillBackgroundColor(styledEls[n].style);
+      }
+    }
+
     console.log('[reader] polyfillEpubCss done, sheets=' + sheets.length);
   }
 
