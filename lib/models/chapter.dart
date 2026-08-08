@@ -36,6 +36,22 @@ class Chapter {
   /// true 时阅读器走 PageView 横向滑动渲染，不走 WebView
   final bool isGallery;
 
+  // ===== EPUB Fixed-layout 章节支持字段 =====
+  // 仅 EPUB 本地书解析时填充，标识该章节是否为固定版式
+  // （rendition:layout=pre-paginated，漫画/画册），由 viewport scale 等比缩放渲染
+
+  /// 是否为 fixed-layout 章节（rendition:layout=pre-paginated 或启发式判定）
+  /// true 时阅读器不做 column 分页，改用 viewport scale 等比缩放显示整页
+  final bool isFixedLayout;
+
+  /// fixed-layout 章节的原始内容宽度（像素）
+  /// 由 EpubViewportParser 从 <meta viewport> / <svg viewBox> 解析
+  /// null 表示 isFixedLayout=true 但尺寸未知（兜底用设备尺寸）
+  final double? fixedLayoutWidth;
+
+  /// fixed-layout 章节的原始内容高度（像素）
+  final double? fixedLayoutHeight;
+
   Chapter({
     required this.id,
     required this.bookId,
@@ -53,6 +69,9 @@ class Chapter {
     this.depth = 0,
     this.parentId = -1,
     this.isGallery = false,
+    this.isFixedLayout = false,
+    this.fixedLayoutWidth,
+    this.fixedLayoutHeight,
   });
 
   Chapter copyWith({
@@ -72,6 +91,9 @@ class Chapter {
     int? depth,
     int? parentId,
     bool? isGallery,
+    bool? isFixedLayout,
+    double? fixedLayoutWidth,
+    double? fixedLayoutHeight,
   }) {
     return Chapter(
       id: id ?? this.id,
@@ -90,6 +112,9 @@ class Chapter {
       depth: depth ?? this.depth,
       parentId: parentId ?? this.parentId,
       isGallery: isGallery ?? this.isGallery,
+      isFixedLayout: isFixedLayout ?? this.isFixedLayout,
+      fixedLayoutWidth: fixedLayoutWidth ?? this.fixedLayoutWidth,
+      fixedLayoutHeight: fixedLayoutHeight ?? this.fixedLayoutHeight,
     );
   }
 
@@ -111,6 +136,9 @@ class Chapter {
       'depth': depth,
       'parentId': parentId,
       'isGallery': isGallery,
+      'isFixedLayout': isFixedLayout,
+      'fixedLayoutWidth': fixedLayoutWidth,
+      'fixedLayoutHeight': fixedLayoutHeight,
     };
   }
 
@@ -134,6 +162,9 @@ class Chapter {
       depth: json['depth'] as int? ?? 0,
       parentId: json['parentId'] as int? ?? -1,
       isGallery: json['isGallery'] as bool? ?? false,
+      isFixedLayout: json['isFixedLayout'] as bool? ?? false,
+      fixedLayoutWidth: (json['fixedLayoutWidth'] as num?)?.toDouble(),
+      fixedLayoutHeight: (json['fixedLayoutHeight'] as num?)?.toDouble(),
     );
   }
 }

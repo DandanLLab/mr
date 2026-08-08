@@ -94,6 +94,24 @@ class EpubChapter {
   /// 仅当 [isGallery] 为 true 时填充，让 Flutter EpubGalleryPage 还原原作者排版
   EpubGalleryChapterStyle? galleryChapterStyle;
 
+  // ===== Fixed-layout 章节支持字段 =====
+  // EPUB fixed-layout（pre-paginated）章节用于漫画/画册/固定版式内容
+  // 参考 Readium Kotlin-toolkit 的 fixed-layout 渲染：
+  // - viewport meta scale 缩放（fitContain/fitWidth/fitHeight）
+  // - 不做 column 分页，整页等比缩放显示
+  // - 内容原始尺寸由 EpubViewportParser 解析
+
+  /// 是否为 fixed-layout 章节（rendition:layout=pre-paginated 或启发式判定）
+  ///
+  /// true 时阅读器不走 column 分页，改用 viewport scale 等比缩放显示整页
+  bool isFixedLayout;
+
+  /// fixed-layout 章节的原始内容尺寸（像素）
+  /// 由 EpubViewportParser 从 <meta viewport> / <svg viewBox> 解析
+  /// null 表示 isFixedLayout=true 但尺寸未知（兜底用设备尺寸）
+  double? fixedLayoutWidth;
+  double? fixedLayoutHeight;
+
   EpubChapter({
     required this.index,
     required this.title,
@@ -112,6 +130,9 @@ class EpubChapter {
     this.isGallery = false,
     this.galleryImages = const [],
     this.galleryChapterStyle,
+    this.isFixedLayout = false,
+    this.fixedLayoutWidth,
+    this.fixedLayoutHeight,
   });
 
   /// 把树状目录扁平化为列表（DFS 遍历顺序）
@@ -147,6 +168,9 @@ class EpubChapter {
         isGallery: node.isGallery,
         galleryImages: node.galleryImages,
         galleryChapterStyle: node.galleryChapterStyle,
+        isFixedLayout: node.isFixedLayout,
+        fixedLayoutWidth: node.fixedLayoutWidth,
+        fixedLayoutHeight: node.fixedLayoutHeight,
       );
       result.add(newNode);
       for (final child in node.children) {
@@ -300,20 +324,6 @@ class EpubBook {
     this.language,
     this.extractedBasePath = '',
     this.inlinedCss = '',
-  });
-}
-
-class ManifestItem {
-  final String id;
-  final String href;
-  final String mediaType;
-  final String? properties;
-
-  const ManifestItem({
-    required this.id,
-    required this.href,
-    required this.mediaType,
-    this.properties,
   });
 }
 
@@ -599,6 +609,42 @@ class EpubParser {
             );
             debugPrint('[EPUB诊断] 章节${chapter.index}识别为画廊页，'
                 '共 ${galleryImages.length} 张图片');
+          }
+
+          // 5a. 识别 fixed-layout 章节（pre-paginated，漫画/画册/固定版式）
+          //     参考 Readium Kotlin-toolkit 的 fixed-layout 渲染：
+          //     - 优先用 OPF spine item 的 rendition:layout=pre-paginated 判定
+          //     - 回退用 EpubViewportParser.looksLikeFixedLayout 启发式判定
+          //     - 解析 viewport 尺寸供渲染层做 fitContain 缩放
+          //     fixed-layout 章节不走 column 分页，整页等比缩放显示
+          if (!chapter.isGallery) {
+            // 检查 OPF spine item 级别的 rendition:layout
+            final spineItem = chapter.spineIndex >= 0 &&
+                    chapter.spineIndex < pkg.spine.length
+                ? pkg.spine[chapter.spineIndex]
+                : null;
+            final isPrePaginated = spineItem != null &&
+                spineItem.properties.contains('rendition:layout-pre-paginated');
+
+            // 解析 viewport 尺寸（从 <meta viewport> / <svg viewBox>）
+            // viewportWidth/Height 定义在 EpubRendition（包级 rendition 声明）
+            final viewport = epub_core.EpubViewportParser.parse(
+              chapter.content ?? '',
+              fallbackWidth: pkg.rendition.viewportWidth,
+              fallbackHeight: pkg.rendition.viewportHeight,
+            );
+
+            // 判定：OPF 声明 pre-paginated，或启发式判定为 fixed-layout
+            if (isPrePaginated ||
+                (viewport != null &&
+                    epub_core.EpubViewportParser.looksLikeFixedLayout(
+                        chapter.content ?? '', viewport))) {
+              chapter.isFixedLayout = true;
+              chapter.fixedLayoutWidth = viewport?.width;
+              chapter.fixedLayoutHeight = viewport?.height;
+              debugPrint('[EPUB诊断] 章节${chapter.index}识别为 fixed-layout'
+                  '${viewport != null ? "（${viewport.width}x${viewport.height}, ${viewport.source}）" : "（尺寸未知）"}');
+            }
           }
 
           // 6. richContent 只包含 body HTML（不含 CSS）
@@ -1084,7 +1130,7 @@ class EpubParser {
   static String getAllCss(
     Map<String, List<int>> files,
     String opfBasePath,
-    Map<String, ManifestItem> manifest,
+    Map<String, epub_core.EpubManifestItem> manifest,
   ) {
     final cssBuffer = StringBuffer();
 
@@ -1111,7 +1157,7 @@ class EpubParser {
   /// [manifest] OPF manifest 条目映射
   static List<String> getAllFonts(
     String opfBasePath,
-    Map<String, ManifestItem> manifest,
+    Map<String, epub_core.EpubManifestItem> manifest,
   ) {
     final fontPaths = <String>[];
     final fontMediaTypes = [

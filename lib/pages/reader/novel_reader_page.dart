@@ -2431,7 +2431,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                       // 但 GestureDetector（onClose）在 value >= 0.5 时可点击关闭
                       ignoring: _menuAnimController.value < 0.5,
                       child: ReaderControlOverlay(
-                        animation: _menuAnimController,
                         bookName: _book?.name ?? '',
                         chapterTitle: _chapterTitle,
                         chapterUrl: _chapterUrl,
@@ -2664,6 +2663,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         LocalBookService.detectBookType(_book!.bookUrl) == LocalBookType.epub &&
         _content.contains('[[EPUB_BODY]]');
 
+    // 取当前章节的 fixed-layout 信息（漫画/画册等 pre-paginated 章节）
+    // 仅 EPUB 本地书有此字段，在线书源保持默认 false
+    final currentChapter = _currentChapterIndex < _chapters.length
+        ? _chapters[_currentChapterIndex]
+        : null;
+
     return SafeArea(
       child: Column(
         children: [
@@ -2687,6 +2692,9 @@ class _NovelReaderPageState extends State<NovelReaderPage>
                 extractedBasePath: _book != null
                     ? LocalBookService.instance.getEpubExtractedBasePath(_book!)
                     : '',
+                isFixedLayout: currentChapter?.isFixedLayout ?? false,
+                fixedLayoutWidth: currentChapter?.fixedLayoutWidth,
+                fixedLayoutHeight: currentChapter?.fixedLayoutHeight,
                 controller: _readerWebViewController,
                 callbacks: ReaderWebViewCallbacks(
                   onInitialized: _onWebviewInitialized,

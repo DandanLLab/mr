@@ -42,6 +42,9 @@ class ReaderHtmlTemplate {
     required int pageModeIndex,
     required int chapterIndex,
     bool isRichHtml = false,
+    bool isFixedLayout = false,
+    double? fixedLayoutWidth,
+    double? fixedLayoutHeight,
   }) {
     final css = _generateCss(provider, isScrollMode, isRichHtml);
     final js = _readerJs();
@@ -77,9 +80,32 @@ class ReaderHtmlTemplate {
     // EPUB 富 HTML 模式下内容直接放入 #reader-content-a，不走 .reader-p 包裹，
     // 所以 .reader-p img 等样式不会作用于 EPUB 内容，需要单独兜底
     final epubFallbackCss = isRichHtml ? _epubRichHtmlFallbackCss() : '';
+
+    // ★ 三段式 CSS 注入（参考 Readium Kotlin-toolkit 的 ReadiumCssInjector）★
+    //
+    // 1. before（基础重置 + 图片约束 + 阅读器变量）：$css + $epubFallbackCss
+    //    - 阅读器 :root 变量（字号/行距/颜色/安全区等）
+    //    - 图片/媒体约束（break-inside:avoid + max-height:safe-height）
+    //    - 标题不切分等兜底规则
+    //
+    // 2. 原作 CSS：$epubCss
+    //    - EPUB 作者的视觉样式（字体/颜色/边距等）
+    //    - 保留作者创意，让排版忠于原作
+    //
+    // 3. after（分页 + 用户设置覆盖）：_epubAfterCss() 或 _fixedLayoutCss()
+    //    - reflowable：column 分页 + 用户设置覆盖
+    //    - fixed-layout：viewport scale 等比缩放（不做 column 分页）
+    //
+    // 关键：after 在原作之后，确保分页布局不被原作破坏
+    // （原作可能有 overflow-x:hidden 或 width:100% 破坏 column 布局）
+    final afterCss = isRichHtml
+        ? (isFixedLayout
+            ? _fixedLayoutCss(viewWidth, viewHeight, fixedLayoutWidth, fixedLayoutHeight)
+            : _epubAfterCss())
+        : '';
     final fullCss = epubCss != null && epubCss.isNotEmpty
-        ? '$css\n$epubFallbackCss\n/* === EPUB 自带 CSS === */\n$epubCss'
-        : (isRichHtml ? '$css\n$epubFallbackCss' : css);
+        ? '$css\n$epubFallbackCss\n/* === EPUB 自带 CSS === */\n$epubCss\n/* === After CSS（${isFixedLayout ? "fixed-layout" : "分页+覆盖"}）=== */\n$afterCss'
+        : (isRichHtml ? '$css\n$epubFallbackCss\n$afterCss' : css);
 
     // 滚动模式：初始章节标题放进 #reader-content-a 内部第一个位置
     // - prependChapter 才能正确插入到初始标题之前，避免顶部出现两个标题
@@ -1156,6 +1182,172 @@ body.reader-scroll #reader-content-b {
    但仅对直接包含 img 的容器生效，避免干扰正文段落） */
 #reader-content-a div:has(> img) {
   text-align: center;
+}
+''';
+  }
+
+  /// EPUB After CSS（三段式注入的第三段）
+  ///
+  /// 参考 Readium Kotlin-toolkit 的 ReadiumCSS-after.css：
+  /// 在原作 CSS 之后注入，用 !important 确保分页布局和用户设置
+  /// 不被原作 CSS 破坏。
+  ///
+  /// 核心职责：
+  /// 1. 修复原作可能破坏分页的 CSS（overflow-x:hidden / width:100% 等）
+  /// 2. 确保 column 布局优先（column-width/column-gap !important）
+  /// 3. html/body 布局约束（height:100vh + overflow:hidden）
+  /// 4. #reader-content-a 的 absolute 定位 + transform
+  static String _epubAfterCss() {
+    return '''
+/* === After CSS（分页+覆盖，参考 ReadiumCSS-after.css）=== */
+
+/* 1. 修复原作 overflow 破坏分页（ReadiumCssInjector 的经典修复）
+   很多 EPUB 原作有 body { overflow-x: hidden } 会破坏 multi-column 分页，
+   必须强制 overflow:visible 让内容横向流动 */
+html, body {
+  overflow: visible !important;
+}
+
+/* 2. 确保 html 高度约束（分页容器需要固定高度）
+   原作可能设 height:auto 导致 column 无法分页 */
+html {
+  height: var(--reader-vh) !important;
+  max-height: var(--reader-vh) !important;
+}
+
+/* 3. 确保 body 不限制宽度（让 column 内容横向流动）
+   原作可能设 body { width:100%; max-width:Npx } 破坏 column
+   注意：不覆盖 padding（padding 由阅读器 _generateCss 控制，
+   #reader-content-a 用 absolute 定位到 padding 区域内）*/
+body {
+  width: auto !important;
+  max-width: none !important;
+  margin: 0 !important;
+}
+
+/* 4. 确保 #reader-content-a 的 column 布局优先
+   原作可能给 div 设 width/overflow 破坏 column 容器 */
+#reader-content-a {
+  column-width: var(--reader-safe-width) !important;
+  column-gap: 128px !important;
+  column-fill: auto !important;
+  height: var(--reader-safe-height) !important;
+  overflow: hidden !important;
+  position: absolute !important;
+  top: var(--reader-padding-top) !important;
+  left: var(--reader-padding-left) !important;
+  width: var(--reader-safe-width) !important;
+}
+
+/* 5. 确保字号变量优先（原作可能设 body { font-size:16px } 覆盖用户设置）
+   通过 !important 确保用户字号生效 */
+html {
+  font-size: var(--reader-font-size) !important;
+}
+
+/* 6. 确保文字颜色/背景色优先（原作可能设 body { color:black } 破坏夜间模式） */
+html {
+  color: var(--reader-text-color) !important;
+  background-color: var(--reader-bg-color) !important;
+}
+''';
+  }
+
+  /// fixed-layout 章节的 After CSS
+  ///
+  /// 移植自 Readium Kotlin-toolkit 的 FixedLayoutInterceptor：
+  /// - 不做 column 分页，整页等比缩放显示
+  /// - fitContain 策略：scale = min(viewW/contentW, viewH/contentH)
+  /// - body 固定为原始尺寸，用 transform: scale() 缩放到视口
+  /// - transform-origin: top left 确保从左上角对齐
+  ///
+  /// 与 [_epubAfterCss] 的区别：
+  /// - 不设置 column-width/column-gap（不分页）
+  /// - body 宽高固定为原始内容尺寸（而非 auto）
+  /// - 用 transform scale 替代 column 分页
+  static String _fixedLayoutCss(
+    double viewWidth,
+    double viewHeight,
+    double? fixedLayoutWidth,
+    double? fixedLayoutHeight,
+  ) {
+    // 兜底：尺寸未知时用视口尺寸（1:1 不缩放）
+    final contentW = (fixedLayoutWidth != null && fixedLayoutWidth > 0)
+        ? fixedLayoutWidth
+        : viewWidth;
+    final contentH = (fixedLayoutHeight != null && fixedLayoutHeight > 0)
+        ? fixedLayoutHeight
+        : viewHeight;
+
+    // fitContain：等比缩放使内容完全包含在视口内（不裁切、不溢出）
+    // 取宽高缩放比中较小者，确保两个方向都不溢出
+    final scaleX = viewWidth / contentW;
+    final scaleY = viewHeight / contentH;
+    final scale = scaleX < scaleY ? scaleX : scaleY;
+
+    // 缩放后居中：计算偏移量让内容在视口中居中显示
+    final offsetX = (viewWidth - contentW * scale) / 2;
+    final offsetY = (viewHeight - contentH * scale) / 2;
+
+    return '''
+/* === After CSS（fixed-layout 等比缩放，参考 Readium FixedLayoutInterceptor）=== */
+/* fixed-layout 章节（漫画/画册）：不做 column 分页，整页等比缩放显示 */
+
+/* 1. html/body 固定为原始内容尺寸，禁用滚动 */
+html, body {
+  width: ${contentW}px !important;
+  height: ${contentH}px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+/* 2. body 应用 fitContain 等比缩放 + 居中偏移
+   - transform: scale(scale) translate(offset) 顺序：先缩放再平移
+   - transform-origin: top left 确保缩放基准点在左上角
+   - position:absolute 脱离文档流，避免影响视口尺寸计算 */
+body {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  transform: scale($scale) !important;
+  transform-origin: top left !important;
+  /* 居中偏移：通过 margin 实现（transform 后 margin 仍按原始尺寸计算，
+     用 margin-left/top 偏移到居中位置） */
+  margin-left: ${offsetX / scale}px !important;
+  margin-top: ${offsetY / scale}px !important;
+}
+
+/* 3. 禁用 #reader-content-a 的 column 分页（fixed-layout 不分页）
+   - position: static 让内容正常流动
+   - column-width: auto 取消分栏
+   - overflow: visible 让 body 的 transform 生效 */
+#reader-content-a {
+  position: static !important;
+  width: auto !important;
+  height: auto !important;
+  column-width: auto !important;
+  column-gap: 0 !important;
+  column-fill: auto !important;
+  overflow: visible !important;
+  top: auto !important;
+  left: auto !important;
+}
+
+/* 4. 确保图片/SVG 等媒体元素填满原始内容区
+   fixed-layout 漫画通常是单张图片或 SVG 占满整页 */
+img, svg, video {
+  max-width: 100% !important;
+  max-height: 100% !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+}
+
+/* 5. 用户文字颜色/背景色仍生效（夜间模式需要） */
+html {
+  color: var(--reader-text-color) !important;
+  background-color: var(--reader-bg-color) !important;
 }
 ''';
   }

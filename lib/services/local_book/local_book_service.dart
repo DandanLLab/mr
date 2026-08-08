@@ -8,6 +8,7 @@ import '../../models/book.dart';
 import '../../models/chapter.dart';
 import '../../services/storage_service.dart';
 import 'epub_parser.dart';
+import 'epub/epub.dart';
 import 'txt_parser.dart';
 
 enum LocalBookType { txt, epub, pdf, unsupported }
@@ -444,6 +445,9 @@ class LocalBookService {
         depth: epubChapter.depth,
         parentId: epubChapter.parentId,
         isGallery: epubChapter.isGallery,
+        isFixedLayout: epubChapter.isFixedLayout,
+        fixedLayoutWidth: epubChapter.fixedLayoutWidth,
+        fixedLayoutHeight: epubChapter.fixedLayoutHeight,
       );
     }).toList();
   }
@@ -655,9 +659,9 @@ class LocalBookService {
           ? opfPath.substring(0, opfPath.lastIndexOf('/'))
           : '';
 
-      // 解析 manifest
+      // 解析 manifest（统一使用 EpubManifestItem 模型）
       final manifestElement = opfDoc.querySelector('manifest');
-      final manifest = <String, ManifestItem>{};
+      final manifest = <String, EpubManifestItem>{};
       if (manifestElement != null) {
         for (final child in manifestElement.children) {
           final local = (child.localName ?? '').toLowerCase();
@@ -665,9 +669,13 @@ class LocalBookService {
             final id = child.attributes['id'] ?? '';
             final href = child.attributes['href'] ?? '';
             final mediaType = child.attributes['media-type'] ?? '';
-            final properties = child.attributes['properties'];
+            final propertiesStr = child.attributes['properties'];
             if (id.isNotEmpty && href.isNotEmpty) {
-              manifest[id] = ManifestItem(
+              // properties 是空格分隔的属性列表，转为 Set<String>
+              final properties = propertiesStr != null && propertiesStr.isNotEmpty
+                  ? propertiesStr.split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toSet()
+                  : <String>{};
+              manifest[id] = EpubManifestItem(
                 id: id,
                 href: href,
                 mediaType: mediaType,

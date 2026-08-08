@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../../../models/highlight.dart';
 import '../../../providers/reader_provider.dart';
+import '../../../services/local_book/epub_resource_server.dart';
 import '../../../utils/chinese_converter.dart';
 import 'reader_html_template.dart';
 import 'reader_webview_controller.dart';
@@ -51,11 +52,40 @@ class ReaderWebView extends StatefulWidget {
 
   /// EPUB 解压根目录的绝对路径（用于 WebView file:// baseUrl）
   ///
-  /// 非空时，WebView 以 `file://<extractedBasePath>/` 为 baseUrl 加载 HTML，
-  /// HTML/CSS 中的相对资源路径会按此目录解析，直接访问本地解压的原始文件
-  /// （图片、字体、视频），无需 base64 编码。
+  /// 双轨方案：
+  /// - 虚拟域名模式（[useVirtualServer]=true）：此字段仅作 fallback，
+  ///   baseUrl 固定为 `https://mr-epub-package/`，资源由
+  ///   [EpubResourceServer] 拦截按需从 zip 读取
+  /// - file:// 模式（[useVirtualServer]=false，默认）：WebView 以
+  ///   `file://<extractedBasePath>/` 为 baseUrl 直接访问解压文件
+  ///
   /// 为空时 baseUrl 为 about:blank（纯文本模式或无 EPUB 资源场景）。
   final String extractedBasePath;
+
+  /// 是否启用虚拟域名资源服务（双轨开关）
+  ///
+  /// true：baseUrl 用 `https://mr-epub-package/`，shouldInterceptRequest
+  ///   拦截请求由 [EpubResourceServer] 从 zip 按需读取
+  /// false（默认）：保留现有 file:// + extractedBasePath 方案
+  final bool useVirtualServer;
+
+  /// 当前书籍标识（虚拟域名模式下用于 EpubResourceServer 定位 Archive）
+  ///
+  /// 建议用 bookUrl 的 hash，与 [EpubResourceServer.registerBook] 一致。
+  final String bookId;
+
+  /// 是否为 EPUB fixed-layout 章节（pre-paginated 漫画/画册）
+  ///
+  /// true 时阅读器不做 column 分页，改用 viewport scale 等比缩放显示整页。
+  /// 仅在 [isRichHtml]=true 时生效。
+  final bool isFixedLayout;
+
+  /// fixed-layout 章节的原始内容宽度（像素）
+  /// 由 EpubViewportParser 从 <meta viewport> / <svg viewBox> 解析
+  final double? fixedLayoutWidth;
+
+  /// fixed-layout 章节的原始内容高度（像素）
+  final double? fixedLayoutHeight;
 
   /// 控制器
   final ReaderWebViewController controller;
@@ -74,6 +104,11 @@ class ReaderWebView extends StatefulWidget {
     required this.callbacks,
     this.isRichHtml = false,
     this.extractedBasePath = '',
+    this.useVirtualServer = false,
+    this.bookId = '',
+    this.isFixedLayout = false,
+    this.fixedLayoutWidth,
+    this.fixedLayoutHeight,
   });
 
   @override
@@ -216,6 +251,9 @@ class _ReaderWebViewState extends State<ReaderWebView> {
       pageModeIndex: widget.provider.pageMode.index,
       chapterIndex: widget.chapterIndex,
       isRichHtml: widget.isRichHtml,
+      isFixedLayout: widget.isFixedLayout,
+      fixedLayoutWidth: widget.fixedLayoutWidth,
+      fixedLayoutHeight: widget.fixedLayoutHeight,
     );
   }
 
@@ -225,12 +263,20 @@ class _ReaderWebViewState extends State<ReaderWebView> {
 
   /// 获取 WebView 加载用的 baseUrl
   ///
-  /// EPUB 富 HTML 模式且有解压根目录时，用 `file://<extractedBasePath>/` 作为
-  /// baseUrl，让 HTML/CSS 中的相对资源路径解析到本地解压目录，直接访问原始文件。
-  /// 其他场景用 about:blank。
-  WebUri get _baseUrl => (widget.isRichHtml && widget.extractedBasePath.isNotEmpty)
-      ? WebUri('file://${widget.extractedBasePath.replaceAll('\\', '/')}/')
-      : WebUri('about:blank');
+  /// 双轨方案：
+  /// - 虚拟域名模式：固定 `https://mr-epub-package/`，资源由
+  ///   [EpubResourceServer] 拦截按需从 zip 读取
+  /// - file:// 模式：`file://<extractedBasePath>/` 直接访问解压文件
+  /// - 其他场景：about:blank
+  WebUri get _baseUrl {
+    if (widget.useVirtualServer && widget.isRichHtml && widget.bookId.isNotEmpty) {
+      return WebUri(EpubResourceServer.packageBaseUrl);
+    }
+    if (widget.isRichHtml && widget.extractedBasePath.isNotEmpty) {
+      return WebUri('file://${widget.extractedBasePath.replaceAll('\\', '/')}/');
+    }
+    return WebUri('about:blank');
+  }
 
   /// 重新加载 HTML
   Future<void> _reloadHtml() async {
@@ -306,7 +352,14 @@ class _ReaderWebViewState extends State<ReaderWebView> {
             verticalScrollBarEnabled: false,
             horizontalScrollBarEnabled: false,
             overScrollMode: OverScrollMode.NEVER,
+            // 虚拟域名模式：启用 shouldInterceptRequest 拦截
+            // 参考 Readium Kotlin-toolkit 的 WebViewServer 设计
+            useShouldInterceptRequest: widget.useVirtualServer,
           ),
+          shouldInterceptRequest: widget.useVirtualServer
+              ? (controller, request) =>
+                  EpubResourceServer.instance.handleRequest(request)
+              : null,
           onWebViewCreated: _onWebViewCreated,
           onLoadStop: _onLoadStop,
         );
