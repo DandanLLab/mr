@@ -395,20 +395,28 @@ a:visited, a:visited * {
   text-decoration: none;
 }
 
-/* 参考 lumina：html/body 统一 100%/100%，padding 放 html 上
+/* 参考 lumina：html 用 --reader-vh，body 用 100%，padding 放 html 上
    100vw/100vh 在 InAppWebView 里可能等于屏幕尺寸而非 widget 尺寸，
-   所以用 --reader-vw/vh（JS 注入 window.innerWidth/innerHeight）替代 */
-html, body {
+   所以用 --reader-vw/vh（JS 注入 window.innerWidth/innerHeight）替代。
+   ★ 关键：html 和 body 的 height 必须不同 ★
+   - html: height = var(--reader-vh)（JS 注入的实际视口高度），
+     box-sizing:border-box + padding → content area = safe-height
+   - body: height = 100%（相对 html content area = safe-height）
+     之前 html,body 都设 var(--reader-vh)，body 高度 = vh > html content area，
+     body 竖向溢出被 html overflow:hidden 裁剪，高度链断裂，
+     #reader-stage flex:1 拿不到正确高度 → column 容器高度 0/错误 → 第二页空白 */
+html {
   margin: 0;
   padding: 0;
-  /* 不设置 width：html 作为根元素默认 width=viewport（=--reader-vw）；
-     body 作为块级元素默认 width=auto，填满 html 的 content area
-     （= --reader-vw - paddingLeft - paddingRight = --reader-safe-width）。
-     之前写 width: var(--reader-vw) 会让 body 比 html content area 宽，
-     滚动模式下 #reader-root(width:100%) 横向溢出屏幕。 */
   height: var(--reader-vh);
   background-color: var(--reader-bg-color);
   color: var(--reader-text-color);
+}
+body {
+  margin: 0;
+  padding: 0;
+  /* 不设置 width：body 默认 width=auto 填满 html content area = safe-width */
+  height: 100%;
   /* ★ EPUB 模式：让作者字体样式优先 ★
      - font-size 保留：作为 EPUB em 单位的基准（作者 1.3em 相对此字号）
      - font-family/line-height/letter-spacing 不设：
@@ -1362,19 +1370,19 @@ body {
 }
 
 /* 3. #reader-content-a column 布局强制（!important 防原作破坏）
-   ★ 关键：不设 position/top/left/width，保留 _generateCss 的布局：
-   - position: absolute; top: 0; bottom: 0; left: 0（相对 #reader-stage）
-   - 不设 width 让 column 自动扩展到多页总宽度
-     （scrollWidth = pageCount * (columnWidth + gap)，翻页 step 依赖此）
+   保留 _generateCss 的布局：
+   - position: absolute; top: 0; bottom: 0; left: 0; width: safe-width
    - column-width = safe-width（单列宽度 = 单页宽度）
    - column-gap = 128px（固定间距消除亚像素误差，与 JS config 一致）
-   只对 column/height/overflow 加 !important 防原作覆盖 */
+   - height = safe-height（column-fill:auto 需要明确高度）
+   ★ 不设 overflow:hidden：裁剪由 #reader-stage 的 overflow:hidden 负责。
+     multicol 容器自身设 overflow:hidden 在部分 Android WebView 上会
+     抑制超出可视区域的列的创建，导致只生成 1 列 → 第二页空白 */
 #reader-content-a {
   column-width: var(--reader-safe-width) !important;
   column-gap: 128px !important;
   column-fill: auto !important;
   height: var(--reader-safe-height) !important;
-  overflow: hidden !important;
 }
 
 /* 4. ★ 全局元素宽度约束（对齐 lumina body * 规则）★
@@ -1906,19 +1914,27 @@ window.readerApi = (function() {
     // background-color 不覆盖：保留原作者设定的原始背景色
     polyfillEpubCss();
 
+    // ★ polyfill 后强制 reflow：polyfill 修改 font-size/line-height 会改变
+    //   文本宽度，column 布局需要重新流动内容到各列。不强制 reflow 的话，
+    //   后续 rAF 读 scrollWidth 可能拿到重排前的旧值（只 1 列）→ 第二页空白。
+    if (contentA) void contentA.offsetHeight;
+
     // 等待 DOM 渲染完成后通知 Dart 侧
-    // 首次通知：rAF 双帧后立即通知，让 Dart 尽快拿到初步 pageCount 启动渲染
-    // （避免首次通知延迟导致首屏白屏）
+    // 首次通知：rAF 三帧后通知，让 column 布局充分重排完成。
+    // 之前用双帧在部分 Android WebView 上不足以完成 multicol 重排，
+    // polyfill 修改 font-size 后文本宽度变化需要更多时间流动到第二列。
     requestAnimationFrame(function() {
       requestAnimationFrame(function() {
-        notifyPageCountReady();
-        // 二次通知：等图片和字体加载完成后再通知一次（M1 修复）
-        // - 图片加载会改变段落高度，触发 column 布局重排，pageCount 可能变化
-        // - 字体加载完成后文本宽度变化，pageCount 可能变化
-        // - 如果不二次通知，Dart 侧拿到的是旧 pageCount，jumpToPage 用错页数
-        // - Dart 侧 _onWebviewPageCountReady 会判断 isUpdate=true 走更新分支，
-        //   只更新 _webviewPageCount + clamp 当前页，不重新恢复进度
-        notifyPageCountReadyWhenStable();
+        requestAnimationFrame(function() {
+          notifyPageCountReady();
+          // 二次通知：等图片和字体加载完成后再通知一次（M1 修复）
+          // - 图片加载会改变段落高度，触发 column 布局重排，pageCount 可能变化
+          // - 字体加载完成后文本宽度变化，pageCount 可能变化
+          // - 如果不二次通知，Dart 侧拿到的是旧 pageCount，jumpToPage 用错页数
+          // - Dart 侧 _onWebviewPageCountReady 会判断 isUpdate=true 走更新分支，
+          //   只更新 _webviewPageCount + clamp 当前页，不重新恢复进度
+          notifyPageCountReadyWhenStable();
+        });
       });
     });
   }
@@ -2712,6 +2728,13 @@ window.readerApi = (function() {
     var root = document.documentElement;
     root.style.setProperty('--reader-vw', window.innerWidth + 'px');
     root.style.setProperty('--reader-vh', window.innerHeight + 'px');
+    // ★ 强制 reflow：CSS 变量更新后，multicol 容器的 height/column-width
+    //   依赖这些变量（通过 calc），但部分 WebView 不会立即重排 column 布局。
+    //   读取 offsetHeight 触发同步 reflow，确保 --reader-safe-height
+    //   重新计算并应用到 #reader-content-a，内容才能正确流向第二列。
+    //   不加此行时初始 --reader-vh=100vh（屏幕高度）偏大，第一列能容纳
+    //   所有内容不产生第二列 → getPageCount 返回 1 → 第二页空白。
+    if (contentA) void contentA.offsetHeight;
   }
 
   // 禁用所有手势缩放
