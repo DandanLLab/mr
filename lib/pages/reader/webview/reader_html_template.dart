@@ -282,6 +282,14 @@ class ReaderHtmlTemplate {
   --reader-title-weight: ${provider.titleFontWeight};
   --reader-title-align: $titleAlign;
   --reader-title-font-size: $titleFontSizeCalc;
+  /* KT 对齐：链接/选择高亮颜色变量（移植 Readium CSS --USER__* 系列） */
+  --reader-link-color: ${_linkColor(textColor, isDarkBg)};
+  --reader-visited-color: ${_visitedColor(isDarkBg)};
+  --reader-selection-bg: ${_selectionBg(isDarkBg)};
+  --reader-selection-text: $textColor;
+  /* KT 对齐：图片夜间模式处理（invert/darken） */
+  --reader-invert-images: ${isDarkBg ? '1' : '0'};
+  --reader-darken-images: ${isDarkBg ? '0.85' : '1'};
   /* 原始 padding 值（用户配置） */
   --reader-padding-top-raw: ${provider.paddingTop}px;
   --reader-padding-bottom-raw: ${provider.paddingBottom}px;
@@ -338,6 +346,54 @@ html:has(.epub-chapter-bg) {
   widows: 1;
   word-break: break-word;
   overflow-wrap: break-word;
+}
+
+/* KT 对齐：链接/选择高亮颜色（移植 Readium CSS --USER__* 系列）
+   原作 <a> 默认蓝色在夜间模式太刺眼，用变量统一控制 */
+a:link, a:link * {
+  color: var(--reader-link-color);
+}
+a:visited, a:visited * {
+  color: var(--reader-visited-color);
+}
+::selection {
+  color: var(--reader-selection-text);
+  background-color: var(--reader-selection-bg);
+}
+::-moz-selection {
+  color: var(--reader-selection-text);
+  background-color: var(--reader-selection-bg);
+}
+
+/* KT 对齐：CJK 语言适配（移植 Readium CSS cjk-horizontal 的 :lang() 规则）
+   - 断字规则：CJK 严格断行（line-break: strict）
+   - 字体族：按语言指定系统字体（PingFang/Hiragino/Noto CJK 等）
+   - 行高补偿：CJK 字符较高，1.167x 补偿避免行距过紧
+   - 链接：CJK 链接默认无下划线（对齐原作习惯） */
+:lang(zh), :lang(ja), :lang(ko) {
+  word-wrap: break-word;
+  -webkit-line-break: strict;
+  -epub-line-break: strict;
+  line-break: strict;
+}
+:lang(zh) {
+  --reader-cjk-font: "PingFang SC", "Heiti SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+}
+:lang(zh-Hant), :lang(zh-TW) {
+  --reader-cjk-font: "PingFang TC", "Heiti TC", "Microsoft JhengHei", "Noto Sans CJK TC", sans-serif;
+}
+:lang(ja) {
+  --reader-cjk-font: "Hiragino Sans", "Yu Gothic", "Meiryo", "Noto Sans CJK JP", sans-serif;
+}
+:lang(ko) {
+  --reader-cjk-font: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+}
+:lang(zh) body, :lang(ja) body, :lang(ko) body {
+  font-family: var(--reader-cjk-font), var(--reader-font-family);
+  line-height: calc(var(--reader-line-height) * 1.167);
+}
+:lang(zh) a, :lang(ja) a, :lang(ko) a {
+  text-decoration: none;
 }
 
 /* 参考 lumina：html/body 统一 100%/100%，padding 放 html 上
@@ -1186,6 +1242,30 @@ body.reader-scroll #reader-content-b {
 ''';
   }
 
+  /// KT 对齐：链接颜色（移植 Readium CSS --USER__linkColor 策略）
+  ///
+  /// 日间：经典蓝色 #0000EE（Readium 默认）
+  /// 夜间：浅蓝 #6FB7FF（降低对比度，避免刺眼）
+  static String _linkColor(String textColor, bool isDarkBg) {
+    return isDarkBg ? '#6FB7FF' : '#0000EE';
+  }
+
+  /// KT 对齐：已访问链接颜色（移植 Readium CSS --USER__visitedColor）
+  ///
+  /// 日间：紫色 #551A8B（Readium 默认）
+  /// 夜间：浅紫 #B98FFF
+  static String _visitedColor(bool isDarkBg) {
+    return isDarkBg ? '#B98FFF' : '#551A8B';
+  }
+
+  /// KT 对齐：选择高亮背景色（移植 Readium CSS --USER__selectionBackgroundColor）
+  ///
+  /// 日间：浅蓝 #B4D8FE（Readium 默认）
+  /// 夜间：深蓝 #1A56DB（夜间背景上更醒目）
+  static String _selectionBg(bool isDarkBg) {
+    return isDarkBg ? '#1A56DB' : '#B4D8FE';
+  }
+
   /// EPUB After CSS（三段式注入的第三段）
   ///
   /// 参考 Readium Kotlin-toolkit 的 ReadiumCSS-after.css：
@@ -1348,6 +1428,16 @@ img, svg, video {
 html {
   color: var(--reader-text-color) !important;
   background-color: var(--reader-bg-color) !important;
+}
+
+/* 6. KT 对齐：图片夜间模式处理（移植 Readium CSS --USER__invertImages/darkenImages）
+   - invert: 夜间模式反相图片（白底黑字截图类图片变黑底白字）
+   - darken: 夜间模式降低图片亮度（避免白底图片刺眼）
+   两个 filter 叠加：brightness(var) invert(var)
+   日间模式 invert=0/darken=1，filter 无视觉效果 */
+img {
+  -webkit-filter: brightness(var(--reader-darken-images)) invert(var(--reader-invert-images)) !important;
+  filter: brightness(var(--reader-darken-images)) invert(var(--reader-invert-images)) !important;
 }
 ''';
   }
@@ -3029,7 +3119,72 @@ window.readerApi = (function() {
   }
 
   // ============ Dart 通信 ============
+  // KT 对齐：虚拟列补齐（移植 Readium Kotlin-toolkit appendVirtualColumnIfNeeded）
+  //
+  // 分页模式下，若资源总列数不是每屏列数的整数倍，最后一页会是半页，
+  // 导致翻页 snap 错位（最后一页内容偏左/偏右）。
+  // 解决：在 body 末尾插入空白虚拟列，补齐到整数倍。
+  //
+  // 策略（对齐 KT columns.ts）：
+  // 1. 读取 :root 的 column-count（每屏列数，1=单列分页，null=滚动模式跳过）
+  // 2. 计算总列数 = round(scrollWidth / windowWidth * colCountPerScreen)
+  // 3. lonely = 总列数 % 每屏列数（多出来的零头）
+  // 4. needed = 每屏列数 - lonely（需补的虚拟列数）
+  // 5. 插入 needed 个 <div id="readium-virtual-page-N" style="break-before:column">
+  //    内含零宽空格（&#8203;），确保产生实际列宽
+  //
+  // 注意：每次调用先移除旧虚拟列，避免 scrollWidth 计算错误
+  function appendVirtualColumnIfNeeded() {
+    var docEl = document.documentElement;
+    var colCountPerScreen = parseInt(
+      window.getComputedStyle(docEl).getPropertyValue('column-count')
+    );
+    if (!colCountPerScreen) {
+      // 滚动模式（column-count: auto 解析为 NaN/0）跳过
+      return false;
+    }
+
+    // 移除旧虚拟列（避免 scrollWidth 计算错误）
+    var virtualCols = document.querySelectorAll("div[id^='readium-virtual-page']");
+    var oldCount = virtualCols.length;
+    for (var i = 0; i < virtualCols.length; i++) {
+      virtualCols[i].remove();
+    }
+
+    var documentWidth = document.scrollingElement
+      ? document.scrollingElement.scrollWidth
+      : document.body.scrollWidth;
+    var windowWidth = window.innerWidth;
+
+    var totalColCount = Math.round(
+      (documentWidth / windowWidth) * colCountPerScreen
+    );
+    var lonelyColCount = totalColCount % colCountPerScreen;
+    var needed = (colCountPerScreen === 1 || lonelyColCount === 0)
+      ? 0
+      : colCountPerScreen - lonelyColCount;
+
+    if (needed > 0) {
+      for (var j = 0; j < needed; j++) {
+        var virtualCol = document.createElement('div');
+        virtualCol.setAttribute('id', 'readium-virtual-page-' + j);
+        virtualCol.style.breakBefore = 'column';
+        virtualCol.style.webkitColumnBreakBefore = 'always';
+        virtualCol.innerHTML = '&#8203;'; // 零宽空格
+        document.body.appendChild(virtualCol);
+      }
+    }
+    if (oldCount !== needed) {
+      console.log('[reader] virtualColumn: needed=' + needed +
+        ' totalCols=' + totalColCount + ' perScreen=' + colCountPerScreen);
+    }
+    return oldCount !== needed;
+  }
+
   function notifyPageCountReady() {
+    // KT 对齐：计算页数前先补齐虚拟列，确保最后一页是整页
+    appendVirtualColumnIfNeeded();
+
     var count = getPageCount();
     var cw = getColumnWidth();
     var sw = contentA ? contentA.scrollWidth : 0;
