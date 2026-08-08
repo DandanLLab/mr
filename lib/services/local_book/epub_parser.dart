@@ -94,6 +94,18 @@ class EpubChapter {
   /// 仅当 [isGallery] 为 true 时填充，让 Flutter EpubGalleryPage 还原原作者排版
   EpubGalleryChapterStyle? galleryChapterStyle;
 
+  // ===== 多看扩展标签识别字段 =====
+  // 借鉴 libdkkernel.so 的 DKE_BLOCK_TYPE / HTML_CUSTOMTAG_TYPE 注册表，
+  // 解析时识别章节中的多看扩展标签，供阅读器决定交互策略。
+
+  /// 章节包含的多看图片块类型集合
+  /// 用于识别跨页图、多帧图、图注等特殊图片渲染需求
+  Set<DuokanImageBlockType> duokanImageBlocks;
+
+  /// 章节包含的多看自定义标签类型集合
+  /// 用于识别脚注、视频、音频、3D 模型等交互内容
+  Set<DuokanCustomTagType> duokanCustomTags;
+
   // ===== Fixed-layout 章节支持字段 =====
   // EPUB fixed-layout（pre-paginated）章节用于漫画/画册/固定版式内容
   // 参考 Readium Kotlin-toolkit 的 fixed-layout 渲染：
@@ -130,6 +142,8 @@ class EpubChapter {
     this.isGallery = false,
     this.galleryImages = const [],
     this.galleryChapterStyle,
+    this.duokanImageBlocks = const {},
+    this.duokanCustomTags = const {},
     this.isFixedLayout = false,
     this.fixedLayoutWidth,
     this.fixedLayoutHeight,
@@ -168,6 +182,8 @@ class EpubChapter {
         isGallery: node.isGallery,
         galleryImages: node.galleryImages,
         galleryChapterStyle: node.galleryChapterStyle,
+        duokanImageBlocks: node.duokanImageBlocks,
+        duokanCustomTags: node.duokanCustomTags,
         isFixedLayout: node.isFixedLayout,
         fixedLayoutWidth: node.fixedLayoutWidth,
         fixedLayoutHeight: node.fixedLayoutHeight,
@@ -632,6 +648,16 @@ class EpubParser {
             );
             debugPrint('[EPUB诊断] 章节${chapter.index}识别为画廊页，'
                 '共 ${galleryImages.length} 张图片');
+          }
+
+          // 5b. 识别多看扩展标签（借鉴 libdkkernel.so DKE_BLOCK_TYPE/HTML_CUSTOMTAG_TYPE）
+          //     解析章节中的 duokan-image-*/duokan-footnote/duokan-video 等标签，
+          //     供阅读器决定交互策略（脚注拦截、媒体播放、跨页图等）。
+          if (epub_core.DuokanTagRecognizer.hasDuokanTags(richBody)) {
+            chapter.duokanImageBlocks =
+                epub_core.DuokanTagRecognizer.detectImageBlocks(richBody);
+            chapter.duokanCustomTags =
+                epub_core.DuokanTagRecognizer.detectCustomTags(richBody);
           }
 
           // 5a. 识别 fixed-layout 章节（pre-paginated，漫画/画册/固定版式）

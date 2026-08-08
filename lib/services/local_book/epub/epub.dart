@@ -10,6 +10,7 @@
 /// - EpubFontFace / EpubFontFaceParser / EpubFontCatalog：@font-face 提取
 /// - EpubViewportParser：fixed-layout 检测与视口解析
 /// - EpubFootnoteSupport：脚注 JS 注入 + payload 解析
+/// - EpubDuokanTags：多看扩展标签识别（借鉴 libdkkernel.so 反编译）
 /// - DirectoryEpubArchiveReader：Container 抽象（从解压目录读取资源）
 ///
 /// 注意：EpubCssProcessor 位于上级目录（lib/services/local_book/epub_css_processor.dart），
@@ -24,4 +25,5 @@ export 'epub_publisher_styles.dart';
 export 'epub_font.dart';
 export 'epub_viewport_parser.dart';
 export 'epub_footnote_support.dart';
+export 'epub_duokan_tags.dart';
 export 'epub_container.dart';

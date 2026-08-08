@@ -921,7 +921,24 @@ class EpubCssProcessor {
     // === 其他 ===
     'cursor',
     // === EPUB 特有（已归一化） ===
+    // 借鉴多看 libdkkernel.so 的 CSS_DECLNAME_TYPE 注册表（FUN_002cfca8），
+    // 支持多看私有 CSS 属性，避免被白名单过滤丢弃。
+    // 这些属性在 WebView 中会作为未知属性被忽略，但保留在 CSS 中
+    // 可供阅读器的 JS 层做自定义渲染（如 duokan-drop-caps-style 首字下沉）。
     'duokan-text-indent', 'src', 'unicode-range',
+    // 多看私有属性（从 FUN_002cfca8 反编译提取）
+    'duokan-text-decoration-width', 'duokan-text-decoration-color',
+    'duokan-border-length-topleft', 'duokan-border-length-topright',
+    'duokan-border-length-righttop', 'duokan-border-length-rightbottom',
+    'duokan-border-length-bottomleft', 'duokan-border-length-bottomright',
+    'duokan-border-length-lefttop', 'duokan-border-length-leftbottom',
+    'duokan-list-image-width', 'duokan-list-image-height',
+    'duokan-list-style-char', 'duokan-list-start',
+    'duokan-polygon-left', 'duokan-polygon-right',
+    'duokan-drop-caps-style', 'duokan-bleed',
+    'duokan-divide-type', 'duokan-divide-style',
+    'duokan-divide-line', 'duokan-divide-ratio',
+    'duokan-hanging-style',
   };
 
   static const _borderStyles = {
@@ -964,9 +981,60 @@ class EpubCssProcessor {
     'x-large', 'xx-large', 'smaller', 'larger',
   };
 
+  /// CSS 命名颜色表
+  ///
+  /// 借鉴多看 libdkkernel.so 的颜色名注册表（FUN_0029fd94），
+  /// 包含 CSS Level 1/2/3 的全部 140 个命名颜色。
+  /// WebView 原生支持这些颜色名的渲染，此处仅用于颜色值识别。
   static const _namedColors = {
+    // CSS Level 1（16 基础色）
     'black', 'white', 'red', 'green', 'blue', 'cyan', 'aqua',
     'magenta', 'fuchsia', 'yellow', 'gray', 'grey', 'silver',
     'maroon', 'purple', 'teal', 'navy', 'orange',
+    // CSS Level 2 扩展
+    'lime', 'olive', 'green', 'navy', 'blue', 'teal', 'aqua',
+    // CSS Level 3 — 粉色系
+    'pink', 'lightpink', 'hotpink', 'deeppink', 'palevioletred',
+    'mediumvioletred',
+    // 红色系
+    'lightsalmon', 'salmon', 'darksalmon', 'lightcoral', 'indianred',
+    'crimson', 'firebrick', 'darkred',
+    // 橙色系
+    'coral', 'tomato', 'orangered', 'darkorange', 'orange',
+    // 黄色系
+    'gold', 'khaki', 'darkkhaki', 'lemonchiffon', 'lightgoldenrodyellow',
+    'lightyellow', 'yellow',
+    // 绿色系
+    'lawngreen', 'chartreuse', 'limegreen', 'forestgreen', 'darkgreen',
+    'greenyellow', 'yellowgreen', 'springgreen', 'mediumspringgreen',
+    'lightgreen', 'palegreen', 'darkseagreen', 'mediumseagreen',
+    'seagreen', 'darkolivegreen', 'olivedrab',
+    // 青色系
+    'mediumaquamarine', 'aquamarine', 'turquoise', 'lightseagreen',
+    'mediumturquoise', 'darkturquoise', 'cadetblue', 'darkcyan',
+    'teal',
+    // 蓝色系
+    'lightsteelblue', 'powderblue', 'lightblue', 'skyblue',
+    'lightskyblue', 'deepskyblue', 'dodgerblue', 'cornflowerblue',
+    'steelblue', 'royalblue', 'mediumblue', 'blue', 'darkblue',
+    'navy', 'midnightblue', 'lavender', 'thistle', 'plum', 'violet',
+    'orchid', 'mediumorchid', 'darkorchid', 'darkviolet', 'blueviolet',
+    'mediumpurple', 'mediumslateblue', 'slateblue', 'darkslateblue',
+    'indigo',
+    // 棕色系
+    'cornsilk', 'blanchedalmond', 'bisque', 'navajowhite', 'wheat',
+    'burlywood', 'tan', 'rosybrown', 'sandybrown', 'goldenrod',
+    'darkgoldenrod', 'peru', 'chocolate', 'saddlebrown', 'sienna',
+    'brown', 'maroon',
+    // 白色系
+    'snow', 'seashell', 'oldlace', 'floralwhite', 'ivory', 'azure',
+    'mintcream', 'honeydew', 'aliceblue', 'ghostwhite', 'whitesmoke',
+    'seashell', 'beige', 'linen', 'lavenderblush', 'mistyrose',
+    // 灰色系
+    'gainsboro', 'lightgray', 'lightgrey', 'silver', 'darkgray',
+    'darkgrey', 'gray', 'grey', 'dimgray', 'dimgrey', 'slategray',
+    'slategrey', 'darkslategray', 'darkslategrey', 'black',
+    // 透明
+    'transparent',
   };
 }
