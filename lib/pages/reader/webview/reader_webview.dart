@@ -362,6 +362,9 @@ class _ReaderWebViewState extends State<ReaderWebView> {
               : null,
           onWebViewCreated: _onWebViewCreated,
           onLoadStop: _onLoadStop,
+          onConsoleMessage: (controller, consoleMessage) {
+            debugPrint('[WebViewConsole] ${consoleMessage.message}');
+          },
         );
       },
     );

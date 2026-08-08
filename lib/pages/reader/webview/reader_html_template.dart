@@ -583,17 +583,21 @@ body.reader-paged #reader-stage {
 }
 
 /* a/b 共用样式：absolute 重叠在 #reader-stage 内，column 分栏
-   关键：不设 width，让 column 布局自动扩展到内容总宽度，
-   这样 scrollWidth 才能返回所有列的总宽度（= pageCount * columnWidth）。
-   高度用 top:0 + bottom:0 撑满 stage，避免 height:100% 在 flex 父容器
-   内的高度计算不稳定（部分 Android WebView 上 flex 子项 absolute 子元素
-   的 height:100% 会算成 0，导致 column 布局坍缩成 1 列）。
+   关键：必须设明确的 width = safe-width（单页宽度），让 column 布局在
+   固定宽度内分列。内容超出单页高度后流向第二列（水平方向），scrollWidth
+   返回所有列的总宽度（= pageCount * (columnWidth + gap) - gap）。
+   对齐 lumina（body height:safe-height + column-width:safe-width）、
+   readium-kotlin（:root width/height 明确）、JRead（root width:PAGE_W）。
+   之前不设 width 依赖 absolute shrink-to-fit，导致 column 布局宽度
+   不可预测，内容无法正确流向第二列 → 第二页空白。
+   高度用 top:0 + bottom:0 撑满 stage。
    裁剪由 #reader-stage 的 overflow:hidden 负责。 */
 body.reader-paged .reader-content {
   position: absolute;
   top: 0;
   bottom: 0;
   left: 0;
+  width: var(--reader-safe-width);
   column-width: var(--reader-safe-width);
   /* 借鉴 lumina：固定 128px 列间距，消除亚像素误差，确保 getPageCount 算准。
      必须与 JS config.columnGap 保持一致，否则翻页 step 与实际列宽不符。 */
@@ -3230,72 +3234,12 @@ window.readerApi = (function() {
   }
 
   // ============ Dart 通信 ============
-  // KT 对齐：虚拟列补齐（移植 Readium Kotlin-toolkit appendVirtualColumnIfNeeded）
-  //
-  // 分页模式下，若资源总列数不是每屏列数的整数倍，最后一页会是半页，
-  // 导致翻页 snap 错位（最后一页内容偏左/偏右）。
-  // 解决：在 body 末尾插入空白虚拟列，补齐到整数倍。
-  //
-  // 策略（对齐 KT columns.ts）：
-  // 1. 读取 :root 的 column-count（每屏列数，1=单列分页，null=滚动模式跳过）
-  // 2. 计算总列数 = round(scrollWidth / windowWidth * colCountPerScreen)
-  // 3. lonely = 总列数 % 每屏列数（多出来的零头）
-  // 4. needed = 每屏列数 - lonely（需补的虚拟列数）
-  // 5. 插入 needed 个 <div id="readium-virtual-page-N" style="break-before:column">
-  //    内含零宽空格（&#8203;），确保产生实际列宽
-  //
-  // 注意：每次调用先移除旧虚拟列，避免 scrollWidth 计算错误
-  function appendVirtualColumnIfNeeded() {
-    var docEl = document.documentElement;
-    var colCountPerScreen = parseInt(
-      window.getComputedStyle(docEl).getPropertyValue('column-count')
-    );
-    if (!colCountPerScreen) {
-      // 滚动模式（column-count: auto 解析为 NaN/0）跳过
-      return false;
-    }
-
-    // 移除旧虚拟列（避免 scrollWidth 计算错误）
-    var virtualCols = document.querySelectorAll("div[id^='readium-virtual-page']");
-    var oldCount = virtualCols.length;
-    for (var i = 0; i < virtualCols.length; i++) {
-      virtualCols[i].remove();
-    }
-
-    var documentWidth = document.scrollingElement
-      ? document.scrollingElement.scrollWidth
-      : document.body.scrollWidth;
-    var windowWidth = window.innerWidth;
-
-    var totalColCount = Math.round(
-      (documentWidth / windowWidth) * colCountPerScreen
-    );
-    var lonelyColCount = totalColCount % colCountPerScreen;
-    var needed = (colCountPerScreen === 1 || lonelyColCount === 0)
-      ? 0
-      : colCountPerScreen - lonelyColCount;
-
-    if (needed > 0) {
-      for (var j = 0; j < needed; j++) {
-        var virtualCol = document.createElement('div');
-        virtualCol.setAttribute('id', 'readium-virtual-page-' + j);
-        virtualCol.style.breakBefore = 'column';
-        virtualCol.style.webkitColumnBreakBefore = 'always';
-        virtualCol.innerHTML = '&#8203;'; // 零宽空格
-        document.body.appendChild(virtualCol);
-      }
-    }
-    if (oldCount !== needed) {
-      console.log('[reader] virtualColumn: needed=' + needed +
-        ' totalCols=' + totalColCount + ' perScreen=' + colCountPerScreen);
-    }
-    return oldCount !== needed;
-  }
 
   function notifyPageCountReady() {
-    // KT 对齐：计算页数前先补齐虚拟列，确保最后一页是整页
-    appendVirtualColumnIfNeeded();
-
+    // 对齐 lumina：直接用 scrollWidth 计算页数，不需要虚拟列补齐。
+    // 之前的 appendVirtualColumnIfNeeded 操作 document.body，但 column 容器
+    // 是 #reader-content-a，虚拟列加到 body 不影响 contentA 的 scrollWidth，
+    // 且 html 上无 column-count 属性导致函数一直 return false，从未生效。
     var count = getPageCount();
     var cw = getColumnWidth();
     var sw = contentA ? contentA.scrollWidth : 0;
