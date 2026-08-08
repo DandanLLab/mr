@@ -287,8 +287,7 @@ class ReaderHtmlTemplate {
   --reader-visited-color: ${_visitedColor(isDarkBg)};
   --reader-selection-bg: ${_selectionBg(isDarkBg)};
   --reader-selection-text: $textColor;
-  /* KT 对齐：图片夜间模式处理（invert/darken） */
-  --reader-invert-images: ${isDarkBg ? '1' : '0'};
+  /* KT 对齐：图片夜间模式变暗（不做反相，反相会破坏彩色图片） */
   --reader-darken-images: ${isDarkBg ? '0.85' : '1'};
   /* 原始 padding 值（用户配置） */
   --reader-padding-top-raw: ${provider.paddingTop}px;
@@ -798,15 +797,16 @@ body.reader-scroll #reader-content-b {
   height: auto;
 }
 
-/* 3a. 封面图全屏：EPUB 封面章常见结构
+/* 3a. 封面图全屏（对齐 lumina applyCenteringStyles + Readium CSS object-fit:contain）：
+   EPUB 封面章常见结构：
    <svg width="100%" height="100%" viewBox="0 0 1000 1333"
         preserveAspectRatio="xMidYMid meet"><image .../></svg>
    - :has(svg[width="100%"][height="100%"]) 给背景容器显式 height：
      svg height:100% 才能解析成整页高度（仅 min-height 不参与百分比基准，
      会退回 auto 导致 svg 高度按 viewBox 比例算，封面不能铺满整屏）
-   - preserveAspectRatio 已由 EpubParser 从 meet 改写为 slice：
-     meet 会等比缩放留白（letterbox），slice 等比放大裁边铺满整屏
-   - 显式 height + slice 组合实现封面图全屏（cover 裁掉左右少量边）
+   - preserveAspectRatio 已由 EpubParser 确保为 meet（对齐 lumina）：
+     meet 等比缩放完整显示封面，不裁边（可能有上下/左右留白）
+   - 显式 height + meet 组合实现封面等比缩放全屏（contain 模式）
    - 仅命中全屏封面 svg，不影响正文内普通 svg */
 #reader-content-a .epub-chapter-bg:has(svg[width="100%"][height="100%"]) {
   height: var(--reader-safe-height);
@@ -870,10 +870,11 @@ body.reader-scroll #reader-content-b {
 }
 
 /* 4a-1. 封面章节（EpubParser 标记 epub-chapter-bg epub-cover）：
-   - 固定一屏高（height 而非 min-height），svg cover 铺满整屏
+   - 固定一屏高（height 而非 min-height），svg meet 等比缩放铺满整屏
    - break-inside: avoid + overflow: hidden 双保险，封面绝不跨屏
    - 不依赖 :has() 选择器（低版本 WebView 也生效）
-   - html:has(.epub-chapter-bg) 已把 padding 清零，safe-height = 视口高 */
+   - html:has(.epub-chapter-bg) 已把 padding 清零，safe-height = 视口高
+   - 对齐 lumina：preserveAspectRatio=meet 完整显示不裁边 */
 #reader-content-a .epub-cover {
   position: relative; /* svg absolute 定位基准 */
   height: var(--reader-safe-height);
@@ -896,6 +897,15 @@ body.reader-scroll #reader-content-b {
 #reader-content-a .epub-cover svg[width="100%"][height="100%"] image {
   width: 100% !important;
   height: 100% !important;
+}
+/* 4a-2. 封面章节 img 兜底（对齐 lumina img + Readium CSS object-fit:contain）：
+   - 部分封面章用 <img> 而非 <svg>，需 object-fit:contain 等比缩放完整显示
+   - max-width/max-height:100% 限制不溢出封面容器
+   - 不强制 width:100%（保留作者图片尺寸，小图居中显示） */
+#reader-content-a .epub-cover img {
+  max-width: 100% !important;
+  max-height: 100% !important;
+  object-fit: contain !important;
 }
 
 /* 4b. EPUB 特殊章节原作者 CSS 用百分比 margin 做垂直占位：
@@ -1220,15 +1230,44 @@ body.reader-scroll #reader-content-b {
   border-radius: 4px;
 }
 
-/* 15. 强制所有图片全屏、取消圆形裁切、与顶部留距离：
-   - 原 EPUB 图片若未设 width，浏览器按原始尺寸显示，可能超出或过小
-   - 强制 width:100% 铺满内容区宽度，display:block 去掉行内间隙
-   - 取消可能的 border-radius 圆形裁切（部分主题/阅读器会加）
+/* 14b. figure 兜底（对齐 lumina figure 规则）：
+   - margin:0; padding:0 清除浏览器默认 margin（不同浏览器 figure 默认 margin 不一致）
+   - break-inside:avoid 在 _epubAfterCss 第 6 条已设，这里不重复 */
+#reader-content-a figure {
+  margin: 0;
+  padding: 0;
+}
+
+/* 14c. 链接禁用指针（对齐 lumina a 规则）：
+   - cursor:default 防止链接显示手型光标（阅读器内链接不跳转外部浏览器）
+   - 不设 pointer-events:none（需要保留点击事件供 Dart 侧拦截） */
+#reader-content-a a {
+  cursor: default !important;
+}
+
+/* 14d. dl/dd 兜底（对齐 Readium before.css dd 规则）：
+   - dd 默认 margin-left:40px（浏览器默认），用 1.5em 跟随字号缩放 */
+#reader-content-a dd {
+  margin-left: 1.5em;
+}
+
+/* 14e. pre tab-size（对齐 Readium before.css pre 规则）：
+   - tab-size:2 让代码块 Tab 缩进 2 字符宽（浏览器默认 8 字符太宽） */
+#reader-content-a pre {
+  -webkit-tab-size: 2;
+  -moz-tab-size: 2;
+  tab-size: 2;
+}
+
+/* 15. 图片兜底样式（对齐 lumina img + Readium before.css 规则）：
+   - max-width:100% 限制不溢出列宽（不强制 width:100% 铺满，保留作者图片尺寸）
+   - display:block 去掉行内间隙
    - float:none 防止原作者浮动布局导致图片重叠/错位
-   - margin-top 让图片与上一内容保持间距 */
+   - margin-top/bottom 提供默认间距（作者 CSS 可覆盖）
+   ★ 不用 width:100%!important：会强制小图标铺满列宽，破坏作者排版
+   ★ border-radius 不强制清除：部分 EPUB 作者用圆角做装饰 */
 #reader-content-a img {
-  width: 100% !important;
-  border-radius: 0 !important;
+  max-width: 100%;
   float: none !important;
   display: block;
   margin-top: 1em;
@@ -1279,56 +1318,129 @@ body.reader-scroll #reader-content-b {
   /// 4. #reader-content-a 的 absolute 定位 + transform
   static String _epubAfterCss() {
     return '''
-/* === After CSS（分页+覆盖，参考 ReadiumCSS-after.css）=== */
+/* === After CSS（分页+覆盖，参考 ReadiumCSS-after.css + lumina main.css）=== */
 
-/* 1. 修复原作 overflow 破坏分页（ReadiumCssInjector 的经典修复）
-   很多 EPUB 原作有 body { overflow-x: hidden } 会破坏 multi-column 分页，
-   必须强制 overflow:visible 让内容横向流动 */
-html, body {
-  overflow: visible !important;
-}
-
-/* 2. 确保 html 高度约束（分页容器需要固定高度）
-   原作可能设 height:auto 导致 column 无法分页 */
+/* 1. html 布局约束（对齐 lumina html + Readium :root 规则）
+   - box-sizing: border-box 确保 padding 含在尺寸内
+   - height/max-height 固定视口高度（column 分页必需）
+   - overflow: hidden 防止内容溢出视口（visible 会破坏分页）
+   - touch-action: manipulation 允许点击禁用双击缩放
+   - font-size/color/bg !important 确保用户设置优先于原作
+   - text-size-adjust: none 防止 WebView 自动调整字号
+   ★ 不设 width：html 作为根元素默认 width=viewport */
 html {
+  box-sizing: border-box !important;
   height: var(--reader-vh) !important;
   max-height: var(--reader-vh) !important;
+  overflow: hidden !important;
+  touch-action: manipulation !important;
+  font-size: var(--reader-font-size) !important;
+  color: var(--reader-text-color) !important;
+  background-color: var(--reader-bg-color) !important;
+  -webkit-text-size-adjust: none !important;
+  text-size-adjust: none !important;
 }
 
-/* 3. 确保 body 不限制宽度（让 column 内容横向流动）
-   原作可能设 body { width:100%; max-width:Npx } 破坏 column
-   注意：不覆盖 padding（padding 由阅读器 _generateCss 控制，
-   #reader-content-a 用 absolute 定位到 padding 区域内）*/
+/* 2. body 布局约束（对齐 lumina body 规则）
+   - margin/padding: 0 清除原作边距
+   - width: 100% + height: 100% 填满 html
+   - overflow: hidden 配合 html 防溢出
+   ★ 关键修复：原 overflow:visible 让 body 内容溢出 html，
+     破坏 column 的视口约束 → 排版混乱 */
 body {
-  width: auto !important;
-  max-width: none !important;
+  box-sizing: border-box !important;
   margin: 0 !important;
+  padding: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  overflow: hidden !important;
 }
 
-/* 4. 确保 #reader-content-a 的 column 布局优先
-   原作可能给 div 设 width/overflow 破坏 column 容器 */
+/* 3. #reader-content-a column 布局强制（!important 防原作破坏）
+   ★ 关键：不设 position/top/left/width，保留 _generateCss 的布局：
+   - position: absolute; top: 0; bottom: 0; left: 0（相对 #reader-stage）
+   - 不设 width 让 column 自动扩展到多页总宽度
+     （scrollWidth = pageCount * (columnWidth + gap)，翻页 step 依赖此）
+   - column-width = safe-width（单列宽度 = 单页宽度）
+   - column-gap = 128px（固定间距消除亚像素误差，与 JS config 一致）
+   只对 column/height/overflow 加 !important 防原作覆盖 */
 #reader-content-a {
   column-width: var(--reader-safe-width) !important;
   column-gap: 128px !important;
   column-fill: auto !important;
   height: var(--reader-safe-height) !important;
   overflow: hidden !important;
-  position: absolute !important;
-  top: var(--reader-padding-top) !important;
-  left: var(--reader-padding-left) !important;
-  width: var(--reader-safe-width) !important;
 }
 
-/* 5. 确保字号变量优先（原作可能设 body { font-size:16px } 覆盖用户设置）
-   通过 !important 确保用户字号生效 */
-html {
-  font-size: var(--reader-font-size) !important;
+/* 4. ★ 全局元素宽度约束（对齐 lumina body * 规则）★
+   ★ 关键修复：原作元素 width:100% / 大宽度会撑破 column → 排版混乱 ★
+   限制所有元素 max-width 为 safe-width，确保不超出单列宽度 */
+#reader-content-a * {
+  max-width: var(--reader-safe-width) !important;
+  orphans: 1 !important;
+  widows: 1 !important;
+  word-break: break-word !important;
+  overflow-wrap: break-word !important;
 }
 
-/* 6. 确保文字颜色/背景色优先（原作可能设 body { color:black } 破坏夜间模式） */
-html {
-  color: var(--reader-text-color) !important;
-  background-color: var(--reader-bg-color) !important;
+/* 5. 媒体元素约束（对齐 lumina img/svg/video 规则）
+   - max-height: safe-height 防止图片/视频超高
+   - height: auto + object-fit: contain 等比缩放
+   - break-inside: avoid 防止图片被分栏切断 */
+#reader-content-a img,
+#reader-content-a svg,
+#reader-content-a video {
+  max-width: var(--reader-safe-width) !important;
+  max-height: var(--reader-safe-height) !important;
+  height: auto !important;
+  object-fit: contain !important;
+  break-inside: avoid !important;
+  -webkit-column-break-inside: avoid !important;
+  page-break-inside: avoid !important;
+}
+
+/* 6. 不可分切元素（对齐 Readium CSS before.css break-inside 规则）
+   标题/figure/tr/pre 不应被分栏切断（避免标题与后续内容分离）
+   ★ 不含 table：大表格可能超一页，break-inside:avoid 会导致整表推到下一栏
+     若表格高度接近 safe-height 则无栏可放 → 表格消失 */
+#reader-content-a h1, #reader-content-a h2, #reader-content-a h3,
+#reader-content-a h4, #reader-content-a h5, #reader-content-a h6,
+#reader-content-a figure, #reader-content-a tr, #reader-content-a pre {
+  break-inside: avoid !important;
+  -webkit-column-break-inside: avoid !important;
+  page-break-inside: avoid !important;
+}
+
+/* 7. 标题/分页符避免后面断行（对齐 Readium CSS before.css break-after 规则）
+   标题后不应立即分栏断行（避免标题独自留在页尾） */
+#reader-content-a h2, #reader-content-a h3, #reader-content-a h4,
+#reader-content-a h5, #reader-content-a h6, #reader-content-a dt,
+#reader-content-a hr, #reader-content-a caption {
+  break-after: avoid !important;
+  -webkit-column-break-after: avoid !important;
+  page-break-after: avoid !important;
+}
+
+/* 8. 隐藏滚动条（对齐 lumina ::-webkit-scrollbar 规则）
+   分页模式下不应有滚动条，原作可能显示滚动条干扰翻页 */
+::-webkit-scrollbar,
+::-webkit-scrollbar:horizontal,
+::-webkit-scrollbar:vertical {
+  -webkit-appearance: none !important;
+  background-color: transparent !important;
+  display: none !important;
+  height: 0 !important;
+  width: 0 !important;
+}
+body::-webkit-scrollbar,
+body::-webkit-scrollbar:horizontal,
+body::-webkit-scrollbar:vertical {
+  -webkit-appearance: none !important;
+  background-color: transparent !important;
+  display: none !important;
+  height: 0 !important;
+  width: 0 !important;
 }
 ''';
   }
@@ -1430,14 +1542,13 @@ html {
   background-color: var(--reader-bg-color) !important;
 }
 
-/* 6. KT 对齐：图片夜间模式处理（移植 Readium CSS --USER__invertImages/darkenImages）
-   - invert: 夜间模式反相图片（白底黑字截图类图片变黑底白字）
+/* 6. KT 对齐：图片夜间模式变暗（移植 Readium CSS --USER__darkenImages）
    - darken: 夜间模式降低图片亮度（避免白底图片刺眼）
-   两个 filter 叠加：brightness(var) invert(var)
-   日间模式 invert=0/darken=1，filter 无视觉效果 */
+   - 不做反相（invert 会破坏彩色图片和漫画）
+   日间模式 darken=1，filter 无视觉效果 */
 img {
-  -webkit-filter: brightness(var(--reader-darken-images)) invert(var(--reader-invert-images)) !important;
-  filter: brightness(var(--reader-darken-images)) invert(var(--reader-invert-images)) !important;
+  -webkit-filter: brightness(var(--reader-darken-images)) !important;
+  filter: brightness(var(--reader-darken-images)) !important;
 }
 ''';
   }

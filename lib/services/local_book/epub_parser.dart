@@ -541,11 +541,12 @@ class EpubParser {
                 _inlineStyleUrls(bodyAttrs, files, chapterBasePath);
           }
 
-          // 3-0. 封面 SVG 全屏适配（两种模式统一处理）：
-          // 把全屏封面 svg（width/height 100% + image）的 preserveAspectRatio
-          // 从 meet 改写为 slice，配合 reader_html_template 的 svg 填满整页
-          // CSS 实现封面图全屏
-          richBody = _rewriteCoverSvgToSlice(richBody);
+          // 3-0. 封面 SVG 全屏适配（对齐 lumina applyCenteringStyles）：
+          // 确保全屏封面 svg 的 preserveAspectRatio 为 meet（等比缩放完整显示），
+          // 配合 reader_html_template 的 svg 填满整页 CSS 实现封面全屏。
+          // meet 策略与 lumina 和 Readium CSS（object-fit:contain）一致：
+          // 完整显示优先，不裁切封面内容
+          richBody = _ensureCoverSvgMeet(richBody);
 
           // 4. 用 wrapper div 包裹 body 内容，把 body 的 class/style 应用到 div
           //    这样 CSS 中 .video-bg / .volume-bg 等选择器才能生效
@@ -1850,7 +1851,10 @@ class EpubParser {
     return result;
   }
 
-  /// 封面 SVG 全屏适配：把全屏封面 svg 的 preserveAspectRatio 从 meet 改写为 slice
+  /// 封面 SVG 全屏适配：确保全屏封面 svg 的 preserveAspectRatio 为 meet
+  ///
+  /// 对齐 lumina（同框架）的 applyCenteringStyles：
+  /// lumina 对封面 svg 强制 setAttribute('preserveAspectRatio', 'xMidYMid meet')
   ///
   /// EPUB 封面章常见结构（本仓库 诡秘之主 cover.xhtml 同款）：
   /// ```html
@@ -1860,14 +1864,14 @@ class EpubParser {
   /// </svg>
   /// ```
   ///
-  /// 原样渲染时 preserveAspectRatio=meet 会按 viewBox 等比缩放，
-  /// 手机屏幕比例与封面（约 3:4）不一致时上下留白（letterbox），
-  /// 封面不能铺满整屏。改写为 xMidYMid slice 后等比放大裁边铺满，
-  /// 配合 reader_html_template 的 svg 填满整页 CSS 实现封面全屏。
+  /// preserveAspectRatio=meet 按 viewBox 等比缩放，完整显示封面不裁边，
+  /// 手机屏幕比例与封面不一致时可能有上下/左右留白（letterbox）。
+  /// 这与 lumina 和 Readium CSS（object-fit:contain）的策略一致：
+  /// 完整显示优先于铺满整屏，不裁切封面内容。
   ///
   /// 仅匹配「width/height 均为 100% + 内含 <image>」的全屏封面 svg，
   /// 不影响正文中的普通 svg 装饰/图标。
-  static String _rewriteCoverSvgToSlice(String html) {
+  static String _ensureCoverSvgMeet(String html) {
     return html.replaceAllMapped(
       RegExp(r'<svg\b([^>]*)>([\s\S]*?)</svg>', caseSensitive: false),
       (m) {
@@ -1878,17 +1882,18 @@ class EpubParser {
             RegExp(r'\bheight="100%"', caseSensitive: false).hasMatch(attrs) &&
             RegExp(r'<image\b', caseSensitive: false).hasMatch(inner);
         if (!isCoverSvg) return m.group(0)!;
+        // 确保为 meet（对齐 lumina）：若已是 meet 则不改，否则改为 meet
         final newAttrs = attrs.contains('preserveAspectRatio')
             ? attrs.replaceAllMapped(
                 RegExp(
                   r'preserveAspectRatio\s*=\s*"([^"]*)"',
                   caseSensitive: false,
                 ),
-                (am) => (am.group(1) ?? '').contains('slice')
+                (am) => (am.group(1) ?? '').contains('meet')
                     ? am.group(0)!
-                    : 'preserveAspectRatio="xMidYMid slice"',
+                    : 'preserveAspectRatio="xMidYMid meet"',
               )
-            : '$attrs preserveAspectRatio="xMidYMid slice"';
+            : '$attrs preserveAspectRatio="xMidYMid meet"';
         return '<svg$newAttrs>$inner</svg>';
       },
     );
