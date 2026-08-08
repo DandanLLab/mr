@@ -1896,10 +1896,10 @@ window.readerApi = (function() {
     initChapterObserver();
 
     // ★ CSS polyfill（移植自 lumina CssPolyfillManager）★
-    // 对齐 lumina 的 CSS 后处理，补全 EPUB 原作 CSS 的三类兼容问题：
+    // 对齐 lumina 的 CSS 后处理，补全 EPUB 原作 CSS 的兼容问题：
     // 1. font-size/line-height px 值 → 注入 var(--reader-font-size) 主题驱动
-    // 2. background-color → 注入 var(--reader-bg-color, 原值) 夜间模式适配
-    // 3. break-before/after → webkit-column-break 兼容（旧 WebView 不支持 CSS3 break-*）
+    // 2. break-before/after → webkit-column-break 兼容（旧 WebView 不支持 CSS3 break-*）
+    // background-color 不覆盖：保留原作者设定的原始背景色
     polyfillEpubCss();
 
     // 等待 DOM 渲染完成后通知 Dart 侧
@@ -3389,7 +3389,7 @@ window.readerApi = (function() {
 
   // ★ CSS polyfill（移植自 lumina CssPolyfillManager）★
   //
-  // 对齐 lumina 的 CSS 后处理机制，补全 EPUB 原作 CSS 的三类兼容问题：
+  // 对齐 lumina 的 CSS 后处理机制，补全 EPUB 原作 CSS 的兼容问题：
   //
   // 1. font-size/line-height px 值缩放：
   //    EPUB 原作常写 `font-size: 16px` / `line-height: 1.5`，固定 px 不随用户
@@ -3399,29 +3399,22 @@ window.readerApi = (function() {
   //    - line-height: N（无单位）保留（相对值，不破坏作者行距意图）
   //    - line-height: Npx → calc(Npx * 1em)（随字号等比缩放）
   //
-  // 2. background-color 主题适配：
-  //    EPUB 原作写 `background-color: #fff` 破坏夜间模式。lumina 注入
-  //    var(--lumina-surface-container-color, 原值)，咱们用
-  //    var(--reader-bg-color, 原值) 让夜间模式背景色覆盖原作。
-  //    - 透明色（transparent / rgba(0,0,0,0)）不处理（保留作者意图）
-  //    - 已含 var(--reader-...) 的不重复处理
-  //
-  // 3. break-before/after → webkit-column-break 兼容：
+  // 2. break-before/after → webkit-column-break 兼容：
   //    旧版 Android WebView 不支持 CSS3 break-before/after，
   //    需转换为 -webkit-column-break-before/after。
   //    - page/right/left → always
   //    - avoid → avoid
   //    - auto → auto
   //
-  // 注意：只处理 EPUB 富 HTML 模式（纯文本模式无原作 CSS，无需 polyfill）
+  // 注意：
+  // - 只处理 EPUB 富 HTML 模式（纯文本模式无原作 CSS，无需 polyfill）
+  // - background-color 不做覆盖：保留原作者设定的原始背景色，
+  //   按原作者意图渲染（作者设什么背景色就显示什么背景色）
+  //
   function polyfillEpubCss() {
     var doc = document;
     var sheets = doc.styleSheets;
     if (!sheets) return;
-
-    // 判断是否需要背景色覆盖（夜间模式或用户自定义背景色时启用）
-    // 对齐 lumina shouldOverrideTextColor 逻辑：用户设置了背景色就覆盖原作背景
-    var bgOverrideEnabled = true;
 
     for (var i = 0; i < sheets.length; i++) {
       var sheet = sheets[i];
@@ -3447,25 +3440,8 @@ window.readerApi = (function() {
         // 2. line-height polyfill
         polyfillLineHeight(style);
 
-        // 3. background-color polyfill
-        if (bgOverrideEnabled) {
-          polyfillBackgroundColor(style);
-        }
-
-        // 4. break-before/after → webkit-column-break 兼容
+        // 3. break-before/after → webkit-column-break 兼容
         polyfillBreakRules(style);
-      }
-    }
-
-    // ★ 也处理 inline style 的 background-color（对齐 lumina）★
-    // styleSheets 只覆盖 CSS 文件规则，不覆盖 HTML 标签上的
-    // style="background-color:#fff"。EPUB 作者常用 inline style 设背景色
-    // （如 <div style="background-color:#000">），夜间模式下这些白色/黑色
-    // 背景不会被覆盖，破坏主题适配。遍历所有带 style 的元素做同样改写。
-    if (bgOverrideEnabled) {
-      var styledEls = doc.querySelectorAll('[style]');
-      for (var n = 0; n < styledEls.length; n++) {
-        polyfillBackgroundColor(styledEls[n].style);
       }
     }
 
@@ -3498,21 +3474,6 @@ window.readerApi = (function() {
         style.getPropertyPriority('line-height'));
     }
     // 无单位数字（如 1.5）保留（相对值，作者意图）
-  }
-
-  // background-color → var(--reader-bg-color, 原值)
-  function polyfillBackgroundColor(style) {
-    var val = style.getPropertyValue('background-color');
-    if (!val) return;
-    var lower = val.trim().toLowerCase();
-    // 透明色不处理（保留作者意图，如叠加效果）
-    if (lower === 'transparent' || lower === 'rgba(0, 0, 0, 0)') return;
-    // 已含 var(--reader-...) 不重复处理
-    if (lower.indexOf('var(--reader-') !== -1) return;
-    // 注入 var(--reader-bg-color, 原值)，让夜间模式背景色生效，原值作 fallback
-    style.setProperty('background-color',
-      'var(--reader-bg-color, ' + val + ')',
-      style.getPropertyPriority('background-color'));
   }
 
   // break-before/after → -webkit-column-break-before/after
