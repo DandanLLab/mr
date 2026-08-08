@@ -100,11 +100,11 @@ class EpubChapter {
 
   /// 章节包含的多看图片块类型集合
   /// 用于识别跨页图、多帧图、图注等特殊图片渲染需求
-  Set<DuokanImageBlockType> duokanImageBlocks;
+  Set<epub_core.DuokanImageBlockType> duokanImageBlocks;
 
   /// 章节包含的多看自定义标签类型集合
   /// 用于识别脚注、视频、音频、3D 模型等交互内容
-  Set<DuokanCustomTagType> duokanCustomTags;
+  Set<epub_core.DuokanCustomTagType> duokanCustomTags;
 
   // ===== Fixed-layout 章节支持字段 =====
   // EPUB fixed-layout（pre-paginated）章节用于漫画/画册/固定版式内容

@@ -987,12 +987,12 @@ class EpubCssProcessor {
   /// 包含 CSS Level 1/2/3 的全部 140 个命名颜色。
   /// WebView 原生支持这些颜色名的渲染，此处仅用于颜色值识别。
   static const _namedColors = {
-    // CSS Level 1（16 基础色）
+    // CSS Level 1（16 基础色 + orange）
     'black', 'white', 'red', 'green', 'blue', 'cyan', 'aqua',
     'magenta', 'fuchsia', 'yellow', 'gray', 'grey', 'silver',
     'maroon', 'purple', 'teal', 'navy', 'orange',
-    // CSS Level 2 扩展
-    'lime', 'olive', 'green', 'navy', 'blue', 'teal', 'aqua',
+    // CSS Level 2 扩展（新增）
+    'lime', 'olive',
     // CSS Level 3 — 粉色系
     'pink', 'lightpink', 'hotpink', 'deeppink', 'palevioletred',
     'mediumvioletred',
@@ -1000,10 +1000,10 @@ class EpubCssProcessor {
     'lightsalmon', 'salmon', 'darksalmon', 'lightcoral', 'indianred',
     'crimson', 'firebrick', 'darkred',
     // 橙色系
-    'coral', 'tomato', 'orangered', 'darkorange', 'orange',
+    'coral', 'tomato', 'orangered', 'darkorange',
     // 黄色系
     'gold', 'khaki', 'darkkhaki', 'lemonchiffon', 'lightgoldenrodyellow',
-    'lightyellow', 'yellow',
+    'lightyellow',
     // 绿色系
     'lawngreen', 'chartreuse', 'limegreen', 'forestgreen', 'darkgreen',
     'greenyellow', 'yellowgreen', 'springgreen', 'mediumspringgreen',
@@ -1012,12 +1012,11 @@ class EpubCssProcessor {
     // 青色系
     'mediumaquamarine', 'aquamarine', 'turquoise', 'lightseagreen',
     'mediumturquoise', 'darkturquoise', 'cadetblue', 'darkcyan',
-    'teal',
     // 蓝色系
     'lightsteelblue', 'powderblue', 'lightblue', 'skyblue',
     'lightskyblue', 'deepskyblue', 'dodgerblue', 'cornflowerblue',
-    'steelblue', 'royalblue', 'mediumblue', 'blue', 'darkblue',
-    'navy', 'midnightblue', 'lavender', 'thistle', 'plum', 'violet',
+    'steelblue', 'royalblue', 'mediumblue', 'darkblue',
+    'midnightblue', 'lavender', 'thistle', 'plum', 'violet',
     'orchid', 'mediumorchid', 'darkorchid', 'darkviolet', 'blueviolet',
     'mediumpurple', 'mediumslateblue', 'slateblue', 'darkslateblue',
     'indigo',
@@ -1025,15 +1024,15 @@ class EpubCssProcessor {
     'cornsilk', 'blanchedalmond', 'bisque', 'navajowhite', 'wheat',
     'burlywood', 'tan', 'rosybrown', 'sandybrown', 'goldenrod',
     'darkgoldenrod', 'peru', 'chocolate', 'saddlebrown', 'sienna',
-    'brown', 'maroon',
+    'brown',
     // 白色系
     'snow', 'seashell', 'oldlace', 'floralwhite', 'ivory', 'azure',
     'mintcream', 'honeydew', 'aliceblue', 'ghostwhite', 'whitesmoke',
-    'seashell', 'beige', 'linen', 'lavenderblush', 'mistyrose',
+    'beige', 'linen', 'lavenderblush', 'mistyrose',
     // 灰色系
-    'gainsboro', 'lightgray', 'lightgrey', 'silver', 'darkgray',
-    'darkgrey', 'gray', 'grey', 'dimgray', 'dimgrey', 'slategray',
-    'slategrey', 'darkslategray', 'darkslategrey', 'black',
+    'gainsboro', 'lightgray', 'lightgrey', 'darkgray',
+    'darkgrey', 'dimgray', 'dimgrey', 'slategray',
+    'slategrey', 'darkslategray', 'darkslategrey',
     // 透明
     'transparent',
   };
