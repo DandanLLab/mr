@@ -418,6 +418,10 @@ class EpubParser {
       if (tocTree.isNotEmpty) {
         // NCX/NAV 解析成功：扁平化得到 chapters
         chapters = EpubChapter.flatten(tocTree);
+        // 补全 TOC 缺失的 spine 章节（封面、前言等不在 NCX/NAV 里的章节）
+        // 部分 EPUB 的 NCX/NAV 不含封面（cover.xhtml）等章节，
+        // 导致用户翻开书后看不到封面。按 spine 顺序补全缺失项。
+        chapters = _fillMissingSpineChapters(chapters, pkg.spine, spineIndexByHref);
         debugPrint('[EPUB诊断] flatten后chapters数量=${chapters.length}');
         if (chapters.isNotEmpty) {
           debugPrint('[EPUB诊断] 第1章: title=${chapters[0].title} href=${chapters[0].href} spineIndex=${chapters[0].spineIndex} depth=${chapters[0].depth}');
@@ -548,6 +552,20 @@ class EpubParser {
           // 完整显示优先，不裁切封面内容
           richBody = _ensureCoverSvgMeet(richBody);
 
+          // 3-1. 检测多看全屏页属性（duokan-page-fullscreen）
+          //   对齐 lumina DuokanTypConfig.isFullscreen：
+          //   - lumina 对 duokan-page-fullscreen 走 applyCenteringStyles
+          //     （svg position:fixed 铺满 100vw/100vh + meet 等比缩放）
+          //   - 而非 fixed-layout 的 transform:scale() 缩放
+          //   - 否则封面 svg 的内层 div 高度 auto → svg height:100% 失效 → 空白
+          //   提前获取 spineItem 供封面特判和 fixed-layout 判定共用
+          final spineItem = chapter.spineIndex >= 0 &&
+                  chapter.spineIndex < pkg.spine.length
+              ? pkg.spine[chapter.spineIndex]
+              : null;
+          final isDuokanFullscreen = spineItem != null &&
+              spineItem.properties.contains('duokan-page-fullscreen');
+
           // 4. 用 wrapper div 包裹 body 内容，把 body 的 class/style 应用到 div
           //    这样 CSS 中 .video-bg / .volume-bg 等选择器才能生效
           //    加 epub-chapter-bg 标记 class，让 reader 兜底 CSS 能精确匹配
@@ -560,7 +578,10 @@ class EpubParser {
           //    - 便于对正文 wrapper 精确应用布局约束（如 max-width:100%）
           //    - 不影响 IntersectionObserver 的 [data-chapter-index] 监测
           //
-          //    封面特判：body 无属性但内容是全屏 SVG 封面（width/height=100% + image）
+          //    封面特判（两种条件任一即触发）：
+          //    a) OPF spine 声明 duokan-page-fullscreen（多看全屏页，对齐 lumina
+          //       DuokanTypConfig.isFullscreen → applyCenteringStyles）
+          //    b) body 无属性但内容是全屏 SVG 封面（width/height=100% + image）
           //    时，wrapper 标 "epub-chapter-bg epub-cover" 双 class：
           //    - epub-chapter-bg：触发 reader 的 padding 清零 + 背景容器规则，
           //      让封面铺满整屏（无阅读器边距）
@@ -576,11 +597,12 @@ class EpubParser {
                       (m) => 'class="epub-chapter-bg ${m.group(1)}"',
                     )
                   : 'class="epub-chapter-bg" $inlinedBodyAttrs');
-          if (inlinedBodyAttrs.isEmpty &&
-              RegExp(
-                r'<svg\b(?=[^>]*\bwidth="100%")(?=[^>]*\bheight="100%")[^>]*>[\s\S]*?<image\b',
-                caseSensitive: false,
-              ).hasMatch(richBody)) {
+          if (isDuokanFullscreen ||
+              (inlinedBodyAttrs.isEmpty &&
+                  RegExp(
+                    r'<svg\b(?=[^>]*\bwidth="100%")(?=[^>]*\bheight="100%")[^>]*>[\s\S]*?<image\b',
+                    caseSensitive: false,
+                  ).hasMatch(richBody))) {
             wrapperAttrs = 'class="epub-chapter-bg epub-cover"';
           }
           final wrapperStart = '<div $wrapperAttrs>';
@@ -614,16 +636,18 @@ class EpubParser {
 
           // 5a. 识别 fixed-layout 章节（pre-paginated，漫画/画册/固定版式）
           //     参考 Readium Kotlin-toolkit 的 fixed-layout 渲染：
-          //     - 优先用 OPF spine item 的 rendition:layout=pre-paginated 判定
+          //     - 优先用 OPF spine item 的 rendition:layout=pre-paginated 刡定
           //     - 回退用 EpubViewportParser.looksLikeFixedLayout 启发式判定
           //     - 解析 viewport 尺寸供渲染层做 fitContain 缩放
           //     fixed-layout 章节不走 column 分页，整页等比缩放显示
-          if (!chapter.isGallery) {
+          //
+          //     ★ duokan-page-fullscreen 不走 fixed-layout ★
+          //     多看全屏页（如封面）走封面 CSS（.epub-cover），对齐 lumina
+          //     applyCenteringStyles（svg position:fixed 铺满 100vw/100vh + meet）。
+          //     fixed-layout 的 transform:scale() 会导致内层 div 高度 auto →
+          //     svg height:100% 失效 → 封面空白，故必须排除。
+          if (!chapter.isGallery && !isDuokanFullscreen) {
             // 检查 OPF spine item 级别的 rendition:layout
-            final spineItem = chapter.spineIndex >= 0 &&
-                    chapter.spineIndex < pkg.spine.length
-                ? pkg.spine[chapter.spineIndex]
-                : null;
             final isPrePaginated = spineItem != null &&
                 spineItem.properties.contains('rendition:layout-pre-paginated');
 
@@ -774,6 +798,125 @@ class EpubParser {
       ));
     }
     return result;
+  }
+
+  /// 补全 TOC 缺失的 spine 章节到 chapters 列表
+  ///
+  /// 部分 EPUB 的 NCX/NAV 不包含封面（cover.xhtml）、前言等章节，
+  /// 导致这些章节不在 chapters 列表里，用户翻书时看不到。
+  /// 本方法遍历 spine，找出不在 chapters 里的项，按 spine 顺序
+  /// 插入到 chapters 的正确位置。
+  ///
+  /// 插入位置算法：对每个缺失项，找到它在 spine 中前一个在 chapters
+  /// 里的 spine 项，插到那个章节后面；若没有前项则插到最前面。
+  static List<EpubChapter> _fillMissingSpineChapters(
+    List<EpubChapter> chapters,
+    List<epub_core.EpubSpineItem> spine,
+    Map<String, int> spineIndexByHref,
+  ) {
+    if (chapters.isEmpty || spine.isEmpty) return chapters;
+
+    // chapters 中已有的 href 集合（归一化：去掉 fragment）
+    final existingHrefs = <String>{};
+    for (final ch in chapters) {
+      final href = ch.href?.split('#').first;
+      if (href != null && href.isNotEmpty) {
+        existingHrefs.add(href);
+      }
+    }
+
+    // 找出缺失的 spine 项（跳过 linear=no 和已有项）
+    final missing = <epub_core.EpubSpineItem>[];
+    for (final s in spine) {
+      if (!s.linear) continue;
+      if (s.href.isEmpty || existingHrefs.contains(s.href)) continue;
+      missing.add(s);
+    }
+    if (missing.isEmpty) return chapters;
+
+    // 构建 spineIndex → chapters 位置 的映射（用于确定插入位置）
+    final spineIdxToPos = <int, int>{};
+    for (int i = 0; i < chapters.length; i++) {
+      if (chapters[i].spineIndex >= 0) {
+        spineIdxToPos[chapters[i].spineIndex] = i;
+      }
+    }
+
+    // 按 spine 顺序处理缺失项，逐个插入（跟踪偏移量）
+    final result = [...chapters];
+    int offset = 0;
+    for (final s in missing) {
+      final spineIdx = spineIndexByHref[s.href] ?? s.index;
+
+      // 找插入位置：spine 中 spineIdx 之前最近的在 chapters 里的项
+      int insertPos = 0;
+      for (int si = spineIdx - 1; si >= 0; si--) {
+        final pos = spineIdxToPos[si];
+        if (pos != null) {
+          insertPos = pos + offset + 1;
+          break;
+        }
+      }
+
+      final isCover = s.properties.contains('duokan-page-fullscreen') ||
+          s.href.toLowerCase().contains('cover');
+      result.insert(insertPos, EpubChapter(
+        index: -1, // 稍后统一分配
+        title: isCover ? '封面' : _guessChapterTitle(s.href),
+        href: s.href,
+        spineIndex: spineIdx,
+      ));
+      offset++;
+    }
+
+    // 重新分配 index（EpubChapter 字段全 final，需重建）
+    for (int i = 0; i < result.length; i++) {
+      final old = result[i];
+      result[i] = EpubChapter(
+        index: i,
+        title: old.title,
+        href: old.href,
+        content: old.content,
+        richContent: old.richContent,
+        startFragmentId: old.startFragmentId,
+        endFragmentId: old.endFragmentId,
+        nextUrl: old.nextUrl,
+        isVolume: old.isVolume,
+        anchor: old.anchor,
+        spineIndex: old.spineIndex,
+        depth: old.depth,
+        parentId: old.parentId,
+        children: old.children,
+        isGallery: old.isGallery,
+        galleryImages: old.galleryImages,
+        galleryChapterStyle: old.galleryChapterStyle,
+        isFixedLayout: old.isFixedLayout,
+        fixedLayoutWidth: old.fixedLayoutWidth,
+        fixedLayoutHeight: old.fixedLayoutHeight,
+      );
+    }
+
+    debugPrint('[EPUB诊断] 补全${missing.length}个缺失spine章节: '
+        '${missing.map((m) => m.href.split('/').last).join(", ")}');
+    return result;
+  }
+
+  /// 根据文件名猜测章节标题（用于补全缺失的 spine 章节）
+  static String _guessChapterTitle(String href) {
+    final fileName = href.split('/').last;
+    final name = fileName.replaceAll(
+      RegExp(r'\.(x?html?|xml)$', caseSensitive: false),
+      '',
+    );
+    final lower = name.toLowerCase();
+    if (lower.contains('intro')) return '前言';
+    if (lower.contains('copy')) return '版权页';
+    if (lower.contains('illust')) return '插图';
+    if (lower.contains('foreword') || lower.contains('preface')) return '序言';
+    if (lower.contains('toc') || lower.contains('nav')) return '目录';
+    if (lower.contains('dedicat')) return '献词';
+    if (lower.contains('title')) return '扉页';
+    return name;
   }
 
   /// 解析 EPUB 内部相对路径

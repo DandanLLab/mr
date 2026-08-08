@@ -98,6 +98,12 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   /// ```
   _GalleryCellStyle _parseCellStyle(String rawCss) {
     final cellBlock = _extractRuleBlock(rawCss, 'duokan-image-gallery-cell');
+    final maintitleBlock = _extractRuleBlock(rawCss, 'duokan-image-maintitle');
+    final subtitleBlock = _extractRuleBlock(rawCss, 'duokan-image-subtitle');
+
+    // 解析 maintitle margin（原作 margin: 1em auto -0.5em auto）
+    final maintitleMargins = _parseMargin(maintitleBlock);
+
     return _GalleryCellStyle(
       borderWidth: _parseFloat(cellBlock, 'border-width') ?? 1.0,
       borderColor: _parseColor(cellBlock, 'border-color'),
@@ -105,31 +111,42 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
       boxShadowDy: _parseBoxShadow(cellBlock)?.dy ?? 5.0,
       boxShadowBlur: _parseBoxShadow(cellBlock)?.blur ?? 5.0,
       boxShadowColor: _parseBoxShadow(cellBlock)?.color ?? const Color(0xFF888888),
-      maintitleColor: _parseColor(
-        _extractRuleBlock(rawCss, 'duokan-image-maintitle'),
-        'color',
-      ) ?? const Color(0xFF336633),
-      subtitleColor: _parseColor(
-        _extractRuleBlock(rawCss, 'duokan-image-subtitle'),
-        'color',
-      ) ?? const Color(0xFF333333),
+      maintitleColor: _parseColor(maintitleBlock, 'color') ??
+          const Color(0xFF336633),
+      subtitleColor: _parseColor(subtitleBlock, 'color') ??
+          const Color(0xFF333333),
+      maintitleMarginTop: maintitleMargins?.$1 ?? 1.0,
+      maintitleMarginBottom: maintitleMargins?.$2 ?? -0.5,
+      subtitleMarginBottom: _parseMargin(subtitleBlock)?.$2 ?? 0.5,
+      cellMarginVertical: _parseMarginPx(cellBlock)?.$1 ?? 10.0,
+      maintitleFontSize: _parseFloat(maintitleBlock, 'font-size') ?? 0.9,
+      subtitleFontSize: _parseFloat(subtitleBlock, 'font-size') ?? 0.9,
+      subtitleLineHeight: _parseFloat(subtitleBlock, 'line-height') ?? 1.35,
     );
   }
 
   _GalleryTitleStyle _parseTitleStyle(String rawCss) {
     final block = _extractRuleBlock(rawCss, 'gallery-title');
+    final margins = _parseMargin(block);
     return _GalleryTitleStyle(
       fontSize: _parseFloat(block, 'font-size') ?? 1.5,
       bold: _containsKeyword(block, 'bold') || _containsKeyword(block, '700'),
       color: _parseColor(block, 'color'),
+      textShadow: _parseTextShadow(block),
+      marginTop: margins?.$1 ?? 2.0,
+      marginBottom: margins?.$2 ?? 2.0,
     );
   }
 
   _GalleryTxtStyle _parseTxtStyle(String rawCss) {
     final block = _extractRuleBlock(rawCss, 'gallery-txt');
+    final margins = _parseMargin(block);
     return _GalleryTxtStyle(
       fontSize: _parseFloat(block, 'font-size') ?? 0.7,
       color: _parseColor(block, 'color'),
+      textShadow: _parseTextShadow(block),
+      marginTop: margins?.$1 ?? 1.0,
+      marginBottom: margins?.$2 ?? 1.0,
     );
   }
 
@@ -186,6 +203,82 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   bool _containsKeyword(String? block, String keyword) {
     if (block == null) return false;
     return block.toLowerCase().contains(keyword.toLowerCase());
+  }
+
+  /// 解析 CSS margin 的上下值（em 单位，如 margin: 1em auto -0.5em auto）
+  ///
+  /// 返回 (marginTop, marginBottom)，解析失败返回 null
+  /// 支持格式：
+  /// - `margin: top right bottom left`（4 值）
+  /// - `margin: top bottom`（2 值）
+  /// - `margin: all`（1 值）
+  /// auto 值跳过（不参与上下 margin 计算）
+  (double, double)? _parseMargin(String? block) {
+    if (block == null) return null;
+    final match = RegExp(r'margin\s*:\s*([^;]+)').firstMatch(block);
+    if (match == null) return null;
+    final parts = match.group(1)!.trim().split(RegExp(r'\s+'));
+    final emValues = parts
+        .map((p) => p.toLowerCase().endsWith('em')
+            ? double.tryParse(p.replaceAll(RegExp(r'em$'), ''))
+            : null)
+        .whereType<double>()
+        .toList();
+    if (emValues.isEmpty) return null;
+    if (emValues.length >= 4) {
+      return (emValues[0], emValues[2]);
+    } else if (emValues.length >= 2) {
+      return (emValues[0], emValues[1]);
+    } else {
+      return (emValues[0], emValues[0]);
+    }
+  }
+
+  /// 解析 CSS margin 的上下值（px 单位，如 margin: 10px 0）
+  ///
+  /// 返回 (marginTop, marginBottom)，解析失败返回 null
+  (double, double)? _parseMarginPx(String? block) {
+    if (block == null) return null;
+    final match = RegExp(r'margin\s*:\s*([^;]+)').firstMatch(block);
+    if (match == null) return null;
+    final parts = match.group(1)!.trim().split(RegExp(r'\s+'));
+    final pxValues = parts
+        .map((p) => p.toLowerCase().endsWith('px')
+            ? double.tryParse(p.replaceAll(RegExp(r'px$'), ''))
+            : double.tryParse(p))
+        .whereType<double>()
+        .toList();
+    if (pxValues.isEmpty) return null;
+    if (pxValues.length >= 4) {
+      return (pxValues[0], pxValues[2]);
+    } else if (pxValues.length >= 2) {
+      return (pxValues[0], pxValues[1]);
+    } else {
+      return (pxValues[0], pxValues[0]);
+    }
+  }
+
+  /// 解析 CSS text-shadow（如 text-shadow: 0 1 1px #fff）
+  ///
+  /// 格式：offsetX offsetY blur color
+  /// 原作 gallery-title / gallery-txt 均为 text-shadow: 0 1 1px #fff
+  Shadow? _parseTextShadow(String? block) {
+    if (block == null) return null;
+    final match = RegExp(
+      r'text-shadow\s*:\s*([0-9.-]+)\s+([0-9.-]+)\s*(?:([0-9.]+)px\s+)?#([0-9a-fA-F]{3,6})',
+    ).firstMatch(block);
+    if (match == null) return null;
+    final dx = double.tryParse(match.group(1) ?? '0') ?? 0;
+    final dy = double.tryParse(match.group(2) ?? '0') ?? 0;
+    final blur = double.tryParse(match.group(3) ?? '0') ?? 0;
+    final hex = match.group(4)!;
+    final color = hex.length == 6
+        ? Color(int.parse('FF$hex', radix: 16))
+        : hex.length == 3
+            ? Color(int.parse('FF${hex[0] * 2}${hex[1] * 2}${hex[2] * 2}',
+                radix: 16))
+            : const Color(0xFFFFFFFF);
+    return Shadow(offset: Offset(dx, dy), blurRadius: blur, color: color);
   }
 
   Color _resolveBgColor() {
@@ -345,14 +438,22 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   }
 
   /// 画廊标题（对齐原作 .gallery-title）
+  /// 原作 CSS: margin: 2em auto; font-size: 1.5em; font-weight: bold;
+  ///   text-align: center; text-shadow: 0 1 1px #fff
   Widget _buildGalleryTitle() {
     final title = widget.chapterStyle?.galleryTitle;
     if (title == null || title.isEmpty) return const SizedBox.shrink();
 
+    final shadows = _titleStyle.textShadow != null
+        ? [_titleStyle.textShadow!]
+        : <Shadow>[];
+
     return Padding(
-      padding: EdgeInsets.symmetric(
-        vertical: widget.baseFontSize * 1.0,
-        horizontal: 16,
+      padding: EdgeInsets.only(
+        top: widget.baseFontSize * _titleStyle.marginTop,
+        bottom: widget.baseFontSize * _titleStyle.marginBottom,
+        left: 16,
+        right: 16,
       ),
       child: Text(
         title,
@@ -361,6 +462,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
           fontWeight: _titleStyle.bold ? FontWeight.bold : FontWeight.normal,
           color: _titleStyle.color ?? widget.textColor,
           decoration: TextDecoration.none,
+          shadows: shadows,
         ),
         textAlign: TextAlign.center,
       ),
@@ -368,14 +470,22 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   }
 
   /// 底部提示文本（对齐原作 .gallery-txt）
+  /// 原作 CSS: margin: 1em auto; font-size: 0.7em; text-align: center;
+  ///   text-shadow: 0 1 1px #fff
   Widget _buildGalleryTxt() {
     final txt = widget.chapterStyle?.galleryTxt;
     if (txt == null || txt.isEmpty) return const SizedBox.shrink();
 
+    final shadows = _txtStyle.textShadow != null
+        ? [_txtStyle.textShadow!]
+        : <Shadow>[];
+
     return Padding(
-      padding: EdgeInsets.symmetric(
-        vertical: widget.baseFontSize * 0.5,
-        horizontal: 16,
+      padding: EdgeInsets.only(
+        top: widget.baseFontSize * _txtStyle.marginTop,
+        bottom: widget.baseFontSize * _txtStyle.marginBottom,
+        left: 16,
+        right: 16,
       ),
       child: Text(
         txt,
@@ -383,6 +493,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
           fontSize: widget.baseFontSize * _txtStyle.fontSize,
           color: _txtStyle.color ?? widget.textColor,
           decoration: TextDecoration.none,
+          shadows: shadows,
         ),
         textAlign: TextAlign.center,
       ),
@@ -463,7 +574,11 @@ class _GalleryCell extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        // 水平 24px 让内容不贴边；垂直用原作 cell margin（10px 0）
+        padding: EdgeInsets.symmetric(
+          horizontal: 24,
+          vertical: style.cellMarginVertical,
+        ),
         // ★ Center 松约束：PageView 页面是 tight 约束，若不加 Center，
         //   Column 子元素会被强制撑满页面宽度，边框/阴影框比图片大。
         //   加 Center 后约束变 loose，边框容器收缩到图片实际渲染宽度，
@@ -499,47 +614,53 @@ class _GalleryCell extends StatelessWidget {
                 ),
               ),
               // maintitle（对齐 .duokan-image-maintitle）
+              // 原作 margin: 1em auto -0.5em auto：
+              // - top 1em：与图片之间 1em 间距
+              // - bottom -0.5em：与 subtitle 减少 0.5em 间距（Flutter 用
+              //   subtitle top=0 近似：maintitle bottom=0 + subtitle top=0
+              //   = 零间距，近似 -0.5em 的紧凑效果）
               if (image.maintitle.isNotEmpty)
-                  Padding(
-                    padding: EdgeInsets.only(
-                      top: baseFontSize * 0.5,
-                      bottom: 0,
-                      left: 12,
-                      right: 12,
-                    ),
-                    child: Text(
-                      image.maintitle,
-                      style: TextStyle(
-                        fontSize: baseFontSize * 0.9,
-                        color: style.maintitleColor,
-                        decoration: TextDecoration.none,
-                        height: 1.2,
-                      ),
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                Padding(
+                  padding: EdgeInsets.only(
+                    top: baseFontSize * style.maintitleMarginTop,
+                    bottom: 0,
+                    left: 12,
+                    right: 12,
                   ),
-                // subtitle（对齐 .duokan-image-subtitle）
-                if (image.subtitle.isNotEmpty)
-                  Padding(
-                    padding: EdgeInsets.only(
-                      top: baseFontSize * 0.25,
-                      bottom: baseFontSize * 0.5,
-                      left: 12,
-                      right: 12,
+                  child: Text(
+                    image.maintitle,
+                    style: TextStyle(
+                      fontSize: baseFontSize * style.maintitleFontSize,
+                      color: style.maintitleColor,
+                      decoration: TextDecoration.none,
+                      height: 1.2,
                     ),
-                    child: Text(
-                      image.subtitle,
-                      style: TextStyle(
-                        fontSize: baseFontSize * 0.9,
-                        color: style.subtitleColor,
-                        height: 1.35,
-                        decoration: TextDecoration.none,
-                      ),
-                      textAlign: TextAlign.justify,
-                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
+                ),
+              // subtitle（对齐 .duokan-image-subtitle）
+              // 原作无 margin，紧接 maintitle（maintitle 负下 margin 效果）
+              if (image.subtitle.isNotEmpty)
+                Padding(
+                  padding: EdgeInsets.only(
+                    top: 0,
+                    bottom: baseFontSize * style.subtitleMarginBottom,
+                    left: 12,
+                    right: 12,
+                  ),
+                  child: Text(
+                    image.subtitle,
+                    style: TextStyle(
+                      fontSize: baseFontSize * style.subtitleFontSize,
+                      color: style.subtitleColor,
+                      height: style.subtitleLineHeight,
+                      decoration: TextDecoration.none,
+                    ),
+                    textAlign: TextAlign.justify,
+                  ),
+                ),
             ],
           ),
         ),
@@ -918,6 +1039,20 @@ class _GalleryCellStyle {
   final Color? boxShadowColor;
   final Color maintitleColor;
   final Color subtitleColor;
+  /// maintitle 上 margin（em 值，原作 1em）
+  final double maintitleMarginTop;
+  /// maintitle 下 margin（em 值，原作 -0.5em，负值=减少与 subtitle 间距）
+  final double maintitleMarginBottom;
+  /// subtitle 下 margin（em 值，原作无 margin，默认 0.5em 收尾间距）
+  final double subtitleMarginBottom;
+  /// cell 上下 margin（px 值，原作 10px 0）
+  final double cellMarginVertical;
+  /// maintitle 字号（em 值，原作 0.9em）
+  final double maintitleFontSize;
+  /// subtitle 字号（em 值，原作 0.9em）
+  final double subtitleFontSize;
+  /// subtitle 行高（原作 1.35em）
+  final double subtitleLineHeight;
 
   const _GalleryCellStyle({
     this.borderWidth = 1.0,
@@ -928,6 +1063,13 @@ class _GalleryCellStyle {
     this.boxShadowColor,
     this.maintitleColor = const Color(0xFF336633),
     this.subtitleColor = const Color(0xFF333333),
+    this.maintitleMarginTop = 1.0,
+    this.maintitleMarginBottom = -0.5,
+    this.subtitleMarginBottom = 0.5,
+    this.cellMarginVertical = 10.0,
+    this.maintitleFontSize = 0.9,
+    this.subtitleFontSize = 0.9,
+    this.subtitleLineHeight = 1.35,
   });
 }
 
@@ -935,21 +1077,37 @@ class _GalleryTitleStyle {
   final double fontSize;
   final bool bold;
   final Color? color;
+  /// 文字阴影（原作 text-shadow: 0 1 1px #fff）
+  final Shadow? textShadow;
+  /// 上下 margin（em 值，原作 2em auto）
+  final double marginTop;
+  final double marginBottom;
 
   const _GalleryTitleStyle({
     this.fontSize = 1.5,
     this.bold = true,
     this.color,
+    this.textShadow,
+    this.marginTop = 2.0,
+    this.marginBottom = 2.0,
   });
 }
 
 class _GalleryTxtStyle {
   final double fontSize;
   final Color? color;
+  /// 文字阴影（原作 text-shadow: 0 1 1px #fff）
+  final Shadow? textShadow;
+  /// 上下 margin（em 值，原作 1em auto）
+  final double marginTop;
+  final double marginBottom;
 
   const _GalleryTxtStyle({
     this.fontSize = 0.7,
     this.color,
+    this.textShadow,
+    this.marginTop = 1.0,
+    this.marginBottom = 1.0,
   });
 }
 
