@@ -58,6 +58,13 @@ class EpubGalleryPage extends StatefulWidget {
   State<EpubGalleryPage> createState() => _EpubGalleryPageState();
 }
 
+/// dotted 指示器高度（圆点 6px + 上下 padding 各 8px = 22px）
+///
+/// 对齐多看 .dotted 的 absolute 定位（gallery_full_disasm_report.md 5.1）：
+/// 多看 .dotted 用 position:absolute 悬浮在 .slider 底部，高度由设备 theme 注入。
+/// Flutter 移植固定为 22px，PageView 底部留此高度避免 cell 内容被 dotted 遮挡。
+const _kDottedHeight = 22.0;
+
 class _EpubGalleryPageState extends State<EpubGalleryPage> {
   late final PageController _pageController;
   late final _GalleryCellStyle _cellStyle;
@@ -117,11 +124,18 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
           const Color(0xFF333333),
       maintitleMarginTop: maintitleMargins?.$1 ?? 1.0,
       maintitleMarginBottom: maintitleMargins?.$2 ?? -0.5,
-      subtitleMarginBottom: _parseMargin(subtitleBlock)?.$2 ?? 0.5,
+      // 原著 .duokan-image-subtitle 无 margin 属性（style.css 第339-345行），
+      // 默认 0；subtitle 紧接 maintitle，靠 maintitle 负下 margin 拉近间距。
+      subtitleMarginBottom: _parseMargin(subtitleBlock)?.$2 ?? 0.0,
       cellMarginVertical: _parseMarginPx(cellBlock)?.$1 ?? 10.0,
       maintitleFontSize: _parseFloat(maintitleBlock, 'font-size') ?? 0.9,
       subtitleFontSize: _parseFloat(subtitleBlock, 'font-size') ?? 0.9,
       subtitleLineHeight: _parseFloat(subtitleBlock, 'line-height') ?? 1.35,
+      // 字体族（对齐原著 style.css）
+      // maintitle: DK-HEITI（黑体）→ sans-serif
+      // subtitle: DK-KAITI（楷体）→ serif
+      maintitleFontFamily: _parseFontFamily(maintitleBlock) ?? 'sans-serif',
+      subtitleFontFamily: _parseFontFamily(subtitleBlock) ?? 'serif',
     );
   }
 
@@ -135,6 +149,8 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
       textShadow: _parseTextShadow(block),
       marginTop: margins?.$1 ?? 2.0,
       marginBottom: margins?.$2 ?? 2.0,
+      // 原作 font-family: "DK-XIAOBIAOSONG", "h3", serif → serif
+      fontFamily: _parseFontFamily(block) ?? 'serif',
     );
   }
 
@@ -147,6 +163,8 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
       textShadow: _parseTextShadow(block),
       marginTop: margins?.$1 ?? 1.0,
       marginBottom: margins?.$2 ?? 1.0,
+      // 原作 font-family: "DK-HEITI", "ht", sans-serif → sans-serif
+      fontFamily: _parseFontFamily(block) ?? 'sans-serif',
     );
   }
 
@@ -183,6 +201,39 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
       return Color(int.parse('FF$r$g$b', radix: 16));
     }
     return null;
+  }
+
+  /// 从 CSS 块中解析 font-family（如 font-family: "DK-HEITI","ht",sans-serif → sans-serif）
+  ///
+  /// 多看 EPUB 用 DK-* 字体名（DK-HEITI=黑体, DK-KAITI=楷体, DK-SONGTI=宋体,
+  /// DK-FANGSONG=仿宋, DK-XIAOBIAOSONG=小标宋, DK-XIHEITI=细黑体），
+  /// 这些字体在多看设备上由系统注入，Flutter 侧用通用字体族兜底：
+  /// - DK-HEITI/DK-XIHEITI → sans-serif（黑体/圆体）
+  /// - DK-KAITI → serif（楷体，serif 衬线体更接近楷书笔画）
+  /// - DK-SONGTI/DK-FANGSONG/DK-XIAOBIAOSONG → serif（宋体/仿宋/小标宋）
+  String? _parseFontFamily(String? block) {
+    if (block == null) return null;
+    final match = RegExp(
+      r'font-family\s*:\s*([^;]+)',
+    ).firstMatch(block);
+    if (match == null) return null;
+    final family = match.group(1)!.toLowerCase();
+    // 检测多看 DK-* 字体名 → 映射到通用字体族
+    if (family.contains('heiti') || family.contains('xiheiti')) {
+      return 'sans-serif';
+    }
+    if (family.contains('kaiti') ||
+        family.contains('songti') ||
+        family.contains('fangsong') ||
+        family.contains('xiaobiaosong')) {
+      return 'serif';
+    }
+    // 兜底：取最后一个字体名（去掉引号）
+    final parts = family.split(',');
+    if (parts.isEmpty) return null;
+    // 正则匹配双引号或单引号；用非 raw 字符串转义单引号
+    final last = parts.last.trim().replaceAll(RegExp('["\']'), '');
+    return last.isEmpty ? null : last;
   }
 
   /// 解析 box-shadow: dx dy blur color
@@ -399,6 +450,16 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     final hasBgImage = widget.chapterStyle?.backgroundImageSrc != null &&
         widget.chapterStyle!.backgroundImageSrc!.isNotEmpty;
 
+    // ★ 对齐多看 dotted 定位（gallery_full_disasm_report.md 第二节/5.1）：
+    //   多看 .dotted 用 `position: absolute; left/top/width/height` 悬浮在
+    //   .slider 容器底部，圆点数量 = 图片数量（obj+0x134）。
+    //   Flutter 移植：PageView + dotted 同入 Stack，dotted 用 Positioned
+    //   贴底部（外层 SafeArea 已处理 safe-area-bottom，此处 bottom:0 即可）。
+    //   PageView 底部留 _kDottedHeight，避免 cell 末尾 subtitle 被 dotted 遮挡。
+    //   单图画廊不显示 dotted，底部不留白。
+    final showDotted = widget.images.length > 1;
+    final dottedHeight = showDotted ? _kDottedHeight : 0.0;
+
     return Container(
       color: hasBgImage ? null : _resolveBgColor(),
       decoration: hasBgImage ? _buildBackgroundDecoration() : null,
@@ -407,29 +468,45 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
           children: [
             _buildGalleryTitle(),
             Expanded(
-              child: NotificationListener<ScrollNotification>(
-                onNotification: (notification) {
-                  _handleEdgeScroll(notification);
-                  return false;
-                },
-                child: PageView.builder(
-                  controller: _pageController,
-                  itemCount: widget.images.length,
-                  onPageChanged: _onPageChanged,
-                  allowImplicitScrolling: true,
-                  itemBuilder: (context, index) {
-                    return _GalleryCell(
-                      image: widget.images[index],
-                      style: _cellStyle,
-                      baseFontSize: widget.baseFontSize,
-                      textColor: widget.textColor,
-                      onTap: () => _showFullScreenPreview(index),
-                    );
-                  },
-                ),
+              child: Stack(
+                children: [
+                  // 滑动区：底部留出 dotted 高度，cell 内容不被遮挡
+                  Positioned.fill(
+                    child: Padding(
+                      padding: EdgeInsets.only(bottom: dottedHeight),
+                      child: NotificationListener<ScrollNotification>(
+                        onNotification: (notification) {
+                          _handleEdgeScroll(notification);
+                          return false;
+                        },
+                        child: PageView.builder(
+                          controller: _pageController,
+                          itemCount: widget.images.length,
+                          onPageChanged: _onPageChanged,
+                          allowImplicitScrolling: true,
+                          itemBuilder: (context, index) {
+                            return _GalleryCell(
+                              image: widget.images[index],
+                              style: _cellStyle,
+                              baseFontSize: widget.baseFontSize,
+                              textColor: widget.textColor,
+                              onTap: () => _showFullScreenPreview(index),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                  // 点点点指示器：对齐多看 .dotted position:absolute bottom
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: _buildDottedIndicator(),
+                  ),
+                ],
               ),
             ),
-            _buildDottedIndicator(),
             _buildGalleryTxt(),
           ],
         ),
@@ -460,6 +537,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
         style: TextStyle(
           fontSize: widget.baseFontSize * _titleStyle.fontSize,
           fontWeight: _titleStyle.bold ? FontWeight.bold : FontWeight.normal,
+          fontFamily: _titleStyle.fontFamily,
           color: _titleStyle.color ?? widget.textColor,
           decoration: TextDecoration.none,
           shadows: shadows,
@@ -491,6 +569,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
         txt,
         style: TextStyle(
           fontSize: widget.baseFontSize * _txtStyle.fontSize,
+          fontFamily: _txtStyle.fontFamily,
           color: _txtStyle.color ?? widget.textColor,
           decoration: TextDecoration.none,
           shadows: shadows,
@@ -501,6 +580,17 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   }
 
   /// 点点点指示器（对齐多看 .dotted > span）
+  ///
+  /// 多看反编译（gallery_full_disasm_report.md 第二节/5.1）：
+  /// - CGallery::getHtmlSnippet 生成 `<div class="dotted"><span></span>×N</div>`
+  /// - span 数量 = 图片数量（obj+0x134）← 已对齐：List.generate(images.length)
+  /// - dotted 的 style 由 setGalleryScrollRect 生成：
+  ///     `position: absolute; left:%dpx; top:%dpx; width:%dpx; height:%dpx;`
+  ///   ← 已对齐：build() 中用 Stack + Positioned(bottom:0) 悬浮在 PageView 底部
+  /// - 多看未在 .rodata 中给出 span 的具体尺寸样式，由设备 theme 注入
+  ///   ← Flutter 近似：圆点 6×6px，active alpha 230 / inactive alpha 77
+  ///
+  /// 本方法只负责圆点行本身；定位由 build() 的 Positioned 包裹完成。
   Widget _buildDottedIndicator() {
     if (widget.images.length <= 1) return const SizedBox.shrink();
 
@@ -598,7 +688,7 @@ class _GalleryCell extends StatelessWidget {
                   decoration: BoxDecoration(
                     border: Border.all(
                       width: style.borderWidth,
-                      color: style.borderColor ?? const Color(0xFF000000),
+                      color: style.borderColor ?? textColor,
                     ),
                     boxShadow: [
                       BoxShadow(
@@ -614,23 +704,27 @@ class _GalleryCell extends StatelessWidget {
                 ),
               ),
               // maintitle（对齐 .duokan-image-maintitle）
-              // 原作 margin: 1em auto -0.5em auto：
+              // 原作 CSS:
+              //   margin: 1em auto -0.5em auto;
+              //   font-family: "DK-HEITI","ht",sans-serif;
+              //   font-size: 0.9em; color: #336633; text-align: center;
               // - top 1em：与图片之间 1em 间距
-              // - bottom -0.5em：与 subtitle 减少 0.5em 间距（Flutter 用
-              //   subtitle top=0 近似：maintitle bottom=0 + subtitle top=0
-              //   = 零间距，近似 -0.5em 的紧凑效果）
+              // - bottom -0.5em：与 subtitle 减少 0.5em 间距
+              //   Flutter Padding 不支持负值，用 Transform.translate 让 subtitle
+              //   往上偏移 |maintitleMarginBottom| em，模拟负 margin 的重叠效果。
+              // - 原作无 padding，去掉之前的 12px 左右 padding（多看 cell 内文字
+              //   紧贴边框，由 cell 的 border + box-shadow 形成视觉边界）
               if (image.maintitle.isNotEmpty)
                 Padding(
                   padding: EdgeInsets.only(
                     top: baseFontSize * style.maintitleMarginTop,
                     bottom: 0,
-                    left: 12,
-                    right: 12,
                   ),
                   child: Text(
                     image.maintitle,
                     style: TextStyle(
                       fontSize: baseFontSize * style.maintitleFontSize,
+                      fontFamily: style.maintitleFontFamily,
                       color: style.maintitleColor,
                       decoration: TextDecoration.none,
                       height: 1.2,
@@ -641,24 +735,37 @@ class _GalleryCell extends StatelessWidget {
                   ),
                 ),
               // subtitle（对齐 .duokan-image-subtitle）
-              // 原作无 margin，紧接 maintitle（maintitle 负下 margin 效果）
+              // 原作 CSS:
+              //   font-family: "DK-KAITI","kt",serif;
+              //   font-size: 0.9em; color: #333;
+              //   line-height: 1.35em; text-align: justify;
+              // 无 margin，紧接 maintitle（maintitle 负下 margin 让 subtitle
+              // 往上重叠 0.5em）。用 Transform.translate 模拟负 margin：
+              // 当 maintitleMarginBottom < 0 时，subtitle 往上偏移 |marginBottom| em
               if (image.subtitle.isNotEmpty)
-                Padding(
-                  padding: EdgeInsets.only(
-                    top: 0,
-                    bottom: baseFontSize * style.subtitleMarginBottom,
-                    left: 12,
-                    right: 12,
+                Transform.translate(
+                  offset: Offset(
+                    0,
+                    style.maintitleMarginBottom < 0
+                        ? baseFontSize * style.maintitleMarginBottom
+                        : 0,
                   ),
-                  child: Text(
-                    image.subtitle,
-                    style: TextStyle(
-                      fontSize: baseFontSize * style.subtitleFontSize,
-                      color: style.subtitleColor,
-                      height: style.subtitleLineHeight,
-                      decoration: TextDecoration.none,
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      top: 0,
+                      bottom: baseFontSize * style.subtitleMarginBottom,
                     ),
-                    textAlign: TextAlign.justify,
+                    child: Text(
+                      image.subtitle,
+                      style: TextStyle(
+                        fontSize: baseFontSize * style.subtitleFontSize,
+                        fontFamily: style.subtitleFontFamily,
+                        color: style.subtitleColor,
+                        height: style.subtitleLineHeight,
+                        decoration: TextDecoration.none,
+                      ),
+                      textAlign: TextAlign.justify,
+                    ),
                   ),
                 ),
             ],
@@ -1043,7 +1150,7 @@ class _GalleryCellStyle {
   final double maintitleMarginTop;
   /// maintitle 下 margin（em 值，原作 -0.5em，负值=减少与 subtitle 间距）
   final double maintitleMarginBottom;
-  /// subtitle 下 margin（em 值，原作无 margin，默认 0.5em 收尾间距）
+  /// subtitle 下 margin（em 值，原作无 margin，默认 0）
   final double subtitleMarginBottom;
   /// cell 上下 margin（px 值，原作 10px 0）
   final double cellMarginVertical;
@@ -1053,6 +1160,10 @@ class _GalleryCellStyle {
   final double subtitleFontSize;
   /// subtitle 行高（原作 1.35em）
   final double subtitleLineHeight;
+  /// maintitle 字体族（原作 DK-HEITI → sans-serif）
+  final String maintitleFontFamily;
+  /// subtitle 字体族（原作 DK-KAITI → serif）
+  final String subtitleFontFamily;
 
   const _GalleryCellStyle({
     this.borderWidth = 1.0,
@@ -1065,11 +1176,13 @@ class _GalleryCellStyle {
     this.subtitleColor = const Color(0xFF333333),
     this.maintitleMarginTop = 1.0,
     this.maintitleMarginBottom = -0.5,
-    this.subtitleMarginBottom = 0.5,
+    this.subtitleMarginBottom = 0.0,
     this.cellMarginVertical = 10.0,
     this.maintitleFontSize = 0.9,
     this.subtitleFontSize = 0.9,
     this.subtitleLineHeight = 1.35,
+    this.maintitleFontFamily = 'sans-serif',
+    this.subtitleFontFamily = 'serif',
   });
 }
 
@@ -1082,6 +1195,8 @@ class _GalleryTitleStyle {
   /// 上下 margin（em 值，原作 2em auto）
   final double marginTop;
   final double marginBottom;
+  /// 字体族（原作 DK-XIAOBIAOSONG → serif）
+  final String fontFamily;
 
   const _GalleryTitleStyle({
     this.fontSize = 1.5,
@@ -1090,6 +1205,7 @@ class _GalleryTitleStyle {
     this.textShadow,
     this.marginTop = 2.0,
     this.marginBottom = 2.0,
+    this.fontFamily = 'serif',
   });
 }
 
@@ -1101,6 +1217,8 @@ class _GalleryTxtStyle {
   /// 上下 margin（em 值，原作 1em auto）
   final double marginTop;
   final double marginBottom;
+  /// 字体族（原作 DK-HEITI → sans-serif）
+  final String fontFamily;
 
   const _GalleryTxtStyle({
     this.fontSize = 0.7,
@@ -1108,6 +1226,7 @@ class _GalleryTxtStyle {
     this.textShadow,
     this.marginTop = 1.0,
     this.marginBottom = 1.0,
+    this.fontFamily = 'sans-serif',
   });
 }
 
