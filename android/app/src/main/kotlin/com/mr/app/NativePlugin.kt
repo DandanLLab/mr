@@ -139,7 +139,8 @@ class NativePlugin(private val context: Context) {
                 "release" to Build.VERSION.RELEASE,
                 "brand" to Build.BRAND,
                 "model" to Build.MODEL,
-                "manufacturer" to Build.MANUFACTURER
+                "manufacturer" to Build.MANUFACTURER,
+                "hardware" to Build.HARDWARE
             ))
         } catch (e: Exception) {
             result.error("ERROR", e.message, null)

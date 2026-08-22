@@ -4,6 +4,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../../../models/highlight.dart';
 import '../../../providers/reader_provider.dart';
 import '../../../services/local_book/epub_resource_server.dart';
+import '../../../services/native/platform_channel.dart';
 import '../../../utils/chinese_converter.dart';
 import 'reader_html_template.dart';
 import 'reader_webview_controller.dart';
@@ -23,6 +24,27 @@ import 'reader_webview_controller.dart';
 /// - ReaderWebViewController: 控制器，提供 Dart→JS 调用方法
 /// - ReaderHtmlTemplate: HTML/CSS/JS 模板生成
 class ReaderWebView extends StatefulWidget {
+  /// redroid 模拟器检测结果缓存（进程级）
+  ///
+  /// 背景：redroid 的 gralloc 基于 ashmem，不支持 CPU 读写 + GPU 纹理
+  /// 组合的 AHardwareBuffer（usage 300），Texture Layer（VirtualDisplay）
+  /// 模式下 WebView 内容黑屏。Hybrid Composition 走 Surface 直接合成
+  /// （与系统 WebView 相同路径，SurfaceFlinger 合成），内容可正常显示。
+  /// 真机 Texture Layer 正常且可被 RepaintBoundary 截图（翻页动画必需），
+  /// 故仅在 redroid 上切换 Hybrid Composition。
+  static bool? _isRedroid;
+
+  static Future<bool> isRedroid() async {
+    if (_isRedroid != null) return _isRedroid!;
+    try {
+      final info = await NativeChannel.instance.getDeviceInfo();
+      _isRedroid = info?['hardware'] == 'redroid';
+    } catch (_) {
+      _isRedroid = false;
+    }
+    return _isRedroid!;
+  }
+
   /// 章节内容（纯文本，未经简繁转换）
   final String content;
 
@@ -119,6 +141,8 @@ class _ReaderWebViewState extends State<ReaderWebView> {
   InAppWebViewController? _webviewController;
   bool _isLoaded = false;
   String _currentHtml = '';
+  // redroid 上 Texture Layer 黑屏 → 异步检测后切 Hybrid Composition
+  bool _useHybridComposition = false;
   // 样式快照：记录上次生成 HTML 时的所有 CSS 相关字段值
   // ChangeNotifier 是单例，didUpdateWidget 拿到的 oldWidget.provider 和
   // widget.provider 是同一引用，无法直接比较字段（getter 返回最新值）。
@@ -142,6 +166,12 @@ class _ReaderWebViewState extends State<ReaderWebView> {
     // 不在此处生成 HTML：_lastConstraints 此时为 (0,0)，生成的尺寸错误
     // 等 build 方法第一次拿到 LayoutBuilder 的真实 constraints 后再生成
     _lastStyleSnapshot = _StyleSnapshot.fromProvider(widget.provider);
+    // redroid 检测：Texture Layer 黑屏，切换 Hybrid Composition（重建 WebView）
+    ReaderWebView.isRedroid().then((isRedroid) {
+      if (isRedroid && !_useHybridComposition && mounted) {
+        setState(() => _useHybridComposition = true);
+      }
+    });
   }
 
   @override
@@ -320,6 +350,10 @@ class _ReaderWebViewState extends State<ReaderWebView> {
           // 首次：_currentHtml 直接传给 initialData，无需手动重载
         }
         return InAppWebView(
+          // 合成模式切换时强制重建 WebView（useHybridComposition 只能在创建时生效）
+          key: ValueKey(
+            'reader-webview-${_useHybridComposition ? 'hybrid' : 'texture'}',
+          ),
           initialData: InAppWebViewInitialData(
             data: _currentHtml,
             mimeType: 'text/html',
@@ -328,12 +362,15 @@ class _ReaderWebViewState extends State<ReaderWebView> {
           ),
           initialSettings: InAppWebViewSettings(
             transparentBackground: true,
-            // 必须为 false：Hybrid Composition 模式下 WebView 由 Android
+            // 真机必须为 false：Hybrid Composition 模式下 WebView 由 Android
             // 原生绘制到独立 Surface，Flutter 的 RepaintBoundary.toImage()
             // 无法截到该 Surface 内容 → 翻页截图会是空白 → 排版乱。
             // Texture Layer 模式下 WebView 作为 texture 合成到 Flutter 树，
             // 可被 RepaintBoundary 正常截图。
-            useHybridComposition: false,
+            // redroid 例外：gralloc 不支持 Texture Layer 的 AHardwareBuffer
+            // 分配（usage 300），WebView 内容黑屏 → 自动切 Hybrid Composition
+            // （Surface 直接合成，与系统 WebView 相同路径，可正常显示）。
+            useHybridComposition: _useHybridComposition,
             // 必须为 true：禁用 Android 默认 ActionMode（系统选择菜单），
             // 改由 JS 自定义浮动菜单（reader_html_template.dart 中的
             // #reader-selection-menu）替代，样式更美观统一。
