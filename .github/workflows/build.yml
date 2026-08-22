@@ -121,35 +121,55 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
-      - name: Build APK
+      - name: Build APK (arm64)
         run: flutter build apk --release --target-platform=android-arm64 --obfuscate --split-debug-info=build/symbols
         env:
           # 2 核 runner：CMake/Ninja 并行度 = CPU 核数
           CMAKE_BUILD_PARALLEL_LEVEL: 2
 
+      - name: Backup arm64 APK
+        # 第二次构建会覆盖 app-release.apk，先备份 arm64 产物
+        run: cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/app-release-arm64.apk
+
+      - name: Build APK (x86_64)
+        # x86_64 产物用于 redroid x86 模拟器（arm64 库经 ndk_translation 渲染失败）
+        run: flutter build apk --release --target-platform=android-x64 --obfuscate --split-debug-info=build/symbols-x64
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: 2
+
+      - name: Backup x86_64 APK
+        run: cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/app-release-x86_64.apk
+
       - name: Analyze APK Size
         run: |
-          echo "=== APK 内容分析（按大小排序，Top 30）==="
-          unzip -l build/app/outputs/flutter-apk/app-release.apk | sort -rn -k1 | head -30
+          echo "=== arm64 APK 内容分析（lib 目录）==="
+          unzip -l build/app/outputs/flutter-apk/app-release-arm64.apk | grep "lib/" | head -15
+          echo "=== x86_64 APK 内容分析（lib 目录）==="
+          unzip -l build/app/outputs/flutter-apk/app-release-x86_64.apk | grep "lib/" | head -15
           echo "=== APK 总大小 ==="
-          ls -lh build/app/outputs/flutter-apk/app-release.apk
+          ls -lh build/app/outputs/flutter-apk/app-release-arm64.apk build/app/outputs/flutter-apk/app-release-x86_64.apk
 
-      - name: Rename APK
+      - name: Rename APKs
         id: apk
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
           TYPE="${{ needs.prepare.outputs.release_type }}"
           BUILD_DATE="${{ needs.prepare.outputs.build_date }}"
-          APK_NAME="mr_v${{ needs.prepare.outputs.version_compact }}_${TYPE}_${BUILD_DATE}_arm64.apk"
-          cp build/app/outputs/flutter-apk/app-release.apk "${APK_NAME}"
-          echo "apk_name=$APK_NAME" >> $GITHUB_OUTPUT
-          ls -lh "${APK_NAME}"
+          APK_ARM64="mr_v${{ needs.prepare.outputs.version_compact }}_${TYPE}_${BUILD_DATE}_arm64.apk"
+          APK_X64="mr_v${{ needs.prepare.outputs.version_compact }}_${TYPE}_${BUILD_DATE}_x86_64.apk"
+          cp build/app/outputs/flutter-apk/app-release-arm64.apk "${APK_ARM64}"
+          cp build/app/outputs/flutter-apk/app-release-x86_64.apk "${APK_X64}"
+          echo "apk_arm64=$APK_ARM64" >> $GITHUB_OUTPUT
+          echo "apk_x64=$APK_X64" >> $GITHUB_OUTPUT
+          ls -lh "${APK_ARM64}" "${APK_X64}"
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: mr-android-${{ needs.prepare.outputs.version }}
-          path: ${{ steps.apk.outputs.apk_name }}
+          path: |
+            ${{ steps.apk.outputs.apk_arm64 }}
+            ${{ steps.apk.outputs.apk_x64 }}
           retention-days: 30
 
   # ===== iOS 打包（允许失败）=====

@@ -28,13 +28,14 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // 保险 #1：清除 Flutter Gradle Plugin 注入的三个 ABI，只保留 arm64-v8a
+        // 保险 #1：清除 Flutter Gradle Plugin 注入的三个 ABI，只保留 arm64-v8a + x86_64
         // FlutterPlugin.kt:557-560 在 apply 阶段会 abiFilters.clear() + addAll([armeabi-v7a, arm64-v8a, x86_64])
         // 用户代码在 plugin apply 之后执行，这里再次 clear() 覆盖
         // abiFilters 是 val MutableSet<String>（无 setter），不能用 = 赋值，只能 clear() + add()
+        // x86_64 用于 redroid x86 模拟器（arm64 库经 ndk_translation 渲染会失败）
         ndk {
             abiFilters.clear()
-            abiFilters.add("arm64-v8a")
+            abiFilters.addAll(setOf("arm64-v8a", "x86_64"))
         }
         // QuickJS NDK 编译配置
         externalNativeBuild {
@@ -45,9 +46,9 @@ android {
                     "-DPROJECT_ROOT_DIR=${rootProject.projectDir.parentFile?.absolutePath}"
                 )
                 cFlags += "-D_GNU_SOURCE"
-                // 显式只编译 arm64-v8a（覆盖 Flutter 注入的 ABI）
+                // 显式只编译 arm64-v8a + x86_64（覆盖 Flutter 注入的 ABI）
                 abiFilters.clear()
-                abiFilters.add("arm64-v8a")
+                abiFilters.addAll(setOf("arm64-v8a", "x86_64"))
             }
         }
     }
@@ -83,10 +84,8 @@ android {
         // 省 5-15% APK 体积（代价：首次安装略慢几百ms）
         jniLibs {
             useLegacyPackaging = true
-            // 保险 #3：packaging 显式排除 x86_64 和 armeabi-v7a 的 .so
-            // 即使上游依赖带了这些 ABI 的 .so 也会被剔除
-            excludes += listOf(
-                "lib/x86_64/**",
+        // 保险 #3：packaging 剔除冗余 ABI 的 .so（保留 arm64-v8a 真机 + x86_64 redroid 模拟器）
+        excludes += listOf(
                 "lib/armeabi-v7a/**",
                 "lib/x86/**",
                 "lib/mips/**",
