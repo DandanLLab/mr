@@ -64,7 +64,7 @@ const _kDottedHeight = 22.0;
 /// ★ 多看画廊基准字号（实测锚定）★
 ///
 /// 多看 DkeGallery 原生布局不随阅读器字号设置缩放，以固定基准渲染：
-/// - 标题页 h3 字形实测 63 physical = 31.5 logical = 1.5em × 21
+/// - 画廊标题 h3 字形实测 63 physical = 31.5 logical = 1.5em × 21
 /// - gallery-txt 字形实测 29 physical = 14.5 logical = 0.7em × 21
 /// - maintitle 字形实测 36 physical = 18.9 logical = 0.9em × 21
 /// 故基准字号 = 21 logical（dk_g1/dk_prev/dk5 像素测量）。
@@ -84,12 +84,14 @@ const _kGalleryBaseFontSize = 21.0;
 const _kGalleryTxtExtraTop = 35.0;
 const _kGalleryTxtMarginTop = 18.0;
 
-/// 多看标题页 h3「画廊图」字形顶实测 y=263 physical（131.5 logical）。
+/// 多看画廊首页 h3 标题字形顶实测 y=263 physical（131.5 logical）。
 ///
-/// 多看把 gallery.xhtml 的 h3 独立分页（dk_g1 实测：页面上仅 h3 居中，
-/// 下方全空），DocImagesView slider 页不显示标题。
+/// ★ 用户实测多看纠正（2026-08-24）：画廊第一页 = 标题 + 第一张图 +
+/// 文字同屏（不需要滑动），此前「h3 独立分页」的结论有误。
 /// MR 侧：SafeArea 24 + h3 的 2em CSS margin（2×21=42）+ 固定留白
 /// 65.5 logical = 131.5 ✓（字形顶精确命中，字形高 31.5）。
+/// 首页 cell 内布局：107.5 留白（2em+65.5）→ 标题 31.5 → 81 留白 →
+/// 图像顶 244（合计 220 = _kGalleryImageTopGap，图像区锚定全页一致）。
 const _kTitlePageExtraTop = 65.5;
 
 /// 多看 DkeGallery 图像页排版（逻辑 px，基准 21，稳定态实测锚定）。
@@ -123,10 +125,10 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   int _currentIndex = 0;
   bool _isNavigating = false;
 
-  /// 是否有独立标题页（gallery.xhtml 的 h3 对齐多看分页：首页单独一页）
-  late final bool _hasTitlePage;
+  /// 是否显示画廊标题（gallery.xhtml 的 h3；首页与第一张图同屏）
+  late final bool _hasTitle;
 
-  /// 标题页文本（chapterStyle.galleryTitle ?? chapterTitle）
+  /// 标题文本（chapterStyle.galleryTitle ?? chapterTitle）
   late final String _titleText;
 
   /// gallery-txt 提示文本（无则不显示悬浮提示）
@@ -140,14 +142,11 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   final _maintitleKey = GlobalKey();
   final _subtitleKey = GlobalKey();
 
-  /// PageView 总页数 = 标题页（可选）+ 图片页
-  int get _itemCount => widget.images.length + (_hasTitlePage ? 1 : 0);
+  /// PageView 总页数 = 图片页（标题与第一张图同屏，不占独立页）
+  int get _itemCount => widget.images.length;
 
-  /// 当前是否处于图片页（标题页不显示 gallery-txt / dotted）
-  bool get _isImagePage => _currentIndex >= (_hasTitlePage ? 1 : 0);
-
-  /// 当前图片索引（标题页时为 0，仅 _isImagePage 时有效）
-  int get _imageIndex => _currentIndex - (_hasTitlePage ? 1 : 0);
+  /// 当前图片索引（每页都是图片页）
+  int get _imageIndex => _currentIndex;
 
   @override
   void initState() {
@@ -155,7 +154,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     _titleText =
         (widget.chapterStyle?.galleryTitle ?? widget.chapterTitle).trim();
     _txtText = widget.chapterStyle?.galleryTxt?.trim() ?? '';
-    _hasTitlePage = _titleText.isNotEmpty;
+    _hasTitle = _titleText.isNotEmpty;
     final initialIdx = widget.initialPageToEnd ? _itemCount - 1 : 0;
     _currentIndex = initialIdx;
     _pageController = PageController(initialPage: initialIdx);
@@ -470,7 +469,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   void _onPageChanged(int index) {
     setState(() => _currentIndex = index);
     _isNavigating = false;
-    // 翻页后导出渲染值（标题页/图片页切换验证）
+    // 翻页后导出渲染值（首页标题/后续图片页切换验证）
     _dumpLayout('page$index');
     // onPageChanged 在滑动越过 50% 时触发，此时页面仍在 settle 动画中，
     // 水平偏移导致 x 值不可信；600ms 后再导一次稳定态
@@ -539,14 +538,14 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
         widget.chapterStyle!.backgroundImageSrc!.isNotEmpty;
 
     // ★ 对齐多看画廊页结构（gallery_full_disasm_report.md 第二节/5.1 +
-    //   真机实测 dk_g1/dk_prev/dk_s1）：
-    //   1. 标题页独立分页：多看把 gallery.xhtml 的 h3 单独一页（页面上仅
-    //      h3 居中，y=267-330），DocImagesView slider 页不显示标题
+    //   真机实测 + 用户实测纠正 2026-08-24）：
+    //   1. 首页 = 标题(h3) + 第一张图 + 文字同屏（不需要滑动；
+    //      此前「h3 独立分页」结论有误，用户实测多看第一页即完整排版）
     //   2. gallery-txt 悬浮在 slider 页顶部（dk_prev 实测 y=154，文本顶
     //      77 logical = SafeArea 24 + 35 + 1em margin）
     //   3. 图片页：图片 + maintitle + subtitle 垂直居中（dk_s1 实测
     //      图片 648x326 @ x=36-683，即左右边距各 18 logical）
-    //   4. dotted 悬浮底部，仅图片页显示（dk_s1 图片页无标题无 txt）
+    //   4. dotted 悬浮底部，所有页显示
     final showDotted = widget.images.length > 1;
 
     return Container(
@@ -573,18 +572,19 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
                           onPageChanged: _onPageChanged,
                           allowImplicitScrolling: true,
                           itemBuilder: (context, index) {
-                            if (_hasTitlePage && index == 0) {
-                              return _buildGalleryTitle(
-                                titleKey: _currentIndex == 0 ? _titleKey : null,
-                              );
-                            }
-                            final imgIdx = _hasTitlePage ? index - 1 : index;
                             final isCurrent = index == _currentIndex;
                             return _GalleryCell(
-                              image: widget.images[imgIdx],
+                              image: widget.images[index],
                               style: _cellStyle,
                               textColor: widget.textColor,
-                              onTap: () => _showFullScreenPreview(imgIdx),
+                              onTap: () => _showFullScreenPreview(index),
+                              // 首页：h3 标题与第一张图同屏（对齐多看）
+                              title: index == 0 && _hasTitle
+                                  ? _buildGalleryTitle(
+                                      titleKey:
+                                          isCurrent ? _titleKey : null,
+                                    )
+                                  : null,
                               imageKey: isCurrent ? _imageKey : null,
                               maintitleKey: isCurrent ? _maintitleKey : null,
                               subtitleKey: isCurrent ? _subtitleKey : null,
@@ -595,10 +595,9 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
                     ),
                   ),
                   // gallery-txt 顶部悬浮（对齐多看 DocImagesView 顶部 y=77）
-                  // 只看图片页显示；标题页无（dk_g1 标题页仅 h3）
                   // 注意：Positioned 在 SafeArea 内的 Stack，top 相对
                   // SafeArea 顶，不要再加 safeTop（双重偏移实测落 101）
-                  if (_isImagePage && _txtText.isNotEmpty)
+                  if (_txtText.isNotEmpty)
                     Positioned(
                       top:
                           _kGalleryTxtExtraTop + _kGalleryTxtMarginTop,
@@ -607,8 +606,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
                       child: _buildGalleryTxt(),
                     ),
                   // 点点点指示器：对齐多看 .dotted position:absolute bottom
-                  // 仅图片页显示（标题页无 dotted）
-                  if (_isImagePage && showDotted)
+                  if (showDotted)
                     Positioned(
                       left: 0,
                       right: 0,
@@ -624,20 +622,20 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     );
   }
 
-  /// dotted 是否占用 PageView 底部空间（仅图片页且多图时）
+  /// dotted 是否占用 PageView 底部空间（多图时）
   double dottedHeightOf(bool showDotted) =>
-      _isImagePage && showDotted ? _kDottedHeight : 0.0;
+      showDotted ? _kDottedHeight : 0.0;
 
-  /// 标题页（对齐多看 gallery.xhtml 首页：h3 独立分页）
+  /// 画廊标题（gallery.xhtml 的 h3，首页与第一张图同屏）
   ///
   /// 原作 CSS: margin: 2em auto; font-size: 1.5em; font-weight: bold;
   ///   text-align: center; text-shadow: 0 1 1px #fff
   /// 多看实测（dk_g1）：h3 字形顶 y=263 physical（131.5 logical），
-  ///   字形高 63 physical（31.5 = 1.5em × 基准 21），页面上无其他内容；
-  ///   DocImagesView slider 页不显示标题。
+  ///   字形高 63 physical（31.5 = 1.5em × 基准 21）。
   /// 定位：SafeArea 24 + 2em(42) + 65.5 = 131.5 ✓（字形顶精确命中）。
-  /// ★ 必须用 Align(topCenter) 而非 Center：Center 会把文本垂直居中，
-  ///   顶部的 2em+65.5 留白被抵消（实测标题落到了 y=344 而非 131.5）。
+  /// ★ 用户实测多看纠正（2026-08-24）：第一页 = 标题 + 图 + 文字同屏，
+  ///   标题嵌在首页 cell 内（图像顶 244 锚定不变：107.5 留白 + 标题
+  ///   31.5 + 81 留白 = 220 = _kGalleryImageTopGap）。
   /// ★ Text height 1.0：行盒 = 字形高，字形顶 = box 顶，galleryDump
   ///   的 title.y 直接等于多看字形顶 131.5，可像素级对比。
   Widget _buildGalleryTitle({Key? titleKey}) {
@@ -646,6 +644,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
         : <Shadow>[];
 
     return Padding(
+      key: titleKey,
       padding: EdgeInsets.only(
         top: _kGalleryBaseFontSize * _titleStyle.marginTop + _kTitlePageExtraTop,
       ),
@@ -653,7 +652,6 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
         alignment: Alignment.topCenter,
         child: Text(
           _titleText,
-          key: titleKey,
           style: TextStyle(
             fontSize: _kGalleryBaseFontSize * _titleStyle.fontSize,
             fontWeight: _titleStyle.bold ? FontWeight.bold : FontWeight.normal,
@@ -756,7 +754,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
       sb.write(' dpr=$dpr size=${size.width.round()}x${size.height.round()}');
       sb.write(' safeTop=${safe.top.round()} safeBottom=${safe.bottom.round()}');
       sb.write(' itemCount=$_itemCount idx=$_currentIndex imageIdx=$_imageIndex');
-      sb.write(' hasTitlePage=$_hasTitlePage');
+      sb.write(' hasTitle=$_hasTitle');
 
       void rectOf(GlobalKey key, String name) {
         final box = key.currentContext?.findRenderObject() as RenderBox?;
@@ -816,6 +814,9 @@ class _GalleryCell extends StatelessWidget {
   final Color textColor;
   final VoidCallback onTap;
 
+  /// 首页 h3 标题（与第一张图同屏，对齐多看；其他页为 null）
+  final Widget? title;
+
   /// 渲染值诊断 key（仅当前页传入，避免 GlobalKey 重复挂载）
   final Key? imageKey;
   final Key? maintitleKey;
@@ -826,6 +827,7 @@ class _GalleryCell extends StatelessWidget {
     required this.style,
     required this.textColor,
     required this.onTap,
+    this.title,
     this.imageKey,
     this.maintitleKey,
     this.subtitleKey,
@@ -847,11 +849,26 @@ class _GalleryCell extends StatelessWidget {
             // 等比缩放裁边填满，不随原图比例变化
             final dispW = constraints.maxWidth;
             const dispH = _kGalleryImageDisplayHeight;
-            // 图像区顶留白 = 220（绝对 244 = SafeArea 24 + 220）
+            // 图像区顶留白 = 220（绝对 244 = SafeArea 24 + 220）；
+            // 首页内嵌 h3 标题（对齐多看：标题 + 图 + 文字同屏），
+            // 标题占 107.5 留白 + 31.5 字形，Spacer 补足剩余间距，
+            // 保证图像顶 244 锚定不随标题渲染高度漂移
             return Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const SizedBox(height: _kGalleryImageTopGap),
+                if (title != null)
+                  SizedBox(
+                    height: _kGalleryImageTopGap,
+                    width: double.infinity,
+                    child: Column(
+                      children: [
+                        title!,
+                        const Spacer(),
+                      ],
+                    ),
+                  )
+                else
+                  const SizedBox(height: _kGalleryImageTopGap),
                 // 边框+阴影装饰叠加层（原 .duokan-image-gallery-cell 的
                 // border 1px + box-shadow 5px 5px 5px #888888）。
                 // 用 Stack 叠加避免 border 向外扩展影响布局尺寸
