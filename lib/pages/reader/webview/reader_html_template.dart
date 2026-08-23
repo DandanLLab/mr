@@ -1962,13 +1962,71 @@ window.readerApi = (function() {
       // 加载完成后等一帧让 column 布局重排完成
       requestAnimationFrame(function() {
         notifyPageCountReady();
+        dumpDomSnapshot('chapter');
       });
     }).catch(function() {
       // 兜底：异常时也通知一次
       requestAnimationFrame(function() {
         notifyPageCountReady();
+        dumpDomSnapshot('chapter');
       });
     });
+  }
+
+  // ★ DOM 快照导出（排版诊断）★
+  // 遍历渲染后的 DOM 树，提取每个元素的标签/class/计算样式/布局矩形，
+  // 通过 console 桥输出到 Flutter logcat。用于与多看渲染结果逐节点对比
+  // 排版值（font-size/line-height/margin/对齐/图片尺寸等）。
+  // 节点上限 400、深度上限 8，超长 JSON 按 1400 字符分块输出。
+  function dumpDomSnapshot(reason) {
+    try {
+      var props = ['display', 'position', 'width', 'height', 'font-size',
+        'line-height', 'text-align', 'text-indent', 'margin', 'padding',
+        'color', 'background-color', 'font-weight', 'float', 'border-radius',
+        'white-space', 'vertical-align'];
+      function styleOf(el) {
+        var s = getComputedStyle(el);
+        var o = {};
+        for (var i = 0; i < props.length; i++) o[props[i]] = s.getPropertyValue(props[i]);
+        return o;
+      }
+      var nodes = [];
+      function walk(el, depth) {
+        if (nodes.length >= 400 || !el || el.nodeType !== 1) return;
+        var r = el.getBoundingClientRect();
+        var n = {
+          t: el.tagName.toLowerCase(),
+          c: (el.className && typeof el.className === 'string') ? el.className : '',
+          d: depth,
+          s: styleOf(el),
+          x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height)
+        };
+        for (var k = 0; k < el.childNodes.length; k++) {
+          var cn = el.childNodes[k];
+          if (cn.nodeType === 3 && cn.textContent && cn.textContent.trim()) {
+            n.txt = cn.textContent.trim().slice(0, 40);
+            break;
+          }
+        }
+        if (el.tagName === 'IMG') {
+          n.src = String(el.currentSrc || el.src || '').split('/').pop();
+          n.nat = el.naturalWidth + 'x' + el.naturalHeight;
+        }
+        nodes.push(n);
+        if (depth < 8) {
+          for (var j = 0; j < el.children.length; j++) walk(el.children[j], depth + 1);
+        }
+      }
+      if (document.body) walk(document.body, 0);
+      var json = JSON.stringify(nodes);
+      var chunk = 1400;
+      for (var p = 0; p < json.length; p += chunk) {
+        console.log('[reader] domDump ' + reason + ' ' + json.slice(p, p + chunk));
+      }
+      console.log('[reader] domDump done ' + reason + ' nodes=' + nodes.length + ' chars=' + json.length);
+    } catch (e) {
+      console.error('[reader] domDump failed: ' + e);
+    }
   }
 
   // ============ 文字选择菜单 ============
@@ -3352,6 +3410,8 @@ window.readerApi = (function() {
     nearEndNotified = false; // 重置以允许下次触发
     console.log('[reader] appendChapter: idx=' + chapterIndex +
       ' title=' + title + ' appendedCount=' + appendedChapterCount);
+    // 排版诊断：章节内容插入后导出 DOM 快照
+    requestAnimationFrame(function() { dumpDomSnapshot('append'); });
   }
 
   // ★ CSS polyfill（移植自 lumina CssPolyfillManager）★
