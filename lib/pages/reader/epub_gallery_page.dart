@@ -472,6 +472,11 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     _isNavigating = false;
     // 翻页后导出渲染值（标题页/图片页切换验证）
     _dumpLayout('page$index');
+    // onPageChanged 在滑动越过 50% 时触发，此时页面仍在 settle 动画中，
+    // 水平偏移导致 x 值不可信；600ms 后再导一次稳定态
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (mounted) _dumpLayout('page${index}settle');
+    });
   }
 
   /// 边界章节切换：在第一页继续往前 → 上一章，最后页继续往后 → 下一章
