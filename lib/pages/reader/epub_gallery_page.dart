@@ -1,10 +1,67 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
 import '../../services/local_book/epub_parser.dart';
+
+/// 读取图片原生尺寸（PNG/JPEG/GIF 文件头解析，不解码整图）
+///
+/// 多看 DkeGallery 的 getImageBoundary 用图片原始尺寸做 contain 缩放，
+/// 布局期需要同步拿到尺寸（异步解码会晚一帧）。EPUB 画廊图片几乎都是
+/// 这三种格式；解析失败返回 null，调用方退化为撑满图像区。
+Size? _readImageSize(String src) {
+  try {
+    final Uint8List b;
+    if (src.startsWith('data:')) {
+      b = _parseDataUri(src);
+    } else {
+      final raf = File(src).openSync();
+      try {
+        b = raf.readSync(64 * 1024);
+      } finally {
+        raf.closeSync();
+      }
+    }
+    if (b.length < 16) return null;
+    // PNG: 89 50 4E 47 ... IHDR(4+4) w(4) h(4) big-endian
+    if (b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47) {
+      final w = (b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19];
+      final h = (b[20] << 24) | (b[21] << 16) | (b[22] << 8) | b[23];
+      return Size(w.toDouble(), h.toDouble());
+    }
+    // JPEG: FFD8 ... SOFn marker（FF C0-C3/C5-C7）→ h(2) w(2) big-endian
+    if (b[0] == 0xFF && b[1] == 0xD8) {
+      var i = 2;
+      while (i + 9 < b.length) {
+        if (b[i] != 0xFF) {
+          i++;
+          continue;
+        }
+        final m = b[i + 1];
+        if (m >= 0xC0 && m <= 0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC) {
+          final h = (b[i + 5] << 8) | b[i + 6];
+          final w = (b[i + 7] << 8) | b[i + 8];
+          return Size(w.toDouble(), h.toDouble());
+        }
+        final len = (b[i + 2] << 8) | b[i + 3];
+        if (len < 2) return null;
+        i += 2 + len;
+      }
+    }
+    // GIF: "GIF87a"/"GIF89a" + w(2) h(2) little-endian
+    if (b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46) {
+      final w = b[6] | (b[7] << 8);
+      final h = b[8] | (b[9] << 8);
+      return Size(w.toDouble(), h.toDouble());
+    }
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
 
 /// EPUB 多看画廊页面渲染器（Flutter 原生实现）
 ///
@@ -26,9 +83,6 @@ class EpubGalleryPage extends StatefulWidget {
   final Color backgroundColor;
   final Color textColor;
 
-  /// 阅读器基础字号（px），作为 EPUB CSS em 值的基准
-  final double baseFontSize;
-
   /// 画廊章节级样式（含 rawCss 原始 CSS 全文、背景图、gallery-title 等）
   final EpubGalleryChapterStyle? chapterStyle;
 
@@ -47,7 +101,6 @@ class EpubGalleryPage extends StatefulWidget {
     required this.chapterTitle,
     required this.backgroundColor,
     required this.textColor,
-    this.baseFontSize = 18.0,
     this.chapterStyle,
     this.initialPageToEnd = false,
     required this.onPreviousChapter,
@@ -65,23 +118,52 @@ class EpubGalleryPage extends StatefulWidget {
 /// Flutter 移植固定为 22px，PageView 底部留此高度避免 cell 内容被 dotted 遮挡。
 const _kDottedHeight = 22.0;
 
+/// ★ 多看画廊基准字号（实测锚定）★
+///
+/// 多看 DkeGallery 原生布局不随阅读器字号设置缩放，以固定基准渲染：
+/// - 标题页 h3 字形实测 63 physical = 31.5 logical = 1.5em × 21
+/// - gallery-txt 字形实测 29 physical = 14.5 logical = 0.7em × 21
+/// - maintitle 字形实测 36 physical = 18.9 logical = 0.9em × 21
+/// 故基准字号 = 21 logical（dk_g1/dk_prev/dk5 像素测量）。
+const _kGalleryBaseFontSize = 21.0;
+
 /// 多看 DocImagesView 顶部起始偏移（实测对齐）
 ///
-/// 多看 slider 页 gallery-txt「滑动切换，点击放大」文本顶实测
-/// y=154 physical（77 logical）。多看阅读器内容区顶 = 状态栏 30 +
-/// 固定 30 logical 留白 ≈ 60 logical，gallery-txt 以 CSS margin 1em
-/// （≈17.7 logical）悬浮其下：60 + 1em ≈ 77.7 ✓。
-/// MR 侧 SafeArea 顶 = 24 logical（该设备状态栏），故 gallery-txt 顶 =
-/// 24 + 35（多看 60 与 MR 24 的差值）+ 1em = 77 ✓（dk_prev 实测 y=154）。
+/// 多看 DocImagesView 矩形绝对顶 = 59 logical（= 多看内容区顶 60 ≈
+/// 状态栏 30 physical + 固定留白），图像在 (59, 592) 高 533 的区域内
+/// 垂直居中（图像顶 244 = 59 + (533-163)/2，00.jpg/01.jpg 恒定）。
+/// MR 侧 SafeArea 顶 = 24 logical，故相对 cell 顶 = 35。
+///
+/// gallery-txt「滑动切换，点击放大」文本顶实测 y=154 physical
+/// （77 logical）= DocImagesView 顶 59 + 18（多看把 CSS margin 1em
+/// 按 18 logical 折算，非按基准 21——实测字形 14.5 是 0.7em×21 但
+/// 1em margin 落点为 18，像素级锚定不深究内部折算）。
 const _kGalleryTxtExtraTop = 35.0;
+const _kGalleryTxtMarginTop = 18.0;
 
-/// 多看标题页 h3「画廊图」文本顶实测 y=278 physical（139 logical）。
+/// 多看标题页 h3「画廊图」字形顶实测 y=263 physical（131.5 logical）。
 ///
 /// 多看把 gallery.xhtml 的 h3 独立分页（dk_g1 实测：页面上仅 h3 居中，
-/// y=267-330，下方全空），DocImagesView slider 页不显示标题。
-/// MR 侧：SafeArea 24 + h3 的 2em CSS margin（36）+ 章节首页固定留白
-/// 73 logical = 133 logical（266 physical ≈ 多看 278）。
-const _kTitlePageExtraTop = 73.0;
+/// 下方全空），DocImagesView slider 页不显示标题。
+/// MR 侧：SafeArea 24 + h3 的 2em CSS margin（2×21=42）+ 固定留白
+/// 65.5 logical = 131.5 ✓（字形顶精确命中，字形高 31.5）。
+const _kTitlePageExtraTop = 65.5;
+
+/// 多看 DkeGallery 图像页标题排版（逻辑 px，基准 21，实测锚定）：
+/// - 图像区：相对 cell 顶 35（绝对 59），高 533，图像区内垂直居中
+/// - maintitle 字形顶 = 图像显示区底 + 22.5（两页实测恒定）
+///   Flutter 实现：box 顶 = 显示区底 + 21（1em）+ 1.42（height 1.15 字形
+///   下沉，18.9×1.15 行盒）≈ 22.42；图像 border 上下各 1 逻辑计入 box，
+///   Padding top 取 19 = 21 - 2 抵消
+/// - subtitle 首行字形顶 = maintitle 字形底 + 28.5，行距 40.5（实测
+///   line pitch 82 physical = 41 与 80 physical = 40 平均 ≈ 40.5）
+///   Flutter 实现：box 间距 15.5 + Text height 40.5/18.9（字形下沉 10.8）
+const _kDocImagesTop = 35.0;
+const _kDocImagesHeight = 533.0;
+const _kMaintitlePaddingTop = 19.0;
+const _kMaintitleLineHeight = 1.15;
+const _kSubtitlePaddingTop = 15.5;
+const _kSubtitleLineHeight = 40.5 / 18.9;
 
 class _EpubGalleryPageState extends State<EpubGalleryPage> {
   late final PageController _pageController;
@@ -547,7 +629,6 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
                             return _GalleryCell(
                               image: widget.images[imgIdx],
                               style: _cellStyle,
-                              baseFontSize: widget.baseFontSize,
                               textColor: widget.textColor,
                               onTap: () => _showFullScreenPreview(imgIdx),
                               imageKey: isCurrent ? _imageKey : null,
@@ -565,7 +646,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
                     Positioned(
                       top: safeTop +
                           _kGalleryTxtExtraTop +
-                          widget.baseFontSize * _txtStyle.marginTop,
+                          _kGalleryTxtMarginTop,
                       left: 0,
                       right: 0,
                       child: _buildGalleryTxt(),
@@ -596,8 +677,14 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   ///
   /// 原作 CSS: margin: 2em auto; font-size: 1.5em; font-weight: bold;
   ///   text-align: center; text-shadow: 0 1 1px #fff
-  /// 多看实测（dk_g1）：h3 文本顶 y=278 physical（139 logical），
-  ///   页面上无其他内容；DocImagesView slider 页无标题。
+  /// 多看实测（dk_g1）：h3 字形顶 y=263 physical（131.5 logical），
+  ///   字形高 63 physical（31.5 = 1.5em × 基准 21），页面上无其他内容；
+  ///   DocImagesView slider 页不显示标题。
+  /// 定位：SafeArea 24 + 2em(42) + 65.5 = 131.5 ✓（字形顶精确命中）。
+  /// ★ 必须用 Align(topCenter) 而非 Center：Center 会把文本垂直居中，
+  ///   顶部的 2em+65.5 留白被抵消（实测标题落到了 y=344 而非 131.5）。
+  /// ★ Text height 1.0：行盒 = 字形高，字形顶 = box 顶，galleryDump
+  ///   的 title.y 直接等于多看字形顶 131.5，可像素级对比。
   Widget _buildGalleryTitle({Key? titleKey}) {
     final shadows = _titleStyle.textShadow != null
         ? [_titleStyle.textShadow!]
@@ -605,18 +692,20 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
 
     return Padding(
       padding: EdgeInsets.only(
-        top: widget.baseFontSize * _titleStyle.marginTop + _kTitlePageExtraTop,
+        top: _kGalleryBaseFontSize * _titleStyle.marginTop + _kTitlePageExtraTop,
       ),
-      child: Center(
+      child: Align(
+        alignment: Alignment.topCenter,
         child: Text(
           _titleText,
           key: titleKey,
           style: TextStyle(
-            fontSize: widget.baseFontSize * _titleStyle.fontSize,
+            fontSize: _kGalleryBaseFontSize * _titleStyle.fontSize,
             fontWeight: _titleStyle.bold ? FontWeight.bold : FontWeight.normal,
             fontFamily: _titleStyle.fontFamily,
             color: _titleStyle.color ?? widget.textColor,
             decoration: TextDecoration.none,
+            height: 1.0,
             shadows: shadows,
           ),
           textAlign: TextAlign.center,
@@ -638,11 +727,11 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
       padding: const EdgeInsets.symmetric(
         horizontal: 16,
       ),
-      child: Text(
-        _txtText,
-        key: _txtKey,
-        style: TextStyle(
-          fontSize: widget.baseFontSize * _txtStyle.fontSize,
+        child: Text(
+          _txtText,
+          key: _txtKey,
+          style: TextStyle(
+            fontSize: _kGalleryBaseFontSize * _txtStyle.fontSize,
           fontFamily: _txtStyle.fontFamily,
           color: _txtStyle.color ?? widget.textColor,
           decoration: TextDecoration.none,
@@ -735,9 +824,17 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   }
 }
 
-/// 单张图片单元格（对齐多看 .msg > .duokan-image-gallery-cell）
+/// 单张图片单元格（对齐多看 DkeGallery 原生布局，非 CSS 流）
 ///
-/// 原作 CSS：
+/// 多看反汇编（.tmp/gallery_dex_report.md）+ 真机实测（dk_s1/dk5）
+/// 确立的原生几何（逻辑 px，基准字号 21）：
+/// - DocImagesView 矩形 = 相对 cell 顶 35（绝对 59）、高 533、宽 324
+/// - 图像在矩形内垂直居中：图像顶 = 35 + (533 - 显示高)/2（00.jpg
+///   显示 324×163 → 顶 244，01.jpg 恒定 → 顶恒定不随滑动变化）
+/// - maintitle 字形顶 = 图像显示区底 + 22.5（实测两页恒定）
+/// - subtitle 首行字形顶 = maintitle 字形底 + 28.5；行距 40.5
+///
+/// 原作 CSS（仅作字号/颜色来源）：
 /// ```css
 /// .duokan-image-gallery-cell {
 ///     margin: 10px 0;
@@ -760,7 +857,6 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
 class _GalleryCell extends StatelessWidget {
   final EpubGalleryImage image;
   final _GalleryCellStyle style;
-  final double baseFontSize;
   final Color textColor;
   final VoidCallback onTap;
 
@@ -772,7 +868,6 @@ class _GalleryCell extends StatelessWidget {
   const _GalleryCell({
     required this.image,
     required this.style,
-    required this.baseFontSize,
     required this.textColor,
     required this.onTap,
     this.imageKey,
@@ -784,31 +879,39 @@ class _GalleryCell extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
+      // 水平 18px 对齐多看图片左右边距：dk_s1 实测 00.jpg x=36-683
+      // （648 wide = 720-72，即单边 36 physical = 18 logical）。
+      // 垂直不留边距：图像顶由 DocImagesView 固定几何（35 + 居中留白）决定。
       child: Padding(
-        // 水平 18px 对齐多看图片左右边距：dk_s1 实测 00.jpg x=36-683
-        // （648 wide = 720-72，即单边 36 physical = 18 logical），
-        // 垂直用原作 cell margin（10px 0）
-        padding: EdgeInsets.symmetric(
-          horizontal: 18,
-          vertical: style.cellMarginVertical,
-        ),
-        // ★ Center 松约束：PageView 页面是 tight 约束，若不加 Center，
-        //   Column 子元素会被强制撑满页面宽度，边框/阴影框比图片大。
-        //   加 Center 后约束变 loose，边框容器收缩到图片实际渲染宽度，
-        //   修复「画廊 cell 外层框被放大」（f4eec31 回归丢失 3fdcbe2 修复）
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 图片（对齐 .gallery-pic img { width: 100% }，等比缩放）
-              // 边框+阴影容器放 Flexible 内：宽度跟随图片实际渲染宽度，
-              // 高度受剩余空间约束（FlexFit.loose），与 3fdcbe2 的
-              // IntrinsicWidth 方案等价但更稳健（不依赖图片 intrinsic 计算）
-              Flexible(
-                fit: FlexFit.loose,
-                child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // 多看 DocImagesView 图像区：宽 = 页宽 - 36，高 533
+            final areaW = constraints.maxWidth;
+            const areaH = _kDocImagesHeight;
+            // 图像 contain 于区内（等比缩放，不放大）
+            final srcSize = _readImageSize(image.src);
+            double dispW = areaW;
+            double dispH = areaH;
+            if (srcSize != null && srcSize.width > 0 && srcSize.height > 0) {
+              final scale = math.min(
+                math.min(areaW / srcSize.width, areaH / srcSize.height),
+                1.0,
+              );
+              dispW = srcSize.width * scale;
+              dispH = srcSize.height * scale;
+            }
+            // 图像区顶留白 = 35 + (533 - 显示高)/2（多看图像垂直居中）
+            final topGap = _kDocImagesTop + (areaH - dispH) / 2;
+
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(height: topGap),
+                // 边框+阴影容器（原 .duokan-image-gallery-cell 的
+                // border 1px + box-shadow 5px 5px 5px #888888）
+                Container(
                   key: imageKey,
-                  // 原作 .duokan-image-gallery-cell 的 border + box-shadow
                   decoration: BoxDecoration(
                     border: Border.all(
                       width: style.borderWidth,
@@ -822,80 +925,58 @@ class _GalleryCell extends StatelessWidget {
                       ),
                     ],
                   ),
-                  child: ClipRect(
-                    child: _buildImage(),
+                  child: SizedBox(
+                    width: dispW,
+                    height: dispH,
+                    child: ClipRect(child: _buildImage()),
                   ),
                 ),
-              ),
-              // maintitle（对齐 .duokan-image-maintitle）
-              // 原作 CSS:
-              //   margin: 1em auto -0.5em auto;
-              //   font-family: "DK-HEITI","ht",sans-serif;
-              //   font-size: 0.9em; color: #336633; text-align: center;
-              // - top 1em：与图片之间 1em 间距
-              // - bottom -0.5em：与 subtitle 减少 0.5em 间距
-              //   Flutter Padding 不支持负值，用 Transform.translate 让 subtitle
-              //   往上偏移 |maintitleMarginBottom| em，模拟负 margin 的重叠效果。
-              // - 原作无 padding，去掉之前的 12px 左右 padding（多看 cell 内文字
-              //   紧贴边框，由 cell 的 border + box-shadow 形成视觉边界）
-              if (image.maintitle.isNotEmpty)
-                Padding(
-                  key: maintitleKey,
-                  padding: EdgeInsets.only(
-                    top: baseFontSize * style.maintitleMarginTop,
-                    bottom: 0,
-                  ),
-                  child: Text(
-                    image.maintitle,
-                    style: TextStyle(
-                      fontSize: baseFontSize * style.maintitleFontSize,
-                      fontFamily: style.maintitleFontFamily,
-                      color: style.maintitleColor,
-                      decoration: TextDecoration.none,
-                      height: 1.2,
+                // maintitle（对齐 .duokan-image-maintitle，多看字形顶 =
+                // 图像显示区底 + 22.5；box 间距 = 22.5 - 1.42（height 1.15
+                // 字形下沉）= 21.08 ≈ 21 = 1em；图像边框上下各 1 逻辑计入
+                // 流式 box，Padding 顶取 19 = 21 - 2）
+                if (image.maintitle.isNotEmpty)
+                  Padding(
+                    key: maintitleKey,
+                    padding: const EdgeInsets.only(top: _kMaintitlePaddingTop),
+                    child: Text(
+                      image.maintitle,
+                      style: TextStyle(
+                        fontSize:
+                            _kGalleryBaseFontSize * style.maintitleFontSize,
+                        fontFamily: style.maintitleFontFamily,
+                        color: style.maintitleColor,
+                        decoration: TextDecoration.none,
+                        height: _kMaintitleLineHeight,
+                      ),
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-              // subtitle（对齐 .duokan-image-subtitle）
-              // 原作 CSS:
-              //   font-family: "DK-KAITI","kt",serif;
-              //   font-size: 0.9em; color: #333;
-              //   line-height: 1.35em; text-align: justify;
-              // 无 margin，紧接 maintitle（maintitle 负下 margin 让 subtitle
-              // 往上重叠 0.5em）。用 Transform.translate 模拟负 margin：
-              // 当 maintitleMarginBottom < 0 时，subtitle 往上偏移 |marginBottom| em
-              if (image.subtitle.isNotEmpty)
-                Transform.translate(
-                  offset: Offset(
-                    0,
-                    style.maintitleMarginBottom < 0
-                        ? baseFontSize * style.maintitleMarginBottom
-                        : 0,
-                  ),
-                  child: Padding(
+                // subtitle（对齐 .duokan-image-subtitle，多看首行字形顶 =
+                // maintitle 字形底 + 28.5，行距 40.5）
+                // 原作 CSS 无 margin，行距 1.35em 被多看原生放大为 40.5
+                if (image.subtitle.isNotEmpty)
+                  Padding(
                     key: subtitleKey,
-                    padding: EdgeInsets.only(
-                      top: 0,
-                      bottom: baseFontSize * style.subtitleMarginBottom,
-                    ),
+                    padding: const EdgeInsets.only(top: _kSubtitlePaddingTop),
                     child: Text(
                       image.subtitle,
                       style: TextStyle(
-                        fontSize: baseFontSize * style.subtitleFontSize,
+                        fontSize:
+                            _kGalleryBaseFontSize * style.subtitleFontSize,
                         fontFamily: style.subtitleFontFamily,
                         color: style.subtitleColor,
-                        height: style.subtitleLineHeight,
+                        height: _kSubtitleLineHeight,
                         decoration: TextDecoration.none,
                       ),
                       textAlign: TextAlign.justify,
                     ),
                   ),
-                ),
-            ],
-          ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -903,14 +984,11 @@ class _GalleryCell extends StatelessWidget {
 
   Widget _buildImage() {
     final src = image.src;
-    // ★ 不能设 width: double.infinity：会把图片强制拉满父容器宽度，
-    //   导致边框框比图片大（外层框放大）。不设宽度时 Image 按
-    //   RenderImage._sizeForConstraints 以自然尺寸渲染，受外层
-    //   loose 约束（maxWidth/maxHeight）等比缩放，边框框紧贴图片。
+    // 外层 SizedBox 已按 contain 等比算出显示尺寸，fit: fill 直接填满
     if (src.startsWith('data:')) {
       return Image.memory(
         _parseDataUri(src),
-        fit: BoxFit.contain,
+        fit: BoxFit.fill,
         gaplessPlayback: true,
         errorBuilder: (context, error, stackTrace) =>
             _buildErrorWidget(),
@@ -918,7 +996,7 @@ class _GalleryCell extends StatelessWidget {
     }
     return Image.file(
       File(src),
-      fit: BoxFit.contain,
+      fit: BoxFit.fill,
       gaplessPlayback: true,
       errorBuilder: (context, error, stackTrace) =>
           _buildErrorWidget(),

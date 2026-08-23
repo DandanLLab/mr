@@ -2558,7 +2558,6 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       chapterTitle: _chapterTitle,
       backgroundColor: provider.backgroundColor,
       textColor: provider.textColor,
-      baseFontSize: provider.fontSize,
       chapterStyle: _galleryChapterStyle,
       initialPageToEnd: initialPageToEnd,
       onPreviousChapter: () => _previousChapter(),
