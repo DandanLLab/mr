@@ -863,13 +863,12 @@ class _GalleryCell extends StatelessWidget {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      ClipRect(child: _buildImage()),
+                      // 阴影层（最底）：boxShadow 只在盒外侧投影，被上层
+                      // 图片盖住内侧。redroid 软渲染下 blur 铺满整盒的
+                      // 渲染异常也因此被图片遮挡，不影响视觉（实测
+                      // DecoratedBox 在图片上层时灰块盖住图片）。
                       DecoratedBox(
                         decoration: BoxDecoration(
-                          border: Border.all(
-                            width: style.borderWidth,
-                            color: style.borderColor ?? textColor,
-                          ),
                           boxShadow: [
                             BoxShadow(
                               color:
@@ -879,6 +878,17 @@ class _GalleryCell extends StatelessWidget {
                               blurRadius: style.boxShadowBlur,
                             ),
                           ],
+                        ),
+                      ),
+                      // 图片层（中）：cover 裁边填满显示区
+                      ClipRect(child: _buildImage()),
+                      // 边框层（最上）：1px 描边不遮挡图片内容
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            width: style.borderWidth,
+                            color: style.borderColor ?? textColor,
+                          ),
                         ),
                       ),
                     ],
