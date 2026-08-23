@@ -65,6 +65,24 @@ class EpubGalleryPage extends StatefulWidget {
 /// Flutter 移植固定为 22px，PageView 底部留此高度避免 cell 内容被 dotted 遮挡。
 const _kDottedHeight = 22.0;
 
+/// 多看 DocImagesView 顶部起始偏移（实测对齐）
+///
+/// 多看 slider 页 gallery-txt「滑动切换，点击放大」文本顶实测
+/// y=154 physical（77 logical）。多看阅读器内容区顶 = 状态栏 30 +
+/// 固定 30 logical 留白 ≈ 60 logical，gallery-txt 以 CSS margin 1em
+/// （≈17.7 logical）悬浮其下：60 + 1em ≈ 77.7 ✓。
+/// MR 侧 SafeArea 顶 = 24 logical（该设备状态栏），故 gallery-txt 顶 =
+/// 24 + 35（多看 60 与 MR 24 的差值）+ 1em = 77 ✓（dk_prev 实测 y=154）。
+const _kGalleryTxtExtraTop = 35.0;
+
+/// 多看标题页 h3「画廊图」文本顶实测 y=278 physical（139 logical）。
+///
+/// 多看把 gallery.xhtml 的 h3 独立分页（dk_g1 实测：页面上仅 h3 居中，
+/// y=267-330，下方全空），DocImagesView slider 页不显示标题。
+/// MR 侧：SafeArea 24 + h3 的 2em CSS margin（36）+ 章节首页固定留白
+/// 73 logical = 133 logical（266 physical ≈ 多看 278）。
+const _kTitlePageExtraTop = 73.0;
+
 class _EpubGalleryPageState extends State<EpubGalleryPage> {
   late final PageController _pageController;
   late final _GalleryCellStyle _cellStyle;
@@ -73,17 +91,48 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   int _currentIndex = 0;
   bool _isNavigating = false;
 
+  /// 是否有独立标题页（gallery.xhtml 的 h3 对齐多看分页：首页单独一页）
+  late final bool _hasTitlePage;
+
+  /// 标题页文本（chapterStyle.galleryTitle ?? chapterTitle）
+  late final String _titleText;
+
+  /// gallery-txt 提示文本（无则不显示悬浮提示）
+  late final String _txtText;
+
+  /// 渲染值诊断用 GlobalKey（仅挂载在当前页，避免多页重复 key）
+  final _titleKey = GlobalKey();
+  final _txtKey = GlobalKey();
+  final _dottedKey = GlobalKey();
+  final _imageKey = GlobalKey();
+  final _maintitleKey = GlobalKey();
+  final _subtitleKey = GlobalKey();
+
+  /// PageView 总页数 = 标题页（可选）+ 图片页
+  int get _itemCount => widget.images.length + (_hasTitlePage ? 1 : 0);
+
+  /// 当前是否处于图片页（标题页不显示 gallery-txt / dotted）
+  bool get _isImagePage => _currentIndex >= (_hasTitlePage ? 1 : 0);
+
+  /// 当前图片索引（标题页时为 0，仅 _isImagePage 时有效）
+  int get _imageIndex => _currentIndex - (_hasTitlePage ? 1 : 0);
+
   @override
   void initState() {
     super.initState();
-    final initialIdx =
-        widget.initialPageToEnd ? widget.images.length - 1 : 0;
+    _titleText =
+        (widget.chapterStyle?.galleryTitle ?? widget.chapterTitle).trim();
+    _txtText = widget.chapterStyle?.galleryTxt?.trim() ?? '';
+    _hasTitlePage = _titleText.isNotEmpty;
+    final initialIdx = widget.initialPageToEnd ? _itemCount - 1 : 0;
     _currentIndex = initialIdx;
     _pageController = PageController(initialPage: initialIdx);
     final rawCss = widget.chapterStyle?.rawCss ?? '';
     _cellStyle = _parseCellStyle(rawCss);
     _titleStyle = _parseTitleStyle(rawCss);
     _txtStyle = _parseTxtStyle(rawCss);
+    // 首帧后导出渲染值（logcat 抓取 galleryDump）
+    WidgetsBinding.instance.addPostFrameCallback((_) => _dumpLayout('init'));
   }
 
   @override
@@ -389,6 +438,8 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   void _onPageChanged(int index) {
     setState(() => _currentIndex = index);
     _isNavigating = false;
+    // 翻页后导出渲染值（标题页/图片页切换验证）
+    _dumpLayout('page$index');
   }
 
   /// 边界章节切换：在第一页继续往前 → 上一章，最后页继续往后 → 下一章
@@ -401,7 +452,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
         _isNavigating = true;
         widget.onPreviousChapter();
       } else if (notification.overscroll > 0 &&
-          _currentIndex == widget.images.length - 1) {
+          _currentIndex == _itemCount - 1) {
         _isNavigating = true;
         widget.onNextChapter();
       }
@@ -450,15 +501,17 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     final hasBgImage = widget.chapterStyle?.backgroundImageSrc != null &&
         widget.chapterStyle!.backgroundImageSrc!.isNotEmpty;
 
-    // ★ 对齐多看 dotted 定位（gallery_full_disasm_report.md 第二节/5.1）：
-    //   多看 .dotted 用 `position: absolute; left/top/width/height` 悬浮在
-    //   .slider 容器底部，圆点数量 = 图片数量（obj+0x134）。
-    //   Flutter 移植：PageView + dotted 同入 Stack，dotted 用 Positioned
-    //   贴底部（外层 SafeArea 已处理 safe-area-bottom，此处 bottom:0 即可）。
-    //   PageView 底部留 _kDottedHeight，避免 cell 末尾 subtitle 被 dotted 遮挡。
-    //   单图画廊不显示 dotted，底部不留白。
+    // ★ 对齐多看画廊页结构（gallery_full_disasm_report.md 第二节/5.1 +
+    //   真机实测 dk_g1/dk_prev/dk_s1）：
+    //   1. 标题页独立分页：多看把 gallery.xhtml 的 h3 单独一页（页面上仅
+    //      h3 居中，y=267-330），DocImagesView slider 页不显示标题
+    //   2. gallery-txt 悬浮在 slider 页顶部（dk_prev 实测 y=154，文本顶
+    //      77 logical = SafeArea 24 + 35 + 1em margin）
+    //   3. 图片页：图片 + maintitle + subtitle 垂直居中（dk_s1 实测
+    //      图片 648x326 @ x=36-683，即左右边距各 18 logical）
+    //   4. dotted 悬浮底部，仅图片页显示（dk_s1 图片页无标题无 txt）
     final showDotted = widget.images.length > 1;
-    final dottedHeight = showDotted ? _kDottedHeight : 0.0;
+    final safeTop = MediaQuery.paddingOf(context).top;
 
     return Container(
       color: hasBgImage ? null : _resolveBgColor(),
@@ -466,14 +519,13 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
       child: SafeArea(
         child: Column(
           children: [
-            _buildGalleryTitle(),
             Expanded(
               child: Stack(
                 children: [
                   // 滑动区：底部留出 dotted 高度，cell 内容不被遮挡
                   Positioned.fill(
                     child: Padding(
-                      padding: EdgeInsets.only(bottom: dottedHeight),
+                      padding: EdgeInsets.only(bottom: dottedHeightOf(showDotted)),
                       child: NotificationListener<ScrollNotification>(
                         onNotification: (notification) {
                           _handleEdgeScroll(notification);
@@ -481,92 +533,114 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
                         },
                         child: PageView.builder(
                           controller: _pageController,
-                          itemCount: widget.images.length,
+                          itemCount: _itemCount,
                           onPageChanged: _onPageChanged,
                           allowImplicitScrolling: true,
                           itemBuilder: (context, index) {
+                            if (_hasTitlePage && index == 0) {
+                              return _buildGalleryTitle(
+                                titleKey: _currentIndex == 0 ? _titleKey : null,
+                              );
+                            }
+                            final imgIdx = _hasTitlePage ? index - 1 : index;
+                            final isCurrent = index == _currentIndex;
                             return _GalleryCell(
-                              image: widget.images[index],
+                              image: widget.images[imgIdx],
                               style: _cellStyle,
                               baseFontSize: widget.baseFontSize,
                               textColor: widget.textColor,
-                              onTap: () => _showFullScreenPreview(index),
+                              onTap: () => _showFullScreenPreview(imgIdx),
+                              imageKey: isCurrent ? _imageKey : null,
+                              maintitleKey: isCurrent ? _maintitleKey : null,
+                              subtitleKey: isCurrent ? _subtitleKey : null,
                             );
                           },
                         ),
                       ),
                     ),
                   ),
+                  // gallery-txt 顶部悬浮（对齐多看 DocImagesView 顶部 y=77）
+                  // 只看图片页显示；标题页无（dk_g1 标题页仅 h3）
+                  if (_isImagePage && _txtText.isNotEmpty)
+                    Positioned(
+                      top: safeTop +
+                          _kGalleryTxtExtraTop +
+                          widget.baseFontSize * _txtStyle.marginTop,
+                      left: 0,
+                      right: 0,
+                      child: _buildGalleryTxt(),
+                    ),
                   // 点点点指示器：对齐多看 .dotted position:absolute bottom
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: _buildDottedIndicator(),
-                  ),
+                  // 仅图片页显示（标题页无 dotted）
+                  if (_isImagePage && showDotted)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: _buildDottedIndicator(),
+                    ),
                 ],
               ),
             ),
-            _buildGalleryTxt(),
           ],
         ),
       ),
     );
   }
 
-  /// 画廊标题（对齐原作 .gallery-title）
+  /// dotted 是否占用 PageView 底部空间（仅图片页且多图时）
+  double dottedHeightOf(bool showDotted) =>
+      _isImagePage && showDotted ? _kDottedHeight : 0.0;
+
+  /// 标题页（对齐多看 gallery.xhtml 首页：h3 独立分页）
+  ///
   /// 原作 CSS: margin: 2em auto; font-size: 1.5em; font-weight: bold;
   ///   text-align: center; text-shadow: 0 1 1px #fff
-  Widget _buildGalleryTitle() {
-    final title = widget.chapterStyle?.galleryTitle;
-    if (title == null || title.isEmpty) return const SizedBox.shrink();
-
+  /// 多看实测（dk_g1）：h3 文本顶 y=278 physical（139 logical），
+  ///   页面上无其他内容；DocImagesView slider 页无标题。
+  Widget _buildGalleryTitle({Key? titleKey}) {
     final shadows = _titleStyle.textShadow != null
         ? [_titleStyle.textShadow!]
         : <Shadow>[];
 
     return Padding(
       padding: EdgeInsets.only(
-        top: widget.baseFontSize * _titleStyle.marginTop,
-        bottom: widget.baseFontSize * _titleStyle.marginBottom,
-        left: 16,
-        right: 16,
+        top: widget.baseFontSize * _titleStyle.marginTop + _kTitlePageExtraTop,
       ),
-      child: Text(
-        title,
-        style: TextStyle(
-          fontSize: widget.baseFontSize * _titleStyle.fontSize,
-          fontWeight: _titleStyle.bold ? FontWeight.bold : FontWeight.normal,
-          fontFamily: _titleStyle.fontFamily,
-          color: _titleStyle.color ?? widget.textColor,
-          decoration: TextDecoration.none,
-          shadows: shadows,
+      child: Center(
+        child: Text(
+          _titleText,
+          key: titleKey,
+          style: TextStyle(
+            fontSize: widget.baseFontSize * _titleStyle.fontSize,
+            fontWeight: _titleStyle.bold ? FontWeight.bold : FontWeight.normal,
+            fontFamily: _titleStyle.fontFamily,
+            color: _titleStyle.color ?? widget.textColor,
+            decoration: TextDecoration.none,
+            shadows: shadows,
+          ),
+          textAlign: TextAlign.center,
         ),
-        textAlign: TextAlign.center,
       ),
     );
   }
 
-  /// 底部提示文本（对齐原作 .gallery-txt）
+  /// 顶部提示文本（对齐多看 DocImagesView gallery-txt）
   /// 原作 CSS: margin: 1em auto; font-size: 0.7em; text-align: center;
   ///   text-shadow: 0 1 1px #fff
+  /// 位置由 build() 中 Positioned(top: safeTop + 35 + 1em) 决定。
   Widget _buildGalleryTxt() {
-    final txt = widget.chapterStyle?.galleryTxt;
-    if (txt == null || txt.isEmpty) return const SizedBox.shrink();
-
     final shadows = _txtStyle.textShadow != null
         ? [_txtStyle.textShadow!]
         : <Shadow>[];
 
     return Padding(
-      padding: EdgeInsets.only(
-        top: widget.baseFontSize * _txtStyle.marginTop,
-        bottom: widget.baseFontSize * _txtStyle.marginBottom,
-        left: 16,
-        right: 16,
+      padding: const EdgeInsets.symmetric(
+        horizontal: 16,
       ),
       child: Text(
-        txt,
+        _txtText,
+        key: _txtKey,
         style: TextStyle(
           fontSize: widget.baseFontSize * _txtStyle.fontSize,
           fontFamily: _txtStyle.fontFamily,
@@ -598,13 +672,15 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     final r = (textRgb >> 16) & 0xFF;
     final g = (textRgb >> 8) & 0xFF;
     final b = textRgb & 0xFF;
+    final activeDot = _imageIndex;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
+        key: _dottedKey,
         mainAxisAlignment: MainAxisAlignment.center,
         children: List.generate(widget.images.length, (i) {
-          final isActive = i == _currentIndex;
+          final isActive = i == activeDot;
           return Container(
             width: 6,
             height: 6,
@@ -619,6 +695,43 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
         }),
       ),
     );
+  }
+
+  /// 导出画廊页渲染值到 logcat（[reader] galleryDump 前缀，domDump 同族诊断）
+  ///
+  /// 用户要求「看渲染的排版值」：Flutter 原生页无 DOM，用 GlobalKey +
+  /// RenderBox 读取各元素全局坐标与实际渲染尺寸，与多看真机实测对比。
+  void _dumpLayout(String reason) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final dpr = MediaQuery.devicePixelRatioOf(context);
+      final size = MediaQuery.sizeOf(context);
+      final safe = MediaQuery.paddingOf(context);
+      final sb = StringBuffer('[reader] galleryDump $reason');
+      sb.write(' dpr=$dpr size=${size.width.round()}x${size.height.round()}');
+      sb.write(' safeTop=${safe.top.round()} safeBottom=${safe.bottom.round()}');
+      sb.write(' itemCount=$_itemCount idx=$_currentIndex imageIdx=$_imageIndex');
+      sb.write(' hasTitlePage=$_hasTitlePage');
+
+      void rectOf(GlobalKey key, String name) {
+        final box = key.currentContext?.findRenderObject() as RenderBox?;
+        if (box == null || !box.attached) {
+          sb.write(' $name=null');
+          return;
+        }
+        final pos = box.localToGlobal(Offset.zero);
+        sb.write(' $name=x${pos.dx.round()}y${pos.dy.round()}'
+            'w${box.size.width.round()}h${box.size.height.round()}');
+      }
+
+      rectOf(_titleKey, 'title');
+      rectOf(_txtKey, 'txt');
+      rectOf(_dottedKey, 'dotted');
+      rectOf(_imageKey, 'img');
+      rectOf(_maintitleKey, 'maintitle');
+      rectOf(_subtitleKey, 'subtitle');
+      debugPrint(sb.toString());
+    });
   }
 }
 
@@ -651,12 +764,20 @@ class _GalleryCell extends StatelessWidget {
   final Color textColor;
   final VoidCallback onTap;
 
+  /// 渲染值诊断 key（仅当前页传入，避免 GlobalKey 重复挂载）
+  final Key? imageKey;
+  final Key? maintitleKey;
+  final Key? subtitleKey;
+
   const _GalleryCell({
     required this.image,
     required this.style,
     required this.baseFontSize,
     required this.textColor,
     required this.onTap,
+    this.imageKey,
+    this.maintitleKey,
+    this.subtitleKey,
   });
 
   @override
@@ -664,9 +785,11 @@ class _GalleryCell extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Padding(
-        // 水平 24px 让内容不贴边；垂直用原作 cell margin（10px 0）
+        // 水平 18px 对齐多看图片左右边距：dk_s1 实测 00.jpg x=36-683
+        // （648 wide = 720-72，即单边 36 physical = 18 logical），
+        // 垂直用原作 cell margin（10px 0）
         padding: EdgeInsets.symmetric(
-          horizontal: 24,
+          horizontal: 18,
           vertical: style.cellMarginVertical,
         ),
         // ★ Center 松约束：PageView 页面是 tight 约束，若不加 Center，
@@ -684,6 +807,7 @@ class _GalleryCell extends StatelessWidget {
               Flexible(
                 fit: FlexFit.loose,
                 child: Container(
+                  key: imageKey,
                   // 原作 .duokan-image-gallery-cell 的 border + box-shadow
                   decoration: BoxDecoration(
                     border: Border.all(
@@ -716,6 +840,7 @@ class _GalleryCell extends StatelessWidget {
               //   紧贴边框，由 cell 的 border + box-shadow 形成视觉边界）
               if (image.maintitle.isNotEmpty)
                 Padding(
+                  key: maintitleKey,
                   padding: EdgeInsets.only(
                     top: baseFontSize * style.maintitleMarginTop,
                     bottom: 0,
@@ -751,6 +876,7 @@ class _GalleryCell extends StatelessWidget {
                         : 0,
                   ),
                   child: Padding(
+                    key: subtitleKey,
                     padding: EdgeInsets.only(
                       top: 0,
                       bottom: baseFontSize * style.subtitleMarginBottom,

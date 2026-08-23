@@ -39,3 +39,4 @@ test_sources/
 .tmp/
 .tmp_*
 *.zip
+screenshots/
