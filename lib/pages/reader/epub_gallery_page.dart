@@ -63,69 +63,86 @@ class EpubGalleryPage extends StatefulWidget {
 /// Flutter 移植固定为 22px，PageView 底部留此高度避免 cell 内容被 dotted 遮挡。
 const _kDottedHeight = 22.0;
 
-/// ★ 多看画廊基准字号（实测锚定）★
+/// ★ 多看画廊真实模型（2026-08-28 双字号实测定案）★
 ///
-/// 多看 DkeGallery 原生布局不随阅读器字号设置缩放，以固定基准渲染：
-/// - maintitle 字形实测 36 physical = 18.9 logical = 0.9em × 21
-/// 故基准字号 = 21 logical（dk_g1/dk_prev/dk5 像素测量）。
+/// 画廊章 = h3 标题 + slide 块（图 contain + maintitle + subtitle）+
+/// dotted + gallery-txt 的【随字号缩放的流式布局】，横向滑动 = 同视图内
+/// 切换 slide（dotted 激活点位移证实），非翻页：
+/// - 字号 46（默认，本页锚定态）：h3 大标题独占首页（字形顶 131.5），
+///   slide 单独成页（图像区 244-411.5、maintitle 430、subtitle 476），
+///   gallery-txt 落再下一页顶 77 —— MR 单屏 PageView 取标题页 + slide 页
+/// - 字号 20：全部同屏（标题 91.5、图 199-361.5、maintitle 372、
+///   subtitle 392、dotted 462.5、txt 481.5），间距按 em 等比缩放
+///
+/// 图像为 contain 原比例置于 324×167.5 固定框内（非 cover 裁切！
+/// 00.jpg contain 163 < 框高 167.5，边框环仍为满框 244-411.5）。
+
+/// ★ 多看画廊基准字号（maintitle 字形 18.9 = 0.9em × 21 反推，
+/// 对应多看默认字号 46 档）★
 const _kGalleryBaseFontSize = 21.0;
 
-/// ★ 多看画廊页不渲染 h3 标题与 gallery-txt 提示（2026-08-24 实测纠正）★
+/// 多看画廊首页 h3 标题字形顶 = 131.5 logical（字号 46 实测，dk_g1）。
 ///
-/// gallery.xhtml 的 <h3 class="gallery-title"> 与 .gallery-txt 在多看
-/// native 渲染管线（RenderGallery → slider/slide/msg）中不进入画廊页：
-/// dk_p00b 稳定态逐行扫描 y80-488 全空白，首屏即第一个 cell
-/// （图像 488-823 + maintitle 860+）。用户所说「标题」= maintitle
-/// （如「22全途径魔药徽章UI设计」），非 h3「画廊图」。
+/// MR 侧：SafeArea 24 + h3 的 2em CSS margin（2×21=42）+ 固定留白 65.5。
+/// ★ Text height 1.0：行盒 = 字形高，galleryDump 的 title.y 直接等于
+/// 多看字形顶 131.5，可像素级对比。
+const _kTitlePageExtraTop = 65.5;
 
-/// 多看 DkeGallery 图像页排版（逻辑 px，基准 21，稳定态实测锚定）。
-///
-/// ★ 稳定态实测（dk_launch1/dk_p00b/dk_p00：00/01/02.jpg 三页一致）★
-/// - 图像显示区 = 页宽-36 × 167.5 固定（x18-342、y244-411.5），全部图片
-///   cover 等比缩放裁边填满（非 contain！01.jpg 等比 149.5 高但显示 167.5）
-/// - maintitle 字形顶 = 430（= 图像显示区底 411.5 + 18.5）
-/// - subtitle 首行字形顶 = 476，行距 40.5（行1 476 → 行2 518 → 行3 558）
-///
-/// Flutter 实现（height 1.15 下沉 1.575 / subtitle 下沉 10.8）：
-/// - maintitle box 顶 = 显示区底 + 17 → 字形顶 = 411.5+17+1.575 = 430.075
-/// - subtitle box 顶 = maintitle box 底 + 15 → 行1 字形顶 = 476.035
-/// 图像显示区固定高（多看稳定态实测：所有图 cover 于 324×167.5）
+/// 图像显示区固定高（多看稳定态实测：324 宽框内 contain 原比例）
 const _kGalleryImageDisplayHeight = 167.5;
 
-/// 图像显示区顶相对 SafeArea = 220（绝对 244 = SafeArea 24 + 220；
-/// 多看 DocImagesView 顶 59 + 图像区距 DocImagesView 顶 185）
+/// 图像显示区顶相对 SafeArea = 220（绝对 244 = SafeArea 24 + 220）
 const _kGalleryImageTopGap = 220.0;
 
-const _kMaintitlePaddingTop = 17.0;
+/// maintitle：box 顶取 15.5 = 18.5 - 下沉修正，墨顶 = 411.5+15.5+3 ≈ 430
+/// （Flutter 墨顶实测 431.5 @pad17，墨迹含 CJK 内部上留白，-1.5 校正）
+const _kMaintitlePaddingTop = 15.5;
 const _kMaintitleLineHeight = 1.15;
-const _kSubtitlePaddingTop = 15.0;
+
+/// subtitle：墨顶 = maintitle 墨底 + 间距，-2 校正后 476（实测 478 @pad15）
+const _kSubtitlePaddingTop = 13.0;
 const _kSubtitleLineHeight = 40.5 / 18.9;
 
 class _EpubGalleryPageState extends State<EpubGalleryPage> {
   late final PageController _pageController;
   late final _GalleryCellStyle _cellStyle;
+  late final _GalleryTitleStyle _titleStyle;
   int _currentIndex = 0;
   bool _isNavigating = false;
 
+  /// 是否有独立 h3 标题页（多看字号 46 默认态：标题独占首页）
+  late final bool _hasTitlePage;
+
+  /// 标题页文本（chapterStyle.galleryTitle ?? chapterTitle）
+  late final String _titleText;
+
   /// 渲染值诊断用 GlobalKey（仅挂载在当前页，避免多页重复 key）
+  final _titleKey = GlobalKey();
   final _dottedKey = GlobalKey();
   final _imageKey = GlobalKey();
   final _maintitleKey = GlobalKey();
   final _subtitleKey = GlobalKey();
 
-  /// PageView 总页数 = 图片页（每页 = 图 + maintitle/subtitle）
-  int get _itemCount => widget.images.length;
+  /// PageView 总页数 = 标题页（可选）+ 图片页
+  int get _itemCount => widget.images.length + (_hasTitlePage ? 1 : 0);
 
-  /// 当前图片索引（每页都是图片页）
-  int get _imageIndex => _currentIndex;
+  /// 当前是否处于图片页（标题页不显示 dotted）
+  bool get _isImagePage => _currentIndex >= (_hasTitlePage ? 1 : 0);
+
+  /// 当前图片索引（标题页时为 0，仅 _isImagePage 时有效）
+  int get _imageIndex => _currentIndex - (_hasTitlePage ? 1 : 0);
 
   @override
   void initState() {
     super.initState();
+    _titleText =
+        (widget.chapterStyle?.galleryTitle ?? widget.chapterTitle).trim();
+    _hasTitlePage = _titleText.isNotEmpty;
     final initialIdx = widget.initialPageToEnd ? _itemCount - 1 : 0;
     _currentIndex = initialIdx;
     _pageController = PageController(initialPage: initialIdx);
     _cellStyle = _parseCellStyle(widget.chapterStyle?.rawCss ?? '');
+    _titleStyle = _parseTitleStyle(widget.chapterStyle?.rawCss ?? '');
     // 首帧后导出渲染值（logcat 抓取 galleryDump）
     WidgetsBinding.instance.addPostFrameCallback((_) => _dumpLayout('init'));
   }
@@ -180,6 +197,22 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
       // subtitle: DK-KAITI（楷体）→ serif
       maintitleFontFamily: _parseFontFamily(maintitleBlock) ?? 'sans-serif',
       subtitleFontFamily: _parseFontFamily(subtitleBlock) ?? 'serif',
+    );
+  }
+
+  /// 解析 .gallery-title 规则块（原作：2em auto / 1.5em / bold /
+  /// DK-XIAOBIAOSONG,serif / text-shadow 0 1 1px #fff）
+  _GalleryTitleStyle _parseTitleStyle(String rawCss) {
+    final block = _extractRuleBlock(rawCss, 'gallery-title');
+    final margins = _parseMargin(block);
+    return _GalleryTitleStyle(
+      fontSize: _parseFloat(block, 'font-size') ?? 1.5,
+      bold: _containsKeyword(block, 'bold') || _containsKeyword(block, '700'),
+      color: _parseColor(block, 'color'),
+      textShadow: _parseTextShadow(block),
+      marginTop: margins?.$1 ?? 2.0,
+      marginBottom: margins?.$2 ?? 2.0,
+      fontFamily: _parseFontFamily(block) ?? 'serif',
     );
   }
 
@@ -317,6 +350,31 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     } else {
       return (pxValues[0], pxValues[0]);
     }
+  }
+
+  bool _containsKeyword(String? block, String keyword) {
+    if (block == null) return false;
+    return block.toLowerCase().contains(keyword.toLowerCase());
+  }
+
+  /// 解析 text-shadow（原作 h3: 0 1 1px #fff）
+  Shadow? _parseTextShadow(String? block) {
+    if (block == null) return null;
+    final match = RegExp(
+      r'text-shadow\s*:\s*([0-9.-]+)\s+([0-9.-]+)\s*(?:([0-9.]+)px\s+)?#([0-9a-fA-F]{3,6})',
+    ).firstMatch(block);
+    if (match == null) return null;
+    final dx = double.tryParse(match.group(1) ?? '0') ?? 0;
+    final dy = double.tryParse(match.group(2) ?? '0') ?? 0;
+    final blur = double.tryParse(match.group(3) ?? '0') ?? 0;
+    final hex = match.group(4)!;
+    final color = hex.length == 6
+        ? Color(int.parse('FF$hex', radix: 16))
+        : hex.length == 3
+            ? Color(int.parse('FF${hex[0] * 2}${hex[1] * 2}${hex[2] * 2}',
+                radix: 16))
+            : const Color(0xFFFFFFFF);
+    return Shadow(offset: Offset(dx, dy), blurRadius: blur, color: color);
   }
 
   Color _resolveBgColor() {
@@ -477,12 +535,18 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
                           onPageChanged: _onPageChanged,
                           allowImplicitScrolling: true,
                           itemBuilder: (context, index) {
+                            if (_hasTitlePage && index == 0) {
+                              return _buildGalleryTitle(
+                                titleKey: _currentIndex == 0 ? _titleKey : null,
+                              );
+                            }
+                            final imgIdx = _hasTitlePage ? index - 1 : index;
                             final isCurrent = index == _currentIndex;
                             return _GalleryCell(
-                              image: widget.images[index],
+                              image: widget.images[imgIdx],
                               style: _cellStyle,
                               textColor: widget.textColor,
-                              onTap: () => _showFullScreenPreview(index),
+                              onTap: () => _showFullScreenPreview(imgIdx),
                               imageKey: isCurrent ? _imageKey : null,
                               maintitleKey: isCurrent ? _maintitleKey : null,
                               subtitleKey: isCurrent ? _subtitleKey : null,
@@ -493,7 +557,8 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
                     ),
                   ),
                   // 点点点指示器：对齐多看 .dotted position:absolute bottom
-                  if (showDotted)
+                  // 仅图片页显示（多看字号 46 实测：标题页无 dotted）
+                  if (_isImagePage && showDotted)
                     Positioned(
                       left: 0,
                       right: 0,
@@ -509,9 +574,46 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     );
   }
 
-  /// dotted 是否占用 PageView 底部空间（多图时）
+  /// dotted 是否占用 PageView 底部空间（仅图片页且多图时）
   double dottedHeightOf(bool showDotted) =>
-      showDotted ? _kDottedHeight : 0.0;
+      _isImagePage && showDotted ? _kDottedHeight : 0.0;
+
+  /// 画廊首页 h3 标题页（对齐多看字号 46 默认态：标题独占首页）
+  ///
+  /// 原作 CSS: margin: 2em auto; font-size: 1.5em; bold; 居中;
+  /// DK-XIAOBIAOSONG serif; text-shadow 0 1 1px #fff。
+  /// 字形顶 = SafeArea 24 + 2em(42) + 65.5 = 131.5（dk_g1 实测）。
+  /// ★ Text height 1.0：行盒 = 字形高，galleryDump 的 title.y 直接等于
+  /// 多看字形顶 131.5，可像素级对比。
+  Widget _buildGalleryTitle({Key? titleKey}) {
+    final shadows = _titleStyle.textShadow != null
+        ? [_titleStyle.textShadow!]
+        : <Shadow>[];
+
+    return Padding(
+      padding: EdgeInsets.only(
+        top: _kGalleryBaseFontSize * _titleStyle.marginTop +
+            _kTitlePageExtraTop,
+      ),
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: Text(
+          _titleText,
+          key: titleKey,
+          style: TextStyle(
+            fontSize: _kGalleryBaseFontSize * _titleStyle.fontSize,
+            fontWeight: _titleStyle.bold ? FontWeight.bold : FontWeight.normal,
+            fontFamily: _titleStyle.fontFamily,
+            color: _titleStyle.color ?? widget.textColor,
+            decoration: TextDecoration.none,
+            height: 1.0,
+            shadows: shadows,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ),
+    );
+  }
 
   /// 点点点指示器（对齐多看 .dotted > span）
   ///
@@ -583,6 +685,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
             'w${box.size.width.round()}h${box.size.height.round()}');
       }
 
+      rectOf(_titleKey, 'title');
       rectOf(_dottedKey, 'dotted');
       rectOf(_imageKey, 'img');
       rectOf(_maintitleKey, 'maintitle');
@@ -759,12 +862,13 @@ class _GalleryCell extends StatelessWidget {
 
   Widget _buildImage() {
     final src = image.src;
-    // 外层 SizedBox 固定 324×167.5 显示区，cover 等比缩放裁边填满
-    // （对齐多看稳定态：所有图 cover 于固定显示区）
+    // 外层 SizedBox 固定 324×167.5 显示框，图 contain 原比例居中
+    // （多看实测：00.jpg contain 163 < 框高 167.5，边框环仍为满框；
+    // cover 裁切会切掉图表边缘内容，2026-08-28 双字号实测纠正）
     if (src.startsWith('data:')) {
       return Image.memory(
         _parseDataUri(src),
-        fit: BoxFit.cover,
+        fit: BoxFit.contain,
         gaplessPlayback: true,
         errorBuilder: (context, error, stackTrace) =>
             _buildErrorWidget(),
@@ -772,7 +876,7 @@ class _GalleryCell extends StatelessWidget {
     }
     return Image.file(
       File(src),
-      fit: BoxFit.cover,
+      fit: BoxFit.contain,
       gaplessPlayback: true,
       errorBuilder: (context, error, stackTrace) =>
           _buildErrorWidget(),
@@ -1114,6 +1218,28 @@ class _BoxShadow {
     required this.dy,
     required this.blur,
     required this.color,
+  });
+}
+
+/// 画廊标题页 h3 样式（原作 .gallery-title：2em auto / 1.5em / bold /
+/// DK-XIAOBIAOSONG serif / text-shadow 0 1 1px #fff）
+class _GalleryTitleStyle {
+  final double fontSize;
+  final bool bold;
+  final Color? color;
+  final Shadow? textShadow;
+  final double marginTop;
+  final double marginBottom;
+  final String fontFamily;
+
+  const _GalleryTitleStyle({
+    this.fontSize = 1.5,
+    this.bold = true,
+    this.color,
+    this.textShadow,
+    this.marginTop = 2.0,
+    this.marginBottom = 2.0,
+    this.fontFamily = 'serif',
   });
 }
 
