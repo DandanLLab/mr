@@ -99,8 +99,10 @@ const _kGalleryImageTopGap = 220.0;
 const _kMaintitlePaddingTop = 15.5;
 const _kMaintitleLineHeight = 1.15;
 
-/// subtitle：墨顶 = maintitle 墨底 + 间距，-2 校正后 476（实测 478 @pad15）
-const _kSubtitlePaddingTop = 13.0;
+/// subtitle：墨顶 = maintitle box 底 + pad + 下沉 10.8 + 墨迹 1.9
+/// （maintitle pad 已贡献 -1.5，本 pad 15 → 墨顶 476.4 ≈ 476；
+///  实测 pad13 时墨顶 474，pad15 回正）
+const _kSubtitlePaddingTop = 15.0;
 const _kSubtitleLineHeight = 40.5 / 18.9;
 
 class _EpubGalleryPageState extends State<EpubGalleryPage> {
