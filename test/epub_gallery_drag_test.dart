@@ -44,6 +44,40 @@ void main() {
     expect(find.text('图一'), findsNothing);
   });
 
+  testWidgets('长描述自动缩字号不撞圆点行', (tester) async {
+    final longSub = '很' * 90; // 90 字长描述
+    await tester.pumpWidget(MaterialApp(
+      home: EpubGalleryPage(
+        images: [
+          EpubGalleryImage(
+            src: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+            maintitle: '长描述页',
+            subtitle: longSub,
+          ),
+          img('图二'),
+        ],
+        chapterTitle: '画廊图',
+        backgroundColor: Colors.white,
+        textColor: Colors.black,
+        baseFontSize: 15,
+        onPreviousChapter: () {},
+        onNextChapter: () {},
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 700));
+
+    // 不应有布局异常
+    expect(tester.takeException(), isNull);
+    // subtitle 存在且被缩字号渲染（找到文本）
+    expect(find.text(longSub), findsOneWidget);
+    // 圆点行不应被 subtitle 文字覆盖：subtitle 的 RenderBox 底部
+    // 不超过圆点行墨顶（base 15 = 507.15）
+    final subBox = tester.renderObject<RenderBox>(find.text(longSub).last);
+    final subBottom = subBox.localToGlobal(Offset.zero).dy + subBox.size.height;
+    expect(subBottom, lessThanOrEqualTo(508));
+  });
+
   testWidgets('拖动幅度不足回弹不提交', (tester) async {
     await tester.pumpWidget(MaterialApp(
       home: EpubGalleryPage(

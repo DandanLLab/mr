@@ -723,10 +723,57 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
         : _imageTopGapOf(base);
     final imgBottomRel = frameTop + frameH;
     final maintitleTop = imgBottomRel + _maintitlePadOf(base);
-    final subtitleTop = maintitleTop +
-        base * _cellStyle.maintitleFontSize * _kMaintitleLineHeight +
-        _subtitlePadOf(base);
     final current = widget.images[_imageIndex];
+
+    // ★ 描述文字动态排版（防溢出）★
+    // 长描述（如 08/10/11/19/22.jpg）在 base15 下 subtitle 达 3-4 行，
+    // 底部撞圆点行（实测定量：s10 撞 36px、s22 撞 37px）。处理：
+    // 1) TextPainter 实测 maintitle 高度（1~2 行），subtitle 起点随动
+    // 2) subtitle 逐级缩字号（0.9em → 最低 0.5em）适配「圆点行上方」
+    //    的可用空间；仍放不下则 maxLines + ellipsis 兜底
+    final maintitleStyle = TextStyle(
+      fontSize: base * _cellStyle.maintitleFontSize,
+      fontFamily: _cellStyle.maintitleFontFamily,
+      color: _cellStyle.maintitleColor,
+      height: _kMaintitleLineHeight,
+      decoration: TextDecoration.none,
+    );
+    final mtTp = TextPainter(
+      text: TextSpan(text: current.maintitle, style: maintitleStyle),
+      maxLines: 2,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: _frameW);
+    final subtitleTopDyn = maintitleTop + mtTp.height + _subtitlePadOf(base);
+
+    final dottedInkRel = _dottedInkTopOf(base);
+    final subtitleAvail =
+        (dottedInkRel - 8 - subtitleTopDyn).clamp(24.0, double.infinity);
+
+    final subtitleBaseFs = base * _cellStyle.subtitleFontSize;
+    var subtitleFs = subtitleBaseFs;
+    TextPainter subtitleTp(TextStyle style) => TextPainter(
+          text: TextSpan(text: current.subtitle, style: style),
+          textDirection: TextDirection.ltr,
+        )..layout(maxWidth: _frameW);
+    var subTp = subtitleTp(TextStyle(
+      fontSize: subtitleFs,
+      fontFamily: _cellStyle.subtitleFontFamily,
+      color: _cellStyle.subtitleColor,
+      height: _kSubtitleLineHeight,
+      decoration: TextDecoration.none,
+    ));
+    while (subTp.height > subtitleAvail && subtitleFs > base * 0.5) {
+      subtitleFs -= base * 0.05;
+      subTp = subtitleTp(TextStyle(
+        fontSize: subtitleFs,
+        fontFamily: _cellStyle.subtitleFontFamily,
+        color: _cellStyle.subtitleColor,
+        height: _kSubtitleLineHeight,
+        decoration: TextDecoration.none,
+      ));
+    }
+    final subtitleMaxLines =
+        (subtitleAvail / (subtitleFs * _kSubtitleLineHeight)).floor().clamp(1, 20);
 
     return Container(
       color: hasBgImage ? null : _resolveBgColor(),
@@ -821,20 +868,22 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
             // subtitle（静态层，内容随当前 slide 切换；324 列宽 justify）
             if (current.subtitle.isNotEmpty)
               Positioned(
-                top: subtitleTop,
+                top: subtitleTopDyn,
                 left: 18,
                 right: 18,
                 child: Text(
                   current.subtitle,
                   key: _subtitleKey,
                   style: TextStyle(
-                    fontSize: base * _cellStyle.subtitleFontSize,
+                    fontSize: subtitleFs,
                     fontFamily: _cellStyle.subtitleFontFamily,
                     color: _cellStyle.subtitleColor,
                     height: _kSubtitleLineHeight,
                     decoration: TextDecoration.none,
                   ),
                   textAlign: TextAlign.justify,
+                  maxLines: subtitleMaxLines,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             // 点点点指示器 + gallery-txt 提示：同屏形态随字号公式
