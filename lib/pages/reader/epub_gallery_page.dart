@@ -217,13 +217,13 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
   void _onDragStart(DragStartDetails details) {
     _settle.stop();
     _rawDx = 0;
-    setState(() => _dragVector = _dragVector); // 保持当前相位（动画中断续拖）
   }
 
   void _onDragUpdate(DragUpdateDetails d) {
     _rawDx += d.delta.dx;
-    final lo = _imageIndex > 0 ? -_frameW : 0.0;
-    final hi = _imageIndex < _itemCount - 1 ? _frameW : 0.0;
+    // 拖动向量 = 内容跟随手指：左滑（dx<0）→ 下一张，右滑（dx>0）→ 上一张
+    final lo = _imageIndex < _itemCount - 1 ? -_frameW : 0.0;
+    final hi = _imageIndex > 0 ? _frameW : 0.0;
     final next = (_dragVector + d.delta.dx).clamp(lo, hi);
     if (next != _dragVector) setState(() => _dragVector = next);
   }
@@ -234,7 +234,8 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     final fling = dxPerSec.abs() > 350;
     final passed = _dragVector.abs() > _frameW * 0.35;
 
-    // 章节边界：第一张继续向右拖 / 最后一张继续向左拖 → 切换章节
+    // 章节边界：第一张继续向右拖（回看上一章）/ 最后一张继续向左拖
+    // （进看下一章）→ 切换章节
     if (_dragVector == 0 && _rawDx.abs() > 80) {
       if (_imageIndex == 0 && _rawDx > 0) {
         _isNavigating = true;
@@ -250,8 +251,9 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
 
     _settleFrom = _dragVector;
     if (passed || (fling && _dragVector.abs() > 8)) {
-      _settleTo = _dragVector > 0 ? _frameW : -_frameW;
-      _settleCommit = _dragVector > 0 ? 1 : -1;
+      // v<0 = 拖向下一张（+1）；v>0 = 拖向上一张（-1）
+      _settleTo = _dragVector < 0 ? -_frameW : _frameW;
+      _settleCommit = _dragVector < 0 ? 1 : -1;
     } else {
       _settleTo = 0;
       _settleCommit = null;
@@ -653,10 +655,10 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
                           imageKey: _imageKey,
                         ),
                       ),
-                      // 入场 sheet：拖向下一张时从框右缘滑入盖住
-                      if (_dragVector > 0)
+                      // 入场 sheet：拖向下一张（v<0）时从框右缘滑入盖住
+                      if (_dragVector < 0)
                         Positioned(
-                          left: _frameW - _dragVector,
+                          left: _frameW + _dragVector,
                           top: 0,
                           width: _frameW,
                           height: frameH,
@@ -666,10 +668,10 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
                             textColor: widget.textColor,
                           ),
                         ),
-                      // 入场 sheet：拖向上一张时从框左缘滑入盖住
-                      if (_dragVector < 0)
+                      // 入场 sheet：拖向上一张（v>0）时从框左缘滑入盖住
+                      if (_dragVector > 0)
                         Positioned(
-                          left: -_frameW - _dragVector,
+                          left: -_frameW + _dragVector,
                           top: 0,
                           width: _frameW,
                           height: frameH,
@@ -966,6 +968,7 @@ class _FrameImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox.expand(
+      key: imageKey,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -1092,9 +1095,7 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
               },
             ),
           ),
-          // 顶部：页码指示器 + 关闭按钮
-          _buildTopBar(),
-          // 底部：图片描述
+          // 底部图注（多看全屏预览顶部无页码/关闭 UI，点击图片即退出）
           if (widget.images[_currentIndex].maintitle.isNotEmpty ||
               widget.images[_currentIndex].subtitle.isNotEmpty)
             _buildBottomDescription(),
@@ -1103,62 +1104,9 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
     );
   }
 
-  Widget _buildTopBar() {
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 200),
-                  child: Text(
-                    '${_currentIndex + 1} / ${widget.images.length}',
-                    key: ValueKey(_currentIndex),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      decoration: TextDecoration.none,
-                    ),
-                  ),
-                ),
-              ),
-              const Spacer(),
-              GestureDetector(
-                onTap: () => Navigator.of(context).pop(),
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.6),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.close,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
+  /// 底部图注（对齐多看 DocImageWatchingView 实拍：白字左对齐、无胶囊
+  /// 背景，maintitle ~18px / subtitle ~14.5px，块底距屏底 ~87 逻辑px，
+  /// 顶部无页码/关闭 UI——点击图片即退出）
   Widget _buildBottomDescription() {
     final img = widget.images[_currentIndex];
     return Positioned(
@@ -1167,51 +1115,30 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
       right: 0,
       child: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          padding: const EdgeInsets.fromLTRB(4, 8, 8, 63),
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (img.maintitle.isNotEmpty)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.6),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    img.maintitle,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      decoration: TextDecoration.none,
-                    ),
-                    textAlign: TextAlign.center,
+                Text(
+                  img.maintitle,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    height: 1.35,
+                    decoration: TextDecoration.none,
                   ),
                 ),
               if (img.subtitle.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    img.subtitle,
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 12,
-                      height: 1.4,
-                      decoration: TextDecoration.none,
-                    ),
-                    textAlign: TextAlign.center,
+                const SizedBox(height: 4),
+                Text(
+                  img.subtitle,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14.5,
+                    height: 1.35,
+                    decoration: TextDecoration.none,
                   ),
                 ),
               ],
