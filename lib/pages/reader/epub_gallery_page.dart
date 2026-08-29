@@ -101,25 +101,27 @@ double _imageFrameHeightOf(double base) => 158.7 + 0.42 * base;
 /// 9.13 → 175.0，绝对 244/199 实测拟合）
 double _imageTopGapOf(double base) => 140.4 + 3.791 * base;
 
-/// maintitle/sutitle 内边距随基准字号等比（21 时校准值 15.5/15.0，
-/// 墨顶 430/476 已逐像素验证）
-double _maintitlePadOf(double base) => 15.5 * base / 21.0;
-double _subtitlePadOf(double base) => 15.0 * base / 21.0;
+/// maintitle/subtitle 内边距：以多看墨顶线（maintitle 327.4+4.886B、
+/// subtitle 327.4+7.075B）为目标，对 MR 自身渲染偏差两点重拟合
+/// （21 处精确退化回已验证的 15.5/15.0）
+double _maintitlePadOf(double base) => 4.3 + 0.532 * base;
+double _subtitlePadOf(double base) => 1.93 + 0.6225 * base;
 
 const _kMaintitleLineHeight = 1.15;
 const _kSubtitleLineHeight = 40.5 / 18.9;
 
-/// dotted 圆点行几何（多看 20号/52号 实拍逐像素拟合，同屏形态）：
-/// - 行顶（圆点墨顶）= 393.0 + 7.61B（9.13→462.5、24.3→578.0 双锚精确）
+/// dotted 圆点行几何（多看 20号/52号 实拍逐像素拟合，同屏形态）。
+/// ★ 一律为 SafeArea 内相对坐标（实拍绝对值 − SafeArea 24）★：
+/// - 行顶（圆点墨顶）= 369.0 + 7.61B（绝对 462.5@9.13、578.0@24.3）
 /// - 点距 = 0.4615B + 0.287（9.13→4.5、24.3→11.5）
 /// - 非激活点径 = 0.297B − 1.212（9.13→1.5、24.3→6.0）
 /// - 激活点径 = 2.19 + 0.198B（9.13→4.0、24.3→7.0）
-double _dottedInkTopOf(double base) => 393.0 + 7.61 * base;
+double _dottedInkTopOf(double base) => 369.0 + 7.61 * base;
 double _dotPitchOf(double base) => 0.4615 * base + 0.287;
 double _dotSizeOf(double base) => (0.297 * base - 1.212).clamp(1.0, 12.0);
 double _dotActiveSizeOf(double base) => 2.19 + 0.198 * base;
 
-/// gallery-txt 提示行：墨顶 = dotted 墨顶 + 2.081B（9.13→481.5 实拍），
+/// gallery-txt 提示行：墨顶 = dotted 墨顶 + 2.081B（绝对 481.5@9.13 实拍），
 /// 字号 0.7em；页内放不下则不显示（多看 52号 实拍同样无提示）
 double _txtInkTopOf(double base) =>
     _dottedInkTopOf(base) + 2.081 * base;
@@ -631,15 +633,20 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     );
   }
 
-  /// dotted 行的 Positioned top（圆点墨顶 − 行内上下留白 8）
+  /// dotted 行的 Positioned top：圆点墨顶（SafeArea 相对）− 圆点在行内
+  /// 的垂直居中偏移；放不下则贴底兜底
   double _dottedPositionedTopOf(BuildContext context) {
     final safe = MediaQuery.paddingOf(context);
     final pageH = MediaQuery.sizeOf(context).height - safe.top - safe.bottom;
-    final inkTop = _dottedInkTopOf(widget.baseFontSize);
-    // 圆点行高约 6，放不下则贴底兜底（等价旧 bottom:0 的 578）
+    final base = widget.baseFontSize;
+    final inkTop = _dottedInkTopOf(base);
+    final centering =
+        (_dotActiveSizeOf(base) - _dotSizeOf(base)) / 2;
     const dotRow = 6.0;
-    if (inkTop + dotRow > pageH - 2) return pageH - dotRow - 2 - 8;
-    return inkTop - 8;
+    if (inkTop + dotRow > pageH - 2) {
+      return pageH - dotRow - 2 - centering;
+    }
+    return inkTop - centering;
   }
 
   /// gallery-txt 是否显示（0.7em 行塞进页内才显示）
