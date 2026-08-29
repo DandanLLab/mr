@@ -109,6 +109,21 @@ double _subtitlePadOf(double base) => 15.0 * base / 21.0;
 const _kMaintitleLineHeight = 1.15;
 const _kSubtitleLineHeight = 40.5 / 18.9;
 
+/// dotted 圆点行几何（多看 20号/52号 实拍逐像素拟合，同屏形态）：
+/// - 行顶（圆点墨顶）= 393.0 + 7.61B（9.13→462.5、24.3→578.0 双锚精确）
+/// - 点距 = 0.4615B + 0.287（9.13→4.5、24.3→11.5）
+/// - 非激活点径 = 0.297B − 1.212（9.13→1.5、24.3→6.0）
+/// - 激活点径 = 2.19 + 0.198B（9.13→4.0、24.3→7.0）
+double _dottedInkTopOf(double base) => 393.0 + 7.61 * base;
+double _dotPitchOf(double base) => 0.4615 * base + 0.287;
+double _dotSizeOf(double base) => (0.297 * base - 1.212).clamp(1.0, 12.0);
+double _dotActiveSizeOf(double base) => 2.19 + 0.198 * base;
+
+/// gallery-txt 提示行：墨顶 = dotted 墨顶 + 2.081B（9.13→481.5 实拍），
+/// 字号 0.7em；页内放不下则不显示（多看 52号 实拍同样无提示）
+double _txtInkTopOf(double base) =>
+    _dottedInkTopOf(base) + 2.081 * base;
+
 class _EpubGalleryPageState extends State<EpubGalleryPage> {
   late final PageController _pageController;
   late final _GalleryCellStyle _cellStyle;
@@ -121,6 +136,9 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
 
   /// 标题页文本（chapterStyle.galleryTitle ?? chapterTitle）
   late final String _titleText;
+
+  /// gallery-txt 提示文本（无则不显示；同屏形态下 dotted 下方）
+  late final String _txtText;
 
   /// 渲染值诊断用 GlobalKey（仅挂载在当前页，避免多页重复 key）
   final _titleKey = GlobalKey();
@@ -142,6 +160,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     _titleText =
         (widget.chapterStyle?.galleryTitle ?? widget.chapterTitle).trim();
     _hasTitlePage = _titleText.isNotEmpty;
+    _txtText = widget.chapterStyle?.galleryTxt?.trim() ?? '';
     final initialIdx = widget.initialPageToEnd ? _itemCount - 1 : 0;
     _currentIndex = initialIdx;
     _pageController = PageController(initialPage: initialIdx);
@@ -586,14 +605,22 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
                       ),
                     ),
                   ),
-                  // 点点点指示器：对齐多看 .dotted position:absolute bottom
-                  // 所有图片页显示（同屏形态下首页也有 dotted）
+                  // 点点点指示器 + gallery-txt 提示：同屏形态随字号公式
+                  // 定位（20号→462.5/481.5、52号→578 实拍锚定），放不下
+                  // 的元素自动贴底/隐藏
                   if (showDotted)
                     Positioned(
                       left: 0,
                       right: 0,
-                      bottom: 0,
+                      top: _dottedPositionedTopOf(context),
                       child: _buildDottedIndicator(),
+                    ),
+                  if (_showGalleryTxt(context))
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      top: _galleryTxtPositionedTopOf(context),
+                      child: _buildGalleryTxt(),
                     ),
                 ],
               ),
@@ -604,9 +631,50 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     );
   }
 
+  /// dotted 行的 Positioned top（圆点墨顶 − 行内上下留白 8）
+  double _dottedPositionedTopOf(BuildContext context) {
+    final safe = MediaQuery.paddingOf(context);
+    final pageH = MediaQuery.sizeOf(context).height - safe.top - safe.bottom;
+    final inkTop = _dottedInkTopOf(widget.baseFontSize);
+    // 圆点行高约 6，放不下则贴底兜底（等价旧 bottom:0 的 578）
+    const dotRow = 6.0;
+    if (inkTop + dotRow > pageH - 2) return pageH - dotRow - 2 - 8;
+    return inkTop - 8;
+  }
+
+  /// gallery-txt 是否显示（0.7em 行塞进页内才显示）
+  bool _showGalleryTxt(BuildContext context) {
+    if (_txtText.isEmpty) return false;
+    final safe = MediaQuery.paddingOf(context);
+    final pageH = MediaQuery.sizeOf(context).height - safe.top - safe.bottom;
+    final txtH = widget.baseFontSize * 0.7;
+    return _txtInkTopOf(widget.baseFontSize) + txtH <= pageH - 2;
+  }
+
+  /// gallery-txt 的 Positioned top（墨顶 − CJK 墨迹上留白约 1）
+  double _galleryTxtPositionedTopOf(BuildContext context) =>
+      _txtInkTopOf(widget.baseFontSize) - 1;
+
   /// dotted 是否占用 PageView 底部空间（多图时）
   double dottedHeightOf(bool showDotted) =>
       showDotted && widget.images.length > 1 ? _kDottedHeight : 0.0;
+
+  /// gallery-txt 提示（原作 CSS: margin 1em auto / 0.7em / 居中 /
+  /// DK-HEITI sans-serif / text-shadow 0 1 1px #fff；
+  /// 多看 20号 实拍「滑动切换，点击放大」墨顶 481.5）
+  Widget _buildGalleryTxt() {
+    return Text(
+      _txtText,
+      style: TextStyle(
+        fontSize: widget.baseFontSize * 0.7,
+        fontFamily: 'sans-serif',
+        color: widget.textColor,
+        decoration: TextDecoration.none,
+        height: 1.0,
+      ),
+      textAlign: TextAlign.center,
+    );
+  }
 
   /// 画廊 h3 标题文本（首页与第一张图同屏，对齐多看小字号形态）
   ///
@@ -644,10 +712,11 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   /// - dotted 的 style 由 setGalleryScrollRect 生成：
   ///     `position: absolute; left:%dpx; top:%dpx; width:%dpx; height:%dpx;`
   ///   ← 已对齐：build() 中用 Stack + Positioned(bottom:0) 悬浮在 PageView 底部
-  /// - 多看未在 .rodata 中给出 span 的具体尺寸样式，由设备 theme 注入
-  ///   ← Flutter 近似：圆点 6×6px，active alpha 230 / inactive alpha 77
+  /// - span 尺寸由实拍拟合（2026-08-29 dk 20号/52号 逐像素）：
+  ///   点距 = 0.4615B+0.287、非激活点径 = 0.297B−1.212、
+  ///   激活点径 = 2.19+0.198B（激活更大更深）
   ///
-  /// 本方法只负责圆点行本身；定位由 build() 的 Positioned 包裹完成。
+  /// 本方法只负责圆点行本身；定位由 build() 的 Positioned 按公式完成。
   Widget _buildDottedIndicator() {
     if (widget.images.length <= 1) return const SizedBox.shrink();
 
@@ -656,27 +725,34 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     final g = (textRgb >> 8) & 0xFF;
     final b = textRgb & 0xFF;
     final activeDot = _imageIndex;
+    final base = widget.baseFontSize;
+    final pitch = _dotPitchOf(base);
+    final inactive = _dotSizeOf(base);
+    final active = _dotActiveSizeOf(base);
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        key: _dottedKey,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: List.generate(widget.images.length, (i) {
-          final isActive = i == activeDot;
-          return Container(
-            width: 6,
-            height: 6,
-            margin: const EdgeInsets.symmetric(horizontal: 3),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: isActive
-                  ? Color.fromARGB(230, r, g, b)
-                  : Color.fromARGB(77, r, g, b),
+    return Row(
+      key: _dottedKey,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: List.generate(widget.images.length, (i) {
+        final isActive = i == activeDot;
+        final size = isActive ? active : inactive;
+        return SizedBox(
+          width: pitch,
+          height: active,
+          child: Center(
+            child: Container(
+              width: size,
+              height: size,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isActive
+                    ? Color.fromARGB(255, r, g, b)
+                    : Color.fromARGB(110, r, g, b),
+              ),
             ),
-          );
-        }),
-      ),
+          ),
+        );
+      }),
     );
   }
 
