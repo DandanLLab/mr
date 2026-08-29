@@ -185,14 +185,36 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     _titleStyle = _parseTitleStyle(widget.chapterStyle?.rawCss ?? '');
     _settle = AnimationController(vsync: this, duration: const Duration(milliseconds: 220))
       ..addListener(_onSettleTick);
-    // 首帧后导出渲染值（logcat 抓取 galleryDump）
-    WidgetsBinding.instance.addPostFrameCallback((_) => _dumpLayout('init'));
+    // 首帧后：导出渲染值 + 预热相邻图
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _precacheNeighbors();
+      _dumpLayout('init');
+    });
   }
 
   @override
   void dispose() {
     _settle.dispose();
     super.dispose();
+  }
+
+  /// 预热相邻两张图（替代 PageView allowImplicitScrolling 的预加载，
+  /// 避免拖动时 sheet 首次读盘闪白）
+  void _precacheNeighbors() {
+    final context = this.context;
+    for (final i in [_imageIndex + 1, _imageIndex - 1]) {
+      if (i < 0 || i >= _itemCount) continue;
+      final src = widget.images[i].src;
+      try {
+        if (src.startsWith('data:')) {
+          precacheImage(MemoryImage(_parseDataUri(src)), context);
+        } else {
+          precacheImage(FileImage(File(src)), context);
+        }
+      } catch (_) {
+        // 预热失败不影响渲染，拖动时正常加载
+      }
+    }
   }
 
   /// snap 动画驱动：插值拖动向量，提交时切换索引并清零（文字层随之换内容）
@@ -541,6 +563,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
 
   void _onSlideCommitted(int index) {
     _isNavigating = false;
+    _precacheNeighbors();
     // slide 提交后导出渲染值（文字层内容切换验证）
     _dumpLayout('slide$index');
     Future.delayed(const Duration(milliseconds: 600), () {
