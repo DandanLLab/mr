@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show FontLoader;
 
 import '../../services/local_book/epub_parser.dart';
 
@@ -126,6 +127,30 @@ double _dotActiveSizeOf(double base) => 2.19 + 0.198 * base;
 double _txtInkTopOf(double base) =>
     _dottedInkTopOf(base) + 2.081 * base;
 
+/// 作者 CSS local() 字体链的语义映射（style.css @font-face 声明的流派 →
+/// Flutter 系统近似族）。多看内建字体（DK-HEITI 等）Flutter 拿不到文件，
+/// 按作者 local 链的字体流派映射系统族兜底。
+const Map<String, String> _fontStackLocalMap = <String, String>{
+  // 宋体族
+  'dk-songti': 'serif', 'st': 'serif', '宋体': 'serif', '明体': 'serif',
+  '明朝': 'serif', 'songti': 'serif', 'songti sc': 'serif',
+  // 仿宋族
+  'dk-fangsong': 'serif', 'fs': 'serif', '仿宋': 'serif', 'fangsong': 'serif',
+  // 小标宋族（标题）
+  'dk-xiaobiaosong': 'serif', 'h3': 'serif', '方正小标宋_gbk': 'serif',
+  '方正小标宋简体': 'serif', '方正小标宋繁体': 'serif',
+  // 楷体族
+  'dk-kaiti': 'serif', 'kt': 'serif', '楷体': 'serif', 'kaiti': 'serif',
+  'kaiti sc': 'serif',
+  // 黑体族
+  'dk-heiti': 'sans-serif', 'ht': 'sans-serif', '微软雅黑': 'sans-serif',
+  '黑体': 'sans-serif', 'heiti': 'sans-serif', 'heiti sc': 'sans-serif',
+  'sthei': 'sans-serif',
+  // 圆体/细黑族
+  'dk-xiheiti': 'sans-serif', 'yt': 'sans-serif', '圆体': 'sans-serif',
+  'yuanti': 'sans-serif', 'styuanti': 'sans-serif',
+};
+
 class _EpubGalleryPageState extends State<EpubGalleryPage>
     with TickerProviderStateMixin {
   late final _GalleryCellStyle _cellStyle;
@@ -181,21 +206,75 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     _hasTitlePage = _titleText.isNotEmpty;
     _txtText = widget.chapterStyle?.galleryTxt?.trim() ?? '';
     _imageIndex = widget.initialPageToEnd ? _itemCount - 1 : 0;
-    _cellStyle = _parseCellStyle(widget.chapterStyle?.rawCss ?? '');
-    _titleStyle = _parseTitleStyle(widget.chapterStyle?.rawCss ?? '');
+    final embeddedFonts = widget.chapterStyle?.embeddedFonts ?? const {};
+    _cellStyle = _parseCellStyle(widget.chapterStyle?.rawCss ?? '', embeddedFonts);
+    _titleStyle = _parseTitleStyle(widget.chapterStyle?.rawCss ?? '', embeddedFonts);
     _settle = AnimationController(vsync: this, duration: const Duration(milliseconds: 220))
       ..addListener(_onSettleTick);
-    // 首帧后：导出渲染值 + 预热相邻图
+    // 注册作者内嵌字体（@font-face url 文件）+ 首帧导出渲染值/预热相邻图
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _registerEmbeddedFonts();
       if (mounted) _precacheNeighbors();
       _dumpLayout('init');
     });
+  }
+
+  /// 注册作者内嵌字体（@font-face { src: url(...) } 的字体文件），
+  /// 注册后 font-family 栈命中该 family 名即可直接渲染作者字体
+  Future<void> _registerEmbeddedFonts() async {
+    final fonts = widget.chapterStyle?.embeddedFonts;
+    if (fonts == null || fonts.isEmpty) return;
+    for (final entry in fonts.entries) {
+      try {
+        final ByteData bytes;
+        if (entry.value.startsWith('data:')) {
+          final list = _parseDataUri(entry.value);
+          bytes = ByteData.view(list.buffer);
+        } else {
+          final f = File(entry.value);
+          if (!f.existsSync()) continue;
+          bytes = ByteData.view(f.readAsBytesSync().buffer);
+        }
+        final loader = FontLoader(entry.key)..addFont(Future.value(bytes));
+        await loader.load();
+      } catch (_) {
+        // 单个字体注册失败不影响其他字体与整体渲染
+      }
+    }
   }
 
   @override
   void dispose() {
     _settle.dispose();
     super.dispose();
+  }
+
+  /// 解析 font-family 栈原文（如 "DK-HEITI","ht",sans-serif → 栈字符串）
+  String _parseFontFamilyStack(String? block, String fallback) {
+    if (block == null) return fallback;
+    final m = RegExp(r'font-family\s*:\s*([^;}]+)').firstMatch(block);
+    if (m == null) return fallback;
+    final stack = m.group(1)!.trim();
+    return stack.isEmpty ? fallback : stack;
+  }
+
+  /// font-family 栈解析 → Flutter fontFamily（作者 CSS 是唯一真相）：
+  /// ① 栈中名字命中内嵌字体表（@font-face url 加载注册的作者字体）→ 直接用
+  /// ② 命中 local 语义映射（作者 local 链声明的字体流派）→ 系统近似族
+  /// ③ 栈尾 generic（serif/sans-serif/monospace）直接用
+  String _resolveFontFamily(String stack, Map<String, String> embedded) {
+    for (final raw in stack.split(',')) {
+      final name = raw.trim().replaceAll('"', '').replaceAll("'", '');
+      if (name.isEmpty) continue;
+      if (embedded.containsKey(name)) return name;
+      final mapped = _fontStackLocalMap[name.toLowerCase()];
+      if (mapped != null) return mapped;
+      final lower = name.toLowerCase();
+      if (lower == 'serif' || lower == 'sans-serif' || lower == 'monospace') {
+        return lower;
+      }
+    }
+    return 'sans-serif';
   }
 
   /// 预热相邻两张图（替代 PageView allowImplicitScrolling 的预加载，
@@ -294,7 +373,10 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
   ///     box-shadow: 5px 5px 5px #888888;
   /// }
   /// ```
-  _GalleryCellStyle _parseCellStyle(String rawCss) {
+  _GalleryCellStyle _parseCellStyle(
+    String rawCss,
+    Map<String, String> embeddedFonts,
+  ) {
     final cellBlock = _extractRuleBlock(rawCss, 'duokan-image-gallery-cell');
     final maintitleBlock = _extractRuleBlock(rawCss, 'duokan-image-maintitle');
     final subtitleBlock = _extractRuleBlock(rawCss, 'duokan-image-subtitle');
@@ -322,18 +404,23 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
       maintitleFontSize: _parseFloat(maintitleBlock, 'font-size') ?? 0.9,
       subtitleFontSize: _parseFloat(subtitleBlock, 'font-size') ?? 0.9,
       subtitleLineHeight: _parseFloat(subtitleBlock, 'line-height') ?? 1.35,
-      // 字体族（2026-08-29 dk 20号 实拍字形放大比对纠正）：
-      // maintitle 多看渲染为宋体（横细竖粗带笔锋）→ serif
-      // subtitle 多看渲染为黑体（等线无衬线）→ sans-serif
-      // （两者 CSS 均未声明 font-family，按多看实际字形映射）
-      maintitleFontFamily: _parseFontFamily(maintitleBlock) ?? 'serif',
-      subtitleFontFamily: _parseFontFamily(subtitleBlock) ?? 'sans-serif',
+      // 字体族：font-family 栈解析（作者 CSS 原设，style.css 331/340）：
+      // maintitle = "DK-HEITI","ht",sans-serif（黑体，0.9em）
+      // subtitle  = "DK-KAITI","kt",serif（楷体，0.9em）
+      // 内嵌字体命中 → 用作者字体；否则按 local 语义映射系统近似族
+      maintitleFontFamily: _resolveFontFamily(
+        _parseFontFamilyStack(maintitleBlock, 'sans-serif'), embeddedFonts),
+      subtitleFontFamily: _resolveFontFamily(
+        _parseFontFamilyStack(subtitleBlock, 'serif'), embeddedFonts),
     );
   }
 
   /// 解析 .gallery-title 规则块（原作：2em auto / 1.5em / bold /
   /// DK-XIAOBIAOSONG,serif / text-shadow 0 1 1px #fff）
-  _GalleryTitleStyle _parseTitleStyle(String rawCss) {
+  _GalleryTitleStyle _parseTitleStyle(
+    String rawCss,
+    Map<String, String> embeddedFonts,
+  ) {
     final block = _extractRuleBlock(rawCss, 'gallery-title');
     final margins = _parseMargin(block);
     return _GalleryTitleStyle(

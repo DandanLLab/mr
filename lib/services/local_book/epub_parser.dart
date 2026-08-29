@@ -278,6 +278,12 @@ class EpubGalleryChapterStyle {
   /// 实现 1:1 还原作者排版（对齐多看 HTML snippet 渲染机制）
   final String? rawCss;
 
+  /// 内嵌字体表（family 名 → 已解析的字体文件本地路径）
+  /// 从 @font-face { font-family: "X"; src: url(...) } 提取，
+  /// url 相对路径按 CSS 目录解析为绝对路径；只有 local() 的不收录
+  /// （Flutter 无法访问宿主 local 字体，走 local 语义映射表兜底）
+  final Map<String, String> embeddedFonts;
+
   const EpubGalleryChapterStyle({
     this.backgroundImageSrc,
     this.backgroundColor,
@@ -288,6 +294,7 @@ class EpubGalleryChapterStyle {
     this.galleryTitle,
     this.galleryTxt,
     this.rawCss,
+    this.embeddedFonts = const {},
   });
 }
 
@@ -1806,8 +1813,38 @@ class EpubParser {
         // HTML 解析失败时只跳过文本提取
       }
 
+      // 4. 解析 @font-face 内嵌字体：family → 字体文件绝对路径
+      //    作者 CSS：@font-face { font-family: "plt"; src: url(../Fonts/plt.ttf); }
+      //    只有 local() 的（多看内建字体）Flutter 拿不到文件，不收录，
+      //    由画廊页的 local 语义映射表（宋体→serif 等）兜底
+      final embeddedFonts = <String, String>{};
+      final fontFacePattern = RegExp(r'@font-face\s*\{([^}]*)\}');
+      for (final fm in fontFacePattern.allMatches(epubCss)) {
+        final block = fm.group(1)!;
+        final famMatch = RegExp(
+          r'font-family\s*:\s*["\x27]?([^";\x27]+)["\x27]?\s*;',
+        ).firstMatch(block);
+        final urlMatch = RegExp(r'url\(([^)]+)\)').firstMatch(block);
+        if (famMatch == null || urlMatch == null) continue;
+        final family = famMatch
+            .group(1)!
+            .trim()
+            .replaceAll('"', '')
+            .replaceAll("'", '');
+        final rawUrl = urlMatch
+            .group(1)!
+            .trim()
+            .replaceAll('"', '')
+            .replaceAll("'", '');
+        final resolvedFont = _resolveGallerySrc(
+          rawUrl, extractedBasePath, chapterBasePath,
+        );
+        if (resolvedFont.isNotEmpty) embeddedFonts[family] = resolvedFont;
+      }
+
       return EpubGalleryChapterStyle(
         backgroundImageSrc: backgroundImageSrc?.isNotEmpty == true ? backgroundImageSrc : null,
+        embeddedFonts: embeddedFonts,
         backgroundColor: backgroundColor,
         backgroundRepeat: backgroundRepeat,
         backgroundSize: backgroundSize,
