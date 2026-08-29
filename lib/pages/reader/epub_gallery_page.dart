@@ -116,7 +116,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   int _currentIndex = 0;
   bool _isNavigating = false;
 
-  /// 是否有独立 h3 标题页（多看字号 46 默认态：标题独占首页）
+  /// 是否有 h3 标题（首页与第一张图同屏）
   late final bool _hasTitlePage;
 
   /// 标题页文本（chapterStyle.galleryTitle ?? chapterTitle）
@@ -129,14 +129,12 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
   final _maintitleKey = GlobalKey();
   final _subtitleKey = GlobalKey();
 
-  /// PageView 总页数 = 标题页（可选）+ 图片页
-  int get _itemCount => widget.images.length + (_hasTitlePage ? 1 : 0);
+  /// PageView 总页数 = 图片页（首页 = h3 标题 + 第一张图同屏，
+  /// 对齐多看小字号同屏形态；横向滑动切 slide，标题不随页翻走）
+  int get _itemCount => widget.images.length;
 
-  /// 当前是否处于图片页（标题页不显示 dotted）
-  bool get _isImagePage => _currentIndex >= (_hasTitlePage ? 1 : 0);
-
-  /// 当前图片索引（标题页时为 0，仅 _isImagePage 时有效）
-  int get _imageIndex => _currentIndex - (_hasTitlePage ? 1 : 0);
+  /// 当前图片索引（每页都是图片页）
+  int get _imageIndex => _currentIndex;
 
   @override
   void initState() {
@@ -541,31 +539,56 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
                           onPageChanged: _onPageChanged,
                           allowImplicitScrolling: true,
                           itemBuilder: (context, index) {
-                            if (_hasTitlePage && index == 0) {
-                              return _buildGalleryTitle(
-                                titleKey: _currentIndex == 0 ? _titleKey : null,
-                              );
-                            }
-                            final imgIdx = _hasTitlePage ? index - 1 : index;
                             final isCurrent = index == _currentIndex;
-                            return _GalleryCell(
-                              image: widget.images[imgIdx],
+                            final hasTitle = index == 0 && _hasTitlePage;
+                            final base = widget.baseFontSize;
+                            // 首页有标题时图像区顶距不低于标题块底部+4，
+                            // 防止超大字号下标题与图像重叠
+                            final titleBottom = hasTitle
+                                ? base * _titleStyle.marginTop +
+                                      _titleExtraTopOf(base) +
+                                      base * _titleStyle.fontSize +
+                                      base * _titleStyle.marginBottom
+                                : 0.0;
+                            final cell = _GalleryCell(
+                              image: widget.images[index],
                               style: _cellStyle,
                               textColor: widget.textColor,
-                              baseFontSize: widget.baseFontSize,
-                              onTap: () => _showFullScreenPreview(imgIdx),
+                              baseFontSize: base,
+                              minTopGap: titleBottom + 4,
+                              onTap: () => _showFullScreenPreview(index),
                               imageKey: isCurrent ? _imageKey : null,
                               maintitleKey: isCurrent ? _maintitleKey : null,
                               subtitleKey: isCurrent ? _subtitleKey : null,
                             );
+                            // 首页 = h3 标题 + 第一张图同屏（多看小字号
+                            // 形态：标题悬于图像区上方，位置按随字号公式，
+                            // 横向滑动切 slide 时标题只在首页）
+                            if (hasTitle) {
+                              return Stack(
+                                children: [
+                                  cell,
+                                  Positioned(
+                                    top: base * _titleStyle.marginTop +
+                                        _titleExtraTopOf(base),
+                                    left: 0,
+                                    right: 0,
+                                    child: _buildTitleText(
+                                      titleKey: isCurrent ? _titleKey : null,
+                                    ),
+                                  ),
+                                ],
+                              );
+                            }
+                            return cell;
                           },
                         ),
                       ),
                     ),
                   ),
                   // 点点点指示器：对齐多看 .dotted position:absolute bottom
-                  // 仅图片页显示（多看字号 46 实测：标题页无 dotted）
-                  if (_isImagePage && showDotted)
+                  // 所有图片页显示（同屏形态下首页也有 dotted）
+                  if (showDotted)
                     Positioned(
                       left: 0,
                       right: 0,
@@ -581,44 +604,35 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     );
   }
 
-  /// dotted 是否占用 PageView 底部空间（仅图片页且多图时）
+  /// dotted 是否占用 PageView 底部空间（多图时）
   double dottedHeightOf(bool showDotted) =>
-      _isImagePage && showDotted ? _kDottedHeight : 0.0;
+      showDotted && widget.images.length > 1 ? _kDottedHeight : 0.0;
 
-  /// 画廊首页 h3 标题页（对齐多看字号 46 默认态：标题独占首页）
+  /// 画廊 h3 标题文本（首页与第一张图同屏，对齐多看小字号形态）
   ///
   /// 原作 CSS: margin: 2em auto; font-size: 1.5em; bold; 居中;
   /// DK-XIAOBIAOSONG serif; text-shadow 0 1 1px #fff。
-  /// 字形顶 = SafeArea 24 + 2em(42) + 65.5 = 131.5（dk_g1 实测）。
+  /// 字形顶 = SafeArea 24 + 2em + extraTop（随字号公式，dk 实测锚定）。
   /// ★ Text height 1.0：行盒 = 字形高，galleryDump 的 title.y 直接等于
-  /// 多看字形顶 131.5，可像素级对比。
-  Widget _buildGalleryTitle({Key? titleKey}) {
+  /// 多看字形顶，可像素级对比。定位（Positioned top）由 itemBuilder 完成。
+  Widget _buildTitleText({Key? titleKey}) {
     final shadows = _titleStyle.textShadow != null
         ? [_titleStyle.textShadow!]
         : <Shadow>[];
 
-    return Padding(
-      padding: EdgeInsets.only(
-        top: widget.baseFontSize * _titleStyle.marginTop +
-            _titleExtraTopOf(widget.baseFontSize),
+    return Text(
+      _titleText,
+      key: titleKey,
+      style: TextStyle(
+        fontSize: widget.baseFontSize * _titleStyle.fontSize,
+        fontWeight: _titleStyle.bold ? FontWeight.bold : FontWeight.normal,
+        fontFamily: _titleStyle.fontFamily,
+        color: _titleStyle.color ?? widget.textColor,
+        decoration: TextDecoration.none,
+        height: 1.0,
+        shadows: shadows,
       ),
-      child: Align(
-        alignment: Alignment.topCenter,
-        child: Text(
-          _titleText,
-          key: titleKey,
-          style: TextStyle(
-            fontSize: widget.baseFontSize * _titleStyle.fontSize,
-            fontWeight: _titleStyle.bold ? FontWeight.bold : FontWeight.normal,
-            fontFamily: _titleStyle.fontFamily,
-            color: _titleStyle.color ?? widget.textColor,
-            decoration: TextDecoration.none,
-            height: 1.0,
-            shadows: shadows,
-          ),
-          textAlign: TextAlign.center,
-        ),
-      ),
+      textAlign: TextAlign.center,
     );
   }
 
@@ -739,6 +753,9 @@ class _GalleryCell extends StatelessWidget {
 
   /// 画廊基准字号 = 阅读器字号设置（em 级联与垂直几何随动）
   final double baseFontSize;
+
+  /// 图像区顶距下限（首页有标题时 = 标题块底部 + 4，防止大字号下重叠）
+  final double minTopGap;
   final VoidCallback onTap;
 
   /// 渲染值诊断 key（仅当前页传入，避免 GlobalKey 重复挂载）
@@ -752,6 +769,7 @@ class _GalleryCell extends StatelessWidget {
     required this.textColor,
     required this.baseFontSize,
     required this.onTap,
+    this.minTopGap = 0,
     this.imageKey,
     this.maintitleKey,
     this.subtitleKey,
@@ -772,11 +790,13 @@ class _GalleryCell extends StatelessWidget {
             // 原比例居中于显示框（框高随基准字号：167.5@21）
             final dispW = constraints.maxWidth;
             final dispH = _imageFrameHeightOf(baseFontSize);
-            // 图像区顶留白随基准字号（220@21，绝对 244 = SafeArea 24 + 220）
+            // 图像区顶留白随基准字号（220@21，绝对 244 = SafeArea 24 +
+            // 220）；首页有标题时不低于标题块底部，防大字号重叠
+            final topGap = _imageTopGapOf(baseFontSize);
             return Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                SizedBox(height: _imageTopGapOf(baseFontSize)),
+                SizedBox(height: topGap < minTopGap ? minTopGap : topGap),
                 // 边框+阴影装饰叠加层（原 .duokan-image-gallery-cell 的
                 // border 1px + box-shadow 5px 5px 5px #888888）。
                 // 用 Stack 叠加避免 border 向外扩展影响布局尺寸
