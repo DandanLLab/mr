@@ -322,11 +322,12 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
       maintitleFontSize: _parseFloat(maintitleBlock, 'font-size') ?? 0.9,
       subtitleFontSize: _parseFloat(subtitleBlock, 'font-size') ?? 0.9,
       subtitleLineHeight: _parseFloat(subtitleBlock, 'line-height') ?? 1.35,
-      // 字体族（对齐原著 style.css）
-      // maintitle: DK-HEITI（黑体）→ sans-serif
-      // subtitle: DK-KAITI（楷体）→ serif
-      maintitleFontFamily: _parseFontFamily(maintitleBlock) ?? 'sans-serif',
-      subtitleFontFamily: _parseFontFamily(subtitleBlock) ?? 'serif',
+      // 字体族（2026-08-29 dk 20号 实拍字形放大比对纠正）：
+      // maintitle 多看渲染为宋体（横细竖粗带笔锋）→ serif
+      // subtitle 多看渲染为黑体（等线无衬线）→ sans-serif
+      // （两者 CSS 均未声明 font-family，按多看实际字形映射）
+      maintitleFontFamily: _parseFontFamily(maintitleBlock) ?? 'serif',
+      subtitleFontFamily: _parseFontFamily(subtitleBlock) ?? 'sans-serif',
     );
   }
 
