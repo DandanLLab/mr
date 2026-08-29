@@ -66,6 +66,12 @@ dependencies:
   # 编码转换 - TXT 本地书 GBK 检测
   charset: ^2.0.0
 
+# 钉死 html 版本：analyze_rule 导入 package:html/src/query_selector.dart 的
+# matches（私有 API），html 1.x 移除后 CI 动态 SDK 重解析会编译失败；
+# flutter_html 3.0.0 的 styled_element 同样依赖 Element.matches
+dependency_overrides:
+  html: 0.15.6
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
