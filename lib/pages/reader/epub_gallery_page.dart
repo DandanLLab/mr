@@ -126,35 +126,52 @@ double _dotActiveSizeOf(double base) => 2.19 + 0.198 * base;
 double _txtInkTopOf(double base) =>
     _dottedInkTopOf(base) + 2.081 * base;
 
-class _EpubGalleryPageState extends State<EpubGalleryPage> {
-  late final PageController _pageController;
+class _EpubGalleryPageState extends State<EpubGalleryPage>
+    with TickerProviderStateMixin {
   late final _GalleryCellStyle _cellStyle;
   late final _GalleryTitleStyle _titleStyle;
-  int _currentIndex = 0;
+
+  /// 当前 slide 索引
+  int _imageIndex = 0;
   bool _isNavigating = false;
 
-  /// 是否有 h3 标题（首页与第一张图同屏）
+  /// ★ 捕捉到的拖动向量的水平投影（多看覆盖式滑动的驱动量）★
+  /// >0 拖向下一张（下一张 sheet 从框右缘滑入盖住当前图）、
+  /// <0 拖向上一张（上一张 sheet 从框左缘滑入）、0 = 静止；
+  /// 绝对值上限 = 框宽（sheet 完全盖住框）。文字层内容在提交瞬间才切换。
+  double _dragVector = 0;
+
+  /// 拖动中的原始位移累计（章节边界判定用：第一/最后一张拖出但不产生
+  /// sheet 位移时，按位移触发上一章/下一章）
+  double _rawDx = 0;
+
+  /// 释放后的 snap 动画（滑向 ±框宽 提交，或回弹 0）
+  late final AnimationController _settle;
+  double _settleFrom = 0;
+  double _settleTo = 0;
+  int? _settleCommit;
+
+  /// 是否有 h3 标题（所有页同屏恒显）
   late final bool _hasTitlePage;
 
-  /// 标题页文本（chapterStyle.galleryTitle ?? chapterTitle）
+  /// 标题文本（chapterStyle.galleryTitle ?? chapterTitle）
   late final String _titleText;
 
-  /// gallery-txt 提示文本（无则不显示；同屏形态下 dotted 下方）
+  /// gallery-txt 提示文本（无则不显示；dotted 下方）
   late final String _txtText;
 
-  /// 渲染值诊断用 GlobalKey（仅挂载在当前页，避免多页重复 key）
+  /// 渲染值诊断用 GlobalKey（静态层恒挂载；图片 key 挂当前框内图层）
   final _titleKey = GlobalKey();
   final _dottedKey = GlobalKey();
   final _imageKey = GlobalKey();
   final _maintitleKey = GlobalKey();
   final _subtitleKey = GlobalKey();
 
-  /// PageView 总页数 = 图片页（首页 = h3 标题 + 第一张图同屏，
-  /// 对齐多看小字号同屏形态；横向滑动切 slide，标题不随页翻走）
+  /// 图片总数
   int get _itemCount => widget.images.length;
 
-  /// 当前图片索引（每页都是图片页）
-  int get _imageIndex => _currentIndex;
+  /// 框宽（逻辑 px，对齐多看 DocImagesView 宽 324）
+  static const double _frameW = 324.0;
 
   @override
   void initState() {
@@ -163,21 +180,83 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
         (widget.chapterStyle?.galleryTitle ?? widget.chapterTitle).trim();
     _hasTitlePage = _titleText.isNotEmpty;
     _txtText = widget.chapterStyle?.galleryTxt?.trim() ?? '';
-    final initialIdx = widget.initialPageToEnd ? _itemCount - 1 : 0;
-    _currentIndex = initialIdx;
-    // 轮播节距 340.5 逻辑 = 360 × viewportFraction（多看实拍拟合）
-    _pageController =
-        PageController(initialPage: initialIdx, viewportFraction: 340.5 / 360.0);
+    _imageIndex = widget.initialPageToEnd ? _itemCount - 1 : 0;
     _cellStyle = _parseCellStyle(widget.chapterStyle?.rawCss ?? '');
     _titleStyle = _parseTitleStyle(widget.chapterStyle?.rawCss ?? '');
+    _settle = AnimationController(vsync: this, duration: const Duration(milliseconds: 220))
+      ..addListener(_onSettleTick);
     // 首帧后导出渲染值（logcat 抓取 galleryDump）
     WidgetsBinding.instance.addPostFrameCallback((_) => _dumpLayout('init'));
   }
 
   @override
   void dispose() {
-    _pageController.dispose();
+    _settle.dispose();
     super.dispose();
+  }
+
+  /// snap 动画驱动：插值拖动向量，提交时切换索引并清零（文字层随之换内容）
+  void _onSettleTick() {
+    final t = Curves.easeOut.transform(_settle.value);
+    if (!mounted) return;
+    setState(() {
+      _dragVector = _settleFrom + (_settleTo - _settleFrom) * t;
+    });
+    if (_settle.isCompleted && _settleCommit != null) {
+      setState(() {
+        _imageIndex = (_imageIndex + _settleCommit!).clamp(0, _itemCount - 1);
+        _dragVector = 0;
+        _settleCommit = null;
+      });
+      _onSlideCommitted(_imageIndex);
+    }
+  }
+
+  // ---- 拖动向量的捕捉与提交（覆盖式滑动）----
+
+  void _onDragStart(DragStartDetails details) {
+    _settle.stop();
+    _rawDx = 0;
+    setState(() => _dragVector = _dragVector); // 保持当前相位（动画中断续拖）
+  }
+
+  void _onDragUpdate(DragUpdateDetails d) {
+    _rawDx += d.delta.dx;
+    final lo = _imageIndex > 0 ? -_frameW : 0.0;
+    final hi = _imageIndex < _itemCount - 1 ? _frameW : 0.0;
+    final next = (_dragVector + d.delta.dx).clamp(lo, hi);
+    if (next != _dragVector) setState(() => _dragVector = next);
+  }
+
+  void _onDragEnd(DragEndDetails d) {
+    if (_isNavigating) return; // 章节切换已触发，防重复
+    final dxPerSec = d.velocity.pixelsPerSecond.dx;
+    final fling = dxPerSec.abs() > 350;
+    final passed = _dragVector.abs() > _frameW * 0.35;
+
+    // 章节边界：第一张继续向右拖 / 最后一张继续向左拖 → 切换章节
+    if (_dragVector == 0 && _rawDx.abs() > 80) {
+      if (_imageIndex == 0 && _rawDx > 0) {
+        _isNavigating = true;
+        widget.onPreviousChapter();
+        return;
+      }
+      if (_imageIndex == _itemCount - 1 && _rawDx < 0) {
+        _isNavigating = true;
+        widget.onNextChapter();
+        return;
+      }
+    }
+
+    _settleFrom = _dragVector;
+    if (passed || (fling && _dragVector.abs() > 8)) {
+      _settleTo = _dragVector > 0 ? _frameW : -_frameW;
+      _settleCommit = _dragVector > 0 ? 1 : -1;
+    } else {
+      _settleTo = 0;
+      _settleCommit = null;
+    }
+    _settle.forward(from: 0);
   }
 
   /// 从 rawCss 解析 .duokan-image-gallery-cell 的视觉样式
@@ -458,33 +537,13 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     return Alignment.center;
   }
 
-  void _onPageChanged(int index) {
-    setState(() => _currentIndex = index);
+  void _onSlideCommitted(int index) {
     _isNavigating = false;
-    // 翻页后导出渲染值（首页标题/后续图片页切换验证）
-    _dumpLayout('page$index');
-    // onPageChanged 在滑动越过 50% 时触发，此时页面仍在 settle 动画中，
-    // 水平偏移导致 x 值不可信；600ms 后再导一次稳定态
+    // slide 提交后导出渲染值（文字层内容切换验证）
+    _dumpLayout('slide$index');
     Future.delayed(const Duration(milliseconds: 600), () {
-      if (mounted) _dumpLayout('page${index}settle');
+      if (mounted) _dumpLayout('slide${index}settle');
     });
-  }
-
-  /// 边界章节切换：在第一页继续往前 → 上一章，最后页继续往后 → 下一章
-  void _handleEdgeScroll(ScrollNotification notification) {
-    if (_isNavigating) return;
-
-    if (notification is OverscrollNotification &&
-        notification.metrics.axis == Axis.horizontal) {
-      if (notification.overscroll < 0 && _currentIndex == 0) {
-        _isNavigating = true;
-        widget.onPreviousChapter();
-      } else if (notification.overscroll > 0 &&
-          _currentIndex == _itemCount - 1) {
-        _isNavigating = true;
-        widget.onNextChapter();
-      }
-    }
   }
 
   /// 点击图片弹出全屏预览
@@ -529,21 +588,32 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     final hasBgImage = widget.chapterStyle?.backgroundImageSrc != null &&
         widget.chapterStyle!.backgroundImageSrc!.isNotEmpty;
 
-    // ★ 对齐多看滑动实拍（dksw1 中间帧 + 20号/52号 静止态逐像素）★
-    // 画廊 = 静态文字层 + 图片轮播：
-    // - 标题/maintitle/subtitle/dotted/txt 全部【静止不滑动】，内容随
-    //   当前 slide 切换（多看 P1/P2 实拍标题同位；滑动中间帧 maintitle
-    //   纹丝不动，图片横向滑出/滑入）
-    // - 图片轮播节距 340.5（图 324 + 间隙 16.5）：静止时右侧露出下一张
-    //   ~1.5 逻辑px 预告边条（dk_f20_p1/p2 右缘 718 物理px 深色实拍）
+    // ★ 单框模型（对齐多看 dksw1 中间帧 + 20号/52号 静止态逐像素）★
+    // 全画廊只有一个框（DocImagesView 窗口：左 18、宽 324、高随字号），
+    // ClipRect 固定不动；图片条在框内滑动：
+    // - 每张图 cover 铺满整个框（内容顶满内边框，21 号档像素实证）
+    // - 拖动向量的捕捉驱动：下一张 sheet 从框右缘滑入盖住当前图
+    //   （当前图不动，dksw1 实证），上一张从左缘滑入；提交瞬间文字层
+    //   换内容（多看 P1/P2 实拍标题同位、中间帧 maintitle 纹丝不动）
     final showDotted = widget.images.length > 1;
     final base = widget.baseFontSize;
-    final imgBottomRel =
-        _imageTopGapOf(base) + _imageFrameHeightOf(base);
+    final frameH = _imageFrameHeightOf(base);
+    // 标题恒显：图像框顶不低于标题块底部+4，防超大字号重叠
+    final titleBottom = _hasTitlePage
+        ? base * _titleStyle.marginTop +
+            _titleExtraTopOf(base) +
+            base * _titleStyle.fontSize +
+            base * _titleStyle.marginBottom
+        : 0.0;
+    final frameTop = (_imageTopGapOf(base) < titleBottom + 4)
+        ? titleBottom + 4
+        : _imageTopGapOf(base);
+    final imgBottomRel = frameTop + frameH;
     final maintitleTop = imgBottomRel + _maintitlePadOf(base);
     final subtitleTop = maintitleTop +
         base * _cellStyle.maintitleFontSize * _kMaintitleLineHeight +
         _subtitlePadOf(base);
+    final current = widget.images[_imageIndex];
 
     return Container(
       color: hasBgImage ? null : _resolveBgColor(),
@@ -551,42 +621,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
       child: SafeArea(
         child: Stack(
           children: [
-            // 图片轮播：只滑图片（边框+阴影随图），文字不参与
-            Positioned.fill(
-              child: NotificationListener<ScrollNotification>(
-                onNotification: (notification) {
-                  _handleEdgeScroll(notification);
-                  return false;
-                },
-                child: PageView.builder(
-                  controller: _pageController,
-                  itemCount: _itemCount,
-                  onPageChanged: _onPageChanged,
-                  allowImplicitScrolling: true,
-                  itemBuilder: (context, index) {
-                    final isCurrent = index == _currentIndex;
-                    // 首页有标题时图像区顶距不低于标题块底部+4，
-                    // 防止超大字号下标题与图像重叠
-                    final titleBottom = _hasTitlePage
-                        ? base * _titleStyle.marginTop +
-                              _titleExtraTopOf(base) +
-                              base * _titleStyle.fontSize +
-                              base * _titleStyle.marginBottom
-                        : 0.0;
-                    return _GalleryCell(
-                      image: widget.images[index],
-                      style: _cellStyle,
-                      textColor: widget.textColor,
-                      baseFontSize: base,
-                      minTopGap: titleBottom + 4,
-                      onTap: () => _showFullScreenPreview(index),
-                      imageKey: isCurrent ? _imageKey : null,
-                    );
-                  },
-                ),
-              ),
-            ),
-            // h3 标题（静态层，所有页显示——多看 P1/P2 实拍标题同位）
+            // h3 标题（静态层，恒显——多看 P1/P2 实拍标题同位）
             if (_hasTitlePage)
               Positioned(
                 top: base * _titleStyle.marginTop + _titleExtraTopOf(base),
@@ -594,14 +629,69 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
                 right: 0,
                 child: _buildTitleText(titleKey: _titleKey),
               ),
+            // ★ 唯一的框：固定窗口，图片条在框内滑动（ClipRect 裁剪）
+            Positioned(
+              top: frameTop,
+              left: 18,
+              width: _frameW,
+              height: frameH,
+              child: ClipRect(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onHorizontalDragStart: _onDragStart,
+                  onHorizontalDragUpdate: _onDragUpdate,
+                  onHorizontalDragEnd: _onDragEnd,
+                  onTap: () => _showFullScreenPreview(_imageIndex),
+                  child: Stack(
+                    children: [
+                      // 底层：当前图，cover 铺满整个框（静止不动）
+                      Positioned.fill(
+                        child: _FrameImage(
+                          image: current,
+                          style: _cellStyle,
+                          textColor: widget.textColor,
+                          imageKey: _imageKey,
+                        ),
+                      ),
+                      // 入场 sheet：拖向下一张时从框右缘滑入盖住
+                      if (_dragVector > 0)
+                        Positioned(
+                          left: _frameW - _dragVector,
+                          top: 0,
+                          width: _frameW,
+                          height: frameH,
+                          child: _FrameImage(
+                            image: widget.images[_imageIndex + 1],
+                            style: _cellStyle,
+                            textColor: widget.textColor,
+                          ),
+                        ),
+                      // 入场 sheet：拖向上一张时从框左缘滑入盖住
+                      if (_dragVector < 0)
+                        Positioned(
+                          left: -_frameW - _dragVector,
+                          top: 0,
+                          width: _frameW,
+                          height: frameH,
+                          child: _FrameImage(
+                            image: widget.images[_imageIndex - 1],
+                            style: _cellStyle,
+                            textColor: widget.textColor,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
             // maintitle（静态层，内容随当前 slide 切换；324 列宽对齐图像列）
-            if (widget.images[_imageIndex].maintitle.isNotEmpty)
+            if (current.maintitle.isNotEmpty)
               Positioned(
                 top: maintitleTop,
                 left: 18,
                 right: 18,
                 child: Text(
-                  widget.images[_imageIndex].maintitle,
+                  current.maintitle,
                   key: _maintitleKey,
                   style: TextStyle(
                     fontSize: base * _cellStyle.maintitleFontSize,
@@ -616,13 +706,13 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
                 ),
               ),
             // subtitle（静态层，内容随当前 slide 切换；324 列宽 justify）
-            if (widget.images[_imageIndex].subtitle.isNotEmpty)
+            if (current.subtitle.isNotEmpty)
               Positioned(
                 top: subtitleTop,
                 left: 18,
                 right: 18,
                 child: Text(
-                  widget.images[_imageIndex].subtitle,
+                  current.subtitle,
                   key: _subtitleKey,
                   style: TextStyle(
                     fontSize: base * _cellStyle.subtitleFontSize,
@@ -800,7 +890,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
       final sb = StringBuffer('[reader] galleryDump $reason');
       sb.write(' dpr=$dpr size=${size.width.round()}x${size.height.round()}');
       sb.write(' safeTop=${safe.top.round()} safeBottom=${safe.bottom.round()}');
-      sb.write(' itemCount=$_itemCount idx=$_currentIndex imageIdx=$_imageIndex');
+      sb.write(' itemCount=$_itemCount idx=$_imageIndex drag=$_dragVector');
 
       void rectOf(GlobalKey key, String name) {
         final box = key.currentContext?.findRenderObject() as RenderBox?;
@@ -853,129 +943,84 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
 ///     text-align: justify;
 /// }
 /// ```
-class _GalleryCell extends StatelessWidget {
+/// 框内单张图片图层（cover 铺满整个框）
+///
+/// ★ 单框模型：全画廊只有一个框（DocImagesView 窗口），本图层即框内
+/// 的内容——每张图 cover 填满 324×frameH，边框 1px 描边 + 阴影随图。
+/// 滑动 = 入场图层从框缘平移盖住当前图层（唯一框，无新框创建）。
+class _FrameImage extends StatelessWidget {
   final EpubGalleryImage image;
   final _GalleryCellStyle style;
   final Color textColor;
 
-  /// 画廊基准字号 = 阅读器字号设置（em 级联与垂直几何随动）
-  final double baseFontSize;
-
-  /// 图像区顶距下限（首页有标题时 = 标题块底部 + 4，防止大字号下重叠）
-  final double minTopGap;
-  final VoidCallback onTap;
-
-  /// 渲染值诊断 key（仅当前页传入，避免 GlobalKey 重复挂载）
+  /// 渲染值诊断 key（仅当前图层挂载）
   final Key? imageKey;
 
-  const _GalleryCell({
+  const _FrameImage({
     required this.image,
     required this.style,
     required this.textColor,
-    required this.baseFontSize,
-    required this.onTap,
-    this.minTopGap = 0,
     this.imageKey,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      // 轮播页宽 = 340.5（节距），图 324 居中 → 水平内边距 8.25；
-      // 相邻页在屏幕右缘露出 ~1.5 逻辑px 预告边条（多看实拍一致）
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8.25),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            // 多看 DocImagesView 图像区：宽 = 页宽 - 36；图像 contain
-            // 原比例居中于显示框（框高随基准字号：167.5@21）
-            final dispW = constraints.maxWidth;
-            final dispH = _imageFrameHeightOf(baseFontSize);
-            // 图像区顶留白随基准字号（220@21，绝对 244 = SafeArea 24 +
-            // 220）；首页有标题时不低于标题块底部，防大字号重叠
-            final topGap = _imageTopGapOf(baseFontSize);
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(height: topGap < minTopGap ? minTopGap : topGap),
-                // 边框+阴影装饰叠加层（原 .duokan-image-gallery-cell 的
-                // border 1px + box-shadow 5px 5px 5px #888888）。
-                // 用 Stack 叠加避免 border 向外扩展影响布局尺寸
-                // （Flutter Container+border 实测 box 高 = 内容+2）。
-                SizedBox(
-                  key: imageKey,
-                  width: dispW,
-                  height: dispH,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      // 阴影层（最底）：boxShadow 只在盒外侧投影，被上层
-                      // 图片盖住内侧。redroid 软渲染下 blur 铺满整盒的
-                      // 渲染异常也因此被图片遮挡，不影响视觉（实测
-                      // DecoratedBox 在图片上层时灰块盖住图片）。
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          boxShadow: [
-                            BoxShadow(
-                              color:
-                                  style.boxShadowColor ?? const Color(0xFF888888),
-                              offset: Offset(
-                                  style.boxShadowDx, style.boxShadowDy),
-                              blurRadius: style.boxShadowBlur,
-                            ),
-                          ],
-                        ),
-                      ),
-                      // 图片层（中）：cover 裁边填满显示区
-                      ClipRect(child: _buildImage()),
-                      // 边框层（最上）：1px 描边不遮挡图片内容
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                            width: style.borderWidth,
-                            color: style.borderColor ?? textColor,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+    return SizedBox.expand(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // 阴影层（最底）
+          DecoratedBox(
+            decoration: BoxDecoration(
+              boxShadow: [
+                BoxShadow(
+                  color: style.boxShadowColor ?? const Color(0xFF888888),
+                  offset: Offset(style.boxShadowDx, style.boxShadowDy),
+                  blurRadius: style.boxShadowBlur,
                 ),
               ],
-            );
-          },
-        ),
+            ),
+          ),
+          // 图片层（中）：cover 铺满框（内容顶满内边框）
+          ClipRect(child: _buildImage()),
+          // 边框层（最上）：1px 描边
+          DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(
+                width: style.borderWidth,
+                color: style.borderColor ?? textColor,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildImage() {
     final src = image.src;
-    // 外层 SizedBox 固定 324×167.5 显示框，图 contain 原比例居中
-    // （多看实测：00.jpg contain 163 < 框高 167.5，边框环仍为满框；
-    // cover 裁切会切掉图表边缘内容，2026-08-28 双字号实测纠正）
+    // ★ 图片 cover 铺满整个框（用户定案：图片一定要全部覆盖框框；
+    // 21 号档像素实证：内容 490-820 顶满内边框 490-820）
     if (src.startsWith('data:')) {
       return Image.memory(
         _parseDataUri(src),
-        fit: BoxFit.contain,
+        fit: BoxFit.cover,
         gaplessPlayback: true,
-        errorBuilder: (context, error, stackTrace) =>
-            _buildErrorWidget(),
+        errorBuilder: (context, error, stackTrace) => _buildErrorWidget(),
       );
     }
     return Image.file(
       File(src),
-      fit: BoxFit.contain,
+      fit: BoxFit.cover,
       gaplessPlayback: true,
-      errorBuilder: (context, error, stackTrace) =>
-          _buildErrorWidget(),
+      errorBuilder: (context, error, stackTrace) => _buildErrorWidget(),
     );
   }
 
   Widget _buildErrorWidget() {
     return Container(
       width: double.infinity,
-      height: 200,
+      height: double.infinity,
       alignment: Alignment.center,
       child: Icon(
         Icons.broken_image_outlined,
