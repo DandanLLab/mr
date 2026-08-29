@@ -165,7 +165,9 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     _txtText = widget.chapterStyle?.galleryTxt?.trim() ?? '';
     final initialIdx = widget.initialPageToEnd ? _itemCount - 1 : 0;
     _currentIndex = initialIdx;
-    _pageController = PageController(initialPage: initialIdx);
+    // 轮播节距 340.5 逻辑 = 360 × viewportFraction（多看实拍拟合）
+    _pageController =
+        PageController(initialPage: initialIdx, viewportFraction: 340.5 / 360.0);
     _cellStyle = _parseCellStyle(widget.chapterStyle?.rawCss ?? '');
     _titleStyle = _parseTitleStyle(widget.chapterStyle?.rawCss ?? '');
     // 首帧后导出渲染值（logcat 抓取 galleryDump）
@@ -527,106 +529,128 @@ class _EpubGalleryPageState extends State<EpubGalleryPage> {
     final hasBgImage = widget.chapterStyle?.backgroundImageSrc != null &&
         widget.chapterStyle!.backgroundImageSrc!.isNotEmpty;
 
-    // ★ 对齐多看画廊页结构（gallery_full_disasm_report.md 第二节/5.1 +
-    //   dk_p00b 稳定态实测 2026-08-24）：
-    //   1. 每页 = 图片 + maintitle + subtitle（多看 RenderGallery 只生成
-    //      slider/slide/msg，h3 标题与 gallery-txt 不进入画廊页）
-    //   2. 图片页：图片 + maintitle + subtitle 垂直居中（dk_s1 实测
-    //      图片 648x326 @ x=36-683，即左右边距各 18 logical）
-    //   3. dotted 悬浮底部，所有页显示
+    // ★ 对齐多看滑动实拍（dksw1 中间帧 + 20号/52号 静止态逐像素）★
+    // 画廊 = 静态文字层 + 图片轮播：
+    // - 标题/maintitle/subtitle/dotted/txt 全部【静止不滑动】，内容随
+    //   当前 slide 切换（多看 P1/P2 实拍标题同位；滑动中间帧 maintitle
+    //   纹丝不动，图片横向滑出/滑入）
+    // - 图片轮播节距 340.5（图 324 + 间隙 16.5）：静止时右侧露出下一张
+    //   ~1.5 逻辑px 预告边条（dk_f20_p1/p2 右缘 718 物理px 深色实拍）
     final showDotted = widget.images.length > 1;
+    final base = widget.baseFontSize;
+    final imgBottomRel =
+        _imageTopGapOf(base) + _imageFrameHeightOf(base);
+    final maintitleTop = imgBottomRel + _maintitlePadOf(base);
+    final subtitleTop = maintitleTop +
+        base * _cellStyle.maintitleFontSize * _kMaintitleLineHeight +
+        _subtitlePadOf(base);
 
     return Container(
       color: hasBgImage ? null : _resolveBgColor(),
       decoration: hasBgImage ? _buildBackgroundDecoration() : null,
       child: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
-            Expanded(
-              child: Stack(
-                children: [
-                  // 滑动区：底部留出 dotted 高度，cell 内容不被遮挡
-                  Positioned.fill(
-                    child: Padding(
-                      padding: EdgeInsets.only(bottom: dottedHeightOf(showDotted)),
-                      child: NotificationListener<ScrollNotification>(
-                        onNotification: (notification) {
-                          _handleEdgeScroll(notification);
-                          return false;
-                        },
-                        child: PageView.builder(
-                          controller: _pageController,
-                          itemCount: _itemCount,
-                          onPageChanged: _onPageChanged,
-                          allowImplicitScrolling: true,
-                          itemBuilder: (context, index) {
-                            final isCurrent = index == _currentIndex;
-                            final hasTitle = index == 0 && _hasTitlePage;
-                            final base = widget.baseFontSize;
-                            // 首页有标题时图像区顶距不低于标题块底部+4，
-                            // 防止超大字号下标题与图像重叠
-                            final titleBottom = hasTitle
-                                ? base * _titleStyle.marginTop +
-                                      _titleExtraTopOf(base) +
-                                      base * _titleStyle.fontSize +
-                                      base * _titleStyle.marginBottom
-                                : 0.0;
-                            final cell = _GalleryCell(
-                              image: widget.images[index],
-                              style: _cellStyle,
-                              textColor: widget.textColor,
-                              baseFontSize: base,
-                              minTopGap: titleBottom + 4,
-                              onTap: () => _showFullScreenPreview(index),
-                              imageKey: isCurrent ? _imageKey : null,
-                              maintitleKey: isCurrent ? _maintitleKey : null,
-                              subtitleKey: isCurrent ? _subtitleKey : null,
-                            );
-                            // 首页 = h3 标题 + 第一张图同屏（多看小字号
-                            // 形态：标题悬于图像区上方，位置按随字号公式，
-                            // 横向滑动切 slide 时标题只在首页）
-                            if (hasTitle) {
-                              return Stack(
-                                children: [
-                                  cell,
-                                  Positioned(
-                                    top: base * _titleStyle.marginTop +
-                                        _titleExtraTopOf(base),
-                                    left: 0,
-                                    right: 0,
-                                    child: _buildTitleText(
-                                      titleKey: isCurrent ? _titleKey : null,
-                                    ),
-                                  ),
-                                ],
-                              );
-                            }
-                            return cell;
-                          },
-                        ),
-                      ),
-                    ),
-                  ),
-                  // 点点点指示器 + gallery-txt 提示：同屏形态随字号公式
-                  // 定位（20号→462.5/481.5、52号→578 实拍锚定），放不下
-                  // 的元素自动贴底/隐藏
-                  if (showDotted)
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      top: _dottedPositionedTopOf(context),
-                      child: _buildDottedIndicator(),
-                    ),
-                  if (_showGalleryTxt(context))
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      top: _galleryTxtPositionedTopOf(context),
-                      child: _buildGalleryTxt(),
-                    ),
-                ],
+            // 图片轮播：只滑图片（边框+阴影随图），文字不参与
+            Positioned.fill(
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (notification) {
+                  _handleEdgeScroll(notification);
+                  return false;
+                },
+                child: PageView.builder(
+                  controller: _pageController,
+                  itemCount: _itemCount,
+                  onPageChanged: _onPageChanged,
+                  allowImplicitScrolling: true,
+                  itemBuilder: (context, index) {
+                    final isCurrent = index == _currentIndex;
+                    // 首页有标题时图像区顶距不低于标题块底部+4，
+                    // 防止超大字号下标题与图像重叠
+                    final titleBottom = _hasTitlePage
+                        ? base * _titleStyle.marginTop +
+                              _titleExtraTopOf(base) +
+                              base * _titleStyle.fontSize +
+                              base * _titleStyle.marginBottom
+                        : 0.0;
+                    return _GalleryCell(
+                      image: widget.images[index],
+                      style: _cellStyle,
+                      textColor: widget.textColor,
+                      baseFontSize: base,
+                      minTopGap: titleBottom + 4,
+                      onTap: () => _showFullScreenPreview(index),
+                      imageKey: isCurrent ? _imageKey : null,
+                    );
+                  },
+                ),
               ),
             ),
+            // h3 标题（静态层，所有页显示——多看 P1/P2 实拍标题同位）
+            if (_hasTitlePage)
+              Positioned(
+                top: base * _titleStyle.marginTop + _titleExtraTopOf(base),
+                left: 0,
+                right: 0,
+                child: _buildTitleText(titleKey: _titleKey),
+              ),
+            // maintitle（静态层，内容随当前 slide 切换；324 列宽对齐图像列）
+            if (widget.images[_imageIndex].maintitle.isNotEmpty)
+              Positioned(
+                top: maintitleTop,
+                left: 18,
+                right: 18,
+                child: Text(
+                  widget.images[_imageIndex].maintitle,
+                  key: _maintitleKey,
+                  style: TextStyle(
+                    fontSize: base * _cellStyle.maintitleFontSize,
+                    fontFamily: _cellStyle.maintitleFontFamily,
+                    color: _cellStyle.maintitleColor,
+                    decoration: TextDecoration.none,
+                    height: _kMaintitleLineHeight,
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            // subtitle（静态层，内容随当前 slide 切换；324 列宽 justify）
+            if (widget.images[_imageIndex].subtitle.isNotEmpty)
+              Positioned(
+                top: subtitleTop,
+                left: 18,
+                right: 18,
+                child: Text(
+                  widget.images[_imageIndex].subtitle,
+                  key: _subtitleKey,
+                  style: TextStyle(
+                    fontSize: base * _cellStyle.subtitleFontSize,
+                    fontFamily: _cellStyle.subtitleFontFamily,
+                    color: _cellStyle.subtitleColor,
+                    height: _kSubtitleLineHeight,
+                    decoration: TextDecoration.none,
+                  ),
+                  textAlign: TextAlign.justify,
+                ),
+              ),
+            // 点点点指示器 + gallery-txt 提示：同屏形态随字号公式
+            // 定位（20号→462.5/481.5、52号→578 实拍锚定），放不下
+            // 的元素自动贴底/隐藏
+            if (showDotted)
+              Positioned(
+                left: 0,
+                right: 0,
+                top: _dottedPositionedTopOf(context),
+                child: _buildDottedIndicator(),
+              ),
+            if (_showGalleryTxt(context))
+              Positioned(
+                left: 0,
+                right: 0,
+                top: _galleryTxtPositionedTopOf(context),
+                child: _buildGalleryTxt(),
+              ),
           ],
         ),
       ),
@@ -843,8 +867,6 @@ class _GalleryCell extends StatelessWidget {
 
   /// 渲染值诊断 key（仅当前页传入，避免 GlobalKey 重复挂载）
   final Key? imageKey;
-  final Key? maintitleKey;
-  final Key? subtitleKey;
 
   const _GalleryCell({
     required this.image,
@@ -854,19 +876,16 @@ class _GalleryCell extends StatelessWidget {
     required this.onTap,
     this.minTopGap = 0,
     this.imageKey,
-    this.maintitleKey,
-    this.subtitleKey,
   });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      // 水平 18px 对齐多看图片左右边距：dk_s1 实测 00.jpg x=36-683
-      // （648 wide = 720-72，即单边 36 physical = 18 logical）。
-      // 垂直不留边距：图像顶由 DocImagesView 固定几何（35 + 居中留白）决定。
+      // 轮播页宽 = 340.5（节距），图 324 居中 → 水平内边距 8.25；
+      // 相邻页在屏幕右缘露出 ~1.5 逻辑px 预告边条（多看实拍一致）
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 18),
+        padding: const EdgeInsets.symmetric(horizontal: 8.25),
         child: LayoutBuilder(
           builder: (context, constraints) {
             // 多看 DocImagesView 图像区：宽 = 页宽 - 36；图像 contain
@@ -922,46 +941,6 @@ class _GalleryCell extends StatelessWidget {
                     ],
                   ),
                 ),
-                // maintitle（对齐 .duokan-image-maintitle：墨顶 = 显示框底
-                // + 18.5 = 430@21；pad 15.5 随基准字号等比）
-                if (image.maintitle.isNotEmpty)
-                  Padding(
-                    key: maintitleKey,
-                    padding:
-                        EdgeInsets.only(top: _maintitlePadOf(baseFontSize)),
-                    child: Text(
-                      image.maintitle,
-                      style: TextStyle(
-                        fontSize: baseFontSize * style.maintitleFontSize,
-                        fontFamily: style.maintitleFontFamily,
-                        color: style.maintitleColor,
-                        decoration: TextDecoration.none,
-                        height: _kMaintitleLineHeight,
-                      ),
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                // subtitle（对齐 .duokan-image-subtitle：墨顶 476@21，
-                // pad 15.0 随基准字号等比；行距 40.5/18.9 比例不变）
-                if (image.subtitle.isNotEmpty)
-                  Padding(
-                    key: subtitleKey,
-                    padding:
-                        EdgeInsets.only(top: _subtitlePadOf(baseFontSize)),
-                    child: Text(
-                      image.subtitle,
-                      style: TextStyle(
-                        fontSize: baseFontSize * style.subtitleFontSize,
-                        fontFamily: style.subtitleFontFamily,
-                        color: style.subtitleColor,
-                        height: _kSubtitleLineHeight,
-                        decoration: TextDecoration.none,
-                      ),
-                      textAlign: TextAlign.justify,
-                    ),
-                  ),
               ],
             );
           },
