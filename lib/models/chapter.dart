@@ -36,6 +36,10 @@ class Chapter {
   /// true 时阅读器走 PageView 横向滑动渲染，不走 WebView
   final bool isGallery;
 
+  /// 是否为整页 CSS 背景章（body.renwu/VOL/qmpfengdi 等，EpubParser 识别）
+  /// true 时 WebView 模板按全屏背景渲染（4a-3 背景铺满，对齐多看）
+  final bool isFullPageBg;
+
   // ===== EPUB Fixed-layout 章节支持字段 =====
   // 仅 EPUB 本地书解析时填充，标识该章节是否为固定版式
   // （rendition:layout=pre-paginated，漫画/画册），由 viewport scale 等比缩放渲染
@@ -69,6 +73,7 @@ class Chapter {
     this.depth = 0,
     this.parentId = -1,
     this.isGallery = false,
+    this.isFullPageBg = false,
     this.isFixedLayout = false,
     this.fixedLayoutWidth,
     this.fixedLayoutHeight,
@@ -91,6 +96,7 @@ class Chapter {
     int? depth,
     int? parentId,
     bool? isGallery,
+    bool? isFullPageBg,
     bool? isFixedLayout,
     double? fixedLayoutWidth,
     double? fixedLayoutHeight,
@@ -112,6 +118,7 @@ class Chapter {
       depth: depth ?? this.depth,
       parentId: parentId ?? this.parentId,
       isGallery: isGallery ?? this.isGallery,
+      isFullPageBg: isFullPageBg ?? this.isFullPageBg,
       isFixedLayout: isFixedLayout ?? this.isFixedLayout,
       fixedLayoutWidth: fixedLayoutWidth ?? this.fixedLayoutWidth,
       fixedLayoutHeight: fixedLayoutHeight ?? this.fixedLayoutHeight,

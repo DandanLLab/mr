@@ -86,6 +86,12 @@ class EpubChapter {
   /// true 时阅读器走 PageView 横向滑动渲染，不走 WebView
   bool isGallery;
 
+  /// 是否为整页 CSS 背景章（body.renwu\*/VOL\*/qmpfengdi 等 body class
+  /// 背景图整页，正文仅隐藏标题 + 空 p；《这游戏也太真实了》人物卡/卷首页/
+  /// 封底）
+  /// true 时 WebView 模板按全屏背景渲染（4a-3 背景铺满，对齐多看）
+  bool isFullPageBg;
+
   /// 画廊图片信息列表（每项含 src、maintitle、subtitle）
   /// 仅当 [isGallery] 为 true 时填充
   List<EpubGalleryImage> galleryImages;
@@ -140,6 +146,7 @@ class EpubChapter {
     this.parentId = -1,
     this.children = const [],
     this.isGallery = false,
+    this.isFullPageBg = false,
     this.galleryImages = const [],
     this.galleryChapterStyle,
     this.duokanImageBlocks = const {},
@@ -180,6 +187,7 @@ class EpubChapter {
         parentId: parentId,
         children: node.children,
         isGallery: node.isGallery,
+        isFullPageBg: node.isFullPageBg,
         galleryImages: node.galleryImages,
         galleryChapterStyle: node.galleryChapterStyle,
         duokanImageBlocks: node.duokanImageBlocks,
@@ -655,6 +663,42 @@ class EpubParser {
             );
             debugPrint('[EPUB诊断] 章节${chapter.index}识别为画廊页，'
                 '共 ${galleryImages.length} 张图片');
+          }
+
+          // 5a-0. 识别整页 CSS 背景章（body.renwu*/VOL*/qmpfengdi 等）
+          //   作者用 body class 的 background-image 做整页背景（《这游戏也太
+          //   真实了》人物卡/卷首页/封底/手册页）。多看按整页背景渲染；
+          //   MR WebView 的 body class 被移到 wrapper .epub-chapter-bg，
+          //   作者 CSS 的 body.xxx 选择器不命中 → 背景丢失。
+          //   识别后模板 4a-3 把背景覆盖到 wrapper 全屏铺满。
+          //   判定：inlinedBodyAttrs 的 body class 命中背景类集合
+          //   （renwu/VOL/qmpfengdi/qmpzpxg/zhizuosm/jieshao/kuaijie），
+          //   且内容几乎只有隐藏标题/空 p（正文少或缺）
+          final bgClassMatch =
+              RegExp(r'class="([^"]*)"', caseSensitive: false)
+                  .firstMatch(inlinedBodyAttrs);
+          final bodyClasses =
+              (bgClassMatch?.group(1) ?? '').split(RegExp(r'\s+'));
+          final bgClassHits = bodyClasses.where((c) {
+            final lower = c.toLowerCase();
+            return lower.contains('renwu') ||
+                lower.contains('vol') ||
+                lower.contains('qmpfengdi') ||
+                lower.contains('qmpzpxg') ||
+                lower.contains('zhizuosm') ||
+                lower.contains('jieshao') ||
+                lower.contains('kuaijie');
+          }).toList();
+          if (bgClassHits.isNotEmpty) {
+            final richText = richBody
+                .replaceAll(RegExp(r'<[^>]+>'), ' ')
+                .trim()
+                .replaceAll('&nbsp;', '');
+            if (richText.length < 40) {
+              chapter.isFullPageBg = true;
+              debugPrint('[EPUB诊断] 章节${chapter.index}识别为整页背景章 '
+                  '(class=${bgClassHits.join(',')} 文本${richText.length}字)');
+            }
           }
 
           // 5b. 识别多看扩展标签（借鉴 libdkkernel.so DKE_BLOCK_TYPE/HTML_CUSTOMTAG_TYPE）

@@ -120,6 +120,11 @@ class ReaderWebView extends StatefulWidget {
   final double? topInsetOverride;
   final double? bottomInsetOverride;
 
+  /// 章节是否为整页 CSS 背景章（body.renwu/VOL 等，EpubParser.isFullPageBg）
+  /// 注入 --reader-fullpage-bg 标记，模板 4a-3 将作者 body class 背景
+  /// 覆盖到 wrapper 全屏铺满（对齐多看人物卡/卷首页/封底实拍）
+  final bool isFullPageBg;
+
   const ReaderWebView({
     super.key,
     required this.content,
@@ -128,6 +133,7 @@ class ReaderWebView extends StatefulWidget {
     required this.provider,
     this.topInsetOverride,
     this.bottomInsetOverride,
+    this.isFullPageBg = false,
     required this.isScrollMode,
     required this.controller,
     required this.callbacks,

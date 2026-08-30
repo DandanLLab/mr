@@ -2699,6 +2699,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         isFixedLayout: isFixedLayout,
         fixedLayoutWidth: currentChapter?.fixedLayoutWidth,
         fixedLayoutHeight: currentChapter?.fixedLayoutHeight,
+        isFullPageBg: currentChapter?.isFullPageBg ?? false,
         topInsetOverride: headerExtent,
         bottomInsetOverride: footerExtent,
         controller: _readerWebViewController,

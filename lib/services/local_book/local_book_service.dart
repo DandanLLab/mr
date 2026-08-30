@@ -445,6 +445,7 @@ class LocalBookService {
         depth: epubChapter.depth,
         parentId: epubChapter.parentId,
         isGallery: epubChapter.isGallery,
+        isFullPageBg: epubChapter.isFullPageBg,
         isFixedLayout: epubChapter.isFixedLayout,
         fixedLayoutWidth: epubChapter.fixedLayoutWidth,
         fixedLayoutHeight: epubChapter.fixedLayoutHeight,
