@@ -2057,10 +2057,11 @@ class EpubParser {
     return result;
   }
 
-  /// 封面 SVG 全屏适配：确保全屏封面 svg 的 preserveAspectRatio 为 meet
+  /// 封面 SVG 全屏适配：确保全屏封面 svg 的 preserveAspectRatio 为 cover
   ///
-  /// 对齐 lumina（同框架）的 applyCenteringStyles：
-  /// lumina 对封面 svg 强制 setAttribute('preserveAspectRatio', 'xMidYMid meet')
+  /// 对齐多看实拍（《这游戏也太真实了》封面）：全屏铺满、裁边填充，
+  /// 无上下/左右留白——与 Readium object-fit:cover 一致。
+  /// 之前用 meet（contain 完整显示）导致封面 letterbox 露底，与多看不符。
   ///
   /// EPUB 封面章常见结构（本仓库 诡秘之主 cover.xhtml 同款）：
   /// ```html
@@ -2070,10 +2071,9 @@ class EpubParser {
   /// </svg>
   /// ```
   ///
-  /// preserveAspectRatio=meet 按 viewBox 等比缩放，完整显示封面不裁边，
-  /// 手机屏幕比例与封面不一致时可能有上下/左右留白（letterbox）。
-  /// 这与 lumina 和 Readium CSS（object-fit:contain）的策略一致：
-  /// 完整显示优先于铺满整屏，不裁切封面内容。
+  /// preserveAspectRatio=cover 按 viewBox 等比缩放并居中裁剪，铺满整屏不
+  /// 留白（多看全屏封面策略）。手机屏幕比例与封面不一致时裁掉少量边缘，
+  /// 相比 meet 的留白更贴近多看。
   ///
   /// 仅匹配「width/height 均为 100% + 内含 <image>」的全屏封面 svg，
   /// 不影响正文中的普通 svg 装饰/图标。
@@ -2088,18 +2088,18 @@ class EpubParser {
             RegExp(r'\bheight="100%"', caseSensitive: false).hasMatch(attrs) &&
             RegExp(r'<image\b', caseSensitive: false).hasMatch(inner);
         if (!isCoverSvg) return m.group(0)!;
-        // 确保为 meet（对齐 lumina）：若已是 meet 则不改，否则改为 meet
+        // 确保为 cover（对齐多看全屏铺满）：若已是 cover 则不改，否则改 cover
         final newAttrs = attrs.contains('preserveAspectRatio')
             ? attrs.replaceAllMapped(
                 RegExp(
                   r'preserveAspectRatio\s*=\s*"([^"]*)"',
                   caseSensitive: false,
                 ),
-                (am) => (am.group(1) ?? '').contains('meet')
+                (am) => (am.group(1) ?? '').contains('cover')
                     ? am.group(0)!
-                    : 'preserveAspectRatio="xMidYMid meet"',
+                    : 'preserveAspectRatio="xMidYMid slice"',
               )
-            : '$attrs preserveAspectRatio="xMidYMid meet"';
+            : '$attrs preserveAspectRatio="xMidYMid slice"';
         return '<svg$newAttrs>$inner</svg>';
       },
     );

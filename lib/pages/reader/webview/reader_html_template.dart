@@ -1065,6 +1065,33 @@ body.reader-scroll #reader-content-b {
   overflow: hidden;
 }
 
+/* 4a-3. 整页 CSS 背景章（body.renwu0/renwu1/.../VOL01/.../qmpfengdi 等）：
+   作者用 body class 的 background-image 做整页背景（《这游戏也太真实了》
+   人物卡/卷首页/封底——正文仅隐藏 h1/h2 + 空 p）。
+   多看按"整页背景 + 可选标题"渲染，全屏铺满无留白。
+   作者 CSS 的 body.renwu0 选择器在 WebView 里不命中（body class 已被
+   EpubParser 移到 wrapper div .epub-chapter-bg），此规则把背景铺满语义
+   兜底到 wrapper：配合 4a 的 min-height:var(--reader-safe-height) +
+   overflow:hidden，背景 cover 铺满整屏（对齐多看人物卡/卷首页实拍）。
+   仅命中整页背景类（有 body 级背景图的 class），不影响正文章节。 */
+#reader-content-a .epub-chapter-bg[class*="renwu"],
+#reader-content-a .epub-chapter-bg[class*="VOL"],
+#reader-content-a .epub-chapter-bg[class*="qmpfengdi"],
+#reader-content-a .epub-chapter-bg[class*="qmpzpxg"],
+#reader-content-a .epub-chapter-bg[class*="zhizuosm"],
+#reader-content-a .epub-chapter-bg[class*="jieshao"],
+#reader-content-a .epub-chapter-bg[class*="kuaijie"] {
+  background-size: cover !important;
+  background-position: top center !important;
+  background-attachment: scroll !important;
+  background-repeat: no-repeat !important;
+  width: 100% !important;
+  min-height: var(--reader-safe-height) !important;
+}
+
+/* 4a-4. 封面/整页背景章正文若为空（隐藏 h1 + 空 p），wrapper 高度已经由
+   4a-3 的 min-height 顶满；无需额外高度兜底。 */
+
 /* 4d. EPUB 原作者用 width:35px/.content-matrix width:540px 等固定宽度做装饰。
    保留原作者的 width（装饰元素需要固定尺寸），只加 max-width:100% 防止溢出。
    不再用 width:auto 覆盖，避免破坏 .volume-title 装饰框和 .content-matrix 视频尺寸。
