@@ -1062,7 +1062,10 @@ body.reader-scroll #reader-content-b {
      copyright(白底 #fff) 和 foreword1(黑底 #000) 等无 class 但有背景色的章节也能匹配。
      正文章节 body 通常无背景属性，不受影响。 */
 #reader-content-a .epub-chapter-bg {
-  overflow: hidden;
+  /* 只对无长文本的纯背景章用 overflow:hidden；这里默认 visible——
+     手册页 .zhangyue-bg 白卡 height:300% 长文本需要完整可见（多看同款），
+     overflow:hidden 会裁掉超高的白卡内容 */
+  overflow: visible;
 }
 
 /* 4a-3. 整页 CSS 背景章（body.renwu0/renwu1/.../VOL01/.../qmpfengdi 等）：
@@ -1087,6 +1090,22 @@ body.reader-scroll #reader-content-b {
   background-repeat: no-repeat !important;
   width: 100% !important;
   min-height: var(--reader-safe-height) !important;
+}
+
+/* 4a-3b. 手册页白卡（.jieshao 章 div.zhangyue-bg，height:300% 作者意图
+   白卡盖满多屏）正常流分页修复：
+   - 白卡 height:auto 随内容（column 分页按内容高度切页，多看看同款）
+   - 白卡半透明背景保留（rgba 0.8）
+   - 不裁剪（overflow 已改 visible） */
+#reader-content-a .epub-chapter-bg div.zhangyue-bg {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+  break-inside: auto !important;
+  column-break-inside: auto !important;
+  page-break-inside: auto !important;
+  margin: 0 -5px !important;
 }
 
 /* 4a-4. 封面/整页背景章正文若为空（隐藏 h1 + 空 p），wrapper 高度已经由
