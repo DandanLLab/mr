@@ -718,7 +718,9 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
         : _imageTopGapOf(base);
     final imgBottomRel = frameTop + frameH;
     final maintitleTop = imgBottomRel + _maintitlePadOf(base);
-    final current = widget.images[_imageIndex];
+    // 章节切换竞争防御：索引钳制到新章节图片范围内
+    final safeIndex = _imageIndex.clamp(0, _itemCount - 1);
+    final current = widget.images[safeIndex];
 
     // ★ 描述文字动态排版（防溢出，文字必须完整显示、不允许省略号）★
     // 长描述（如 08/10/11/19/22.jpg）在 base15 下 subtitle 达 3-4 行，
@@ -834,7 +836,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
                           width: _frameW,
                           height: frameH,
                           child: _FrameImage(
-                            image: widget.images[_imageIndex + 1],
+                            image: widget.images[safeIndex + 1],
                             style: _cellStyle,
                             textColor: widget.textColor,
                           ),
@@ -847,7 +849,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
                           width: _frameW,
                           height: frameH,
                           child: _FrameImage(
-                            image: widget.images[_imageIndex - 1],
+                            image: widget.images[safeIndex - 1],
                             style: _cellStyle,
                             textColor: widget.textColor,
                           ),
@@ -858,7 +860,6 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
               ),
             ),
             // maintitle（静态层，内容随当前 slide 切换；324 列宽对齐图像列）
-            if (current.maintitle.isNotEmpty)
               Positioned(
                 top: maintitleTop,
                 left: 18,
