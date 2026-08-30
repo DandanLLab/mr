@@ -161,13 +161,28 @@ class EpubTocParser {
     String baseHref,
     xml.XmlElement navPoint,
   ) {
-    // 找 <text> 子元素
+    // 找标题：标准 NCX 是 <navPoint><navLabel><text>标题</text></navLabel>，
+    // <text> 藏在 navLabel 里（非直接子元素）——旧实现只扫直接子元素导致
+    // 全部标题丢失、目录退化为 "Chapter N" 占位（诡秘/这游戏两本书实证）。
+    // 兼容非常规写法：<text> 直接挂在 navPoint 下。
     String? title;
     for (final el in navPoint.children) {
-      if (el is xml.XmlElement && el.localName == 'text') {
-        final text = el.innerText.trim();
-        if (text.isNotEmpty) {
-          title = text;
+      if (el is xml.XmlElement && el.localName == 'navLabel') {
+        for (final t in el.children) {
+          if (t is xml.XmlElement && t.localName == 'text') {
+            final v = t.innerText.trim();
+            if (v.isNotEmpty) title = v;
+            break;
+          }
+        }
+        break;
+      }
+    }
+    if (title == null) {
+      for (final el in navPoint.children) {
+        if (el is xml.XmlElement && el.localName == 'text') {
+          final v = el.innerText.trim();
+          if (v.isNotEmpty) title = v;
           break;
         }
       }
