@@ -80,6 +80,14 @@ void main() async {
       }
     }
 
+    // ★ 沉浸式全屏：隐藏系统状态栏与导航栏（immersiveSticky——边缘滑动
+    // 临时呼出、松手自动再隐藏）。全屏阅读体验，对齐多看
+    try {
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    } catch (e) {
+      debugPrint('SystemChrome immersive error: $e');
+    }
+
     runApp(const DanShenqiApp());
   }, (error, stack) {
     // Zone 级未捕获错误

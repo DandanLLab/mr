@@ -793,7 +793,10 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     return Container(
       color: hasBgImage ? null : _resolveBgColor(),
       decoration: hasBgImage ? _buildBackgroundDecoration() : null,
+      // ★ 顶部锁 24：多看全部位置公式按 safeTop 24 校准；沉浸式隐藏状态
+      //   栏后 MediaQuery.safeTop 归零会导致整体上移，minimum 锁定几何
       child: SafeArea(
+        minimum: const EdgeInsets.only(top: 24),
         child: Stack(
           children: [
             // h3 标题（静态层，恒显——多看 P1/P2 实拍标题同位）
@@ -1284,37 +1287,36 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
       bottom: 0,
       left: 0,
       right: 0,
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(4, 8, 8, 63),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (img.maintitle.isNotEmpty)
-                Text(
-                  img.maintitle,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    height: 1.35,
-                    decoration: TextDecoration.none,
-                  ),
+      // 沉浸式全屏（无系统栏），块底距屏底 87 逻辑 = 多看实拍
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(4, 8, 8, 87),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (img.maintitle.isNotEmpty)
+              Text(
+                img.maintitle,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  height: 1.35,
+                  decoration: TextDecoration.none,
                 ),
-              if (img.subtitle.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  img.subtitle,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14.5,
-                    height: 1.35,
-                    decoration: TextDecoration.none,
-                  ),
+              ),
+            if (img.subtitle.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                img.subtitle,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14.5,
+                  height: 1.35,
+                  decoration: TextDecoration.none,
                 ),
-              ],
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );
