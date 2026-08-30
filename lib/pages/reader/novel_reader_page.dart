@@ -2672,6 +2672,12 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         : null;
     final isFixedLayout = currentChapter?.isFixedLayout ?? false;
 
+    // 页眉/页脚覆盖层高度（可见时非 0）
+    final headerExtent =
+        _headerVisible(provider) ? _headerExtent(provider) : 0.0;
+    final footerExtent =
+        _footerVisible(provider) ? _footerExtent(provider) : 0.0;
+
     // 阅读主体（WebView）
     final webview = ReaderPageView(
       key: _readerPageViewKey,
@@ -2693,6 +2699,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         isFixedLayout: isFixedLayout,
         fixedLayoutWidth: currentChapter?.fixedLayoutWidth,
         fixedLayoutHeight: currentChapter?.fixedLayoutHeight,
+        topInsetOverride: headerExtent,
+        bottomInsetOverride: footerExtent,
         controller: _readerWebViewController,
         callbacks: ReaderWebViewCallbacks(
           onInitialized: _onWebviewInitialized,
@@ -2723,21 +2731,29 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       ),
     );
 
-    // ★ 分隔图/漫画等固定布局章：全出血铺满 + 无页眉页脚（对齐多看实拍
-    //   ——多看分隔页就是无系统栏无 tip 的全屏图）；配合沉浸式系统栏隐藏。
-    //   文字章维持占位居中布局（tip 无底色，与正文底色同系不突兀）。
-    if (isFixedLayout) {
-      return webview;
-    }
-
+    // ★ 全出血布局：WebView 铺满整屏（内容直达屏幕边缘，含沉浸式隐藏
+    //   的系统栏区域），页眉/页脚为透明覆盖层（无底色）★
+    // 正文上下内边距自动抬高 ≥ 覆盖层高度（topInsetOverride/bottomInset
+    // Override），文字不钻入透明页眉/页脚之下；固定布局章（分隔图/漫画）
+    // 图像全出血直达边缘，对齐多看实拍。
     return SafeArea(
-      child: Column(
+      child: Stack(
         children: [
-          if (_headerVisible(provider))
-            _buildScrollPageTip(provider, isHeader: true),
-          Expanded(child: webview),
-          if (_footerVisible(provider))
-            _buildScrollPageTip(provider, isHeader: false),
+          Positioned.fill(child: webview),
+          if (headerExtent > 0)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: _buildScrollPageTip(provider, isHeader: true),
+            ),
+          if (footerExtent > 0)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: _buildScrollPageTip(provider, isHeader: false),
+            ),
         ],
       ),
     );

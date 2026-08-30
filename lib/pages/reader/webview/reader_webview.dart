@@ -115,12 +115,19 @@ class ReaderWebView extends StatefulWidget {
   /// 回调
   final ReaderWebViewCallbacks callbacks;
 
+  /// 页眉/页脚透明覆盖层高度：注入到正文上下内边距（取 max），
+  /// 使正文不钻入透明页眉/页脚之下（全出血布局配套）
+  final double? topInsetOverride;
+  final double? bottomInsetOverride;
+
   const ReaderWebView({
     super.key,
     required this.content,
     required this.title,
     required this.chapterIndex,
     required this.provider,
+    this.topInsetOverride,
+    this.bottomInsetOverride,
     required this.isScrollMode,
     required this.controller,
     required this.callbacks,
@@ -165,7 +172,11 @@ class _ReaderWebViewState extends State<ReaderWebView> {
     widget.controller.setCallbacks(widget.callbacks);
     // 不在此处生成 HTML：_lastConstraints 此时为 (0,0)，生成的尺寸错误
     // 等 build 方法第一次拿到 LayoutBuilder 的真实 constraints 后再生成
-    _lastStyleSnapshot = _StyleSnapshot.fromProvider(widget.provider);
+    _lastStyleSnapshot = _StyleSnapshot.fromProvider(
+      widget.provider,
+      topInsetOverride: widget.topInsetOverride,
+      bottomInsetOverride: widget.bottomInsetOverride,
+    );
     // redroid 检测：Texture Layer 黑屏，切换 Hybrid Composition（重建 WebView）
     ReaderWebView.isRedroid().then((isRedroid) {
       if (isRedroid && !_useHybridComposition && mounted) {
@@ -190,12 +201,20 @@ class _ReaderWebViewState extends State<ReaderWebView> {
         (!widget.isScrollMode && oldWidget.title != widget.title)) {
       _styleReloadDebounce?.cancel();
       _currentHtml = _generateHtml();
-      _lastStyleSnapshot = _StyleSnapshot.fromProvider(widget.provider);
+      _lastStyleSnapshot = _StyleSnapshot.fromProvider(
+      widget.provider,
+      topInsetOverride: widget.topInsetOverride,
+      bottomInsetOverride: widget.bottomInsetOverride,
+    );
       _reloadHtml();
       return;
     }
     // 用快照比较，避免同一 provider 实例导致比较永远 false 的陷阱
-    final current = _StyleSnapshot.fromProvider(widget.provider);
+    final current = _StyleSnapshot.fromProvider(
+      widget.provider,
+      topInsetOverride: widget.topInsetOverride,
+      bottomInsetOverride: widget.bottomInsetOverride,
+    );
     if (_lastStyleSnapshot == current) return;
     // 结构性变化（简繁转换/翻页模式/动画时长/标题显隐/高亮规则）→ 必须 reload
     // 这些字段影响内容或 HTML 结构，无法通过 CSS 变量热更新
@@ -502,7 +521,11 @@ class _StyleSnapshot {
     required this.highlightRulesSnapshot,
   });
 
-  factory _StyleSnapshot.fromProvider(ReaderProvider p) {
+  factory _StyleSnapshot.fromProvider(
+    ReaderProvider p, {
+    double? topInsetOverride,
+    double? bottomInsetOverride,
+  }) {
     final rules = p.highlightRules.where((r) => r.enabled).map((r) {
       return <Object?>[r.pattern, r.style.index, r.color.color.toARGB32()];
     }).toList();
@@ -519,8 +542,16 @@ class _StyleSnapshot {
       fontWeightFine: p.fontWeightFine,
       textBoldFine: p.textBoldFine,
       titleBoldFine: p.titleBoldFine,
-      paddingTop: p.paddingTop,
-      paddingBottom: p.paddingBottom,
+      // 透明页眉/页脚覆盖层高度注入：正文上下内边距取 max，
+      // 使正文不钻入透明页眉/页脚之下（全出血布局配套）
+      paddingTop: topInsetOverride != null
+          ? (topInsetOverride > p.paddingTop ? topInsetOverride : p.paddingTop)
+          : p.paddingTop,
+      paddingBottom: bottomInsetOverride != null
+          ? (bottomInsetOverride > p.paddingBottom
+                ? bottomInsetOverride
+                : p.paddingBottom)
+          : p.paddingBottom,
       paddingLeft: p.paddingLeft,
       paddingRight: p.paddingRight,
       showChapterTitle: p.showChapterTitle,
