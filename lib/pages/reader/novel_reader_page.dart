@@ -2670,63 +2670,72 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     final currentChapter = _currentChapterIndex < _chapters.length
         ? _chapters[_currentChapterIndex]
         : null;
+    final isFixedLayout = currentChapter?.isFixedLayout ?? false;
+
+    // 阅读主体（WebView）
+    final webview = ReaderPageView(
+      key: _readerPageViewKey,
+      isScrollMode: isScrollMode,
+      pageModeIndex: pageModeIndex,
+      onPerformPageTurn: _onPerformPageTurn,
+      onPageTurnCompleted: _onPageTurnCompleted,
+      onPageTurnCancelled: _onPageTurnCancelled,
+      child: ReaderWebView(
+        content: _processedContent(_content),
+        title: _chapterTitle,
+        chapterIndex: _currentChapterIndex,
+        provider: provider,
+        isScrollMode: isScrollMode,
+        isRichHtml: isRichHtml,
+        extractedBasePath: _book != null
+            ? LocalBookService.instance.getEpubExtractedBasePath(_book!)
+            : '',
+        isFixedLayout: isFixedLayout,
+        fixedLayoutWidth: currentChapter?.fixedLayoutWidth,
+        fixedLayoutHeight: currentChapter?.fixedLayoutHeight,
+        controller: _readerWebViewController,
+        callbacks: ReaderWebViewCallbacks(
+          onInitialized: _onWebviewInitialized,
+          onPageCountReady: _onWebviewPageCountReady,
+          onPageChanged: _onWebviewPageChanged,
+          // tap 由 JS click 事件触发（InAppWebView 是 PlatformView，
+          // Flutter Listener 收不到 pointerUp，必须靠 JS 回调）
+          onTap: _onWebviewJsTap,
+          onImageTap: _onWebviewImageTap,
+          // 滚动模式无缝衔接：接近底部时加载下一章
+          onScrollNearEnd: _onScrollNearEnd,
+          // 滚动模式向上衔接：接近顶部时加载上一章
+          onScrollNearStart: _onScrollNearStart,
+          // 滚动模式：当前可见章节变化时更新 UI 章节标题/进度
+          onChapterVisible: _onChapterVisible,
+          // 文字选择菜单（JS 自定义浮动菜单，替代 Android ActionMode）
+          onSelectionReady: _onSelectionReady,
+          onSelectionAction: _onSelectionAction,
+          onHideSelectionMenu: _onHideSelectionMenu,
+          // 尺寸变化 reload 前保存进度（E1 Bug 修复）
+          onBeforeSizeReload: _saveProgressBeforeReload,
+          // JS touchend：InAppWebView 吞 PointerUpEvent，靠 JS touchend
+          // 即时触发 ReaderPageView._finalizeTurn，避免覆盖层残留
+          onTouchEnd: () {
+            _readerPageViewKey.currentState?.handleTouchEnd();
+          },
+        ),
+      ),
+    );
+
+    // ★ 分隔图/漫画等固定布局章：全出血铺满 + 无页眉页脚（对齐多看实拍
+    //   ——多看分隔页就是无系统栏无 tip 的全屏图）；配合沉浸式系统栏隐藏。
+    //   文字章维持占位居中布局（tip 无底色，与正文底色同系不突兀）。
+    if (isFixedLayout) {
+      return webview;
+    }
 
     return SafeArea(
       child: Column(
         children: [
           if (_headerVisible(provider))
             _buildScrollPageTip(provider, isHeader: true),
-          Expanded(
-            child: ReaderPageView(
-              key: _readerPageViewKey,
-              isScrollMode: isScrollMode,
-              pageModeIndex: pageModeIndex,
-              onPerformPageTurn: _onPerformPageTurn,
-              onPageTurnCompleted: _onPageTurnCompleted,
-              onPageTurnCancelled: _onPageTurnCancelled,
-              child: ReaderWebView(
-                content: _processedContent(_content),
-                title: _chapterTitle,
-                chapterIndex: _currentChapterIndex,
-                provider: provider,
-                isScrollMode: isScrollMode,
-                isRichHtml: isRichHtml,
-                extractedBasePath: _book != null
-                    ? LocalBookService.instance.getEpubExtractedBasePath(_book!)
-                    : '',
-                isFixedLayout: currentChapter?.isFixedLayout ?? false,
-                fixedLayoutWidth: currentChapter?.fixedLayoutWidth,
-                fixedLayoutHeight: currentChapter?.fixedLayoutHeight,
-                controller: _readerWebViewController,
-                callbacks: ReaderWebViewCallbacks(
-                  onInitialized: _onWebviewInitialized,
-                  onPageCountReady: _onWebviewPageCountReady,
-                  onPageChanged: _onWebviewPageChanged,
-                  // tap 由 JS click 事件触发（InAppWebView 是 PlatformView，
-                  // Flutter Listener 收不到 pointerUp，必须靠 JS 回调）
-                  onTap: _onWebviewJsTap,
-                  onImageTap: _onWebviewImageTap,
-                  // 滚动模式无缝衔接：接近底部时加载下一章
-                  onScrollNearEnd: _onScrollNearEnd,
-                  // 滚动模式向上衔接：接近顶部时加载上一章
-                  onScrollNearStart: _onScrollNearStart,
-                  // 滚动模式：当前可见章节变化时更新 UI 章节标题/进度
-                  onChapterVisible: _onChapterVisible,
-                  // 文字选择菜单（JS 自定义浮动菜单，替代 Android ActionMode）
-                  onSelectionReady: _onSelectionReady,
-                  onSelectionAction: _onSelectionAction,
-                  onHideSelectionMenu: _onHideSelectionMenu,
-                  // 尺寸变化 reload 前保存进度（E1 Bug 修复）
-                  onBeforeSizeReload: _saveProgressBeforeReload,
-                  // JS touchend：InAppWebView 吞 PointerUpEvent，靠 JS touchend
-                  // 即时触发 ReaderPageView._finalizeTurn，避免覆盖层残留
-                  onTouchEnd: () {
-                    _readerPageViewKey.currentState?.handleTouchEnd();
-                  },
-                ),
-              ),
-            ),
-          ),
+          Expanded(child: webview),
           if (_footerVisible(provider))
             _buildScrollPageTip(provider, isHeader: false),
         ],
@@ -2734,6 +2743,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     );
   }
 
+  
   /// ReaderPageView 回调：执行翻页（让 WebView 切换到目标页）
   ///
   /// 返回 true：正常翻页（章节内），ReaderPageView 继续截图 + 动画
