@@ -122,11 +122,6 @@ double _dotPitchOf(double base) => 0.4615 * base + 0.287;
 double _dotSizeOf(double base) => (0.297 * base - 1.212).clamp(1.0, 12.0);
 double _dotActiveSizeOf(double base) => 2.19 + 0.198 * base;
 
-/// gallery-txt 提示行：墨顶 = dotted 墨顶 + 2.081B（绝对 481.5@9.13 实拍），
-/// 字号 0.7em；页内放不下则不显示（多看 52号 实拍同样无提示）
-double _txtInkTopOf(double base) =>
-    _dottedInkTopOf(base) + 2.081 * base;
-
 /// 作者 CSS local() 字体链的语义映射（style.css @font-face 声明的流派 →
 /// Flutter 系统近似族）。多看内建字体（DK-HEITI 等）Flutter 拿不到文件，
 /// 按作者 local 链的字体流派映射系统族兜底。
@@ -725,12 +720,12 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     final maintitleTop = imgBottomRel + _maintitlePadOf(base);
     final current = widget.images[_imageIndex];
 
-    // ★ 描述文字动态排版（防溢出）★
+    // ★ 描述文字动态排版（防溢出，文字必须完整显示、不允许省略号）★
     // 长描述（如 08/10/11/19/22.jpg）在 base15 下 subtitle 达 3-4 行，
-    // 底部撞圆点行（实测定量：s10 撞 36px、s22 撞 37px）。处理：
+    // 底部撞圆点行（实测定量：s10 撞 36px、s22 撞 37px）。处理顺序：
     // 1) TextPainter 实测 maintitle 高度（1~2 行），subtitle 起点随动
-    // 2) subtitle 逐级缩字号（0.9em → 最低 0.5em）适配「圆点行上方」
-    //    的可用空间；仍放不下则 maxLines + ellipsis 兜底
+    // 2) 圆点行往下让位（最多推到贴屏幕底），必要时圆点略缩
+    // 3) 仍不足 → subtitle 缩字号适配（保证全文完整，无 ellipsis）
     final maintitleStyle = TextStyle(
       fontSize: base * _cellStyle.maintitleFontSize,
       fontFamily: _cellStyle.maintitleFontFamily,
@@ -745,35 +740,53 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     )..layout(maxWidth: _frameW);
     final subtitleTopDyn = maintitleTop + mtTp.height + _subtitlePadOf(base);
 
-    final dottedInkRel = _dottedInkTopOf(base);
-    final subtitleAvail =
-        (dottedInkRel - 8 - subtitleTopDyn).clamp(24.0, double.infinity);
+    final safeAreaPad = MediaQuery.paddingOf(context);
+    final pageH = MediaQuery.sizeOf(context).height -
+        safeAreaPad.top -
+        safeAreaPad.bottom;
 
     final subtitleBaseFs = base * _cellStyle.subtitleFontSize;
-    var subtitleFs = subtitleBaseFs;
-    TextPainter subtitleTp(TextStyle style) => TextPainter(
-          text: TextSpan(text: current.subtitle, style: style),
+    TextPainter subtitleTpAt(double fs) => TextPainter(
+          text: TextSpan(
+            text: current.subtitle,
+            style: TextStyle(
+              fontSize: fs,
+              fontFamily: _cellStyle.subtitleFontFamily,
+              color: _cellStyle.subtitleColor,
+              height: _kSubtitleLineHeight,
+              decoration: TextDecoration.none,
+            ),
+          ),
           textDirection: TextDirection.ltr,
         )..layout(maxWidth: _frameW);
-    var subTp = subtitleTp(TextStyle(
-      fontSize: subtitleFs,
-      fontFamily: _cellStyle.subtitleFontFamily,
-      color: _cellStyle.subtitleColor,
-      height: _kSubtitleLineHeight,
-      decoration: TextDecoration.none,
-    ));
-    while (subTp.height > subtitleAvail && subtitleFs > base * 0.5) {
-      subtitleFs -= base * 0.05;
-      subTp = subtitleTp(TextStyle(
-        fontSize: subtitleFs,
-        fontFamily: _cellStyle.subtitleFontFamily,
-        color: _cellStyle.subtitleColor,
-        height: _kSubtitleLineHeight,
-        decoration: TextDecoration.none,
-      ));
+
+    // 圆点行让位：默认位置 → 最低可推到贴屏幕底（留 6px 圆点高 + 4px 边距）
+    final dottedDefault = _dottedInkTopOf(base);
+    const dotInkH = 6.0;
+    final dottedMax = pageH - dotInkH - 4;
+    final fullH = subtitleTpAt(subtitleBaseFs).height;
+    final need = subtitleTopDyn + fullH + 8 - dottedDefault;
+    final push = need.clamp(0.0, dottedMax - dottedDefault);
+    final dottedInkRel = dottedDefault + push;
+    // 圆点被下推时略缩（视觉不挤）：最多缩 20%
+    final dotScale = 1.0 - 0.20 * (push / (dottedMax - dottedDefault));
+
+    // 仍不足 → subtitle 二分缩字号（全文完整显示，无省略）
+    double lo = base * 0.25;
+    double hi = subtitleBaseFs;
+    var subtitleFs = subtitleBaseFs;
+    if (subtitleTopDyn + fullH + 8 > dottedInkRel) {
+      for (var i = 0; i < 14; i++) {
+        final mid = (lo + hi) / 2;
+        if (subtitleTopDyn + subtitleTpAt(mid).height + 8 <= dottedInkRel) {
+          lo = mid;
+        } else {
+          hi = mid;
+        }
+      }
+      subtitleFs = lo;
     }
-    final subtitleMaxLines =
-        (subtitleAvail / (subtitleFs * _kSubtitleLineHeight)).floor().clamp(1, 20);
+    // 供圆点/提示行定位使用（dottedInkRel / dotScale）
 
     return Container(
       color: hasBgImage ? null : _resolveBgColor(),
@@ -882,8 +895,6 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
                     decoration: TextDecoration.none,
                   ),
                   textAlign: TextAlign.justify,
-                  maxLines: subtitleMaxLines,
-                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             // 点点点指示器 + gallery-txt 提示：同屏形态随字号公式
@@ -893,14 +904,14 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
               Positioned(
                 left: 0,
                 right: 0,
-                top: _dottedPositionedTopOf(context),
-                child: _buildDottedIndicator(),
+                top: _dottedPositionedTopOf(context, dottedInkRel),
+                child: _buildDottedIndicator(dotScale),
               ),
-            if (_showGalleryTxt(context))
+            if (_showGalleryTxt(context, dottedInkRel))
               Positioned(
                 left: 0,
                 right: 0,
-                top: _galleryTxtPositionedTopOf(context),
+                top: _galleryTxtPositionedTopOf(context, dottedInkRel),
                 child: _buildGalleryTxt(),
               ),
           ],
@@ -909,13 +920,12 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     );
   }
 
-  /// dotted 行的 Positioned top：圆点墨顶（SafeArea 相对）− 圆点在行内
-  /// 的垂直居中偏移；放不下则贴底兜底
-  double _dottedPositionedTopOf(BuildContext context) {
+  /// dotted 行的 Positioned top：圆点墨顶（SafeArea 相对，可被让位覆盖）
+  /// − 圆点在行内的垂直居中偏移；越界则贴底兜底
+  double _dottedPositionedTopOf(BuildContext context, double inkTop) {
     final safe = MediaQuery.paddingOf(context);
     final pageH = MediaQuery.sizeOf(context).height - safe.top - safe.bottom;
     final base = widget.baseFontSize;
-    final inkTop = _dottedInkTopOf(base);
     final centering =
         (_dotActiveSizeOf(base) - _dotSizeOf(base)) / 2;
     const dotRow = 6.0;
@@ -925,18 +935,18 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     return inkTop - centering;
   }
 
-  /// gallery-txt 是否显示（0.7em 行塞进页内才显示）
-  bool _showGalleryTxt(BuildContext context) {
+  /// gallery-txt 是否显示（0.7em 行塞进页内才显示；dotted 让位后联动）
+  bool _showGalleryTxt(BuildContext context, double dottedInk) {
     if (_txtText.isEmpty) return false;
     final safe = MediaQuery.paddingOf(context);
     final pageH = MediaQuery.sizeOf(context).height - safe.top - safe.bottom;
     final txtH = widget.baseFontSize * 0.7;
-    return _txtInkTopOf(widget.baseFontSize) + txtH <= pageH - 2;
+    return dottedInk + 2.081 * widget.baseFontSize + txtH <= pageH - 2;
   }
 
   /// gallery-txt 的 Positioned top（墨顶 − CJK 墨迹上留白约 1）
-  double _galleryTxtPositionedTopOf(BuildContext context) =>
-      _txtInkTopOf(widget.baseFontSize) - 1;
+  double _galleryTxtPositionedTopOf(BuildContext context, double dottedInk) =>
+      dottedInk + 2.081 * widget.baseFontSize - 1;
 
   /// dotted 是否占用 PageView 底部空间（多图时）
   double dottedHeightOf(bool showDotted) =>
@@ -1000,7 +1010,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
   ///   激活点径 = 2.19+0.198B（激活更大更深）
   ///
   /// 本方法只负责圆点行本身；定位由 build() 的 Positioned 按公式完成。
-  Widget _buildDottedIndicator() {
+  Widget _buildDottedIndicator([double dotScale = 1.0]) {
     if (widget.images.length <= 1) return const SizedBox.shrink();
 
     final textRgb = widget.textColor.toARGB32();
@@ -1009,9 +1019,9 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     final b = textRgb & 0xFF;
     final activeDot = _imageIndex;
     final base = widget.baseFontSize;
-    final pitch = _dotPitchOf(base);
-    final inactive = _dotSizeOf(base);
-    final active = _dotActiveSizeOf(base);
+    final pitch = _dotPitchOf(base) * dotScale;
+    final inactive = _dotSizeOf(base) * dotScale;
+    final active = _dotActiveSizeOf(base) * dotScale;
 
     return Row(
       key: _dottedKey,

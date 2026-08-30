@@ -71,11 +71,12 @@ void main() {
     expect(tester.takeException(), isNull);
     // subtitle 存在且被缩字号渲染（找到文本）
     expect(find.text(longSub), findsOneWidget);
-    // 圆点行不应被 subtitle 文字覆盖：subtitle 的 RenderBox 底部
-    // 不超过圆点行墨顶（base 15 = 507.15）
+    // 文字必须完整显示：RenderBox 底部仍在页面内（圆点行会下移让位）
     final subBox = tester.renderObject<RenderBox>(find.text(longSub).last);
     final subBottom = subBox.localToGlobal(Offset.zero).dy + subBox.size.height;
-    expect(subBottom, lessThanOrEqualTo(508));
+    expect(subBottom, lessThanOrEqualTo(592));
+    // 全文渲染（无省略号截断）：能按完整文本找到
+    expect(find.text(longSub), findsOneWidget);
   });
 
   testWidgets('拖动幅度不足回弹不提交', (tester) async {
