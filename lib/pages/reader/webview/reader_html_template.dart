@@ -1062,9 +1062,17 @@ body.reader-scroll #reader-content-b {
      copyright(白底 #fff) 和 foreword1(黑底 #000) 等无 class 但有背景色的章节也能匹配。
      正文章节 body 通常无背景属性，不受影响。 */
 #reader-content-a .epub-chapter-bg {
-  /* 只对无长文本的纯背景章用 overflow:hidden；这里默认 visible——
-     手册页 .zhangyue-bg 白卡 height:300% 长文本需要完整可见（多看同款），
-     overflow:hidden 会裁掉超高的白卡内容 */
+  /* 默认裁剪：空内容整页背景章（人物卡 renwu0-11/卷首页 VOL/封底 qmpfengdi）
+     正文只有隐藏 h2 + 空 p，多看里严格单页。若 overflow:visible，wrapper
+     内容高度微超一栏 → 分栏器把章拆成 1/2+2/2 两页且第 2 页全空白
+     （2026-08-31 装机实测回归）。hidden 时内容被裁、wrapper 恰好一栏。 */
+  overflow: hidden;
+}
+
+/* 4c-2. 手册章（body.jieshao，含 div.zhangyue-bg 白卡）保持 visible：
+   白卡超高分栏内容需完整可见，且白卡 margin:0 -5px 出血边不能被裁。
+   （4a-3b 已把白卡改回正常流；p18h/p20~p51 逐屏扫页验证此组合正确） */
+#reader-content-a .epub-chapter-bg[class*="jieshao"] {
   overflow: visible;
 }
 
@@ -1096,7 +1104,7 @@ body.reader-scroll #reader-content-b {
    白卡盖满多屏）正常流分页修复：
    - 白卡 height:auto 随内容（column 分页按内容高度切页，多看看同款）
    - 白卡半透明背景保留（rgba 0.8）
-   - 不裁剪（overflow 已改 visible） */
+   - 手册章 wrapper 裁剪已由 4c-2 单独放开（其他章仍 hidden） */
 #reader-content-a .epub-chapter-bg div.zhangyue-bg {
   height: auto !important;
   min-height: 0 !important;
