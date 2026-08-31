@@ -218,10 +218,21 @@ class EpubCssProcessor {
 
       // duokan-text-indent 兼容
       final normalizedName = name == 'duokan-text-indent' ? 'text-indent' : name;
+      // duokan-middle-line 兼容（对齐多看行内图标基线语义）
+      // 多看用 duokan-middle-line 让行内小图标（如制作说明章 20px 图标）
+      // 与文字中线对齐；WebView 无此私有语义，映射为标准 vertical-align:middle。
+      // 出处：原书 Style0001.css 中 img.design-icon-* 共 4 处使用；
+      // 多看 libddlayoutkit.so 属性表（FUN_002cfca8）含该属性。
+      final effectiveName = normalizedName == 'duokan-middle-line'
+          ? 'vertical-align'
+          : normalizedName;
+      final effectiveValue = normalizedName == 'duokan-middle-line'
+          ? 'middle'
+          : value;
 
       declarations.add(EpubCssDeclaration(
-        name: normalizedName,
-        value: value,
+        name: effectiveName,
+        value: effectiveValue,
         important: important,
         order: declarations.length,
       ));
@@ -960,6 +971,9 @@ class EpubCssProcessor {
     // 这些属性在 WebView 中会作为未知属性被忽略，但保留在 CSS 中
     // 可供阅读器的 JS 层做自定义渲染（如 duokan-drop-caps-style 首字下沉）。
     'duokan-text-indent', 'src', 'unicode-range',
+    // duokan-middle-line：解析阶段已映射为 vertical-align（见 _parseDeclarations），
+    // 白名单同步保留原属性名，防止映射前的过滤阶段误删（保险带）
+    'duokan-middle-line',
     // 多看私有属性（从 FUN_002cfca8 反编译提取）
     'duokan-text-decoration-width', 'duokan-text-decoration-color',
     'duokan-border-length-topleft', 'duokan-border-length-topright',

@@ -1130,6 +1130,35 @@ body.reader-scroll #reader-content-b {
   font-size: calc(var(--reader-font-size) * 0.72);
 }
 
+/* 4a-3e. duokan-bleed 兜底语义（贴边出血）：
+   原书 div.logo / img.logo2 / div.fenge 用 duokan-bleed:lefttopright 声明
+   「图片贴左/上/右边出血」（多看私有属性，章节页眉装饰图用）。
+   多看渲染：贴边零留白。MR 正文页眉由 reader 框架接管（章内 h2.head 的
+   logo 图仅装饰），这里对特殊背景章内的 .logo/.logo2/.fenge 还原贴边意图：
+   margin 清零 + 负 margin 抵消 wrapper padding（3-9 已把整章 padding 清零，
+   此处再对 img 自身的默认 margin 1em 兜底清零，防止贴边图被推离页边）。 */
+#reader-content-a .epub-chapter-bg .logo,
+#reader-content-a .epub-chapter-bg .logo img,
+#reader-content-a .epub-chapter-bg img.logo2,
+#reader-content-a .epub-chapter-bg .fenge,
+#reader-content-a .epub-chapter-bg img.fenge {
+  margin-top: 0 !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+/* 4a-3d. 制作说明章（zhizuosm）多看脚注容器净化：
+   原书用 duokan-footnote 机制把"二维码大图"塞进 <ol class="duokan-footnote-content">
+   （多看在章末以脚注弹层展示，正文页不占位）。WebView 无此机制，两个 ol
+   会当作普通列表渲染，把二维码图撑到制作说明卡之后的下一屏，导致
+   「卡片 + 二维码 + 搜一搜」无法同屏（多看整章 1 屏）。
+   对齐多看实拍（dk_zzsm_clean.png）：整章 1 屏含卡片区 + 二维码区，
+   脚注 ol 不额外占位 → 折叠脚注容器；首个带 hr class 的空 ol 高度为 0。
+   二维码本体（li 里的 img）由 .shumou 区块的同款图（shumouss.png）呈现，
+   多看正文页显示的正是 .shumou 区块，脚注弹层里的 shumouewm.jpg 不参与正文排版。 */
+#reader-content-a .epub-chapter-bg[class*="zhizuosm"] ol.duokan-footnote-content {
+  display: none !important;
+}
 /* 4a-4. 封面/整页背景章正文若为空（隐藏 h1 + 空 p），wrapper 高度已经由
    4a-3 的 min-height 顶满；无需额外高度兜底。 */
 
@@ -2030,17 +2059,42 @@ window.readerApi = (function() {
       // 加载完成后等一帧让 column 布局重排完成
       requestAnimationFrame(function() {
         notifyPageCountReady();
+        installImageLoadRepaginate();
         dumpDomSnapshot('chapter');
       });
     }).catch(function() {
       // 兜底：异常时也通知一次
       requestAnimationFrame(function() {
         notifyPageCountReady();
+        installImageLoadRepaginate();
         dumpDomSnapshot('chapter');
       });
     });
   }
 
+  // 图片加载完成后的分页重算（借鉴 epub.js imageLoadListeners → EXPAND 机制：
+  // contents.js:557-568 对 naturalWidth===0 的 img 挂 onload→expand；
+  // iframe.js 据此 reformat 重新分页。MR 的 notifyPageCountReadyWhenStable
+  // 已覆盖「整章加载完成后通知 Dart」，此钩子补齐「单图晚到 → 立即重排」：
+  // 强制 contentA 重排一帧并重新通知 pageCount，防止图片加载晚于首帧
+  // 导致 pageCount 偏小、跳页 translate3d 落点错误（出现"翻页空白页"）。
+  function installImageLoadRepaginate() {
+    var imgs = document.querySelectorAll('img');
+    for (var i = 0; i < imgs.length; i++) {
+      (function(img) {
+        if (img.complete) return;
+        var handler = function() {
+          img.removeEventListener('load', handler);
+          img.removeEventListener('error', handler);
+          requestAnimationFrame(function() {
+            notifyPageCountReady();
+          });
+        };
+        img.addEventListener('load', handler);
+        img.addEventListener('error', handler);
+      })(imgs[i]);
+    }
+  }
   // ★ DOM 快照导出（排版诊断）★
   // 遍历渲染后的 DOM 树，提取每个元素的标签/class/计算样式/布局矩形，
   // 通过 console 桥输出到 Flutter logcat。用于与多看渲染结果逐节点对比
