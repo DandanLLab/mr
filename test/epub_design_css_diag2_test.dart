@@ -12,6 +12,9 @@ void main() {
     final out = EpubCssProcessor.serialize(rules);
     final i = out.indexOf('design-content');
     print(out.substring(i - 100, i + 400));
+    final t = out.indexOf('h2.design-title');
+    print('==== h2.design-title 产物 ====');
+    print(t < 0 ? '[NOT FOUND] h2.design-title 选择器被丢' : out.substring(t > 30 ? t - 30 : 0, t + 300 > out.length ? out.length : t + 300));
     final j = out.indexOf('design-box');
     print('=====');
     print(out.substring(j - 60, j + 500));

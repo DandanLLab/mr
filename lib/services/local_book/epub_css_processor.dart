@@ -94,6 +94,40 @@ class EpubCssProcessor {
 
       final selectorText = cleanCss.substring(index, start).trim();
 
+      // 容错：孤立的多余 '}'（原书 CSS 常见笔误，如 design-box 双括号收尾）。
+      // 选择器文本若含 '}' 说明扫描跨过了失配括号，其后真实的规则选择器
+      // 会被拼进同一文本导致整条规则被 _toSupportedSelector 丢弃
+      //（《这游戏也太真实了》h2.design-title 的 120% 字号即因此丢失）。
+      // 处理：取最后一段 '}' 之后的选择器重扫；若整体无效则跳过这个 '{'。
+      if (selectorText.contains('}')) {
+        final lastBrace = selectorText.lastIndexOf('}');
+        final rescue = selectorText.substring(lastBrace + 1).trim();
+        if (rescue.isNotEmpty && !rescue.contains(RegExp(r'[{};]'))) {
+          // 用孤立 } 之后的选择器重试当前块（start/end 不变）
+          final rescuedDecls = _parseDeclarations(
+                  cleanCss.substring(start + 1, end))
+              .where((d) => _supportedProperties.contains(d.name))
+              .toList();
+          if (rescuedDecls.isNotEmpty) {
+            for (final selector in rescue.split(',')) {
+              final trimmed = selector.trim();
+              final supported = _toSupportedSelector(trimmed);
+              if (supported != null && supported.isNotEmpty) {
+                rules.add(EpubCssRule(
+                  selector: supported,
+                  declarations: rescuedDecls,
+                  specificity: _cssSpecificity(supported),
+                  order: order,
+                ));
+              }
+            }
+            order++;
+          }
+        }
+        index = end + 1;
+        continue;
+      }
+
       // @keyframes 等：含嵌套块，parseDeclarations 无法处理，跳过
       // （之前被 _expandSupportedAtRules 丢弃，此处保持不处理）
       if (selectorText.startsWith('@keyframes') ||
