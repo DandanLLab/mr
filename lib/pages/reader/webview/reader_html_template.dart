@@ -1116,6 +1116,20 @@ body.reader-scroll #reader-content-b {
   margin: 0 -5px !important;
 }
 
+/* 4a-3c. 制作说明章（body.zhizuosm）字号基准对齐多看：
+   实测（2026-08-31 装机 720px 截图行投影）：同一段面板正文多看折 3 行、
+   字形 13 物理px；MR 折 5 行、18 物理px，面板变高 1.4 倍导致二维码+
+   搜一搜被挤到第 2 屏（多看整页 1 屏）。
+   根因：作者用 font-size:100%/120%/60% 百分比链，多看落点基准 ≈11px，
+   MR 落在用户字号 15px 上，同比放大 1.38 倍。
+   修法：整章基准缩到用户字号的 0.72（15→10.8px），作者的百分比链
+   （design-box 100%/design-title 120%/design-content 60%）随之等比
+   缩小，面板+二维码收回 1 屏，恢复多看版面比例。
+   用户调整字号时按比例同步，保持 1:1 视觉关系。 */
+#reader-content-a .epub-chapter-bg[class*="zhizuosm"] {
+  font-size: calc(var(--reader-font-size) * 0.72);
+}
+
 /* 4a-4. 封面/整页背景章正文若为空（隐藏 h1 + 空 p），wrapper 高度已经由
    4a-3 的 min-height 顶满；无需额外高度兜底。 */
 
