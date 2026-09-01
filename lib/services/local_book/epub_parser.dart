@@ -2487,9 +2487,19 @@ class EpubParser {
     if ((name == 'margin-top' || name == 'margin-bottom' ||
          name == 'padding-top' || name == 'padding-bottom') &&
         lowerValue.contains('%')) {
+      // ★ 保留负号：margin-bottom:-10% 是合法的负间距（原书 h1.kuaijiejinru /
+      //   div.num 用于标题与后续内容的视觉贴合）。旧实现只替换百分比对提取组，
+      //   负号留在外面，产出 `-calc(...)` 非法 CSS，整条声明被 WebView 丢弃，
+      //   导致章节序号框 margin 全废、快捷页标题贴不住图。
+      //   修法：把可选负号纳入匹配，负号移进 calc() 内部：
+      //   -10% → calc(var(--reader-safe-width)*-10/100)，数学上等价原意。
+      //   （负号不能放 calc 外侧：`-calc(...)` 是非法 CSS）
       return value.replaceAllMapped(
-        RegExp(r'(\d+(?:\.\d+)?)\s*%'),
-        (m) => 'calc(var(--reader-safe-width)*${m.group(1)}/100)',
+        RegExp(r'(-)?(\d+(?:\.\d+)?)\s*%'),
+        (m) {
+          final sign = (m.group(1) ?? '') == '-' ? '-' : '';
+          return 'calc(var(--reader-safe-width)*$sign${m.group(2)}/100)';
+        },
       );
     }
 
@@ -2566,9 +2576,19 @@ class EpubParser {
 
     // 5. height: 100% / 100vh / 100svh / 100dvh / 100lvh → auto
     //    #reader-content-a 高度由 column 动态分栏，固定高度会破坏分栏
-    if ((name == 'height' || name == 'max-height') &&
+    //    ★ 只处理 height：max-height:100% 是作者对图片的容器高度上限约束
+    //    （原书 .shumou img / .kuaijieye img 的 max-height:100%），
+    //    改成 none 会解除上限让大图撑爆容器。max-height:100% 在
+    //    column 子元素里语义安全（相对包含块高度），保留不动。
+    if (name == 'height' &&
         RegExp(r'^100(%|vh|svh|dvh|lvh)$', caseSensitive: false).hasMatch(value.trim())) {
-      return name == 'height' ? 'auto' : 'none';
+      return 'auto';
+    }
+    // max-height 只防 vh 类视口单位（100vh 在 WebView 里 = 屏幕高 ≠ column 高），
+    // 百分比保留
+    if (name == 'max-height' &&
+        RegExp(r'^100(vh|svh|dvh|lvh)$', caseSensitive: false).hasMatch(value.trim())) {
+      return 'none';
     }
 
     // 6. float: left/right → none

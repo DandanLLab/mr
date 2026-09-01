@@ -572,12 +572,6 @@ class EpubCssProcessor {
     final expanded = [decl];
     if (decl.name != 'background') return expanded;
 
-    final color = _extractCssColor(decl.value);
-    if (color != null) {
-      expanded.add(decl.copyWith(
-          name: 'background-color', value: color, order: expanded.length));
-    }
-
     final url = _extractCssUrl(decl.value);
     if (url != null) {
       expanded.add(decl.copyWith(
@@ -586,7 +580,30 @@ class EpubCssProcessor {
           order: expanded.length));
     }
 
-    final tokens = _splitValueList(decl.value);
+    // 去掉 url(...) 段后再提取颜色/位置，避免把 url 内串误当 token
+    final withoutUrl = url != null
+        ? decl.value.replaceFirst(
+            decl.value.substring(
+              decl.value.toLowerCase().indexOf('url('),
+              decl.value.indexOf(')', decl.value.toLowerCase().indexOf('url(') + 4) + 1,
+            ),
+            '',
+          )
+        : decl.value;
+
+    final color = _extractCssColor(withoutUrl);
+    if (color != null) {
+      expanded.add(decl.copyWith(
+          name: 'background-color', value: color, order: expanded.length));
+    }
+
+    // 从剩余串中剃掉颜色 token，避免颜色尾串被误扫成 position
+    var scanValue = withoutUrl;
+    if (color != null) {
+      scanValue = _removeColorToken(scanValue, color);
+    }
+
+    final tokens = _splitValueList(scanValue);
 
     // 处理 position / size（CSS3 background shorthand: "position / size"）
     // 例：background: url(...) center/cover → position=center, size=cover
@@ -706,12 +723,34 @@ class EpubCssProcessor {
   static String? _extractCssColor(String value) {
     final clean = value.trim();
     if (clean.startsWith('#') || clean.toLowerCase().startsWith('rgb')) {
-      return clean;
+      // 函数式颜色（rgb/rgba/hsl/hsla）取到匹配右括号为止，
+      // 避免把后续 token 吞进颜色里
+      final lower = clean.toLowerCase();
+      if (lower.startsWith('rgb') || lower.startsWith('hsl')) {
+        final parenStart = clean.indexOf('(');
+        if (parenStart > 0) {
+          final parenEnd = clean.indexOf(')', parenStart);
+          if (parenEnd > parenStart) {
+            return clean.substring(0, parenEnd + 1).trim();
+          }
+        }
+      }
+      // #hex 只取 hex 本体，不吞后续 token
+      final m = RegExp(r'^(#\S+)').firstMatch(clean);
+      return m?.group(1) ?? clean;
     }
     for (final token in _splitValueList(clean)) {
       if (_isCssColorToken(token)) return token;
     }
     return null;
+  }
+
+  /// 从值串中移除颜色 token（background 简写展开的后续扫描用）
+  static String _removeColorToken(String value, String color) {
+    final idx = value.indexOf(color);
+    if (idx < 0) return value;
+    return (value.substring(0, idx) + value.substring(idx + color.length))
+        .trim();
   }
 
   static bool _containsFontSizeToken(String value) {
