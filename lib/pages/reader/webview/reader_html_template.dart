@@ -1118,11 +1118,16 @@ body.reader-scroll #reader-content-b {
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"],
 #reader-content-a .epub-chapter-bg[class*="jieshao"],
 #reader-content-a .epub-chapter-bg[class*="kuaijie"] {
-  /* padding 而非 margin：背景图铺满全屏（多看实拍背景顶到屏边），
-     内容缩进 10px 版心（卡框 x45..674物理）。margin 会把背景一起缩进，
-     右缘露出阅读器底色（26.0902.4 实测翻车） */
-  padding-left: 10px !important;
-  padding-right: 10px !important;
+  /* 背景铺满 wrapper 全屏；版心缩进打在直接子元素上（多看等价：
+     body 背景全屏 + body margin 10px 让子元素缩进。EpubParser 把 body
+     语义搬到 wrapper 后，body 的 margin 语义 = wrapper 的直接子元素缩进）。
+     直接子选择器避免影响卡片内部元素自身的布局 */
+}
+#reader-content-a .epub-chapter-bg[class*="zhizuosm"] > *,
+#reader-content-a .epub-chapter-bg[class*="jieshao"] > *,
+#reader-content-a .epub-chapter-bg[class*="kuaijie"] > * {
+  margin-left: 10px !important;
+  margin-right: 10px !important;
 }
 
 /* 4a-3b. 手册页白卡（.jieshao 章 div.zhangyue-bg，height:300% 作者意图
