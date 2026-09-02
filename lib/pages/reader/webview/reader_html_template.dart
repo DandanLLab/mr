@@ -134,7 +134,7 @@ class ReaderHtmlTemplate {
     $fullCss
   </style>
 </head>
-<body>
+<body${isRichHtml ? ' data-epub="1"' : ''}>
   <div id="reader-root">
     $rootTitle
     <div id="reader-stage">
@@ -424,14 +424,15 @@ body {
   /* 不设置 width：body 默认 width=auto 填满 html content area = safe-width */
   height: 100%;
   /* ★ EPUB 模式：让作者字体样式优先 ★
-     ★ 2026-09-02 样式破坏修复：EPUB 模式不注入 html font-size ★
-     原 body { font-size: var(--reader-font-size) } 会销定全局基准，
-     原书 body font-size:97%（如本书）落点变成 15*0.97，
-     而多看基准 ≈11px → 全书字大 1.38 倍，才需要 0.72 补丁。
-     EPUB 模式：html 不设 font-size，落在 UA 默认 16px，
-     原书百分比链回到作者意图；用户字号由 JS 检测后内联注入（见 updateStyle）。
+     ★ 2026-09-02 二次修复：EPUB 根基准对齐多看 ★
+     实测像素：多看 EPUB 根基准 ≈ 11.2px（zzsm design-content 60% 落点
+     13 物理px 反推），UA 默认 16px 仍偏大 45%。
+     EPUB 模式：html font-size = 11px 锁定（多看等效基准），
+     原书百分比链在此基准上解析 = 作者相对意图 + 多看绝对基准。
+     用户字号：EPUB 模式不直接驱动根字号，而是 JS 检测原书无声明时
+     内联注入 body（见 updateStyle），字号调整按倍率叠加。
      非 EPUB 模式：保持原逻辑，用户字号直接驱动 */
-  ${isRichHtml ? '' : 'font-size: var(--reader-font-size);'}
+  ${isRichHtml ? 'font-size: 11px;' : 'font-size: var(--reader-font-size);'}
   ${isRichHtml ? '' : 'font-family: var(--reader-font-family);'}
   ${isRichHtml ? '' : 'line-height: var(--reader-line-height);'}
   ${isRichHtml ? '' : 'letter-spacing: var(--reader-letter-spacing);'}
@@ -3903,7 +3904,25 @@ window.readerApi = (function() {
     // 原书有声明（如 97%）时不注入，用户字号仅影响无声明章节（EPUB 模式下
     // 正文章无 body font-size 时仍可用），保证作者意图优先。
     var fs = vars['--reader-font-size'];
-    if (fs && document.body && !document.body.dataset.authorFontSize) {
+    if (fs && document.body && document.body.dataset.epub === '1') {
+      // EPUB 模式：根基准 11px 对齐多看，用户字号按 15 默认值倍率缩放
+      // 仅当原书 body 无 font-size 声明时生效（有声明 = 作者定死字号链）
+      if (!document.body.dataset.authorFontSize) {
+        var inlineFs = document.body.style.fontSize;
+        document.body.style.fontSize = '';
+        var computed = parseFloat(getComputedStyle(document.body).fontSize);
+        if (Math.abs(computed - 16) < 0.51) {
+          document.body.dataset.authorFontSize = '0';
+        } else {
+          document.body.dataset.authorFontSize = '1';
+          if (inlineFs) document.body.style.fontSize = inlineFs;
+        }
+      }
+      if (document.body.dataset.authorFontSize === '0') {
+        document.documentElement.style.fontSize =
+          (11 * parseFloat(fs) / 15.0).toFixed(2) + 'px';
+      }
+    } else if (fs && document.body && !document.body.dataset.authorFontSize) {
       var inlineFs = document.body.style.fontSize;
       document.body.style.fontSize = '';
       var computed = parseFloat(getComputedStyle(document.body).fontSize);
