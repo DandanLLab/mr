@@ -1566,6 +1566,13 @@ body {
   page-break-inside: avoid !important;
 }
 
+/* 5b. 表格防溢出（2026-09-02 真实容器细节调整）：
+   只约束 max-width 防撑破分栏，不强制 table-layout（保留原书表格排版）。
+   长内容靠 td 继承的 word-break 折行 */
+#reader-content-a table {
+  max-width: var(--reader-safe-width) !important;
+}
+
 /* 6. 不可分切元素（对齐 Readium CSS before.css break-inside 规则）
    标题/figure/tr/pre 不应被分栏切断（避免标题与后续内容分离）
    ★ 不含 table：大表格可能超一页，break-inside:avoid 会导致整表推到下一栏
