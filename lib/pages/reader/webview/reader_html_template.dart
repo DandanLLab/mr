@@ -1419,19 +1419,16 @@ body.reader-scroll #reader-content-b {
   tab-size: 2;
 }
 
-/* 15. 图片兜底样式（对齐 lumina img + Readium before.css 规则）：
-   - max-width:100% 限制不溢出列宽（不强制 width:100% 铺满，保留作者图片尺寸）
-   - display:block 去掉行内间隙
-   - float:none 防止原作者浮动布局导致图片重叠/错位
-   - margin-top/bottom 提供默认间距（作者 CSS 可覆盖）
-   ★ 不用 width:100%!important：会强制小图标铺满列宽，破坏作者排版
-   ★ border-radius 不强制清除：部分 EPUB 作者用圆角做装饰 */
+/* 15. 图片对齐语义保护（2026-09-02 深夜重灾区清理）：
+   ★ 旧版此处的 float:none!/display:block/margin:1em 三件套是破坏源：
+     - float:none !important 灭掉文绕图（EPUB 常见 float 排版全废）
+     - display:block 把行内小图标逼成独占一行
+     - margin:1em 强加间距破坏紧凑排版
+   epub.js / Readium 均不碰这些属性。全撤。
+   防溢出由 After CSS 第 5 条负责（max-width:safe-width + height:auto），
+   对齐由原书 CSS + text-align 继承链负责。 */
 #reader-content-a img {
   max-width: 100%;
-  float: none !important;
-  display: block;
-  margin-top: 1em;
-  margin-bottom: 1em;
 }
 /* 图片容器居中（若作者用 div 包裹图片，文字也居中，
    但仅对直接包含 img 的容器生效，避免干扰正文段落） */
