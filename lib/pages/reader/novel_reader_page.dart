@@ -4624,6 +4624,8 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
       if (ch.isVolume) {
         result.add(ch);
         final isExpanded = _expandedVolumes.contains(ch.index);
+        // 修复目录展开重复：展开的卷在分支内已 add，必须 continue，
+        // 否则落到外层 result.add(ch) 再加一次（《废土生存手册》双行 bug）
         if (!isExpanded) {
           i++;
           while (i < source.length && !source[i].isVolume) {
@@ -4631,6 +4633,8 @@ class _NovelChapterListPanelState extends State<_NovelChapterListPanel> {
           }
           continue;
         }
+        i++;
+        continue;
       }
       result.add(ch);
       i++;
