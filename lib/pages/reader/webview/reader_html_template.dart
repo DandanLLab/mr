@@ -331,6 +331,19 @@ html:has(.epub-chapter-bg) {
   --reader-padding-right: 0px;
 }
 
+/* 3-9b. 卡片版面章（zhizuosm/jieshao/kuaijie）顶部页边距对齐多看：
+   真机实测（2026-09-03）：多看手册白卡顶 115 物理px = 57.5 CSS（页面
+   上边距，原书 body 无 top margin），制作说明框顶 150 物理含框内留白。
+   MR 之前 0 → 白卡/封面顶头、封面图被裁、红字书名与木架重叠。
+   只给这三类卡片章恢复顶部 padding；renwu/VOL/qmp* 真全屏 bleed 仍 0。
+   放在 3-9 之后利用同特异性源顺序覆盖。背景图铺满不受影响
+   （padding 在 wrapper 外侧，bg 从 wrapper 盒顶继续铺满全屏）。 */
+html:has(.epub-chapter-bg[class*="zhizuosm"]),
+html:has(.epub-chapter-bg[class*="jieshao"]),
+html:has(.epub-chapter-bg[class*="kuaijie"]) {
+  --reader-padding-top: 57px;
+}
+
 * {
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
@@ -1146,7 +1159,10 @@ body.reader-scroll #reader-content-b {
   break-inside: auto !important;
   column-break-inside: auto !important;
   page-break-inside: auto !important;
-  margin: 0 -5px !important;
+  /* 2026-09-03 对齐多看实测：白卡左右缘 x30..690 物理 = 15..345 CSS
+     （= 原书 body margin 10px + 多看页边距 5px）。
+     旧值 0 -5px 是负出血，把 4a-3g 的 18px 版心抵成 5px，卡几乎全宽 */
+  margin: 0 15px !important;
 }
 
 /* 4a-3c. 【2026-09-02 已撤销缩放】 制作说明章（body.zhizuosm）字号基准对齐多看：
@@ -1430,10 +1446,33 @@ body.reader-scroll #reader-content-b {
 #reader-content-a img {
   max-width: 100%;
 }
-/* 图片容器居中（若作者用 div 包裹图片，文字也居中，
-   但仅对直接包含 img 的容器生效，避免干扰正文段落） */
-#reader-content-a div:has(> img) {
-  text-align: center;
+/* 图片容器居中规则已撤（2026-09-03）：
+   多看不改作者对齐——原书 div.logo00 { text-align:left } 的 logo 顶部
+   左置，本规则的 ID 级特异性强压原书 left，logo 被居中（多看/实拍对照）。
+   作者需要居中时会自己写 text-align:center，与多看行为一致 */
+
+/* 16. 多看行距/段距对齐（2026-09-03 双章实测校准）：
+   多看阅读器对 EPUB 应用自身"行距"设置覆盖原书声明——
+   实测两章交叉验证：手册页 p.fs2 行距 39.1 物理px（19.55 CSS），
+   制作说明 60% 段落同比 ≈1.8×字号；原书 body/p 声明 line-height:130%
+   （10.67px 字号 → 13.9 CSS），多看落点 19.55/10.67 = 1.83。
+   MR 之前遵循原书 130% → 每页容纳量比多看大 40%（上下对齐失准主因）。
+   p 垂直 margin 同理：多看段间距 ≈0（缩进标段首），MR 是 UA 默认 1em。
+   不带 !important 的 p margin 让原书 p.mark{margin:1em} 等显式声明照常生效 */
+#reader-content-a p,
+#reader-content-a div,
+#reader-content-a li,
+#reader-content-a h1,
+#reader-content-a h2,
+#reader-content-a h3,
+#reader-content-a h4,
+#reader-content-a h5,
+#reader-content-a h6 {
+  line-height: 1.83 !important;
+}
+#reader-content-a p {
+  margin-top: 0;
+  margin-bottom: 0;
 }
 ''';
   }
