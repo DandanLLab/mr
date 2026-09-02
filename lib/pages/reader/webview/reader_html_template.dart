@@ -1109,6 +1109,19 @@ body.reader-scroll #reader-content-b {
   min-height: var(--reader-safe-height) !important;
 }
 
+/* 4a-3g. 卡片版面章（zhizuosm/jieshao/kuaijie）保留原书 body 版心：
+   真机对比（2026-09-02）：多看制作说明页卡片左右有 10px 版心
+   （卡框 x45..674物理 = 22.5..337 CSS），MR 卡片全宽无版心。
+   根因：原书 body margin:0 10px 的语义在 wrapper 上丢失
+   （4a-3 的 width:100% + html:has 清 padding 把版心抹了）。
+   renwu/VOL/qmp* 是真全屏 bleed 章不受此规则影响。 */
+#reader-content-a .epub-chapter-bg[class*="zhizuosm"],
+#reader-content-a .epub-chapter-bg[class*="jieshao"],
+#reader-content-a .epub-chapter-bg[class*="kuaijie"] {
+  margin-left: 10px !important;
+  margin-right: 10px !important;
+}
+
 /* 4a-3b. 手册页白卡（.jieshao 章 div.zhangyue-bg，height:300% 作者意图
    白卡盖满多屏）正常流分页修复：
    - 白卡 height:auto 随内容（column 分页按内容高度切页，多看看同款）
