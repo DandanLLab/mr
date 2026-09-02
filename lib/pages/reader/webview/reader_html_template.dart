@@ -413,17 +413,25 @@ html {
   color: var(--reader-text-color);
 }
 body {
-  margin: 0;
-  padding: 0;
+  /* ★ 2026-09-02 样式破坏修复：EPUB 模式不再 margin/padding 清零 ★
+     原书 body 常带 margin（本书左右各 10px），是作者版心的组成部分；
+     margin:0 后百分比基准变大（内容宽=屏宽），封面/木架/卡片全部偏大。
+     EPUB 模式：margin/padding 交给原书 CSS（epub.js 同款哲学：
+     阅读器只管布局骨架，不碰排版属性）。
+     非 EPUB 模式：保持清零（纯文本无原书 CSS，需要干净版心） */
+  ${isRichHtml ? '' : 'margin: 0;'}
+  ${isRichHtml ? '' : 'padding: 0;'}
   /* 不设置 width：body 默认 width=auto 填满 html content area = safe-width */
   height: 100%;
   /* ★ EPUB 模式：让作者字体样式优先 ★
-     - font-size 保留：作为 EPUB em 单位的基准（作者 1.3em 相对此字号）
-     - font-family/line-height/letter-spacing 不设：
-       让 EPUB 作者的 body/class 设定完全生效，不被阅读器默认值覆盖
-       作者没设的元素继承 html 的系统默认字体
-     - 非 EPUB 模式：全部设为阅读器配置值 */
-  font-size: var(--reader-font-size);
+     ★ 2026-09-02 样式破坏修复：EPUB 模式不注入 html font-size ★
+     原 body { font-size: var(--reader-font-size) } 会销定全局基准，
+     原书 body font-size:97%（如本书）落点变成 15*0.97，
+     而多看基准 ≈11px → 全书字大 1.38 倍，才需要 0.72 补丁。
+     EPUB 模式：html 不设 font-size，落在 UA 默认 16px，
+     原书百分比链回到作者意图；用户字号由 JS 检测后内联注入（见 updateStyle）。
+     非 EPUB 模式：保持原逻辑，用户字号直接驱动 */
+  ${isRichHtml ? '' : 'font-size: var(--reader-font-size);'}
   ${isRichHtml ? '' : 'font-family: var(--reader-font-family);'}
   ${isRichHtml ? '' : 'line-height: var(--reader-line-height);'}
   ${isRichHtml ? '' : 'letter-spacing: var(--reader-letter-spacing);'}
@@ -1116,7 +1124,7 @@ body.reader-scroll #reader-content-b {
   margin: 0 -5px !important;
 }
 
-/* 4a-3c. 制作说明章（body.zhizuosm）字号基准对齐多看：
+/* 4a-3c. 【2026-09-02 已撤销缩放】 制作说明章（body.zhizuosm）字号基准对齐多看：
    实测（2026-08-31 装机 720px 截图行投影）：同一段面板正文多看折 3 行、
    字形 13 物理px；MR 折 5 行、18 物理px，面板变高 1.4 倍导致二维码+
    搜一搜被挤到第 2 屏（多看整页 1 屏）。
@@ -1127,7 +1135,8 @@ body.reader-scroll #reader-content-b {
    缩小，面板+二维码收回 1 屏，恢复多看版面比例。
    用户调整字号时按比例同步，保持 1:1 视觉关系。 */
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"] {
-  font-size: calc(var(--reader-font-size) * 0.72);
+  /* 2026-09-02: 0.72 缩放撤销。html font-size 基准锁定已移除，
+     原书 body 97% 链落在 UA 16px 与多看等效，补丁不再需要 */
 }
 
 /* 4a-3e. duokan-bleed 兜底语义（贴边出血）：
@@ -1451,35 +1460,34 @@ body.reader-scroll #reader-content-b {
    - height/max-height 固定视口高度（column 分页必需）
    - overflow: hidden 防止内容溢出视口（visible 会破坏分页）
    - touch-action: manipulation 允许点击禁用双击缩放
-   - font-size/color/bg !important 确保用户设置优先于原作
    - text-size-adjust: none 防止 WebView 自动调整字号
-   ★ 不设 width：html 作为根元素默认 width=viewport */
+   ★ 2026-09-02 样式破坏修复：移除 font-size/color/bg !important
+   原书 body 常有 font-size:97% / 色彩体系（本例《这游戏也太真实了》body
+   font-size:97%），html font-size !important 会锚死基准、原书百分比链落点全偏
+   （多看基准 ≈11px，咱 15px，全书字大 1.38 倍 → 才需要 0.72 补丁）。
+   学 epub.js：阅读器只注入布局骨架，不碰排版属性；
+   用户字号走 JS 内联注入（见 _epubUserOverrides），仅当原书无声明时生效 */
 html {
   box-sizing: border-box !important;
   height: var(--reader-vh) !important;
   max-height: var(--reader-vh) !important;
   overflow: hidden !important;
   touch-action: manipulation !important;
-  font-size: var(--reader-font-size) !important;
-  color: var(--reader-text-color) !important;
-  background-color: var(--reader-bg-color) !important;
   -webkit-text-size-adjust: none !important;
   text-size-adjust: none !important;
 }
 
-/* 2. body 布局约束（对齐 lumina body 规则）
-   - margin/padding: 0 清除原作边距
-   - width: 100% + height: 100% 填满 html
-   - overflow: hidden 配合 html 防溢出
-   ★ 关键修复：原 overflow:visible 让 body 内容溢出 html，
-     破坏 column 的视口约束 → 排版混乱 */
+/* 2. body 布局约束
+   ★ 2026-09-02 样式破坏修复：不再 margin/padding:0 !important
+   原书 body margin 左右各 10px（内容宽 = 屏宽-20），margin:0 清零后
+   百分比基准变大 → 封面/木架/卡片全部偏大，与多看对比持续偏差。
+   学 epub.js columns()：body 只保留分页必需的约束，
+   margin/padding 交给原书 CSS；
+   overflow:hidden 保留（防溢出破坏 column 视口约束） */
 body {
-  box-sizing: border-box !important;
-  margin: 0 !important;
-  padding: 0 !important;
   width: 100% !important;
   height: 100% !important;
-  max-width: none !important;
+  box-sizing: border-box !important;
   overflow: hidden !important;
 }
 
@@ -1499,11 +1507,13 @@ body {
   height: var(--reader-safe-height) !important;
 }
 
-/* 4. ★ 全局元素宽度约束（对齐 lumina body * 规则）★
-   ★ 关键修复：原作元素 width:100% / 大宽度会撑破 column → 排版混乱 ★
-   限制所有元素 max-width 为 safe-width，确保不超出单列宽度 */
+/* 4. ★ 全局元素宽度约束（2026-09-02 样式破坏修复：收窄打击面）
+   原先 #reader-content-a * { max-width: safe-width !important }
+   会压塌原书装饰元素（绝对定位装饰框、负 margin 出血元素）。
+   epub.js 不给内容元素加任何全局约束，只锁 iframe 宽度。
+   咱们把 max-width 收窄到真实需要防溢出的媒体元素（第 5 条），
+   文字溢出由 word-break 保证，块级元素本身不会超 column 宽 */
 #reader-content-a * {
-  max-width: var(--reader-safe-width) !important;
   orphans: 1 !important;
   widows: 1 !important;
   word-break: break-word !important;
@@ -1511,16 +1521,24 @@ body {
 }
 
 /* 5. 媒体元素约束（对齐 lumina img/svg/video 规则）
+   - max-width: safe-width 防止图片撑破分栏（原全局 * 规则收窄到这里）
    - max-height: safe-height 防止图片/视频超高
    - height: auto + object-fit: contain 等比缩放
-   - break-inside: avoid 防止图片被分栏切断 */
+   - break-inside: avoid 防止图片被分栏切断
+   ★ object-fit 只加在 img/video 上：svg 原书常用 width/height 控制不加 contain */
 #reader-content-a img,
-#reader-content-a svg,
 #reader-content-a video {
   max-width: var(--reader-safe-width) !important;
   max-height: var(--reader-safe-height) !important;
   height: auto !important;
   object-fit: contain !important;
+  break-inside: avoid !important;
+  -webkit-column-break-inside: avoid !important;
+  page-break-inside: avoid !important;
+}
+#reader-content-a svg {
+  max-width: var(--reader-safe-width) !important;
+  max-height: var(--reader-safe-height) !important;
   break-inside: avoid !important;
   -webkit-column-break-inside: avoid !important;
   page-break-inside: avoid !important;
@@ -3616,15 +3634,10 @@ window.readerApi = (function() {
 
   // font-size px 值 → var(--reader-font-size)
   function polyfillFontSize(style) {
-    var val = style.getPropertyValue('font-size');
-    if (!val || val.indexOf('calc') !== -1 || val.indexOf('var(') !== -1) return;
-    var match = val.trim().toLowerCase().match(/^(\d+(?:\.\d+)?)(px|pt)$/);
-    if (match) {
-      // 原作 px/pt 字号 → 由用户字号变量驱动
-      style.setProperty('font-size', 'var(--reader-font-size)',
-        style.getPropertyPriority('font-size'));
-    }
-    // em/rem/百分比/关键字（small/medium 等）保留原值（相对值，尊重作者意图）
+    // ★ 2026-09-02 样式破坏修复：撤销 px 字号替换
+    // 原书 font-size:Npx 是作者明确意图（多看按原书 px 渲染），
+    // 替换成用户字号会破坏 px 声明章节的排版。
+    // em/rem/百分比链在 html 基准修复后已回到作者意图，无需 polyfill。
   }
 
   // line-height px 值 → calc(Npx * 1em)（随字号缩放）
@@ -3881,6 +3894,27 @@ window.readerApi = (function() {
     for (var key in vars) {
       if (key.charAt(0) === '-' && key.charAt(1) === '-') {
         root.style.setProperty(key, vars[key]);
+      }
+    }
+    // ★ 2026-09-02 用户字号内联注入（学 epub.js Themes.override）：
+    // EPUB 模式 html 不再锁 font-size 基准（原书 97% 链回到作者意图），
+    // 用户字号改走 body 内联 style：仅当原书 body 无 font-size 声明时生效。
+    // 检测方式：临时清 body 内联 → 读 computed 是否等于 UA 默认 16px。
+    // 原书有声明（如 97%）时不注入，用户字号仅影响无声明章节（EPUB 模式下
+    // 正文章无 body font-size 时仍可用），保证作者意图优先。
+    var fs = vars['--reader-font-size'];
+    if (fs && document.body && !document.body.dataset.authorFontSize) {
+      var inlineFs = document.body.style.fontSize;
+      document.body.style.fontSize = '';
+      var computed = parseFloat(getComputedStyle(document.body).fontSize);
+      if (Math.abs(computed - 16) < 0.51) {
+        // 原书无声明（UA 默认 16px）→ 用户字号内联生效
+        document.body.style.fontSize = fs;
+        document.body.dataset.authorFontSize = '0';
+      } else {
+        // 原书有声明 → 尊重作者，不再改
+        document.body.dataset.authorFontSize = '1';
+        if (inlineFs) document.body.style.fontSize = inlineFs;
       }
     }
     // 菜单颜色随背景色亮度自动适配
