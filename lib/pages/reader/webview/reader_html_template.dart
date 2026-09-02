@@ -1159,6 +1159,23 @@ body.reader-scroll #reader-content-b {
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"] ol.duokan-footnote-content {
   display: none !important;
 }
+/* 4a-3f. 简介页（xsjj）封面对齐多看：
+   真机像素对比（2026-09-02）：多看封面居中在木架上（中心 x=359.5/720），
+   MR 封面贴左上角（中心 x=137/720）且顶部越过木架。
+   根因：15 号兜底规则 #reader-content-a img { display:block; margin-top:1em }
+   破坏了原书 div.feng { margin:-68% auto } + 行内 img 的布局语义：
+   - img 变 block 后不再受父级 text-align:center 控制 → margin:auto 失效 → 贴左
+   - 额外 margin-top:1em 把封面下推，与 -68% 上移抵消出偏差 → 越过木架
+   修法：恢复行内语义（inline-block 受 text-align 控制），清掉兜底 margin。
+   宽度保持原书 30.5% 链路不变。 */
+#reader-content-a .epub-chapter-bg div.feng {
+  text-align: center !important;
+}
+#reader-content-a .epub-chapter-bg div.feng img {
+  display: inline-block !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
 /* 4a-4. 封面/整页背景章正文若为空（隐藏 h1 + 空 p），wrapper 高度已经由
    4a-3 的 min-height 顶满；无需额外高度兜底。 */
 
