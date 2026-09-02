@@ -103,6 +103,14 @@ class ReaderWebViewCallbacks {
   /// 没有 animation layer 需要销毁。
   final void Function()? onTouchEnd;
 
+  /// 书内链接点击（EPUB 章节内 <a href="...">）
+  ///
+  /// WebView 以 initialData 加载，相对 href 会解析成不存在的 file:// 路径
+  /// （ERR_FILE_NOT_FOUND 白屏甚至崩溃），必须拦截导航并交给父级：
+  /// 按 spine href 尾段匹配章节后跳章，匹配不到则忽略。
+  /// 参数为 WebView 请求的完整 URL（file:// 或虚拟域名 https://mr-epub-package/）。
+  final void Function(String url)? onLinkTap;
+
   const ReaderWebViewCallbacks({
     required this.onInitialized,
     required this.onPageCountReady,
@@ -117,6 +125,7 @@ class ReaderWebViewCallbacks {
     this.onChapterVisible,
     this.onBeforeSizeReload,
     this.onTouchEnd,
+    this.onLinkTap,
   });
 }
 

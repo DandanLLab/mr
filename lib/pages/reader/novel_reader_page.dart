@@ -1091,6 +1091,26 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     return target;
   }
 
+  /// 书内链接跳章（EPUB <a href>，如书籍简介的封面 → cover.html）
+  ///
+  /// WebView 拦截到的 file:// 或虚拟域名 URL，取路径尾段（文件名）与
+  /// spine 的 chapter.url 后缀匹配；匹配不到（外链/资源）忽略。
+  /// 忽略 isVolume 章节（卷标题无内容），由 _readableChapterIndex 兜底。
+  void _onWebviewLinkTap(String url) {
+    if (_chapters.isEmpty) return;
+    final path = Uri.tryParse(url)?.path ?? '';
+    if (path.isEmpty) return;
+    final target = path.split('/').last;
+    if (target.isEmpty) return;
+    final idx = _chapters.indexWhere((c) {
+      final href = c.url ?? '';
+      return href == target || href.endsWith('/$target');
+    });
+    if (idx < 0 || idx == _currentChapterIndex) return;
+    setState(() => _currentChapterIndex = _readableChapterIndex(idx));
+    _loadChapterContent();
+  }
+
   int? _nextReadableChapterIndex(int fromIndex) {
     for (var i = fromIndex + 1; i < _chapters.length; i++) {
       if (!_chapters[i].isVolume) return i;
@@ -2728,6 +2748,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
           onTouchEnd: () {
             _readerPageViewKey.currentState?.handleTouchEnd();
           },
+          // 书内链接（EPUB <a href>）：按 spine href 尾段匹配章节后跳转
+          onLinkTap: _onWebviewLinkTap,
         ),
       ),
     );

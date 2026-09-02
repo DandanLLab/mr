@@ -422,6 +422,23 @@ class _ReaderWebViewState extends State<ReaderWebView> {
               ? (controller, request) =>
                   EpubResourceServer.instance.handleRequest(request)
               : null,
+          // 书内链接拦截：<a href="cover.html"> 等相对 href 在 initialData
+          // 模式下会解析成不存在的 file:// 路径（ERR_FILE_NOT_FOUND 白屏/
+          // 崩溃）。拦截一切 file:// 与虚拟域名导航交给父级跳章；
+          // 资源加载（img/css）不经过此回调，不受影响。
+          shouldOverrideUrlLoading: (controller, navigationAction) async {
+            final url = navigationAction.request.url?.toString() ?? '';
+            if (url.isEmpty || url.startsWith('about:')) {
+              return NavigationActionPolicy.ALLOW;
+            }
+            final isFile = url.startsWith('file://');
+            final isVirtual = url.startsWith('https://mr-epub-package/');
+            if (!isFile && !isVirtual) {
+              return NavigationActionPolicy.ALLOW;
+            }
+            widget.callbacks.onLinkTap?.call(url);
+            return NavigationActionPolicy.CANCEL;
+          },
           onWebViewCreated: _onWebViewCreated,
           onLoadStop: _onLoadStop,
           onConsoleMessage: (controller, consoleMessage) {
