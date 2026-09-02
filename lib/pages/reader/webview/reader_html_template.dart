@@ -1127,8 +1127,10 @@ body.reader-scroll #reader-content-b {
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"] > *,
 #reader-content-a .epub-chapter-bg[class*="jieshao"] > *,
 #reader-content-a .epub-chapter-bg[class*="kuaijie"] > * {
-  margin-left: 10px !important;
-  margin-right: 10px !important;
+  /* 18px = 原书 body margin 10px + 多看阅读器默认页边距 8px
+     （反推自多看实拍封面 173 物理：30.5% 包含块 = 283.6 CSS） */
+  margin-left: 18px !important;
+  margin-right: 18px !important;
 }
 
 /* 4a-3b. 手册页白卡（.jieshao 章 div.zhangyue-bg，height:300% 作者意图
