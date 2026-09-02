@@ -413,13 +413,14 @@ html {
   color: var(--reader-text-color);
 }
 body {
-  /* ★ 2026-09-02 样式破坏修复：EPUB 模式不再 margin/padding 清零 ★
-     原书 body 常带 margin（本书左右各 10px），是作者版心的组成部分；
-     margin:0 后百分比基准变大（内容宽=屏宽），封面/木架/卡片全部偏大。
-     EPUB 模式：margin/padding 交给原书 CSS（epub.js 同款哲学：
-     阅读器只管布局骨架，不碰排版属性）。
-     非 EPUB 模式：保持清零（纯文本无原书 CSS，需要干净版心） */
-  ${isRichHtml ? '' : 'margin: 0;'}
+  /* ★ 2026-09-02 v2：margin 恢复清零（padding 仍交给原书）★
+     实测 26.0902.4~6：body margin(原书10px/UA8px) 会顶开 #reader-root，
+     root < safe-width=100vw → 背景章右缘露缝，且多层版心叠加无法对账。
+     epub.js 同款 margin:0 !important；百分比基准不受 margin 影响
+     （30.5% 的包含块是 content width，由 html padding 决定）。
+     版心唯一来源 = html --reader-padding-*：
+       正文章 20px / 背景章 0(has 清零) / 卡片章直接子元素 10px(4a-3g) */
+  margin: 0 !important;
   ${isRichHtml ? '' : 'padding: 0;'}
   /* 不设置 width：body 默认 width=auto 填满 html content area = safe-width */
   height: 100%;
