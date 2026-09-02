@@ -1118,8 +1118,11 @@ body.reader-scroll #reader-content-b {
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"],
 #reader-content-a .epub-chapter-bg[class*="jieshao"],
 #reader-content-a .epub-chapter-bg[class*="kuaijie"] {
-  margin-left: 10px !important;
-  margin-right: 10px !important;
+  /* padding 而非 margin：背景图铺满全屏（多看实拍背景顶到屏边），
+     内容缩进 10px 版心（卡框 x45..674物理）。margin 会把背景一起缩进，
+     右缘露出阅读器底色（26.0902.4 实测翻车） */
+  padding-left: 10px !important;
+  padding-right: 10px !important;
 }
 
 /* 4a-3b. 手册页白卡（.jieshao 章 div.zhangyue-bg，height:300% 作者意图
