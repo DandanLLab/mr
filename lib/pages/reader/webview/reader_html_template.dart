@@ -2008,11 +2008,32 @@ img {
         + ' body=' + fs(document.body)
         + ' wrap=' + fs(w)
         + ' p=' + fs(p)
-        + ' htmlInline=' + (document.documentElement.style.fontSize || 'none')
-        + ' bodyInline=' + (document.body.style.fontSize || 'none')
         + ' authorFlag=' + (document.body.dataset.authorFontSize || 'unset')
-        + ' textZoomNA dpr=' + window.devicePixelRatio
+        + ' dpr=' + window.devicePixelRatio
         + ' innerW=' + window.innerWidth);
+      // 下限行为刻画：同串文本 5/7/9/11px 的实际渲染宽度
+      var host = p || w;
+      var probe = document.createElement('div');
+      probe.style.cssText = 'position:absolute;visibility:hidden;left:0;top:0;width:auto;';
+      ['5px', '7px', '8px', '9px', '11px'].forEach(function(size) {
+        var s = document.createElement('span');
+        s.style.fontSize = size;
+        s.style.whiteSpace = 'nowrap';
+        s.textContent = '本书采用阡陌居成员校对的文本为底本测试字号下限行为';
+        probe.appendChild(s);
+        var m = document.createElement('br');
+        probe.appendChild(m);
+      });
+      host.appendChild(probe);
+      setTimeout(function() {
+        var spans = probe.querySelectorAll('span');
+        var out = [];
+        spans.forEach(function(s) {
+          out.push(getComputedStyle(s).fontSize + '→w' + Math.round(s.getBoundingClientRect().width));
+        });
+        console.log('PROBE-FLOOR ' + out.join(' | '));
+        probe.remove();
+      }, 300);
     } catch (e) { console.log('PROBE err ' + e); }
   }, 800);
 })();
