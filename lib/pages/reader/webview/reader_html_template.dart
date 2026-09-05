@@ -1181,10 +1181,14 @@ body.reader-scroll #reader-content-b {
 }
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"] p.design-content,
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"] p.design-ad {
-  /* 0.48em：真机探针实测 0.6em 落点 8px（设备对小字号有 ~1.25 向上调整，
-     桌面 Chrome 6.6px 精确生效）。目标多看正文 ≈6.0-6.4 CSS（3 行折行），
-     0.48 设备落点 ≈6.4-6.7。桌面略小可接受，设备是参照平台。 */
-  font-size: 0.48em;
+  font-size: 0.6em;
+  /* 真机探针：0.6em=6.42px 被本 WebView 的 8px 字号下限钳到 8px
+     （0.48em 渲染与 0.6em 完全一致 → 与指定值无关的硬下限）。
+     text-size-adjust 百分比在布局层再乘（clamp 后的放大器）：
+     8px × 0.8 = 6.4px 视觉落点 ≈ 多看 6.0-6.4。
+     需 !important 压过 4b 的全局 none（同 !important 比特异性）。 */
+  -webkit-text-size-adjust: 80% !important;
+  text-size-adjust: 80% !important;
 }
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"] p.design-ad img {
   height: 15px;
