@@ -1616,14 +1616,20 @@ body {
 }
 
 /* 5. 媒体元素约束（对齐 lumina img/svg/video 规则）
-   - max-width: safe-width 防止图片撑破分栏（原全局 * 规则收窄到这里）
+   - max-width: 100%（相对真实父容器）防图片撑破分栏
    - max-height: safe-height 防止图片/视频超高
    - height: auto + object-fit: contain 等比缩放
    - break-inside: avoid 防止图片被分栏切断
-   ★ object-fit 只加在 img/video 上：svg 原书常用 width/height 控制不加 contain */
+   ★ object-fit 只加在 img/video 上：svg 原书常用 width/height 控制不加 contain
+   ★ max-width 用 100% 而非 safe-width（2026-09-05 图片贴边溢出修复）：
+     作者常写 .xx img { max-width:100% }（=父容器宽，如带 margin 的
+     .shumou 容器 324px）；我们的 safe-width !important（背景章=360）
+     会压过作者声明 → 图被钳到 360 装进 324 容器 → 右缘溢出 36px
+     （制作说明"书眸"搜索框被切，多看按容器宽 317 渲染无溢出）。
+     100% 与父容器一致，两种场景都正确。 */
 #reader-content-a img,
 #reader-content-a video {
-  max-width: var(--reader-safe-width) !important;
+  max-width: 100% !important;
   max-height: var(--reader-safe-height) !important;
   height: auto !important;
   object-fit: contain !important;
@@ -1632,7 +1638,7 @@ body {
   page-break-inside: avoid !important;
 }
 #reader-content-a svg {
-  max-width: var(--reader-safe-width) !important;
+  max-width: 100% !important;
   max-height: var(--reader-safe-height) !important;
   break-inside: avoid !important;
   -webkit-column-break-inside: avoid !important;
@@ -1641,9 +1647,10 @@ body {
 
 /* 5b. 表格防溢出（2026-09-02 真实容器细节调整）：
    只约束 max-width 防撑破分栏，不强制 table-layout（保留原书表格排版）。
-   长内容靠 td 继承的 word-break 折行 */
+   长内容靠 td 继承的 word-break 折行。table 的父容器即分栏内容区，
+   100% 与 safe-width 等价，取 100% 保持一致 */
 #reader-content-a table {
-  max-width: var(--reader-safe-width) !important;
+  max-width: 100% !important;
 }
 
 /* 6. 不可分切元素（对齐 Readium CSS before.css break-inside 规则）
