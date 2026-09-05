@@ -1126,6 +1126,13 @@ body.reader-scroll #reader-content-b {
 #reader-content-a .epub-chapter-bg[class*="jieshao"],
 #reader-content-a .epub-chapter-bg[class*="kuaijie"] {
   padding-top: 57px;
+  /* ★ 背景按屏取景对齐多看（2026-09-03）：多看分页每屏重绘 body 背景
+     （手册页 p2 背景与 p1 同为艺术图顶部——实测），而 wrapper 在 multicol
+     里跨页连续，cover 按"内容全高"取景 → 构图与多看错位（制作说明页
+     实拍：多看是塔楼构图、MR 是武士构图）。fixed = 背景相对视口取景，
+     每屏一致。作者未声明 attachment（renwu/VOL 系作者自带 fixed），
+     此条是对多看渲染行为的等效复刻，非覆盖作者声明。 */
+  background-attachment: fixed !important;
   /* 版心缩进打在直接子元素上（多看等价：body 背景全屏 + body margin
      10px 让子元素缩进。EpubParser 把 body 语义搬到 wrapper 后，body 的
      margin 语义 = wrapper 的直接子元素缩进）。直接子选择器避免影响
