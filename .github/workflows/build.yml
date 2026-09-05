@@ -434,6 +434,37 @@ jobs:
           with open('pubspec.yaml', 'w', encoding='utf-8') as f:
               f.write(new_content)
           PYEOF
+          # 注入 flutter_inappwebview 鸿蒙适配 fork（OpenHarmony-SIG 官方移植，
+          # 分支 br_v6.1.5_ohos 与项目 ^6.1.5 对应；新增 flutter_inappwebview_ohos
+          # 平台包，Android/iOS 路径与上游一致——全平台同一套源码）。
+          # dependency_overrides 的版本约束本就被 Dart 忽略，git ref 定分支即可。
+          python3 << 'PYEOF'
+          import re
+          with open('pubspec.yaml', 'r', encoding='utf-8') as f:
+              content = f.read()
+          if 'flutter_inappwebview' in content and 'dependency_overrides:' in content:
+              override = ('  flutter_inappwebview:\n'
+                          '    git:\n'
+                          '      url: https://gitcode.com/openharmony-sig/flutter_inappwebview.git\n'
+                          '      ref: br_v6.1.5_ohos\n')
+              # 已注入过则跳过（幂等）
+              if 'br_v6.1.5_ohos' in content:
+                  print('⚠️ webview 鸿蒙 override 已存在，跳过')
+              else:
+                  # 插到 dependency_overrides: 节点末尾（下一个顶级键之前）
+                  m = re.search(r'(dependency_overrides:\n(?:[ ]{2}.*\n)*)', content)
+                  if m:
+                      content = content.replace(m.group(1), m.group(1) + override)
+                  else:
+                      content = content.replace('dependency_overrides:\n',
+                                                'dependency_overrides:\n' + override)
+                  print('✅ 已注入 flutter_inappwebview 鸿蒙 override')
+              with open('pubspec.yaml', 'w', encoding='utf-8') as f:
+                  f.write(content)
+          else:
+              print('⚠️ 未找到 dependency_overrides 或 flutter_inappwebview，跳过')
+          PYEOF
+          grep -A4 "dependency_overrides:" pubspec.yaml
           echo "=== 打补丁后的 flutter 节点 ==="
           sed -n '/^flutter:/,/^[a-z]/p' pubspec.yaml
 
