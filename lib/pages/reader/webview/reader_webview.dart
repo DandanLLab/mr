@@ -404,6 +404,11 @@ class _ReaderWebViewState extends State<ReaderWebView> {
             disableHorizontalScroll: true,
             disableVerticalScroll: widget.isScrollMode ? false : true,
             supportZoom: false,
+            // 显式 NORMAL 布局算法：禁 Android WebView 文本自动放大
+            // （font boosting 会对"块宽≫文本自然宽"的小字号块做 1.2~1.3×
+            // 放大，制作说明 0.6em 正文 6.6px 被放大到 8.3px，多看 3 行
+            // 变 MR 4 行）。配套 After CSS 4b 逐元素 text-size-adjust:none。
+            layoutAlgorithm: LayoutAlgorithm.NORMAL,
             // 必须显式关闭 builtInZoomControls，否则 Android WebView 仍允许
             // 双指缩放手势触发（supportZoom:false 只禁缩放功能，不禁手势识别）
             builtInZoomControls: false,

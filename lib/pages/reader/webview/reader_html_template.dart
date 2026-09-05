@@ -1593,6 +1593,17 @@ body {
   overflow-wrap: break-word !important;
 }
 
+/* 4b. Android WebView 字体放大（font boosting / text autosizing）全局关闭：
+   text-size-adjust 属性不继承，html 上的 none 管不到各文本块——
+   Android WebView 会对"块宽远大于文本自然宽度"的小字号块做 1.2~1.3×
+   放大（playwright 桌面 Chrome 0.6em=6.6px 精确生效，真机渲染 8.3px，
+   制作说明正文多看 3 行 / MR 4 行的根因）。逐元素关闭。 */
+#reader-content-a,
+#reader-content-a * {
+  -webkit-text-size-adjust: none !important;
+  text-size-adjust: none !important;
+}
+
 /* 5. 媒体元素约束（对齐 lumina img/svg/video 规则）
    - max-width: safe-width 防止图片撑破分栏（原全局 * 规则收窄到这里）
    - max-height: safe-height 防止图片/视频超高
