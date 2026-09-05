@@ -1244,6 +1244,20 @@ body.reader-scroll #reader-content-b {
   margin-top: 0 !important;
   margin-bottom: 0 !important;
 }
+/* 尺寸对齐多看（2026-09-06 同一手机 dpr2.25 实测）：
+   多看封面坐在架板上（底边压住板面）；MR 封面偏大且悬空有间隙。
+   多看实测：封面宽 173 物理 = 77 CSS；架板 370 物理 = 164 CSS。
+   作者声明 30.5%/65% 渲染 90/191 偏大，按多看落点覆写：
+   77/294 = 26.2%，164/294 = 55.8% */
+#reader-content-a .epub-chapter-bg[class*="zhizuosm"] img.shujia {
+  width: 55.8%;
+}
+#reader-content-a .epub-chapter-bg[class*="zhizuosm"] img.feng {
+  width: 26.2%;
+}
+/* 封面落座：作者 -68% 的渲染（封面底距架板臂 ≈12-16 CSS）与多看一致
+   （-52.9%/-64.3% 实验过沉/浮，非线性，均弃）。宽度按多看实测覆写是
+   本组唯一必需项（65%/30.5% 渲染 191/90 vs 多看 164/77）。 */
 /* 4a-4. 封面/整页背景章正文若为空（隐藏 h1 + 空 p），wrapper 高度已经由
    4a-3 的 min-height 顶满；无需额外高度兜底。 */
 
