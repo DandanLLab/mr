@@ -481,6 +481,20 @@ jobs:
         run: |
           export PATH="$HOME/ohos-flutter/bin:$PATH"
           flutter create --platforms ohos .
+          # ★ compatibleSdkVersion 降配 5.1.0(18)→5.0.0(12)：
+          # flutter_inappwebview 鸿蒙 fork（br_v6.1.5_ohos）按 API 12 编写
+          # （其 example 即 5.0.0(12)），API 18 下 ArkTS 编译 8 错
+          # （getPageOffset 不存在/didFail 参数数/arkts lint）。
+          # fork README 表格：Flutter 3.27/3.35 ↔ SDK 5.0.0(12)。
+          python3 - << 'PYEOF'
+          import re
+          with open('ohos/build-profile.json5', 'r', encoding='utf-8') as f:
+              c = f.read()
+          c2 = c.replace('"compatibleSdkVersion": "5.1.0(18)"', '"compatibleSdkVersion": "5.0.0(12)"')
+          with open('ohos/build-profile.json5', 'w', encoding='utf-8') as f:
+              f.write(c2)
+          print('✅ compatibleSdkVersion → 5.0.0(12)' if c2 != c else '⚠️ 未找到 5.1.0(18)')
+          PYEOF
           echo "=== ohos 目录结构 ==="
           ls -la ohos/
           echo "=== 生成的 build-profile.json5 ==="
