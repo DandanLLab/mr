@@ -595,6 +595,52 @@ jobs:
           echo "=== oh_modules 目录结构（顶层）==="
           find oh_modules -maxdepth 3 -type d 2>/dev/null | head -30
 
+      - name: Patch flutter_inappwebview_ohos for SDK compat
+        # fork（br_v6.1.5_ohos）引用了 WebviewController.getPageOffset——
+        # 该 API 在可用的 SDK（5.0.0(12)/5.1.0(18)）d.ts 中均不存在，
+        # ArkTS 编译 8 错。补丁（语义等价，fork 自带 lastKnown 兜底）：
+        # 1. InAppWebView.ets：getPageOffset → lastKnownScrollX/Y
+        #    （调用处全在 try/catch 内，fork 用 onScroll 持续跟踪 lastKnown）
+        # 2. InAppWebViewClient.ets：改走公共方法 getScrollXSync/YSync
+        # 3. WebResourceResponseHelper.ets：didFail 旧双参签名 → 单参
+        run: |
+          python3 << 'PYEOF'
+          import glob
+          dirs = glob.glob('/home/runner/.pub-cache/git/flutter_inappwebview-*/flutter_inappwebview_ohos/ohos/src/main/ets')
+          if not dirs:
+              print('⚠️ 未找到 ohos 包源码（pub-cache 未就绪？）')
+              raise SystemExit(1)
+          ets = dirs[0]
+          def patch(path, subs):
+              with open(path, 'r', encoding='utf-8') as f:
+                  s = f.read()
+              orig = s
+              for a, b in subs:
+                  s = s.replace(a, b)
+              with open(path, 'w', encoding='utf-8') as f:
+                  f.write(s)
+              print(('✅ patched ' if s != orig else '— 无变化 ') + path.split('ets/')[-1])
+          iv = ets + '/components/plugin/webview/in_app_webview/InAppWebView.ets'
+          patch(iv, [
+              ('this.requireController().getPageOffset().x', 'this.lastKnownScrollX'),
+              ('this.requireController().getPageOffset().y', 'this.lastKnownScrollY'),
+              ('Math.round(this.requireController().getPageOffset().x)', 'this.lastKnownScrollX'),
+              ('Math.round(this.requireController().getPageOffset().y)', 'this.lastKnownScrollY'),
+          ])
+          cl = ets + '/components/plugin/webview/in_app_webview/InAppWebViewClient.ets'
+          patch(cl, [
+              ('const pageOffset = webView.getController().getPageOffset();\n'
+               '      scrollX = Math.round(pageOffset.x);\n'
+               '      scrollY = Math.round(pageOffset.y);',
+               'scrollX = webView.getScrollXSync();\n'
+               '      scrollY = webView.getScrollYSync();'),
+          ])
+          hp = ets + '/components/plugin/types/WebResourceResponseHelper.ets'
+          patch(hp, [
+              ('didFail(WebNetErrorList.ERR_FAILED, true)', 'didFail(WebNetErrorList.ERR_FAILED)'),
+          ])
+          PYEOF
+
       - name: Build HAP
         # 不签名构建：生成未签名 HAP，用户自行用 DevEco Studio 签名后安装
         # 多阶段构建策略（最多 3 次）：
