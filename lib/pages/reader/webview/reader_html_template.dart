@@ -1645,12 +1645,16 @@ body {
   page-break-inside: avoid !important;
 }
 
-/* 5b. 表格防溢出（2026-09-02 真实容器细节调整）：
-   只约束 max-width 防撑破分栏，不强制 table-layout（保留原书表格排版）。
-   长内容靠 td 继承的 word-break 折行。table 的父容器即分栏内容区，
-   100% 与 safe-width 等价，取 100% 保持一致 */
+/* 5b. 表格防溢出 + 多看表格排版对齐（2026-09-05 书籍介绍页实测）：
+   - max-width 100% 防撑破分栏，不强制 table-layout
+   - width: 100%：多看表格铺满内容宽（xsjj 信息表两列铺开到边实测，
+     MR shrink-to-fit 只剩 114px 挤在左侧，多看 245px 铺满）
+   - line-height: normal：多看的行距设置不作用于表格（DK 信息表行高
+     ≈1.15 紧凑；MR 继承 wrapper 的 1.83 → 表格高 58 vs 多看 37） */
 #reader-content-a table {
   max-width: 100% !important;
+  width: 100% !important;
+  line-height: normal !important;
 }
 
 /* 6. 不可分切元素（对齐 Readium CSS before.css break-inside 规则）
