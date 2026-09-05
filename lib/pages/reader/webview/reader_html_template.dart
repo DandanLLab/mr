@@ -1261,7 +1261,8 @@ body.reader-scroll #reader-content-b {
    ★ 2026-09-06 真机复测（最新构建）：封面悬空 15-18 CSS（多看贴合
    overlap 6），margin -68%→-60.5%（+7.5% = 下移 ~22 CSS）。 */
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"] div.feng {
-  margin-top: -60.5%;
+  /* 线性插值：-68% 悬空+16，-60.5% 过深-15 → 4.1 CSS/1%，目标贴合+6 → -62.7% */
+  margin-top: -62.7%;
 }
 /* 4a-4. 封面/整页背景章正文若为空（隐藏 h1 + 空 p），wrapper 高度已经由
    4a-3 的 min-height 顶满；无需额外高度兜底。 */
