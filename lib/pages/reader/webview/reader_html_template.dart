@@ -331,18 +331,8 @@ html:has(.epub-chapter-bg) {
   --reader-padding-right: 0px;
 }
 
-/* 3-9b. 卡片版面章（zhizuosm/jieshao/kuaijie）顶部页边距对齐多看：
-   真机实测（2026-09-03）：多看手册白卡顶 115 物理px = 57.5 CSS（页面
-   上边距，原书 body 无 top margin），制作说明框顶 150 物理含框内留白。
-   MR 之前 0 → 白卡/封面顶头、封面图被裁、红字书名与木架重叠。
-   只给这三类卡片章恢复顶部 padding；renwu/VOL/qmp* 真全屏 bleed 仍 0。
-   放在 3-9 之后利用同特异性源顺序覆盖。背景图铺满不受影响
-   （padding 在 wrapper 外侧，bg 从 wrapper 盒顶继续铺满全屏）。 */
-html:has(.epub-chapter-bg[class*="zhizuosm"]),
-html:has(.epub-chapter-bg[class*="jieshao"]),
-html:has(.epub-chapter-bg[class*="kuaijie"]) {
-  --reader-padding-top: 57px;
-}
+/* 3-9b.（已并入 4a-3g）卡片章顶部 57px 用 wrapper padding-top 实现，
+   不占 html padding——html padding 会推走背景容器露出底色带。 */
 
 * {
   box-sizing: border-box;
@@ -1104,10 +1094,12 @@ body.reader-scroll #reader-content-b {
    人物卡/卷首页/封底——正文仅隐藏 h1/h2 + 空 p）。
    多看按"整页背景 + 可选标题"渲染，全屏铺满无留白。
    作者 CSS 的 body.renwu0 选择器在 WebView 里不命中（body class 已被
-   EpubParser 移到 wrapper div .epub-chapter-bg），此规则把背景铺满语义
-   兜底到 wrapper：配合 4a 的 min-height:var(--reader-safe-height) +
-   overflow:hidden，背景 cover 铺满整屏（对齐多看人物卡/卷首页实拍）。
-   仅命中整页背景类（有 body 级背景图的 class），不影响正文章节。 */
+   EpubParser 移到 wrapper div .epub-chapter-bg），解析器已把 body 规则
+   改写到 wrapper：作者自带的 cover/center/no-repeat/attachment 全部存活。
+   ★ 2026-09-03 降噪（用户指出"暴力重写破坏原书 CSS"）：删掉与作者声明
+   冲突的 4 条 background !important——尤其 background-position: top center
+   曾强压作者的 center center，导致背景几何与多看（按原书渲染）错位。
+   仅保留尺寸兜底：width:100% + min-height 撑满视口（wrapper 是普通 div）。 */
 #reader-content-a .epub-chapter-bg[class*="renwu"],
 #reader-content-a .epub-chapter-bg[class*="VOL"],
 #reader-content-a .epub-chapter-bg[class*="qmpfengdi"],
@@ -1116,9 +1108,6 @@ body.reader-scroll #reader-content-b {
 #reader-content-a .epub-chapter-bg[class*="jieshao"],
 #reader-content-a .epub-chapter-bg[class*="kuaijie"] {
   background-size: cover !important;
-  background-position: top center !important;
-  background-attachment: scroll !important;
-  background-repeat: no-repeat !important;
   width: 100% !important;
   min-height: var(--reader-safe-height) !important;
 }
@@ -1128,14 +1117,19 @@ body.reader-scroll #reader-content-b {
    （卡框 x45..674物理 = 22.5..337 CSS），MR 卡片全宽无版心。
    根因：原书 body margin:0 10px 的语义在 wrapper 上丢失
    （4a-3 的 width:100% + html:has 清 padding 把版心抹了）。
-   renwu/VOL/qmp* 是真全屏 bleed 章不受此规则影响。 */
+   renwu/VOL/qmp* 是真全屏 bleed 章不受此规则影响。
+   ★ padding-top 57px（2026-09-03 实测对齐多看页面上边距 57.5 CSS）：
+   多看手册白卡顶 115 物理/制作说明框顶 150 物理（含框内留白）。
+   放 wrapper 盒内——背景照常铺满 padding 区（全屏出血），仅子元素
+   （白卡/封面/卡框）下移；html padding 方案会把背景推走露出底色带。 */
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"],
 #reader-content-a .epub-chapter-bg[class*="jieshao"],
 #reader-content-a .epub-chapter-bg[class*="kuaijie"] {
-  /* 背景铺满 wrapper 全屏；版心缩进打在直接子元素上（多看等价：
-     body 背景全屏 + body margin 10px 让子元素缩进。EpubParser 把 body
-     语义搬到 wrapper 后，body 的 margin 语义 = wrapper 的直接子元素缩进）。
-     直接子选择器避免影响卡片内部元素自身的布局 */
+  padding-top: 57px;
+  /* 版心缩进打在直接子元素上（多看等价：body 背景全屏 + body margin
+     10px 让子元素缩进。EpubParser 把 body 语义搬到 wrapper 后，body 的
+     margin 语义 = wrapper 的直接子元素缩进）。直接子选择器避免影响
+     卡片内部元素自身的布局 */
 }
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"] > *,
 #reader-content-a .epub-chapter-bg[class*="jieshao"] > *,
