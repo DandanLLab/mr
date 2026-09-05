@@ -1991,6 +1991,23 @@ img {
   } else {
     window.addEventListener('DOMContentLoaded', mountFixedBg);
   }
+  /* TEMP-PROBE: 真机字号链探针（验证后删除） */
+  setTimeout(function() {
+    try {
+      var p = document.querySelector('p.design-content');
+      var w = document.querySelector('.epub-chapter-bg');
+      function fs(el) { return el ? getComputedStyle(el).fontSize : 'NA'; }
+      console.log('PROBE html=' + fs(document.documentElement)
+        + ' body=' + fs(document.body)
+        + ' wrap=' + fs(w)
+        + ' p=' + fs(p)
+        + ' htmlInline=' + (document.documentElement.style.fontSize || 'none')
+        + ' bodyInline=' + (document.body.style.fontSize || 'none')
+        + ' authorFlag=' + (document.body.dataset.authorFontSize || 'unset')
+        + ' textZoomNA dpr=' + window.devicePixelRatio
+        + ' innerW=' + window.innerWidth);
+    } catch (e) { console.log('PROBE err ' + e); }
+  }, 800);
 })();
 
 window.readerApi = (function() {
