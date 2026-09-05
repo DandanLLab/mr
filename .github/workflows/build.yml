@@ -446,6 +446,7 @@ jobs:
               override = ('  flutter_inappwebview:\n'
                           '    git:\n'
                           '      url: https://gitcode.com/openharmony-sig/flutter_inappwebview.git\n'
+                          '      path: flutter_inappwebview\n'
                           '      ref: br_v6.1.5_ohos\n')
               # 已注入过则跳过（幂等）
               if 'br_v6.1.5_ohos' in content:
