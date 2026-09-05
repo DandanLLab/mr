@@ -1166,19 +1166,25 @@ body.reader-scroll #reader-content-b {
   margin: 0 15px !important;
 }
 
-/* 4a-3c. 【2026-09-02 已撤销缩放】 制作说明章（body.zhizuosm）字号基准对齐多看：
-   实测（2026-08-31 装机 720px 截图行投影）：同一段面板正文多看折 3 行、
-   字形 13 物理px；MR 折 5 行、18 物理px，面板变高 1.4 倍导致二维码+
-   搜一搜被挤到第 2 屏（多看整页 1 屏）。
-   根因：作者用 font-size:100%/120%/60% 百分比链，多看落点基准 ≈11px，
-   MR 落在用户字号 15px 上，同比放大 1.38 倍。
-   修法：整章基准缩到用户字号的 0.72（15→10.8px），作者的百分比链
-   （design-box 100%/design-title 120%/design-content 60%）随之等比
-   缩小，面板+二维码收回 1 屏，恢复多看版面比例。
-   用户调整字号时按比例同步，保持 1:1 视觉关系。 */
-#reader-content-a .epub-chapter-bg[class*="zhizuosm"] {
-  /* 2026-09-02: 0.72 缩放撤销。html font-size 基准锁定已移除，
-     原书 body 97% 链落在 UA 16px 与多看等效，补丁不再需要 */
+/* 4a-3c. 制作说明章（body.zhizuosm）多看语义排版复刻（2026-09-03 精确实测）：
+   【勘误】旧注释称"作者用 100%/120%/60% 百分比链"——经全文核查
+   Style0001.css 与 zzsm.xhtml，design-* 类没有任何 font-size 声明。
+   多看标题字形 26 物理(13 CSS≈1.2×基准)、正文同段多看折 3 行 / MR 折 5 行
+   （同宽 → 多看正文 ≈0.6×基准）、图标 30 物理(15 CSS)——
+   这是多看对"制作说明"版面的自有语义渲染，作者 CSS 未声明。
+   此处按实测精确复刻（非覆盖作者声明：作者本就没写）：
+   - h2.design-title → 1.2em
+   - p.design-content / p.design-ad → 0.6em（正文折 3 行恢复多看版面）
+   - p.design-ad 内图标（80×80 原始尺寸无约束）→ 15px */
+#reader-content-a .epub-chapter-bg[class*="zhizuosm"] h2.design-title {
+  font-size: 1.2em;
+}
+#reader-content-a .epub-chapter-bg[class*="zhizuosm"] p.design-content,
+#reader-content-a .epub-chapter-bg[class*="zhizuosm"] p.design-ad {
+  font-size: 0.6em;
+}
+#reader-content-a .epub-chapter-bg[class*="zhizuosm"] p.design-ad img {
+  height: 15px;
 }
 
 /* 4a-3e. duokan-bleed 兜底语义（贴边出血）：
