@@ -1181,7 +1181,10 @@ body.reader-scroll #reader-content-b {
 }
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"] p.design-content,
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"] p.design-ad {
-  font-size: 0.6em;
+  /* 0.48em：真机探针实测 0.6em 落点 8px（设备对小字号有 ~1.25 向上调整，
+     桌面 Chrome 6.6px 精确生效）。目标多看正文 ≈6.0-6.4 CSS（3 行折行），
+     0.48 设备落点 ≈6.4-6.7。桌面略小可接受，设备是参照平台。 */
+  font-size: 0.48em;
 }
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"] p.design-ad img {
   height: 15px;
