@@ -1176,19 +1176,23 @@ body.reader-scroll #reader-content-b {
    - h2.design-title → 1.2em
    - p.design-content / p.design-ad → 0.6em（正文折 3 行恢复多看版面）
    - p.design-ad 内图标（80×80 原始尺寸无约束）→ 15px */
+#reader-content-a .epub-chapter-bg[class*="zhizuosm"] .design-box {
+  /* ★ 真机探针实锤（PROBE-FLOOR）：本 WebView 有 8px 字号硬下限
+     （5/7/8px 全部钳为 8px 渲染），text-size-adjust 百分比/字体路径
+     均无法突破，而多看正文 ≈6.0-6.4 CSS。改用 zoom 布局级缩放：
+     卡内按 0.75 缩放，字号按 1/0.75 补偿（zoom 先于下限检查生效，
+     8.5px 指定值过检后视觉 6.4px）。 */
+  zoom: 0.75;
+}
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"] h2.design-title {
-  font-size: 1.2em;
+  font-size: 1.6em;      /* 视觉 13.2px = 多看标题 26 物理 */
 }
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"] p.design-content,
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"] p.design-ad {
-  font-size: 0.6em;
-  /* 真机探针：0.6em=6.42px 被本 WebView 的 8px 字号下限钳到 8px
-     （0.48em 渲染与 0.6em 完全一致 → 与指定值无关的硬下限）。
-     text-size-adjust 百分比在布局层再乘（clamp 后的放大器）：
-     8px × 0.8 = 6.4px 视觉落点 ≈ 多看 6.0-6.4。
-     需 !important 压过 4b 的全局 none（同 !important 比特异性）。 */
-  -webkit-text-size-adjust: 80% !important;
-  text-size-adjust: 80% !important;
+  font-size: 0.775em;    /* 视觉 6.4px = 多看正文（3 行折行恢复） */
+}
+#reader-content-a .epub-chapter-bg[class*="zhizuosm"] p.design-ad img {
+  height: 20px;          /* 视觉 15px = 多看图标 30 物理 */
 }
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"] p.design-ad img {
   height: 15px;
