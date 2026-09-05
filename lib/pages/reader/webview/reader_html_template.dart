@@ -1934,6 +1934,43 @@ img {
   });
 })();
 
+/* ★ 多看式按页背景（2026-09-03）：把 .epub-chapter-bg 的作者背景搬到
+   position:fixed 底层元素。
+   为什么：Duokan 分页每屏重绘 body 背景（背景相对视口取景）；wrapper 在
+   multicol 里跨页连续，cover 按"内容全高"取景 → 构图与多看错位
+   （制作说明页实拍：多看塔楼构图 / MR 武士构图）；background-attachment:
+   fixed 在 multicol+transform 环境下 WebView 不生效。
+   做法：computed style 原值拷贝（background-image/size/position/repeat，
+   不修改作者声明，只换绘制层）→ wrapper 背景清空防双重绘制。 */
+(function() {
+  function mountFixedBg() {
+    var w = document.querySelector('.epub-chapter-bg');
+    if (!w || document.getElementById('reader-fixed-bg')) return;
+    var cs = window.getComputedStyle(w);
+    if (!cs.backgroundImage || cs.backgroundImage === 'none') return;
+    var under = document.createElement('div');
+    under.id = 'reader-fixed-bg';
+    under.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;'
+      + 'z-index:0;pointer-events:none;'
+      + 'background-image:' + cs.backgroundImage
+      + ';background-size:' + cs.backgroundSize
+      + ';background-position:' + cs.backgroundPosition
+      + ';background-repeat:' + cs.backgroundRepeat
+      + ';background-color:' + cs.backgroundColor;
+    document.body.insertBefore(under, document.body.firstChild);
+    w.style.backgroundImage = 'none';
+    w.style.backgroundColor = 'transparent';
+    // 内容层抬到背景之上（wrapper 在 multicol 流内）
+    w.style.position = 'relative';
+    w.style.zIndex = '1';
+  }
+  if (document.querySelector('.epub-chapter-bg')) {
+    mountFixedBg();
+  } else {
+    window.addEventListener('DOMContentLoaded', mountFixedBg);
+  }
+})();
+
 window.readerApi = (function() {
   var config = { viewWidth: 0, viewHeight: 0, isScrollMode: false, columnGap: 0, pageAnimDurationMs: 0, pageModeIndex: 4 };
   var body = document.body;
