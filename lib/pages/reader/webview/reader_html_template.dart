@@ -1362,12 +1362,17 @@ body.reader-scroll #reader-content-b {
 .epub-chapter-bg li { margin: 0.2em 0; }
 
 /* 11. 分隔线：用 .epub-chapter-bg（class 选择器），让 EPUB 原作者 hr CSS
-   正常生效（如 .book-line { border-color: #ff0000 }）。 */
+   正常生效（如 .book-line { border-color: #ff0000 }、hr.design-line
+   { border-style: dashed }——作者声明在本规则后注入，同特异性后者胜）。
+   ★ line-height:0（2026-09-03 制作说明卡实测）：hr 无文字，但继承
+   1.83 行高会把行盒撑到 19.5 CSS，卡内累计 +37 CSS（对齐多看卡高
+   440 物理的主因之一）。margin 1em→0.7em 同步收敛。 */
 .epub-chapter-bg hr {
   border: none;
   border-top: 1px solid currentColor;
   opacity: 0.3;
-  margin: 1em 0;
+  margin: 0.7em 0;
+  line-height: 0;
 }
 
 /* 12. 链接：只提供下划线，颜色交给 EPUB 原作者 CSS（a { color: #ff0000 }）。
