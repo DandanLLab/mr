@@ -1255,14 +1255,20 @@ body.reader-scroll #reader-content-b {
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"] img.feng {
   width: 26.2%;
 }
-/* 封面落座：作者 -68% 的渲染（封面底距架板臂 ≈12-16 CSS）与多看一致
-   （-52.9%/-64.3% 实验过沉/浮，非线性，均弃）。宽度按多看实测覆写是
-   本组唯一必需项（65%/30.5% 渲染 191/90 vs 多看 164/77）。
-   ★ 2026-09-06 真机复测（最新构建）：封面悬空 15-18 CSS（多看贴合
-   overlap 6），margin -68%→-60.5%（+7.5% = 下移 ~22 CSS）。 */
+/* 定位对齐多看（2026-09-06 全要素测量，多看2 dpr2.25 → CSS）：
+   多看几何：封面顶 56.4（=页顶，无额外顶距）、封面底 159（坐在架上）、
+   红字标题顶 186。MR 之前应用了作者 .shujia{margin:20% 0}（72px 顶距）
+   → 书架/封面整体低 30+，标题低 50（"还是太下"的根源）。
+   多看并不应用该 20% 顶距（架板臂顶 = 页顶 +10）→ 清零；
+   .feng 上拉重算：封面顶目标 56.4，自然位 110 → -53.6px = -18.2%；
+   底距 4% 给标题让位（标题落 ≈187 ≈ 多看 186）。 */
+#reader-content-a .epub-chapter-bg[class*="zhizuosm"] div.shujia {
+  margin: 0 !important;
+}
 #reader-content-a .epub-chapter-bg[class*="zhizuosm"] div.feng {
-  /* 线性插值：-68% 悬空+16，-60.5% 过深-15 → 4.1 CSS/1%，目标贴合+6 → -62.7% */
-  margin-top: -62.7%;
+  /* -24.3%：封面上移 18（顶 74→56 = 多看页顶）；底距 4%→7% 补偿
+     （标题落 186 ≈ 多看 186） */
+  margin: -24.3% auto 7% auto !important;
 }
 /* 4a-4. 封面/整页背景章正文若为空（隐藏 h1 + 空 p），wrapper 高度已经由
    4a-3 的 min-height 顶满；无需额外高度兜底。 */
