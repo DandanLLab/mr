@@ -1200,6 +1200,28 @@ body.reader-scroll #reader-content-b {
 
 
 
+/* 4a-3e. 装饰图对齐多看（2026-09-08 复活重构）：
+   原书 div.logo/img.logo2/div.fenge 带 duokan-bleed:lefttopright（贴边出血），
+   多看渲染：logo 全宽贴边、fenge/logo2 居中融入版面。
+   9/8 旧版只覆盖背景章且被删。新版：
+   - 作用域扩到全部章节（手册正文页 Chapter0009 的 logo 同样贴边）
+   - 负 margin 用 calc 抵消用户边距变量，用户调边距不破坏出血
+   - fenge 分隔图居中（多看视觉：分隔图在版面中轴） */
+#reader-content-a div.logo,
+#reader-content-a div.fenge {
+  margin-left: calc(-1 * var(--reader-padding-left)) !important;
+  margin-right: calc(-1 * var(--reader-padding-right)) !important;
+}
+#reader-content-a div.fenge {
+  text-align: center !important;
+}
+#reader-content-a div.logo img,
+#reader-content-a img.logo2,
+#reader-content-a div.fenge img,
+#reader-content-a img.fenge {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
 /* 4a-3d. 制作说明章（zhizuosm）多看脚注容器净化：
    原书用 duokan-footnote 机制把"二维码大图"塞进 <ol class="duokan-footnote-content">
    （多看在章末以脚注弹层展示，正文页不占位）。WebView 无此机制，两个 ol
