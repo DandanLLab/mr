@@ -1198,22 +1198,7 @@ body.reader-scroll #reader-content-b {
   height: 15px;
 }
 
-/* 4a-3e. duokan-bleed 兜底语义（贴边出血）：
-   原书 div.logo / img.logo2 / div.fenge 用 duokan-bleed:lefttopright 声明
-   「图片贴左/上/右边出血」（多看私有属性，章节页眉装饰图用）。
-   多看渲染：贴边零留白。MR 正文页眉由 reader 框架接管（章内 h2.head 的
-   logo 图仅装饰），这里对特殊背景章内的 .logo/.logo2/.fenge 还原贴边意图：
-   margin 清零 + 负 margin 抵消 wrapper padding（3-9 已把整章 padding 清零，
-   此处再对 img 自身的默认 margin 1em 兜底清零，防止贴边图被推离页边）。 */
-#reader-content-a .epub-chapter-bg .logo,
-#reader-content-a .epub-chapter-bg .logo img,
-#reader-content-a .epub-chapter-bg img.logo2,
-#reader-content-a .epub-chapter-bg .fenge,
-#reader-content-a .epub-chapter-bg img.fenge {
-  margin-top: 0 !important;
-  margin-left: 0 !important;
-  margin-right: 0 !important;
-}
+
 
 /* 4a-3d. 制作说明章（zhizuosm）多看脚注容器净化：
    原书用 duokan-footnote 机制把"二维码大图"塞进 <ol class="duokan-footnote-content">
