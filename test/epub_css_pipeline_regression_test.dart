@@ -1,7 +1,9 @@
 // EPUB CSS 管线回归测试：四大 bug 的修复守护
 // 对应真实书籍《这游戏也太真实了》Style0001.css 的改写场景
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mr/services/local_book/epub_css_processor.dart';
+import 'package:mr/services/local_book/epub_parser.dart';
 
 void main() {
   group('EpubCssProcessor.background 简写', () {
@@ -41,6 +43,24 @@ void main() {
       final decls = {for (final d in rules.first.declarations) d.name: d.value};
       expect(decls['max-height'], '100%');
       expect(decls['max-width'], '100%');
+    });
+
+    test('float: right/left 保留作者语义（文绕图，多看对齐 2026-09-08）', () {
+      // 变异怪物卡牌 .DKimg-right { float: right } 曾被解析层规则6改写为 none，
+      // 文绕图变上图下文。多看实拍（hb_p18_clean.png）证实是环绕，
+      // float 必须原样保留。解析层是私有的，用真实 EPUB 全管线断言。
+      // （epub_css_pipeline 纯 parseRules 不经过改写，测不到此路径）
+      final bytes = File(
+        'D:/OpenClaw/.openclaw/workspace/mr/.tmp/verify/youxi.epub',
+      ).readAsBytesSync();
+      final book = EpubParser.parseFromBytes(bytes);
+      final css = book.inlinedCss;
+      expect(css.contains('.DKimg-right { float: right'), true,
+          reason: 'DKimg-right 的 float:right 必须原样保留（文绕图）');
+      expect(css.contains('.DKimg-left { float: left'), true,
+          reason: 'DKimg-left 的 float:left 必须原样保留');
+      expect(css.contains('float: none'), false,
+          reason: '管线不应产出任何 float:none 改写');
     });
   });
 

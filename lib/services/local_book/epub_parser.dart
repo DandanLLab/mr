@@ -425,13 +425,14 @@ class EpubParser {
 
       debugPrint('[EPUB诊断-OPF] manifest解析: ${pkg.manifest.length} 项');
       debugPrint('[EPUB诊断-OPF] spine解析: ${pkg.spine.length} 项');
+      // 2026-09-08 晚降噪：spineIndexByHref/files 全量 dump 会打印 1102 项，
+      // 把测试日志刷屏（exit code 被 PowerShell 误报也源于此）。诊断期已过，只留计数。
       debugPrint('[EPUB诊断] opfBasePath=$opfBasePath');
       debugPrint(
-          '[EPUB诊断] spine数量=${pkg.spine.length} '
-          'items=${pkg.spine.map((s) => s.idRef).join(",")}');
+          '[EPUB诊断] spine数量=${pkg.spine.length} items=${pkg.spine.length}项');
       debugPrint('[EPUB诊断] manifest数量=${pkg.manifest.length}');
-      debugPrint('[EPUB诊断] spineIndexByHref=$spineIndexByHref');
-      debugPrint('[EPUB诊断] files路径列表=${files.keys.toList()}');
+      debugPrint('[EPUB诊断] spineIndexByHref=${spineIndexByHref.length}项');
+      debugPrint('[EPUB诊断] files路径列表=${files.length}项');
       debugPrint('[EPUB诊断] 最终ncxHref=${pkg.ncxHref} navHref=${pkg.navHref}');
 
       // 5. 解析目录（用 EpubTocParser 替换旧的手动 NAV/NCX 解析）
@@ -2465,7 +2466,7 @@ class EpubParser {
   /// 3. 固定 px 宽度 → 响应式（>200px / <100px 都改为 auto）
   /// 4. position: absolute/fixed → static（relative 保留）
   /// 5. height: 100% / 100vh → auto
-  /// 6. float: left/right → none
+  /// 6. float: 保留作者语义（2026-09-08 晚修订，不再改写）
   /// 7. transform: translate(...) → 移除（保留 scale/rotate）
   /// 8. overflow: hidden → visible
   static String? _rewriteCssValueForReader(String name, String value) {
@@ -2591,11 +2592,14 @@ class EpubParser {
       return 'none';
     }
 
-    // 6. float: left/right → none
-    //    float 在 column 分栏里会跨栏错位
-    if (name == 'float' && (lowerValue == 'left' || lowerValue == 'right')) {
-      return 'none';
-    }
+    // 6. float: 保留作者语义（2026-09-08 晚修订）
+    //    原先 left/right → none 是错的：多看对 DKimg-right/float 排版是保留的
+    //    （变异怪物卡牌浮右、文字绕左，多看实拍 hb_p18_clean.png 证实文绕图）。
+    //    float:none 会把图片逼成独占块、文字掉到图下，与多看 1:1 背道而驰。
+    //    旧注释“防跨栏错位”不成立：float 盒在 multicol 里作为整体参与分栏，
+    //    和 inline 图片一样不会被拦腰切断；9/2 已撤模板侧 float:none 三件套，
+    //    解析侧这条是同款破坏源的漏网之鱼。
+    //    (保留此注释位防复发，不再改写 float)
 
     // 7. transform: translate(...) → 移除整个 transform
     //    保留 scale/rotate（不影响布局定位）
