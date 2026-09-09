@@ -3,26 +3,21 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show FontLoader;
 
 import '../../services/local_book/epub_parser.dart';
 
 /// EPUB 多看画廊页面渲染器（Flutter 原生实现）
 ///
-/// ★ 基于多看阅读器反汇编全面移植 ★
+/// ★ 非全屏极简页模型（2026-09-09 多看真机逐像素重测定案，
+///   .tmp/verify/gallery_evidence_0909.md）★
 ///
-/// 多看画廊渲染分两层（反汇编证据见 .tmp/gallery_full_disasm_report.md）：
-/// 1. native 层（libddlayoutkit.so）：CBookRender::RenderGallery 把原作竖向
-///    gallery.xhtml 转成 HTML snippet（slider/slide_group/slide/msg 结构）
-/// 2. UI 层（dex）：DocImagesView 横向滑动翻页；点击图片进入
-///    DocImageWatchingView（ZoomView + MultiTouchImageView）全屏预览
-///
-/// 我们的移植方案（Flutter 原生，避开 WebView CSS 兼容性问题）：
-/// - 非全屏画廊：PageView 横向滑动翻页（对应多看 slider/slide/msg）
-/// - 全屏预览：PageView + InteractiveViewer（对应 ZoomView + MultiTouchImageView）
-/// - 原作视觉样式：从 rawCss 解析关键字段，用 Flutter 手动应用
-/// - h3 gallery-title / .gallery-txt 不进入画廊页（多看 native 渲染管线
-///   只生成 slider/slide/msg，稳定态实测首屏即第一个 cell）
+/// 非全屏画廊 = 正常阅读页（页码体系内一页）：
+/// - 背景图 cover 全屏 + 唯一画框（左 18css / 宽 324css / 白 1px 描边）
+/// - 框内图 cover 铺满，框内横滑 = 覆盖式切 slide
+/// - 框外点击：右缘=翻出章（下一章），其余=上一章；框外横滑无反应
+/// - 非全屏不渲染 h3/maintitle/subtitle/dotted/gallery-txt（实拍定案）
+/// - 点击图 = 全屏预览（黑底 contain + 左下两行白字 maintitle+num5）
+/// - 章节边界：第一/最后一张继续滑 = 触发上一章/下一章（onPrevious/Next）
 class EpubGalleryPage extends StatefulWidget {
   final List<EpubGalleryImage> images;
   final String chapterTitle;
@@ -86,30 +81,6 @@ double _imageFrameHeightOf(double base) => 158.7 + 0.42 * base;
 /// 9.13 → 175.0，绝对 244/199 实测拟合）
 double _imageTopGapOf(double base) => 140.4 + 3.791 * base;
 
-/// 作者 CSS local() 字体链的语义映射（style.css @font-face 声明的流派 →
-/// Flutter 系统近似族）。多看内建字体（DK-HEITI 等）Flutter 拿不到文件，
-/// 按作者 local 链的字体流派映射系统族兜底。
-const Map<String, String> _fontStackLocalMap = <String, String>{
-  // 宋体族
-  'dk-songti': 'serif', 'st': 'serif', '宋体': 'serif', '明体': 'serif',
-  '明朝': 'serif', 'songti': 'serif', 'songti sc': 'serif',
-  // 仿宋族
-  'dk-fangsong': 'serif', 'fs': 'serif', '仿宋': 'serif', 'fangsong': 'serif',
-  // 小标宋族（标题）
-  'dk-xiaobiaosong': 'serif', 'h3': 'serif', '方正小标宋_gbk': 'serif',
-  '方正小标宋简体': 'serif', '方正小标宋繁体': 'serif',
-  // 楷体族
-  'dk-kaiti': 'serif', 'kt': 'serif', '楷体': 'serif', 'kaiti': 'serif',
-  'kaiti sc': 'serif',
-  // 黑体族
-  'dk-heiti': 'sans-serif', 'ht': 'sans-serif', '微软雅黑': 'sans-serif',
-  '黑体': 'sans-serif', 'heiti': 'sans-serif', 'heiti sc': 'sans-serif',
-  'sthei': 'sans-serif',
-  // 圆体/细黑族
-  'dk-xiheiti': 'sans-serif', 'yt': 'sans-serif', '圆体': 'sans-serif',
-  'yuanti': 'sans-serif', 'styuanti': 'sans-serif',
-};
-
 class _EpubGalleryPageState extends State<EpubGalleryPage>
     with TickerProviderStateMixin {
   late final _GalleryCellStyle _cellStyle;
@@ -147,73 +118,19 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
   void initState() {
     super.initState();
     _imageIndex = widget.initialPageToEnd ? _itemCount - 1 : 0;
-    final embeddedFonts = widget.chapterStyle?.embeddedFonts ?? const {};
-    _cellStyle = _parseCellStyle(widget.chapterStyle?.rawCss ?? '', embeddedFonts);
+    _cellStyle = _parseCellStyle(widget.chapterStyle?.rawCss ?? '');
     _settle = AnimationController(vsync: this, duration: const Duration(milliseconds: 220))
       ..addListener(_onSettleTick);
-    // 注册作者内嵌字体（@font-face url 文件）+ 预热相邻图
+    // 预热相邻图（避免拖动时 sheet 首次读盘闪白）
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _registerEmbeddedFonts();
       if (mounted) _precacheNeighbors();
     });
-  }
-
-  /// 注册作者内嵌字体（@font-face { src: url(...) } 的字体文件），
-  /// 注册后 font-family 栈命中该 family 名即可直接渲染作者字体
-  Future<void> _registerEmbeddedFonts() async {
-    final fonts = widget.chapterStyle?.embeddedFonts;
-    if (fonts == null || fonts.isEmpty) return;
-    for (final entry in fonts.entries) {
-      try {
-        final ByteData bytes;
-        if (entry.value.startsWith('data:')) {
-          final list = _parseDataUri(entry.value);
-          bytes = ByteData.view(list.buffer);
-        } else {
-          final f = File(entry.value);
-          if (!f.existsSync()) continue;
-          bytes = ByteData.view(f.readAsBytesSync().buffer);
-        }
-        final loader = FontLoader(entry.key)..addFont(Future.value(bytes));
-        await loader.load();
-      } catch (_) {
-        // 单个字体注册失败不影响其他字体与整体渲染
-      }
-    }
   }
 
   @override
   void dispose() {
     _settle.dispose();
     super.dispose();
-  }
-
-  /// 解析 font-family 栈原文（如 "DK-HEITI","ht",sans-serif → 栈字符串）
-  String _parseFontFamilyStack(String? block, String fallback) {
-    if (block == null) return fallback;
-    final m = RegExp(r'font-family\s*:\s*([^;}]+)').firstMatch(block);
-    if (m == null) return fallback;
-    final stack = m.group(1)!.trim();
-    return stack.isEmpty ? fallback : stack;
-  }
-
-  /// font-family 栈解析 → Flutter fontFamily（作者 CSS 是唯一真相）：
-  /// ① 栈中名字命中内嵌字体表（@font-face url 加载注册的作者字体）→ 直接用
-  /// ② 命中 local 语义映射（作者 local 链声明的字体流派）→ 系统近似族
-  /// ③ 栈尾 generic（serif/sans-serif/monospace）直接用
-  String _resolveFontFamily(String stack, Map<String, String> embedded) {
-    for (final raw in stack.split(',')) {
-      final name = raw.trim().replaceAll('"', '').replaceAll("'", '');
-      if (name.isEmpty) continue;
-      if (embedded.containsKey(name)) return name;
-      final mapped = _fontStackLocalMap[name.toLowerCase()];
-      if (mapped != null) return mapped;
-      final lower = name.toLowerCase();
-      if (lower == 'serif' || lower == 'sans-serif' || lower == 'monospace') {
-        return lower;
-      }
-    }
-    return 'sans-serif';
   }
 
   /// 预热相邻两张图（替代 PageView allowImplicitScrolling 的预加载，
@@ -301,27 +218,13 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     _settle.forward(from: 0);
   }
 
-  /// 从 rawCss 解析 .duokan-image-gallery-cell 的视觉样式
+  /// 从 rawCss 解析 .duokan-image-gallery-cell 的框视觉样式
   ///
-  /// 原作 CSS（style.css）：
-  /// ```css
-  /// .duokan-image-gallery-cell {
-  ///     margin: 10px 0;
-  ///     border-style: solid;
-  ///     border-width: 1px;
-  ///     box-shadow: 5px 5px 5px #888888;
-  /// }
-  /// ```
-  _GalleryCellStyle _parseCellStyle(
-    String rawCss,
-    Map<String, String> embeddedFonts,
-  ) {
+  /// 非全屏页只保留框本身的描边/阴影（2026-09-09 真机定案：白描边保留、
+  /// 阴影丢弃），maintitle/subtitle 的字号/颜色/字体族不再拆解，
+  /// 文字渲染已移入全屏预览（白字写死，多看实拍）。
+  _GalleryCellStyle _parseCellStyle(String rawCss) {
     final cellBlock = _extractRuleBlock(rawCss, 'duokan-image-gallery-cell');
-    final maintitleBlock = _extractRuleBlock(rawCss, 'duokan-image-maintitle');
-    final subtitleBlock = _extractRuleBlock(rawCss, 'duokan-image-subtitle');
-
-    // 解析 maintitle margin（原作 margin: 1em auto -0.5em auto）
-    final maintitleMargins = _parseMargin(maintitleBlock);
 
     return _GalleryCellStyle(
       borderWidth: _parseFloat(cellBlock, 'border-width') ?? 1.0,
@@ -330,27 +233,6 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
       boxShadowDy: _parseBoxShadow(cellBlock)?.dy ?? 5.0,
       boxShadowBlur: _parseBoxShadow(cellBlock)?.blur ?? 5.0,
       boxShadowColor: _parseBoxShadow(cellBlock)?.color ?? const Color(0xFF888888),
-      maintitleColor: _parseColor(maintitleBlock, 'color') ??
-          const Color(0xFF336633),
-      subtitleColor: _parseColor(subtitleBlock, 'color') ??
-          const Color(0xFF333333),
-      maintitleMarginTop: maintitleMargins?.$1 ?? 1.0,
-      maintitleMarginBottom: maintitleMargins?.$2 ?? -0.5,
-      // 原著 .duokan-image-subtitle 无 margin 属性（style.css 第339-345行），
-      // 默认 0；subtitle 紧接 maintitle，靠 maintitle 负下 margin 拉近间距。
-      subtitleMarginBottom: _parseMargin(subtitleBlock)?.$2 ?? 0.0,
-      cellMarginVertical: _parseMarginPx(cellBlock)?.$1 ?? 10.0,
-      maintitleFontSize: _parseFloat(maintitleBlock, 'font-size') ?? 0.9,
-      subtitleFontSize: _parseFloat(subtitleBlock, 'font-size') ?? 0.9,
-      subtitleLineHeight: _parseFloat(subtitleBlock, 'line-height') ?? 1.35,
-      // 字体族：font-family 栈解析（作者 CSS 原设，style.css 331/340）：
-      // maintitle = "DK-HEITI","ht",sans-serif（黑体，0.9em）
-      // subtitle  = "DK-KAITI","kt",serif（楷体，0.9em）
-      // 内嵌字体命中 → 用作者字体；否则按 local 语义映射系统近似族
-      maintitleFontFamily: _resolveFontFamily(
-        _parseFontFamilyStack(maintitleBlock, 'sans-serif'), embeddedFonts),
-      subtitleFontFamily: _resolveFontFamily(
-        _parseFontFamilyStack(subtitleBlock, 'serif'), embeddedFonts),
     );
   }
 
@@ -410,59 +292,6 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
       blur: double.parse(match.group(3)!),
       color: Color(int.parse('FF${match.group(4)}', radix: 16)),
     );
-  }
-
-  /// 解析 CSS margin 的上下值（em 单位，如 margin: 1em auto -0.5em auto）
-  ///
-  /// 返回 (marginTop, marginBottom)，解析失败返回 null
-  /// 支持格式：
-  /// - `margin: top right bottom left`（4 值）
-  /// - `margin: top bottom`（2 值）
-  /// - `margin: all`（1 值）
-  /// auto 值跳过（不参与上下 margin 计算）
-  (double, double)? _parseMargin(String? block) {
-    if (block == null) return null;
-    final match = RegExp(r'margin\s*:\s*([^;]+)').firstMatch(block);
-    if (match == null) return null;
-    final parts = match.group(1)!.trim().split(RegExp(r'\s+'));
-    final emValues = parts
-        .map((p) => p.toLowerCase().endsWith('em')
-            ? double.tryParse(p.replaceAll(RegExp(r'em$'), ''))
-            : null)
-        .whereType<double>()
-        .toList();
-    if (emValues.isEmpty) return null;
-    if (emValues.length >= 4) {
-      return (emValues[0], emValues[2]);
-    } else if (emValues.length >= 2) {
-      return (emValues[0], emValues[1]);
-    } else {
-      return (emValues[0], emValues[0]);
-    }
-  }
-
-  /// 解析 CSS margin 的上下值（px 单位，如 margin: 10px 0）
-  ///
-  /// 返回 (marginTop, marginBottom)，解析失败返回 null
-  (double, double)? _parseMarginPx(String? block) {
-    if (block == null) return null;
-    final match = RegExp(r'margin\s*:\s*([^;]+)').firstMatch(block);
-    if (match == null) return null;
-    final parts = match.group(1)!.trim().split(RegExp(r'\s+'));
-    final pxValues = parts
-        .map((p) => p.toLowerCase().endsWith('px')
-            ? double.tryParse(p.replaceAll(RegExp(r'px$'), ''))
-            : double.tryParse(p))
-        .whereType<double>()
-        .toList();
-    if (pxValues.isEmpty) return null;
-    if (pxValues.length >= 4) {
-      return (pxValues[0], pxValues[2]);
-    } else if (pxValues.length >= 2) {
-      return (pxValues[0], pxValues[1]);
-    } else {
-      return (pxValues[0], pxValues[0]);
-    }
   }
 
   Color _resolveBgColor() {
@@ -1106,26 +935,6 @@ class _GalleryCellStyle {
   final double boxShadowDy;
   final double boxShadowBlur;
   final Color? boxShadowColor;
-  final Color maintitleColor;
-  final Color subtitleColor;
-  /// maintitle 上 margin（em 值，原作 1em）
-  final double maintitleMarginTop;
-  /// maintitle 下 margin（em 值，原作 -0.5em，负值=减少与 subtitle 间距）
-  final double maintitleMarginBottom;
-  /// subtitle 下 margin（em 值，原作无 margin，默认 0）
-  final double subtitleMarginBottom;
-  /// cell 上下 margin（px 值，原作 10px 0）
-  final double cellMarginVertical;
-  /// maintitle 字号（em 值，原作 0.9em）
-  final double maintitleFontSize;
-  /// subtitle 字号（em 值，原作 0.9em）
-  final double subtitleFontSize;
-  /// subtitle 行高（原作 1.35em）
-  final double subtitleLineHeight;
-  /// maintitle 字体族（原作 DK-HEITI → sans-serif）
-  final String maintitleFontFamily;
-  /// subtitle 字体族（原作 DK-KAITI → serif）
-  final String subtitleFontFamily;
 
   const _GalleryCellStyle({
     this.borderWidth = 1.0,
@@ -1134,17 +943,6 @@ class _GalleryCellStyle {
     this.boxShadowDy = 5.0,
     this.boxShadowBlur = 5.0,
     this.boxShadowColor,
-    this.maintitleColor = const Color(0xFF336633),
-    this.subtitleColor = const Color(0xFF333333),
-    this.maintitleMarginTop = 1.0,
-    this.maintitleMarginBottom = -0.5,
-    this.subtitleMarginBottom = 0.0,
-    this.cellMarginVertical = 10.0,
-    this.maintitleFontSize = 0.9,
-    this.subtitleFontSize = 0.9,
-    this.subtitleLineHeight = 1.35,
-    this.maintitleFontFamily = 'sans-serif',
-    this.subtitleFontFamily = 'serif',
   });
 }
 
