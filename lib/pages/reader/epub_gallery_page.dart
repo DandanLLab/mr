@@ -149,9 +149,6 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
   /// 图片总数
   int get _itemCount => widget.images.length;
 
-  /// 框宽（逻辑 px，对齐多看 DocImagesView 宽 324）
-  static const double _frameW = 324.0;
-
   @override
   void initState() {
     super.initState();
@@ -272,8 +269,13 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
   void _onDragUpdate(DragUpdateDetails d) {
     _rawDx += d.delta.dx;
     // 拖动向量 = 内容跟随手指：左滑（dx<0）→ 下一张，右滑（dx>0）→ 上一张
-    final lo = _imageIndex < _itemCount - 1 ? -_frameW : 0.0;
-    final hi = _imageIndex > 0 ? _frameW : 0.0;
+    // 多看 2026-09-09 实拍：第一/最后一张继续滑仍应触发章节切换，
+    // 不再硬钳到 0（旧钳制让边界拖动 _dragVector 恒 0，_onDragEnd
+    // 里 _rawDx>80 的分支虽然能触发，但位移超过屏宽时手势竞争导致丢判）。
+    // 允许越界拖动（松手回弹或切章），但钳上限不超屏宽。
+    final screenW = MediaQuery.sizeOf(context).width;
+    final lo = _imageIndex < _itemCount - 1 ? -screenW : -screenW * 0.25;
+    final hi = _imageIndex > 0 ? screenW : screenW * 0.25;
     final next = (_dragVector + d.delta.dx).clamp(lo, hi);
     if (next != _dragVector) setState(() => _dragVector = next);
   }
@@ -282,27 +284,34 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     if (_isNavigating) return; // 章节切换已触发，防重复
     final dxPerSec = d.velocity.pixelsPerSecond.dx;
     final fling = dxPerSec.abs() > 350;
-    final passed = _dragVector.abs() > _frameW * 0.35;
+    final screenW = MediaQuery.sizeOf(context).width;
+    final passed = _dragVector.abs() > screenW * 0.35;
 
-    // 章节边界：第一张继续向右拖（回看上一章）/ 最后一张继续向左拖
-    // （进看下一章）→ 切换章节
-    if (_dragVector == 0 && _rawDx.abs() > 80) {
-      if (_imageIndex == 0 && _rawDx > 0) {
-        _isNavigating = true;
+    // 章节边界（多看实拍）：第一张继续向右拖 → 回看上一章；
+    // 最后一张继续向左拖 → 翻出画廊章进下一章。
+    // 判定：图内位移被边界钳住（dragVector 停在 ±0.25 屏宽）时看 rawDx，
+    // 或拖动位移已超过 0.35 屏宽（边界外拖动的实际可视化量）。
+    final atFirst = _imageIndex == 0;
+    final atLast = _imageIndex == _itemCount - 1;
+    final boundaryDrag = (atFirst && _rawDx > 0) || (atLast && _rawDx < 0);
+    final dragAbs = _dragVector.abs();
+    if (boundaryDrag &&
+        ((_dragVector == 0 && _rawDx.abs() > 80) ||
+         dragAbs >= screenW * 0.24 ||
+         (fling && _rawDx.abs() > 120))) {
+      _isNavigating = true;
+      if (_rawDx > 0) {
         widget.onPreviousChapter();
-        return;
-      }
-      if (_imageIndex == _itemCount - 1 && _rawDx < 0) {
-        _isNavigating = true;
+      } else {
         widget.onNextChapter();
-        return;
       }
+      return;
     }
 
     _settleFrom = _dragVector;
     if (passed || (fling && _dragVector.abs() > 8)) {
       // v<0 = 拖向下一张（+1）；v>0 = 拖向上一张（-1）
-      _settleTo = _dragVector < 0 ? -_frameW : _frameW;
+      _settleTo = _dragVector < 0 ? -screenW : screenW;
       _settleCommit = _dragVector < 0 ? 1 : -1;
     } else {
       _settleTo = 0;
