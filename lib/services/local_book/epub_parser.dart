@@ -228,10 +228,17 @@ class EpubGalleryImage {
   /// 副标题（`p.duokan-image-subtitle` 文本，可能为空）
   final String subtitle;
 
+  /// maintitle 内 num5/br 第二段提示文本（如「点击向←滑动」，可能为空）
+  ///
+  /// 多看全屏预览把 maintitle 主体与该提示渲染为两行白字（num5 棕底
+  /// 被丢弃，仅保留文字），非全屏画廊页两者都不渲染。
+  final String galleryHint;
+
   const EpubGalleryImage({
     required this.src,
     this.maintitle = '',
     this.subtitle = '',
+    this.galleryHint = '',
   });
 }
 
@@ -1703,15 +1710,33 @@ class EpubParser {
         );
         if (src.isEmpty) continue;
 
-        final maintitle =
-            cell.querySelector('.duokan-image-maintitle')?.text.trim() ?? '';
         final subtitle =
             cell.querySelector('.duokan-image-subtitle')?.text.trim() ?? '';
 
+        // maintitle 内部结构拆分：主体 + <br>/<span.num5> 提示段
+        // 多看全屏预览渲染为两行白字（num5 棕底丢弃仅留文字），
+        // 非全屏画廊页两者均不渲染（2026-09-09 真机实测定案）
+        final mtEl = cell.querySelector('.duokan-image-maintitle');
+        var mtBody = '';
+        var mtHint = '';
+        if (mtEl != null) {
+          // 克隆后移除 num5/br 后段，余下即主体文本
+          final clone = mtEl.clone(true);
+          final num5 = clone.querySelector('.num5');
+          if (num5 != null) {
+            mtHint = num5.text.trim();
+            num5.remove();
+          }
+          mtBody = clone.text
+              .replaceAll(String.fromCharCode(10), ' ')
+              .trim();
+        }
+
         result.add(EpubGalleryImage(
           src: src,
-          maintitle: maintitle,
+          maintitle: mtBody,
           subtitle: subtitle,
+          galleryHint: mtHint,
         ));
       }
       return result.length >= 2 ? result : const [];
