@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
@@ -96,7 +97,7 @@ class LocalBookService {
         if (isSupported(filePath)) {
           try {
             final bytes = await entity.readAsBytes();
-            final book = createBookFromFile(filePath, bytes: bytes);
+            final book = await createBookFromFile(filePath, bytes: bytes);
             books.add(book);
           } catch (e) {
             continue;
@@ -116,7 +117,7 @@ class LocalBookService {
       if (!await file.exists()) return null;
 
       final bytes = await file.readAsBytes();
-      return createBookFromFile(filePath, bytes: bytes);
+      return await createBookFromFile(filePath, bytes: bytes);
     } catch (e) {
       return null;
     }
@@ -171,7 +172,7 @@ class LocalBookService {
         // 避免对 64MB 视频、10.8MB 字体做 base64 编码导致 OOM
         _log(controller, '解压 EPUB 资源...');
         final extractedBasePath = await _extractEpubToCache(filePath, bytes);
-        final epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        final epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
         if (epubBook == null) {
           _log(controller, 'EPUB 解析失败', level: ImportLogLevel.error);
           return null;
@@ -206,7 +207,7 @@ class LocalBookService {
 
       // TXT 等其他类型：走原流程
       _log(controller, '创建书籍元数据...');
-      final book = createBookFromFile(filePath, bytes: bytes);
+      final book = await createBookFromFile(filePath, bytes: bytes);
       _log(controller, '导入成功: 《${book.name}》', level: ImportLogLevel.success);
       return book;
     } catch (e, st) {
@@ -216,7 +217,7 @@ class LocalBookService {
     }
   }
 
-  Book createBookFromFile(String filePath, {Uint8List? bytes}) {
+  Future<Book> createBookFromFile(String filePath, {Uint8List? bytes}) async {
     final bookType = detectBookType(filePath);
     final fileName = filePath.split('/').last.split('\\').last;
     final (name, author) = TxtParser.extractNameAndAuthor(fileName);
@@ -226,7 +227,7 @@ class LocalBookService {
 
     if (bookType == LocalBookType.epub && bytes != null) {
       _epubBytesCache[filePath] = bytes;
-      final epubBook = _parseEpubData(bytes);
+      final epubBook = await _parseEpubData(bytes);
       if (epubBook != null) {
         _epubCache[filePath] = epubBook;
         return Book(
@@ -422,7 +423,7 @@ class LocalBookService {
         final bytes = await file.readAsBytes();
         _epubBytesCache[book.bookUrl] = bytes;
         final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
-        epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -465,7 +466,7 @@ class LocalBookService {
         final bytes = await file.readAsBytes();
         _epubBytesCache[book.bookUrl] = bytes;
         final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
-        epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -517,7 +518,7 @@ class LocalBookService {
         final bytes = await file.readAsBytes();
         _epubBytesCache[book.bookUrl] = bytes;
         final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
-        epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -554,7 +555,7 @@ class LocalBookService {
         final bytes = await file.readAsBytes();
         _epubBytesCache[book.bookUrl] = bytes;
         final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
-        epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -585,7 +586,7 @@ class LocalBookService {
         final bytes = await file.readAsBytes();
         _epubBytesCache[book.bookUrl] = bytes;
         final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
-        epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -611,7 +612,7 @@ class LocalBookService {
     // Fallback: ensure epub data is loaded
     if (epubBook == null) {
       final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
-      epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+      epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
       if (epubBook != null) {
         _epubCache[book.bookUrl] = epubBook;
       }
@@ -818,7 +819,7 @@ class LocalBookService {
       // Also parse and cache the EpubBook if not already cached
       if (!_epubCache.containsKey(book.bookUrl)) {
         final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
-        final epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        final epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -858,7 +859,7 @@ class LocalBookService {
         final bytes = await file.readAsBytes();
         _epubBytesCache[book.bookUrl] = bytes;
         final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
-        epubBook = _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -879,12 +880,16 @@ class LocalBookService {
     }
   }
 
-  EpubBook? _parseEpubData(Uint8List bytes, {String extractedBasePath = ''}) {
+  Future<EpubBook?> _parseEpubData(Uint8List bytes,
+      {String extractedBasePath = ''}) async {
     try {
-      final epubBook = EpubParser.parseFromBytes(
-        bytes,
-        extractedBasePath: extractedBasePath,
-      );
+      // ★ 主线程防冻结：导入/首开时的富 HTML 预解析（全书每章 html 解析 +
+      //   资源内联，本册 1102 spine 项）是 CPU 密集重活，主 isolate 上跑
+      //   会冻结 UI 20s+（首启慢加载的根因），整体搬进后台 isolate
+      final epubBook = await Isolate.run(() => EpubParser.parseFromBytes(
+            bytes,
+            extractedBasePath: extractedBasePath,
+          ));
       if (epubBook.title != '未知书名' || epubBook.chapters.isNotEmpty) {
         return epubBook;
       }
