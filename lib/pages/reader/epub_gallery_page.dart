@@ -95,19 +95,19 @@ const _kDottedHeight = 22.0;
 /// 故 extraTop = 38.6 + 1.28×base（21 → 65.5）。
 double _titleExtraTopOf(double base) => 38.6 + 1.28 * base;
 
-/// 图像显示框高随基准字号：24.29×base（2026-09-12 重校：多看 20 号
-/// gal_dk0 逐像素 175..1195 物理 = 510 CSS@base21；旧 158.7+0.42×base
-/// 与三处独立实拍（容器 gal_dk0/cmp_gallery_dk20/用户真机）全冲突，废）
-double _imageFrameHeightOf(double base) => 24.29 * base;
+/// 图像显示框高随基准字号：46.4×base（★锚定 base11 = 多看 20 号等效档：
+/// 510 CSS，gal_dk0 175..1195 物理逐像素；52 号实拍证实框随字号放大。
+/// 注意 MR 设置默认 15 ≠ 多看 20 号等效档 11；构建处有页高钳制）
+double _imageFrameHeightOf(double base) => 46.4 * base;
 
-/// 图像框顶相对 SafeArea：4.17×base（多看 20 号框顶 175 物理 = 87.5
-/// CSS@base21，gal_dk0 实测；用户真机 95.5 CSS 同量级印证。
-/// 旧 140.4+3.791×base → 220 与实拍冲突，废）
-double _imageTopGapOf(double base) => 4.17 * base;
+/// 图像框顶相对 SafeArea：5.77×base（多看 20 号框顶 175 物理 = 87.5 绝对
+/// − SafeArea 24 = 63.5 rel @base11；用户真机 95.5 绝对同量级印证。
+/// 旧 140.4+3.791×base 与实拍冲突，废）
+double _imageTopGapOf(double base) => 5.77 * base;
 
-/// maintitle 距框底：8 + 0.57×base（用户真机实拍：框底 558 → maintitle
-/// 顶 578，+20 CSS@20号；MR 实拍 +12 偏近，重校）
-double _maintitlePadOf(double base) => 8.0 + 0.57 * base;
+/// maintitle 距框底：1.8×base（用户真机实拍：框底 558 → maintitle 顶
+/// 578，+20 CSS@base11 多看 20 号等效档）
+double _maintitlePadOf(double base) => 1.8 * base;
 double _subtitlePadOf(double base) => 1.93 + 0.6225 * base;
 
 const _kMaintitleLineHeight = 1.15;
@@ -733,7 +733,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     //   （当前图不动，dksw1 实证），上一张从左缘滑入；提交瞬间文字层
     //   换内容（多看 P1/P2 实拍标题同位、中间帧 maintitle 纹丝不动）
     final base = widget.baseFontSize;
-    final frameH = _imageFrameHeightOf(base);
+    var frameH = _imageFrameHeightOf(base);
     // 标题恒显：图像框顶不低于标题块底部+4，防超大字号重叠
     final titleBottom = _hasTitlePage
         ? base * _titleStyle.marginTop +
@@ -744,6 +744,16 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     final frameTop = (_imageTopGapOf(base) < titleBottom + 4)
         ? titleBottom + 4
         : _imageTopGapOf(base);
+    // 页高钳制：大字号（base>11）时 46.4×base 会挤出屏，缩框留出
+    // maintitle+num5 提示区（60）
+    final mq_ = MediaQuery.of(context);
+    final pageHAvail = mq_.size.height -
+        mq_.padding.top -
+        mq_.padding.bottom -
+        24; // SafeArea 最小顶锁
+    if (frameH > pageHAvail - frameTop - 60) {
+      frameH = pageHAvail - frameTop - 60;
+    }
     final imgBottomRel = frameTop + frameH;
     final maintitleTop = imgBottomRel + _maintitlePadOf(base);
     // 章节切换竞争防御：索引钳制到新章节图片范围内
