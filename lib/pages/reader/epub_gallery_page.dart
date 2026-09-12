@@ -744,15 +744,15 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     final frameTop = (_imageTopGapOf(base) < titleBottom + 4)
         ? titleBottom + 4
         : _imageTopGapOf(base);
-    // 页高钳制：大字号（base>11）时 46.4×base 会挤出屏，缩框留出
-    // maintitle+num5 提示区（60）
+    // 页高钳制：大字号（base>11）时 46.4×base 会挤出屏，缩框；预留 42.5
+    // = 多看框底距屏（gal_dk0：框底 1195 物理，屏 1280）——base11 恰不触发
     final mq_ = MediaQuery.of(context);
     final pageHAvail = mq_.size.height -
         mq_.padding.top -
         mq_.padding.bottom -
         24; // SafeArea 最小顶锁
-    if (frameH > pageHAvail - frameTop - 60) {
-      frameH = pageHAvail - frameTop - 60;
+    if (frameH > pageHAvail - frameTop - 42.5) {
+      frameH = pageHAvail - frameTop - 42.5;
     }
     final imgBottomRel = frameTop + frameH;
     final maintitleTop = imgBottomRel + _maintitlePadOf(base);
