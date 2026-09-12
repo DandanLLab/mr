@@ -1714,8 +1714,9 @@ class EpubParser {
             cell.querySelector('.duokan-image-subtitle')?.text.trim() ?? '';
 
         // maintitle 内部结构拆分：主体 + <br>/<span.num5> 提示段
-        // 多看全屏预览渲染为两行白字（num5 棕底丢弃仅留文字），
-        // 非全屏画廊页两者均不渲染（2026-09-09 真机实测定案）
+        // 多看真机实拍（用户手机 + 诡秘参照 210317）：非全屏画廊页
+        // maintitle 深色渲染、num5 棕底白字块保留（2026-09-12 修正，
+        // 推翻 0909「非全屏不渲染文字」的旧结论）；全屏预览两行白字
         final mtEl = cell.querySelector('.duokan-image-maintitle');
         var mtBody = '';
         var mtHint = '';
