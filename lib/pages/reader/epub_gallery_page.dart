@@ -375,9 +375,22 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     final cellBlock = _extractRuleBlock(rawCss, 'duokan-image-gallery-cell');
     final maintitleBlock = _extractRuleBlock(rawCss, 'duokan-image-maintitle');
     final subtitleBlock = _extractRuleBlock(rawCss, 'duokan-image-subtitle');
+    final num5Block = _extractRuleBlock(rawCss, 'num5');
 
     // 解析 maintitle margin（原作 margin: 1em auto -0.5em auto）
     final maintitleMargins = _parseMargin(maintitleBlock);
+
+    // 解析 num5 内边距（原作 padding: 3px 8px）
+    double hintPadV = 3.0, hintPadH = 8.0;
+    final padMatch = num5Block == null
+        ? null
+        : RegExp(
+            r'padding\s*:\s*([0-9.]+)px\s+([0-9.]+)px',
+          ).firstMatch(num5Block);
+    if (padMatch != null) {
+      hintPadV = double.tryParse(padMatch.group(1)!) ?? 3.0;
+      hintPadH = double.tryParse(padMatch.group(2)!) ?? 8.0;
+    }
 
     return _GalleryCellStyle(
       borderWidth: _parseFloat(cellBlock, 'border-width') ?? 1.0,
@@ -407,6 +420,18 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
         _parseFontFamilyStack(maintitleBlock, 'sans-serif'), embeddedFonts),
       subtitleFontFamily: _resolveFontFamily(
         _parseFontFamilyStack(subtitleBlock, 'serif'), embeddedFonts),
+      maintitleBold: _containsKeyword(maintitleBlock, 'bold') ||
+          _containsKeyword(maintitleBlock, '900'),
+      hintBgColor: _parseColor(num5Block, 'background-color') ??
+          const Color(0xFFA0522D),
+      hintRadius: _parseFloat(num5Block, 'border-radius') ?? 5.0,
+      hintPadH: hintPadH,
+      hintPadV: hintPadV,
+      hintBold: num5Block == null
+          ? true
+          : _containsKeyword(num5Block, 'bold'),
+      hintFontFamily: _resolveFontFamily(
+          _parseFontFamilyStack(num5Block, 'serif'), embeddedFonts),
     );
   }
 
@@ -728,10 +753,13 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     // 1) TextPainter 实测 maintitle 高度（1~2 行），subtitle 起点随动
     // 2) 圆点行往下让位（最多推到贴屏幕底），必要时圆点略缩
     // 3) 仍不足 → subtitle 缩字号适配（保证全文完整，无 ellipsis）
+    // ★ maintitle 深色（多看覆盖作者字色——#F8F8FF 近白在浅背景上不可见，
+    //   真机实拍 210317/本册实拍均为主题深色；字重按作者 CSS 900 保留）
     final maintitleStyle = TextStyle(
       fontSize: base * _cellStyle.maintitleFontSize,
       fontFamily: _cellStyle.maintitleFontFamily,
-      color: _cellStyle.maintitleColor,
+      fontWeight: _cellStyle.maintitleBold ? FontWeight.w900 : null,
+      color: widget.textColor,
       height: _kMaintitleLineHeight,
       decoration: TextDecoration.none,
     );
@@ -740,7 +768,14 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
       maxLines: 2,
       textDirection: TextDirection.ltr,
     )..layout(maxWidth: _frameW);
-    final subtitleTopDyn = maintitleTop + mtTp.height + _subtitlePadOf(base);
+    // num5 提示块（棕底白字）：位于 maintitle 之下、subtitle 之上，
+    // 占位 = 文本行高 + 上下内边距 + 与 maintitle 的间距
+    final hintFs = base * _cellStyle.maintitleFontSize * 0.9;
+    final hintExtra = current.galleryHint.isEmpty
+        ? 0.0
+        : hintFs * 1.2 + _cellStyle.hintPadV * 2 + 6;
+    final subtitleTopDyn =
+        maintitleTop + mtTp.height + hintExtra + _subtitlePadOf(base);
 
     final safeAreaPad = MediaQuery.paddingOf(context);
     final pageH = MediaQuery.sizeOf(context).height -
@@ -862,24 +897,59 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
                 ),
               ),
             ),
-            // maintitle（静态层，内容随当前 slide 切换；324 列宽对齐图像列）
+            // maintitle + num5 提示块（静态层，内容随当前 slide 切换；
+            // 324 列宽对齐图像列；深色字 + 棕底白字圆角块——真机实拍）
               Positioned(
                 top: maintitleTop,
                 left: 18,
                 right: 18,
-                child: Text(
-                  current.maintitle,
-                  key: _maintitleKey,
-                  style: TextStyle(
-                    fontSize: base * _cellStyle.maintitleFontSize,
-                    fontFamily: _cellStyle.maintitleFontFamily,
-                    color: _cellStyle.maintitleColor,
-                    decoration: TextDecoration.none,
-                    height: _kMaintitleLineHeight,
-                  ),
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+                child: Column(
+                  children: [
+                    Text(
+                      current.maintitle,
+                      key: _maintitleKey,
+                      style: TextStyle(
+                        fontSize: base * _cellStyle.maintitleFontSize,
+                        fontFamily: _cellStyle.maintitleFontFamily,
+                        fontWeight: _cellStyle.maintitleBold
+                            ? FontWeight.w900
+                            : null,
+                        color: widget.textColor,
+                        decoration: TextDecoration.none,
+                        height: _kMaintitleLineHeight,
+                      ),
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    // span.num5：棕底白字圆角块（作者 CSS 原设保留）
+                    if (current.galleryHint.isNotEmpty)
+                      Container(
+                        margin: const EdgeInsets.only(top: 6),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: _cellStyle.hintPadH,
+                          vertical: _cellStyle.hintPadV,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _cellStyle.hintBgColor,
+                          borderRadius:
+                              BorderRadius.circular(_cellStyle.hintRadius),
+                        ),
+                        child: Text(
+                          current.galleryHint,
+                          style: TextStyle(
+                            fontSize: hintFs,
+                            fontFamily: _cellStyle.hintFontFamily,
+                            fontWeight: _cellStyle.hintBold
+                                ? FontWeight.w700
+                                : null,
+                            color: const Color(0xFFFFFFFF),
+                            decoration: TextDecoration.none,
+                            height: 1.2,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             // subtitle（静态层，内容随当前 slide 切换；324 列宽 justify）
@@ -1271,6 +1341,7 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
           ),
           // 底部图注（多看全屏预览顶部无页码/关闭 UI，点击图片即退出）
           if (widget.images[_currentIndex].maintitle.isNotEmpty ||
+              widget.images[_currentIndex].galleryHint.isNotEmpty ||
               widget.images[_currentIndex].subtitle.isNotEmpty)
             _buildBottomDescription(),
         ],
@@ -1304,6 +1375,19 @@ class _GalleryFullScreenViewerState extends State<_GalleryFullScreenViewer> {
                   decoration: TextDecoration.none,
                 ),
               ),
+            // num5 提示段：多看全屏预览渲染为第二行白字（棕底丢弃）
+            if (img.galleryHint.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                img.galleryHint,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14.5,
+                  height: 1.35,
+                  decoration: TextDecoration.none,
+                ),
+              ),
+            ],
             if (img.subtitle.isNotEmpty) ...[
               const SizedBox(height: 4),
               Text(
@@ -1504,6 +1588,16 @@ class _GalleryCellStyle {
   final String maintitleFontFamily;
   /// subtitle 字体族（原作 DK-KAITI → serif）
   final String subtitleFontFamily;
+  /// maintitle 加粗（原作 font-weight: 900，实拍确认多看保留字重）
+  final bool maintitleBold;
+  /// maintitle 内 num5 提示段样式（原作 span.num5：棕底白字圆角块，
+  /// 多看真机实拍确认非全屏页渲染该块，作者背景/圆角/内边距保留）
+  final Color hintBgColor;
+  final double hintRadius;
+  final double hintPadH;
+  final double hintPadV;
+  final bool hintBold;
+  final String hintFontFamily;
 
   const _GalleryCellStyle({
     this.borderWidth = 1.0,
@@ -1523,6 +1617,13 @@ class _GalleryCellStyle {
     this.subtitleLineHeight = 1.35,
     this.maintitleFontFamily = 'sans-serif',
     this.subtitleFontFamily = 'serif',
+    this.maintitleBold = false,
+    this.hintBgColor = const Color(0xFFA0522D),
+    this.hintRadius = 5.0,
+    this.hintPadH = 8.0,
+    this.hintPadV = 3.0,
+    this.hintBold = true,
+    this.hintFontFamily = 'serif',
   });
 }
 
