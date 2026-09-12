@@ -45,7 +45,7 @@ void main() {
       expect(decls['max-width'], '100%');
     });
 
-    test('float: right/left 保留作者语义（文绕图，多看对齐 2026-09-08）', () {
+    test('float: right/left 保留作者语义（文绕图，多看对齐 2026-09-08）', () async {
       // 变异怪物卡牌 .DKimg-right { float: right } 曾被解析层规则6改写为 none，
       // 文绕图变上图下文。多看实拍（hb_p18_clean.png）证实是环绕，
       // float 必须原样保留。解析层是私有的，用真实 EPUB 全管线断言。
@@ -53,7 +53,7 @@ void main() {
       final bytes = File(
         'D:/OpenClaw/.openclaw/workspace/mr/.tmp/verify/youxi.epub',
       ).readAsBytesSync();
-      final book = EpubParser.parseFromBytes(bytes);
+      final book = await EpubParser.parseFromBytes(bytes);
       final css = book.inlinedCss;
       expect(css.contains('.DKimg-right { float: right'), true,
           reason: 'DKimg-right 的 float:right 必须原样保留（文绕图）');

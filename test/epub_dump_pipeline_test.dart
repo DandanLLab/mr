@@ -9,8 +9,8 @@ void main() {
     'D:/OpenClaw/.openclaw/workspace/mr/.tmp/verify/youxi.epub',
   ).readAsBytesSync();
 
-  test('导出 MR 管线 CSS + 代表章节 HTML', () {
-    final book = EpubParser.parseFromBytes(bytes);
+  test('导出 MR 管线 CSS + 代表章节 HTML', () async {
+    final book = await EpubParser.parseFromBytes(bytes);
     expect(book.chapters.isNotEmpty, true);
 
     final outDir = Directory(

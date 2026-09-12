@@ -9,6 +9,7 @@ import '../../models/book.dart';
 import '../../models/chapter.dart';
 import '../../services/storage_service.dart';
 import 'epub_parser.dart';
+import 'epub_rich_store.dart';
 import 'epub/epub.dart';
 import 'txt_parser.dart';
 
@@ -172,7 +173,8 @@ class LocalBookService {
         // 避免对 64MB 视频、10.8MB 字体做 base64 编码导致 OOM
         _log(controller, '解压 EPUB 资源...');
         final extractedBasePath = await _extractEpubToCache(filePath, bytes);
-        final epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        final epubBook = await _parseEpubData(bytes,
+            extractedBasePath: extractedBasePath, bookKey: filePath);
         if (epubBook == null) {
           _log(controller, 'EPUB 解析失败', level: ImportLogLevel.error);
           return null;
@@ -227,7 +229,7 @@ class LocalBookService {
 
     if (bookType == LocalBookType.epub && bytes != null) {
       _epubBytesCache[filePath] = bytes;
-      final epubBook = await _parseEpubData(bytes);
+      final epubBook = await _parseEpubData(bytes, bookKey: filePath);
       if (epubBook != null) {
         _epubCache[filePath] = epubBook;
         return Book(
@@ -423,7 +425,8 @@ class LocalBookService {
         final bytes = await file.readAsBytes();
         _epubBytesCache[book.bookUrl] = bytes;
         final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
-        epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        epubBook = await _parseEpubData(bytes,
+            extractedBasePath: extractedBasePath, bookKey: book.bookUrl);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -466,7 +469,8 @@ class LocalBookService {
         final bytes = await file.readAsBytes();
         _epubBytesCache[book.bookUrl] = bytes;
         final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
-        epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        epubBook = await _parseEpubData(bytes,
+            extractedBasePath: extractedBasePath, bookKey: book.bookUrl);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -479,6 +483,11 @@ class LocalBookService {
     if (chapter.index < 0 || chapter.index >= epubBook.chapters.length) return null;
 
     final epubChapter = epubBook.chapters[chapter.index];
+
+    // ★ 持久化存储快路径：富内容按需从盘上读（毫秒级文件读），
+    //   冷启动不再等全书重解析
+    epubChapter.richContent ??=
+        await _loadRichForChapter(book.bookUrl, chapter.index);
 
     // 直接返回导入时预解析好的富 HTML 内容
     // richContent 只包含 body HTML（[[EPUB_BODY]]...[[/EPUB_BODY]]），
@@ -518,7 +527,8 @@ class LocalBookService {
         final bytes = await file.readAsBytes();
         _epubBytesCache[book.bookUrl] = bytes;
         final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
-        epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        epubBook = await _parseEpubData(bytes,
+            extractedBasePath: extractedBasePath, bookKey: book.bookUrl);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -555,7 +565,8 @@ class LocalBookService {
         final bytes = await file.readAsBytes();
         _epubBytesCache[book.bookUrl] = bytes;
         final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
-        epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        epubBook = await _parseEpubData(bytes,
+            extractedBasePath: extractedBasePath, bookKey: book.bookUrl);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -586,7 +597,8 @@ class LocalBookService {
         final bytes = await file.readAsBytes();
         _epubBytesCache[book.bookUrl] = bytes;
         final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
-        epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        epubBook = await _parseEpubData(bytes,
+            extractedBasePath: extractedBasePath, bookKey: book.bookUrl);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -612,7 +624,8 @@ class LocalBookService {
     // Fallback: ensure epub data is loaded
     if (epubBook == null) {
       final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
-      epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+      epubBook = await _parseEpubData(bytes,
+            extractedBasePath: extractedBasePath, bookKey: book.bookUrl);
       if (epubBook != null) {
         _epubCache[book.bookUrl] = epubBook;
       }
@@ -819,7 +832,8 @@ class LocalBookService {
       // Also parse and cache the EpubBook if not already cached
       if (!_epubCache.containsKey(book.bookUrl)) {
         final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
-        final epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        final epubBook = await _parseEpubData(bytes,
+            extractedBasePath: extractedBasePath, bookKey: book.bookUrl);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -859,7 +873,8 @@ class LocalBookService {
         final bytes = await file.readAsBytes();
         _epubBytesCache[book.bookUrl] = bytes;
         final extractedBasePath = await _ensureEpubExtracted(book.bookUrl, bytes);
-        epubBook = await _parseEpubData(bytes, extractedBasePath: extractedBasePath);
+        epubBook = await _parseEpubData(bytes,
+            extractedBasePath: extractedBasePath, bookKey: book.bookUrl);
         if (epubBook != null) {
           _epubCache[book.bookUrl] = epubBook;
         }
@@ -881,16 +896,45 @@ class LocalBookService {
   }
 
   Future<EpubBook?> _parseEpubData(Uint8List bytes,
-      {String extractedBasePath = ''}) async {
+      {String extractedBasePath = '', String? bookKey}) async {
     try {
       // ★ 主线程防冻结：导入/首开时的富 HTML 预解析（全书每章 html 解析 +
       //   资源内联，本册 1102 spine 项）是 CPU 密集重活，主 isolate 上跑
       //   会冻结 UI 20s+（首启慢加载的根因），整体搬进后台 isolate
+      //
+      // ★ 持久化存储快路径（EpubRichStore，documents 目录防系统清缓存）★
+      // manifest 校验通过（EPUB 未变 & 解析器版本一致）→ 结构解析跳过
+      // 富内容/CSS 生成（秒级），CSS+章节标志从盘上注入，各章富内容
+      // 阅读时按需读盘（毫秒级文件读）。校验失败 → 全量解析并后台重建存储
+      if (bookKey != null) {
+        final store = await EpubRichStore.forBook(bookKey);
+        if (await store.isValid(bytes.length)) {
+          final fast = await Isolate.run(() => EpubParser.parseFromBytes(
+                bytes,
+                extractedBasePath: extractedBasePath,
+                generateRich: false,
+              ));
+          if (fast.title != '未知书名' || fast.chapters.isNotEmpty) {
+            fast.inlinedCss = await store.loadCss() ?? fast.inlinedCss;
+            await store.hydrateFlags(fast.chapters);
+            _richStores[bookKey] = store;
+            debugPrint('[EPUB导入] 存储快路径命中（${fast.chapters.length}章，'
+                '免重解析）');
+            return fast;
+          }
+        }
+      }
       final epubBook = await Isolate.run(() => EpubParser.parseFromBytes(
             bytes,
             extractedBasePath: extractedBasePath,
           ));
       if (epubBook.title != '未知书名' || epubBook.chapters.isNotEmpty) {
+        // 全量解析成功 → 富内容后台落盘（下次冷启动走快路径，不阻塞本流程）
+        if (bookKey != null) {
+          final store = await EpubRichStore.forBook(bookKey);
+          _richStores[bookKey] = store;
+          unawaited(store.persist(epubBytesLen: bytes.length, book: epubBook));
+        }
         return epubBook;
       }
       debugPrint('[EPUB导入] 解析返回空（title=未知书名 且 chapters 为空）');
@@ -900,6 +944,16 @@ class LocalBookService {
       debugPrint('[EPUB导入] 异常堆栈: $st');
       return null;
     }
+  }
+
+  /// 各书的富内容持久化存储（bookUrl → store；存在即代表 manifest 校验
+  /// 通过，富内容可按需读盘）
+  final Map<String, EpubRichStore> _richStores = {};
+
+  /// 按需读某章富内容（快路径下章节 richContent 为空，从存储毫秒级读盘）
+  Future<String?> _loadRichForChapter(String bookUrl, int index) async {
+    final store = _richStores[bookUrl] ??= await EpubRichStore.forBook(bookUrl);
+    return store.loadRich(index);
   }
 
   /// 解压 EPUB ZIP 到应用文档目录下的 epub_extract 子目录

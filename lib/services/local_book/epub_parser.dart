@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:isolate';
 import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
@@ -349,9 +351,10 @@ class EpubBook {
   ///
   /// 在 `EpubParser.parseFromBytes` 时一次性生成，所有章节共享。
   /// 由 `LocalBookService._getEpubContent` 拼接到 `richContent` 前面。
-  final String inlinedCss;
+  /// 合并 CSS（★ 可变：冷启动快路径下由 EpubRichStore.loadCss 注入 ★）
+  String inlinedCss;
 
-  const EpubBook({
+  EpubBook({
     required this.title,
     this.author,
     this.description,
@@ -372,7 +375,11 @@ class EpubParser {
   /// 提供此参数后，CSS/HTML 中的相对资源路径会转为指向此目录的绝对路径，
   /// WebView 通过 `file://` baseUrl 直接访问原始文件，无需 base64 编码。
   /// 若为空字符串，则回退到 base64 内嵌模式（用于测试或无解压场景）。
-  static EpubBook parseFromBytes(Uint8List bytes, {String extractedBasePath = ''}) {
+  static Future<EpubBook> parseFromBytes(
+    Uint8List bytes, {
+    String extractedBasePath = '',
+    bool generateRich = true,
+  }) async {
     try {
       // 1. 解码ZIP
       final archive = ZipDecoder().decodeBytes(bytes);
@@ -400,7 +407,7 @@ class EpubParser {
         pkg = epub_core.EpubPackageParser.parse(archiveReader);
       } catch (e) {
         debugPrint('[EPUB诊断-OPF] EpubPackageParser 解析失败: $e');
-        return const EpubBook(title: '未知书名');
+        return EpubBook(title: '未知书名');
       }
 
       // 3. 提取元数据（title/author/description/language 来自 EpubPackage.metadata）
@@ -502,26 +509,19 @@ class EpubParser {
 
       // 9.5 预解析所有章节的富 HTML 内容（导入时一次性完成）
       //
-      // 把图片转 base64 data URI、合并所有 CSS、包裹成
-      // [[EPUB_CSS]]...[[/EPUB_CSS]][[EPUB_BODY]]...[[/EPUB_BODY]] 格式。
-      // 阅读时 _getEpubContent 直接返回 richContent，无需现场解压 ZIP。
+      // ★ generateRich=false 冷启动快路径（配合 EpubRichStore 持久化）★
+      // 存储校验通过时跳过富内容生成与 CSS 处理（阅读时按需读盘，
+      // CSS 从存储 style.css 注入）——冷启动从 20s 级降到秒级。
       //
-      // 优势：
-      // - 导入时一次性完成所有重活，阅读时 O(1) 查询
-      // - 避免每次翻页都解压 ZIP 和遍历文件
-      // - CSS 只合并一次，所有章节共享
-      // 预解析所有章节的富 HTML 内容（导入时一次性完成）
-      //
-      // 把所有资源（字体、CSS 中的 url()、图片、视频、SVG image）转 base64 data URI，
-      // 让 WebView 无需任何资源拦截即可完整渲染 EPUB 排版。
-      //
-      // 关键点：
-      // - CSS 中 @font-face url(../Fonts/xxx.ttf) → data URI（字体生效）
-      // - CSS 中 background-image: url(../Images/xxx.jpg) → data URI（背景图生效）
-      // - body 中 <img src="../Images/xxx.jpg"> → data URI
-      // - body 中 <source src="../Video/xxx.mp4"> → data URI（视频）
-      // - body 中 <image xlink:href="../Images/xxx.jpg"> → data URI（SVG）
-      // - 所有 CSS 合并为一份，所有章节共享（字体和背景图只内嵌一次）
+      // ★ generateRich=true（导入/存储失效）：分片并发生成 ★
+      // 每章富内容互相独立，按 CPU 核数分片投递到多个 isolate 并行
+      // （路径模式下 worker 只需 HTML 文本与 CSS，无大字节传输；
+      // base64 内嵌回退模式因需携带全量资源字节保持串行）。
+      final String inlinedCss;
+      if (!generateRich) {
+        inlinedCss = '';
+        debugPrint('[EPUB诊断] 快路径：跳过富内容/CSS 生成（存储命中）');
+      } else {
       final rawCss = _collectAllCss(files);
       // 1. 结构化 CSS 处理（移植自 JRead/Legado EpubCss.kt）
       //    - @media/@supports 拍平
@@ -536,239 +536,96 @@ class EpubParser {
       // - extractedBasePath 非空（推荐）：url() 转为指向解压目录的绝对路径，
       //   WebView 通过 file:// baseUrl 直接访问原始文件，内存占用极低
       // - extractedBasePath 为空（回退）：url() 转 base64 data URI，内存占用高
-      final inlinedCss = extractedBasePath.isNotEmpty
+      final processedCss = extractedBasePath.isNotEmpty
           ? _rewriteCssUrlsToPath(epubCss, extractedBasePath, 'OEBPS/Styles/')
           : _inlineUrlsInCss(epubCss, files, 'OEBPS/Styles/');
+      inlinedCss = processedCss;
       debugPrint('[EPUB诊断] CSS处理完成，大小: ${inlinedCss.length} 字符 '
           '(模式: ${extractedBasePath.isNotEmpty ? "路径转换" : "base64内嵌"})');
 
+      // 构建单章生成入参（sendable：纯字符串/数值，路径模式不携带资源字节）
+      final inputs = <_ChapterRichInput>[];
       for (final chapter in chapters) {
         if (chapter.content == null) continue;
-        try {
-          // 1. 提取 body HTML + body 属性（class/style/bgcolor）
-          //    body 属性包含章节级背景设置（如 .video-bg 背景图、bgcolor 背景色），
-          //    必须保留并应用到 reader 内容容器，否则背景样式丢失
-          final (bodyHtml, bodyAttrs) = extractBodyWithAttrs(
-            chapter.content!,
-            chapter.startFragmentId,
-            chapter.endFragmentId,
-          );
+        final props = chapter.spineIndex >= 0 &&
+                chapter.spineIndex < pkg.spine.length
+            ? pkg.spine[chapter.spineIndex].properties
+            : const <String>[];
+        inputs.add(_ChapterRichInput(
+          index: chapter.index,
+          content: chapter.content!,
+          href: chapter.href ?? '',
+          startFragmentId: chapter.startFragmentId,
+          endFragmentId: chapter.endFragmentId,
+          spineProps: List<String>.of(props),
+          css: epubCss,
+          extractedBasePath: extractedBasePath,
+          files: null, // 路径模式无需资源字节；base64 回退模式走下方串行
+          renditionWidth: pkg.rendition.viewportWidth,
+          renditionHeight: pkg.rendition.viewportHeight,
+        ));
+      }
 
-          // 2. 计算章节文件路径（用于解析相对图片路径）
-          final chapterHref = chapter.href ?? '';
-          final chapterPath = chapterHref.split('#').first;
-          String? chapterBasePath;
-          if (chapterPath.contains('/')) {
-            chapterBasePath =
-                chapterPath.substring(0, chapterPath.lastIndexOf('/') + 1);
+      final results = List<_ChapterRichResult?>.filled(inputs.length, null);
+      final useParallel = extractedBasePath.isNotEmpty && inputs.length > 8;
+      if (useParallel) {
+        // 按 CPU 核数分片并发（2..6 worker）
+        final workers = Platform.numberOfProcessors.clamp(2, 6);
+        final chunkSize = (inputs.length / workers).ceil();
+        final sw = Stopwatch()..start();
+        final batches = <List<_ChapterRichInput>>[];
+        for (var i = 0; i < inputs.length; i += chunkSize) {
+          batches.add(inputs.sublist(i, (i + chunkSize) > inputs.length
+              ? inputs.length : (i + chunkSize)));
+        }
+        final computed = await Future.wait(batches.map((batch) => Isolate.run(
+                () => [
+                      for (final input in batch)
+                        EpubParser._buildChapterRich(input)
+                    ])));
+        var k = 0;
+        for (final batchResult in computed) {
+          for (final r in batchResult) {
+            results[k] = r;
+            k++;
           }
+        }
+        sw.stop();
+        debugPrint('[EPUB诊断] 富内容并发生成完成: ${inputs.length}章 '
+            '$workers worker ${sw.elapsedMilliseconds}ms');
+      } else {
+        // base64 内嵌回退模式（需携带全量资源字节，不跨 isolate 复制）或小书
+        for (var i = 0; i < inputs.length; i++) {
+          results[i] = _buildChapterRich(inputs[i]);
+        }
+      }
 
-          // 3. 处理 body 中的所有资源引用：
-          // - extractedBasePath 非空：转绝对路径（推荐，内存低）
-          // - extractedBasePath 为空：转 base64 data URI（回退）
-          String richBody;
-          final String inlinedBodyAttrs;
-          if (extractedBasePath.isNotEmpty) {
-            richBody = _rewriteHtmlResourcesToPath(
-              bodyHtml, extractedBasePath, chapterBasePath,
-            );
-            inlinedBodyAttrs = _rewriteStyleUrlsToPath(
-              bodyAttrs, extractedBasePath, chapterBasePath,
-            );
-          } else {
-            var rb = _inlineImagesInHtml(bodyHtml, files, chapterBasePath);
-            rb = _inlineVideoSources(rb, files, chapterBasePath);
-            rb = _inlineSvgImages(rb, files, chapterBasePath);
-            richBody = rb;
-            inlinedBodyAttrs =
-                _inlineStyleUrls(bodyAttrs, files, chapterBasePath);
-          }
-
-          // 3-0. 封面 SVG 全屏适配（对齐 lumina applyCenteringStyles）：
-          // 确保全屏封面 svg 的 preserveAspectRatio 为 meet（等比缩放完整显示），
-          // 配合 reader_html_template 的 svg 填满整页 CSS 实现封面全屏。
-          // meet 策略与 lumina 和 Readium CSS（object-fit:contain）一致：
-          // 完整显示优先，不裁切封面内容
-          richBody = _ensureCoverSvgMeet(richBody);
-
-          // 3-1. 检测多看全屏页属性（duokan-page-fullscreen）
-          //   对齐 lumina DuokanTypConfig.isFullscreen：
-          //   - lumina 对 duokan-page-fullscreen 走 applyCenteringStyles
-          //     （svg position:fixed 铺满 100vw/100vh + meet 等比缩放）
-          //   - 而非 fixed-layout 的 transform:scale() 缩放
-          //   - 否则封面 svg 的内层 div 高度 auto → svg height:100% 失效 → 空白
-          //   提前获取 spineItem 供封面特判和 fixed-layout 判定共用
-          final spineItem = chapter.spineIndex >= 0 &&
-                  chapter.spineIndex < pkg.spine.length
-              ? pkg.spine[chapter.spineIndex]
-              : null;
-          final isDuokanFullscreen = spineItem != null &&
-              spineItem.properties.contains('duokan-page-fullscreen');
-
-          // 4. 用 wrapper div 包裹 body 内容，把 body 的 class/style 应用到 div
-          //    这样 CSS 中 .video-bg / .volume-bg 等选择器才能生效
-          //    加 epub-chapter-bg 标记 class，让 reader 兜底 CSS 能精确匹配
-          //    背景容器，设置 min-height 让背景填满整页
-          //    智能合并 class：若 bodyAttrs 已有 class，追加 epub-chapter-bg；
-          //    否则单独加 class="epub-chapter-bg"
-          //
-          //    正文章节（body 无 class/style/bgcolor）加 class="epub-chapter-plain"：
-          //    - 让 reader 兜底 CSS 能区分特殊章节（.epub-chapter-bg）和正文
-          //    - 便于对正文 wrapper 精确应用布局约束（如 max-width:100%）
-          //    - 不影响 IntersectionObserver 的 [data-chapter-index] 监测
-          //
-          //    封面特判（两种条件任一即触发）：
-          //    a) OPF spine 声明 duokan-page-fullscreen（多看全屏页，对齐 lumina
-          //       DuokanTypConfig.isFullscreen → applyCenteringStyles）
-          //    b) body 无属性但内容是全屏 SVG 封面（width/height=100% + image）
-          //    时，wrapper 标 "epub-chapter-bg epub-cover" 双 class：
-          //    - epub-chapter-bg：触发 reader 的 padding 清零 + 背景容器规则，
-          //      让封面铺满整屏（无阅读器边距）
-          //    - epub-cover：reader 模板 CSS 固定一屏高 + svg cover 铺满 +
-          //      break-inside:avoid，保证封面绝不跨屏
-          //    否则封面 wrapper 是 plain，reader 的封面规则（依赖 epub-chapter-bg）
-          //    不生效，封面显示成"宽满高不足"或跨屏
-          var wrapperAttrs = inlinedBodyAttrs.isEmpty
-              ? 'class="epub-chapter-plain"'
-              : (inlinedBodyAttrs.contains('class="')
-                  ? inlinedBodyAttrs.replaceAllMapped(
-                      RegExp(r'class="([^"]*)"'),
-                      (m) => 'class="epub-chapter-bg ${m.group(1)}"',
-                    )
-                  : 'class="epub-chapter-bg" $inlinedBodyAttrs');
-          if (isDuokanFullscreen ||
-              (inlinedBodyAttrs.isEmpty &&
-                  RegExp(
-                    r'<svg\b(?=[^>]*\bwidth="100%")(?=[^>]*\bheight="100%")[^>]*>[\s\S]*?<image\b',
-                    caseSensitive: false,
-                  ).hasMatch(richBody))) {
-            wrapperAttrs = 'class="epub-chapter-bg epub-cover"';
-          }
-          final wrapperStart = '<div $wrapperAttrs>';
-          const wrapperEnd = '</div>';
-          final wrappedBody = '$wrapperStart$richBody$wrapperEnd';
-
-          // 5. 识别多看画廊章节（duokan-image-gallery）
-          //    画廊章节含横向滑动图片列表，WebView 的 column 分页无法正确处理，
-          //    改由 Flutter PageView 接管渲染。这里在解析时提取每个 cell 的
-          //    图片 src、主标题、副标题，阅读时直接传给 EpubGalleryPage。
-          //    标题样式由章节级 rawCss 原样内联到 WebView，浏览器原生渲染。
-          //    识别后仍保留 richContent（兜底，便于调试或未来回退方案）。
-          final galleryImages = _extractGalleryImages(
-            richBody, extractedBasePath, chapterBasePath,
-          );
-          if (galleryImages.isNotEmpty) {
-            chapter.isGallery = true;
-            chapter.galleryImages = galleryImages;
-            // 同步提取画廊章节级样式（背景图、gallery-title、gallery-txt）
-            // 让 Flutter EpubGalleryPage 1:1 还原原作者排版
-            chapter.galleryChapterStyle = _extractGalleryChapterStyle(
-              richBody,
-              inlinedBodyAttrs,
-              extractedBasePath,
-              chapterBasePath,
-              epubCss,
-            );
-            debugPrint('[EPUB诊断] 章节${chapter.index}识别为画廊页，'
-                '共 ${galleryImages.length} 张图片');
-          }
-
-          // 5a-0. 识别整页 CSS 背景章（body.renwu*/VOL*/qmpfengdi 等）
-          //   作者用 body class 的 background-image 做整页背景（《这游戏也太
-          //   真实了》人物卡/卷首页/封底/手册页）。多看按整页背景渲染；
-          //   MR WebView 的 body class 被移到 wrapper .epub-chapter-bg，
-          //   作者 CSS 的 body.xxx 选择器不命中 → 背景丢失。
-          //   识别后模板 4a-3 把背景覆盖到 wrapper 全屏铺满。
-          //   判定：inlinedBodyAttrs 的 body class 命中背景类集合
-          //   （renwu/VOL/qmpfengdi/qmpzpxg/zhizuosm/jieshao/kuaijie），
-          //   且内容几乎只有隐藏标题/空 p（正文少或缺）
-          final bgClassMatch =
-              RegExp(r'class="([^"]*)"', caseSensitive: false)
-                  .firstMatch(inlinedBodyAttrs);
-          final bodyClasses =
-              (bgClassMatch?.group(1) ?? '').split(RegExp(r'\s+'));
-          final bgClassHits = bodyClasses.where((c) {
-            final lower = c.toLowerCase();
-            return lower.contains('renwu') ||
-                lower.contains('vol') ||
-                lower.contains('qmpfengdi') ||
-                lower.contains('qmpzpxg') ||
-                lower.contains('zhizuosm') ||
-                lower.contains('jieshao') ||
-                lower.contains('kuaijie');
-          }).toList();
-          if (bgClassHits.isNotEmpty) {
-            final richText = richBody
-                .replaceAll(RegExp(r'<[^>]+>'), ' ')
-                .trim()
-                .replaceAll('&nbsp;', '');
-            if (richText.length < 40) {
-              chapter.isFullPageBg = true;
-              debugPrint('[EPUB诊断] 章节${chapter.index}识别为整页背景章 '
-                  '(class=${bgClassHits.join(',')} 文本${richText.length}字)');
-            }
-          }
-
-          // 5b. 识别多看扩展标签（借鉴 libdkkernel.so DKE_BLOCK_TYPE/HTML_CUSTOMTAG_TYPE）
-          //     解析章节中的 duokan-image-*/duokan-footnote/duokan-video 等标签，
-          //     供阅读器决定交互策略（脚注拦截、媒体播放、跨页图等）。
-          if (epub_core.DuokanTagRecognizer.hasDuokanTags(richBody)) {
-            chapter.duokanImageBlocks =
-                epub_core.DuokanTagRecognizer.detectImageBlocks(richBody);
-            chapter.duokanCustomTags =
-                epub_core.DuokanTagRecognizer.detectCustomTags(richBody);
-          }
-
-          // 5a. 识别 fixed-layout 章节（pre-paginated，漫画/画册/固定版式）
-          //     参考 Readium Kotlin-toolkit 的 fixed-layout 渲染：
-          //     - 优先用 OPF spine item 的 rendition:layout=pre-paginated 刡定
-          //     - 回退用 EpubViewportParser.looksLikeFixedLayout 启发式判定
-          //     - 解析 viewport 尺寸供渲染层做 fitContain 缩放
-          //     fixed-layout 章节不走 column 分页，整页等比缩放显示
-          //
-          //     ★ duokan-page-fullscreen 不走 fixed-layout ★
-          //     多看全屏页（如封面）走封面 CSS（.epub-cover），对齐 lumina
-          //     applyCenteringStyles（svg position:fixed 铺满 100vw/100vh + meet）。
-          //     fixed-layout 的 transform:scale() 会导致内层 div 高度 auto →
-          //     svg height:100% 失效 → 封面空白，故必须排除。
-          if (!chapter.isGallery && !isDuokanFullscreen) {
-            // 检查 OPF spine item 级别的 rendition:layout
-            final isPrePaginated = spineItem != null &&
-                spineItem.properties.contains('rendition:layout-pre-paginated');
-
-            // 解析 viewport 尺寸（从 <meta viewport> / <svg viewBox>）
-            // viewportWidth/Height 定义在 EpubRendition（包级 rendition 声明）
-            final viewport = epub_core.EpubViewportParser.parse(
-              chapter.content ?? '',
-              fallbackWidth: pkg.rendition.viewportWidth,
-              fallbackHeight: pkg.rendition.viewportHeight,
-            );
-
-            // 判定：OPF 声明 pre-paginated，或启发式判定为 fixed-layout
-            if (isPrePaginated ||
-                (viewport != null &&
-                    epub_core.EpubViewportParser.looksLikeFixedLayout(
-                        chapter.content ?? '', viewport))) {
-              chapter.isFixedLayout = true;
-              chapter.fixedLayoutWidth = viewport?.width;
-              chapter.fixedLayoutHeight = viewport?.height;
-              debugPrint('[EPUB诊断] 章节${chapter.index}识别为 fixed-layout'
-                  '${viewport != null ? "（${viewport.width}x${viewport.height}, ${viewport.source}）" : "（尺寸未知）"}');
-            }
-          }
-
-          // 6. richContent 只包含 body HTML（不含 CSS）
-          //    CSS 由 LocalBookService._getEpubContent 在返回时拼接，
-          //    避免每个章节都复制一份大 CSS
-          chapter.richContent = '[[EPUB_BODY]]$wrappedBody[[/EPUB_BODY]]';
-        } catch (e) {
-          // 单章节预解析失败：退化为纯文本，不影响其他章节
-          debugPrint('[EPUB诊断] 章节${chapter.index}预解析失败: $e');
-          chapter.richContent =
-              '[[EPUB_BODY]]${extractTextFromHtml(chapter.content!)}[[/EPUB_BODY]]';
+      // 应用结果到章节对象
+      for (var i = 0; i < inputs.length; i++) {
+        final chapter = chapters[inputs[i].index];
+        final r = results[i];
+        if (r == null) continue;
+        chapter.richContent = '[[EPUB_BODY]]${r.wrappedBody}[[/EPUB_BODY]]';
+        if (r.isGallery) {
+          chapter.isGallery = true;
+          chapter.galleryImages = r.galleryImages;
+          chapter.galleryChapterStyle = r.galleryChapterStyle;
+        }
+        if (r.isFullPageBg) chapter.isFullPageBg = true;
+        if (r.duokanImageBlocks.isNotEmpty) {
+          chapter.duokanImageBlocks = r.duokanImageBlocks;
+        }
+        if (r.duokanCustomTags.isNotEmpty) {
+          chapter.duokanCustomTags = r.duokanCustomTags;
+        }
+        if (r.isFixedLayout) {
+          chapter.isFixedLayout = true;
+          chapter.fixedLayoutWidth = r.fixedLayoutWidth;
+          chapter.fixedLayoutHeight = r.fixedLayoutHeight;
         }
       }
       debugPrint('[EPUB诊断] 预解析完成，${chapters.length} 章已生成 richContent');
+      }
 
       // 10. 设置 endFragmentId 和 nextUrl（基于扁平 chapters 顺序）
       // - endFragmentId：当前章节的结束锚点 = 下一章节的 startFragmentId
@@ -794,7 +651,178 @@ class EpubParser {
     } catch (e, st) {
       debugPrint('[EPUB诊断] parseFromBytes异常: $e');
       debugPrint('[EPUB诊断] 异常堆栈: $st');
-      return const EpubBook(title: '未知书名');
+      return EpubBook(title: '未知书名');
+    }
+  }
+
+  /// 构建单章富内容（★ isolate 安全：纯函数，只读入参、不触实例状态 ★）
+  ///
+  /// 从 parseFromBytes 的逐章循环抽出，供并发分片（路径模式）与
+  /// 串行回退（base64 内嵌模式，需携带资源字节）共用。
+  static _ChapterRichResult _buildChapterRich(_ChapterRichInput input) {
+    try {
+      // 1. 提取 body HTML + body 属性（class/style/bgcolor）
+      //    body 属性包含章节级背景设置（如 .video-bg 背景图、bgcolor 背景色），
+      //    必须保留并应用到 reader 内容容器，否则背景样式丢失
+      final (bodyHtml, bodyAttrs) = extractBodyWithAttrs(
+        input.content,
+        input.startFragmentId,
+        input.endFragmentId,
+      );
+
+      // 2. 计算章节文件路径（用于解析相对图片路径）
+      final chapterPath = input.href.split('#').first;
+      String? chapterBasePath;
+      if (chapterPath.contains('/')) {
+        chapterBasePath =
+            chapterPath.substring(0, chapterPath.lastIndexOf('/') + 1);
+      }
+
+      // 3. 处理 body 中的所有资源引用：
+      // - extractedBasePath 非空：转绝对路径（推荐，内存低）
+      // - extractedBasePath 为空：转 base64 data URI（回退）
+      String richBody;
+      final String inlinedBodyAttrs;
+      if (input.extractedBasePath.isNotEmpty) {
+        richBody = _rewriteHtmlResourcesToPath(
+          bodyHtml, input.extractedBasePath, chapterBasePath,
+        );
+        inlinedBodyAttrs = _rewriteStyleUrlsToPath(
+          bodyAttrs, input.extractedBasePath, chapterBasePath,
+        );
+      } else {
+        var rb = _inlineImagesInHtml(bodyHtml, input.files!, chapterBasePath);
+        rb = _inlineVideoSources(rb, input.files!, chapterBasePath);
+        rb = _inlineSvgImages(rb, input.files!, chapterBasePath);
+        richBody = rb;
+        inlinedBodyAttrs =
+            _inlineStyleUrls(bodyAttrs, input.files!, chapterBasePath);
+      }
+
+      // 3-0. 封面 SVG 全屏适配（对齐 lumina applyCenteringStyles）：
+      // 确保全屏封面 svg 的 preserveAspectRatio 为 meet（等比缩放完整显示），
+      // 配合 reader_html_template 的 svg 填满整页 CSS 实现封面全屏。
+      richBody = _ensureCoverSvgMeet(richBody);
+
+      // 3-1. 多看全屏页属性（duokan-page-fullscreen，OPF spine 声明）
+      final isDuokanFullscreen =
+          input.spineProps.contains('duokan-page-fullscreen');
+
+      // 4. wrapper div 包裹 body 内容（body class/style 移交 div，
+      //    让 .video-bg 等选择器继续生效 + epub-chapter-bg/epub-cover 标记）
+      var wrapperAttrs = inlinedBodyAttrs.isEmpty
+          ? 'class="epub-chapter-plain"'
+          : (inlinedBodyAttrs.contains('class="')
+              ? inlinedBodyAttrs.replaceAllMapped(
+                  RegExp(r'class="([^"]*)"'),
+                  (m) => 'class="epub-chapter-bg ${m.group(1)}"',
+                )
+              : 'class="epub-chapter-bg" $inlinedBodyAttrs');
+      if (isDuokanFullscreen ||
+          (inlinedBodyAttrs.isEmpty &&
+              RegExp(
+                r'<svg\b(?=[^>]*\bwidth="100%")(?=[^>]*\bheight="100%")[^>]*>[\s\S]*?<image\b',
+                caseSensitive: false,
+              ).hasMatch(richBody))) {
+        wrapperAttrs = 'class="epub-chapter-bg epub-cover"';
+      }
+      final wrappedBody = '<div $wrapperAttrs>$richBody</div>';
+
+      // 5. 识别多看画廊章节（提取 cell 图片/主标题/副标题/num5 提示 +
+      //    章节级样式，阅读时传给 EpubGalleryPage）
+      var isGallery = false;
+      List<EpubGalleryImage> galleryImages = const [];
+      EpubGalleryChapterStyle? galleryChapterStyle;
+      final imgs = _extractGalleryImages(
+        richBody, input.extractedBasePath, chapterBasePath,
+      );
+      if (imgs.isNotEmpty) {
+        isGallery = true;
+        galleryImages = imgs;
+        galleryChapterStyle = _extractGalleryChapterStyle(
+          richBody,
+          inlinedBodyAttrs,
+          input.extractedBasePath,
+          chapterBasePath,
+          input.css,
+        );
+      }
+
+      // 5a-0. 识别整页 CSS 背景章（body.renwu*/VOL*/qmpfengdi 等 +
+      //       正文几乎为空 → isFullPageBg，模板按全屏背景渲染）
+      var isFullPageBg = false;
+      final bgClassMatch = RegExp(r'class="([^"]*)"', caseSensitive: false)
+          .firstMatch(inlinedBodyAttrs);
+      final bodyClasses =
+          (bgClassMatch?.group(1) ?? '').split(RegExp(r'\s+'));
+      final bgClassHits = bodyClasses.where((c) {
+        final lower = c.toLowerCase();
+        return lower.contains('renwu') ||
+            lower.contains('vol') ||
+            lower.contains('qmpfengdi') ||
+            lower.contains('qmpzpxg') ||
+            lower.contains('zhizuosm') ||
+            lower.contains('jieshao') ||
+            lower.contains('kuaijie');
+      }).toList();
+      if (bgClassHits.isNotEmpty) {
+        final richText = richBody
+            .replaceAll(RegExp(r'<[^>]+>'), ' ')
+            .trim()
+            .replaceAll('&nbsp;', '');
+        if (richText.length < 40) isFullPageBg = true;
+      }
+
+      // 5b. 识别多看扩展标签（duokan-image-*/footnote/video 等）
+      var duokanImageBlocks = <epub_core.DuokanImageBlockType>{};
+      var duokanCustomTags = <epub_core.DuokanCustomTagType>{};
+      if (epub_core.DuokanTagRecognizer.hasDuokanTags(richBody)) {
+        duokanImageBlocks =
+            epub_core.DuokanTagRecognizer.detectImageBlocks(richBody);
+        duokanCustomTags =
+            epub_core.DuokanTagRecognizer.detectCustomTags(richBody);
+      }
+
+      // 5a. 识别 fixed-layout 章节（rendition:layout=pre-paginated 或
+      //     viewport 启发式；duokan-page-fullscreen 不走 fixed-layout）
+      var isFixedLayout = false;
+      double? fixedLayoutWidth;
+      double? fixedLayoutHeight;
+      if (!isGallery && !isDuokanFullscreen) {
+        final isPrePaginated =
+            input.spineProps.contains('rendition:layout-pre-paginated');
+        final viewport = epub_core.EpubViewportParser.parse(
+          input.content,
+          fallbackWidth: input.renditionWidth,
+          fallbackHeight: input.renditionHeight,
+        );
+        if (isPrePaginated ||
+            (viewport != null &&
+                epub_core.EpubViewportParser.looksLikeFixedLayout(
+                    input.content, viewport))) {
+          isFixedLayout = true;
+          fixedLayoutWidth = viewport?.width;
+          fixedLayoutHeight = viewport?.height;
+        }
+      }
+
+      return _ChapterRichResult(
+        wrappedBody: wrappedBody,
+        isGallery: isGallery,
+        galleryImages: galleryImages,
+        galleryChapterStyle: galleryChapterStyle,
+        isFullPageBg: isFullPageBg,
+        duokanImageBlocks: duokanImageBlocks,
+        duokanCustomTags: duokanCustomTags,
+        isFixedLayout: isFixedLayout,
+        fixedLayoutWidth: fixedLayoutWidth,
+        fixedLayoutHeight: fixedLayoutHeight,
+      );
+    } catch (e) {
+      // 单章节预解析失败：退化为纯文本，不影响其他章节
+      debugPrint('[EPUB诊断] 章节${input.index}预解析失败: $e');
+      return _ChapterRichResult(
+          wrappedBody: extractTextFromHtml(input.content));
     }
   }
 
@@ -2939,4 +2967,71 @@ class _MapArchiveReader implements epub_core.EpubArchiveReader {
     final bytes = readBytes(path);
     return EpubParser.decodeBytes(bytes);
   }
+}
+
+/// 单章富内容生成入参（★ 纯 sendable 数据：字符串/数值/字符串列表 ★）
+///
+/// 路径模式（extractedBasePath 非空）不携带资源字节，跨 isolate 复制
+/// 只有 KB 级 HTML 文本；base64 内嵌回退模式需携带全量资源字节（files），
+/// 由调用方决定串行执行避免内存复制爆炸。
+class _ChapterRichInput {
+  final int index;
+  final String content;
+  final String href;
+  final String? startFragmentId;
+  final String? endFragmentId;
+
+  /// OPF spine item 的 properties（duokan-page-fullscreen / pre-paginated 判定）
+  final List<String> spineProps;
+
+  /// 全书合并后的原始 CSS（画廊章节样式提取用）
+  final String css;
+  final String extractedBasePath;
+
+  /// EPUB 资源字节表（仅 base64 内嵌回退模式携带，路径模式为 null）
+  final Map<String, List<int>>? files;
+  final double? renditionWidth;
+  final double? renditionHeight;
+
+  const _ChapterRichInput({
+    required this.index,
+    required this.content,
+    required this.href,
+    this.startFragmentId,
+    this.endFragmentId,
+    this.spineProps = const [],
+    this.css = '',
+    this.extractedBasePath = '',
+    this.files,
+    this.renditionWidth,
+    this.renditionHeight,
+  });
+}
+
+/// 单章富内容生成结果（richContent 包装体 + 章节特殊标志）
+class _ChapterRichResult {
+  /// `<div wrapper>正文</div>` 包装体（parseFromBytes 再套 EPUB_BODY 标记）
+  final String wrappedBody;
+  final bool isGallery;
+  final List<EpubGalleryImage> galleryImages;
+  final EpubGalleryChapterStyle? galleryChapterStyle;
+  final bool isFullPageBg;
+  final Set<epub_core.DuokanImageBlockType> duokanImageBlocks;
+  final Set<epub_core.DuokanCustomTagType> duokanCustomTags;
+  final bool isFixedLayout;
+  final double? fixedLayoutWidth;
+  final double? fixedLayoutHeight;
+
+  const _ChapterRichResult({
+    required this.wrappedBody,
+    this.isGallery = false,
+    this.galleryImages = const [],
+    this.galleryChapterStyle,
+    this.isFullPageBg = false,
+    this.duokanImageBlocks = const {},
+    this.duokanCustomTags = const {},
+    this.isFixedLayout = false,
+    this.fixedLayoutWidth,
+    this.fixedLayoutHeight,
+  });
 }

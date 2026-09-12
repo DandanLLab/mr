@@ -8,8 +8,8 @@ void main() {
     'D:/OpenClaw/.openclaw/workspace/mr/.tmp/newbook/game.epub',
   ).readAsBytesSync();
 
-  test('特殊章解析诊断', () {
-    final book = EpubParser.parseFromBytes(bytes);
+  test('特殊章解析诊断', () async {
+    final book = await EpubParser.parseFromBytes(bytes);
     for (var i = 0; i < book.chapters.length; i++) {
       final c = book.chapters[i];
       if (i >= 0 && i < 6 || (i >= 15 && i <= 25)) {

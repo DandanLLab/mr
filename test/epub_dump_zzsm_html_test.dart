@@ -8,7 +8,7 @@ void main() {
   test('导出 zzsm 章渲染 HTML 供 playwright 检查', () async {
     final f = File(
         r'D:\Program Files\Netease\GameViewer\Download\【多看插图版】《这游戏也太真实了》 作者：晨星LL（全本）V1.0【书眸精制】 - 晨星LL(1).epub');
-    final book = EpubParser.parseFromBytes(f.readAsBytesSync());
+    final book = await EpubParser.parseFromBytes(f.readAsBytesSync());
     final chs = book.chapters;
     final zz = chs.firstWhere((c) => c.title == '制作说明');
     final content = zz.richContent!;
