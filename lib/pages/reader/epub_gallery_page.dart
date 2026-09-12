@@ -95,17 +95,19 @@ const _kDottedHeight = 22.0;
 /// 故 extraTop = 38.6 + 1.28×base（21 → 65.5）。
 double _titleExtraTopOf(double base) => 38.6 + 1.28 * base;
 
-/// 图像显示框高随基准字号：158.7 + 0.42×base（21 → 167.5、9.13 → 162.5）
-double _imageFrameHeightOf(double base) => 158.7 + 0.42 * base;
+/// 图像显示框高随基准字号：24.29×base（2026-09-12 重校：多看 20 号
+/// gal_dk0 逐像素 175..1195 物理 = 510 CSS@base21；旧 158.7+0.42×base
+/// 与三处独立实拍（容器 gal_dk0/cmp_gallery_dk20/用户真机）全冲突，废）
+double _imageFrameHeightOf(double base) => 24.29 * base;
 
-/// 图像区顶相对 SafeArea 随基准字号：140.4 + 3.791×base（21 → 220.0、
-/// 9.13 → 175.0，绝对 244/199 实测拟合）
-double _imageTopGapOf(double base) => 140.4 + 3.791 * base;
+/// 图像框顶相对 SafeArea：4.17×base（多看 20 号框顶 175 物理 = 87.5
+/// CSS@base21，gal_dk0 实测；用户真机 95.5 CSS 同量级印证。
+/// 旧 140.4+3.791×base → 220 与实拍冲突，废）
+double _imageTopGapOf(double base) => 4.17 * base;
 
-/// maintitle/subtitle 内边距：以多看墨顶线（maintitle 327.4+4.886B、
-/// subtitle 327.4+7.075B）为目标，对 MR 自身渲染偏差两点重拟合
-/// （21 处精确退化回已验证的 15.5/15.0）
-double _maintitlePadOf(double base) => 4.3 + 0.532 * base;
+/// maintitle 距框底：8 + 0.57×base（用户真机实拍：框底 558 → maintitle
+/// 顶 578，+20 CSS@20号；MR 实拍 +12 偏近，重校）
+double _maintitlePadOf(double base) => 8.0 + 0.57 * base;
 double _subtitlePadOf(double base) => 1.93 + 0.6225 * base;
 
 const _kMaintitleLineHeight = 1.15;
@@ -171,10 +173,13 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
   double _settleTo = 0;
   int? _settleCommit;
 
-  /// 是否有 h3 标题（所有页同屏恒显）
+  /// 是否有 h3 标题（所有页同屏恒显；★ 只认 HTML 里的 .gallery-title
+  /// 元素——多看不合成标题：本册 Section0014 无该元素，多看（容器
+  /// gal_dk0 + 用户真机实拍）画框上方均无标题；诡秘之主有 .gallery-title
+  /// 故渲染。旧版回退到目录章节名合成「废土OL地图」系多余渲染）
   late final bool _hasTitlePage;
 
-  /// 标题文本（chapterStyle.galleryTitle ?? chapterTitle）
+  /// 标题文本（仅 HTML .gallery-title）
   late final String _titleText;
 
   /// gallery-txt 提示文本（无则不显示；dotted 下方）
@@ -196,8 +201,7 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
   @override
   void initState() {
     super.initState();
-    _titleText =
-        (widget.chapterStyle?.galleryTitle ?? widget.chapterTitle).trim();
+    _titleText = (widget.chapterStyle?.galleryTitle ?? '').trim();
     _hasTitlePage = _titleText.isNotEmpty;
     _txtText = widget.chapterStyle?.galleryTxt?.trim() ?? '';
     _imageIndex = widget.initialPageToEnd ? _itemCount - 1 : 0;
@@ -728,7 +732,6 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     // - 拖动向量的捕捉驱动：下一张 sheet 从框右缘滑入盖住当前图
     //   （当前图不动，dksw1 实证），上一张从左缘滑入；提交瞬间文字层
     //   换内容（多看 P1/P2 实拍标题同位、中间帧 maintitle 纹丝不动）
-    final showDotted = widget.images.length > 1;
     final base = widget.baseFontSize;
     final frameH = _imageFrameHeightOf(base);
     // 标题恒显：图像框顶不低于标题块底部+4，防超大字号重叠
@@ -746,6 +749,11 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
     // 章节切换竞争防御：索引钳制到新章节图片范围内
     final safeIndex = _imageIndex.clamp(0, _itemCount - 1);
     final current = widget.images[safeIndex];
+    // ★ num5 提示块（作者自带「点击向←滑动」）存在时，多看不渲染自家的
+    //   dots/gallery-txt（用户真机本册实拍：框下只有 maintitle+棕底块；
+    //   诡秘之主无 num5 → dots+txt 全有）——块即作者提示，替代多看指示器
+    final showDotted =
+        widget.images.length > 1 && current.galleryHint.isEmpty;
 
     // ★ 描述文字动态排版（防溢出，文字必须完整显示、不允许省略号）★
     // 长描述（如 08/10/11/19/22.jpg）在 base15 下 subtitle 达 3-4 行，
@@ -981,7 +989,8 @@ class _EpubGalleryPageState extends State<EpubGalleryPage>
                 top: _dottedPositionedTopOf(context, dottedInkRel),
                 child: _buildDottedIndicator(dotScale),
               ),
-            if (_showGalleryTxt(context, dottedInkRel))
+            if (current.galleryHint.isEmpty &&
+                _showGalleryTxt(context, dottedInkRel))
               Positioned(
                 left: 0,
                 right: 0,
